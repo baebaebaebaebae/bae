@@ -55,7 +55,7 @@ pub fn make_config() -> DioxusConfig {
         .with_disable_drag_drop_handler(false)
         // Custom protocol for serving local files (images, etc.)
         // Usage: bae://local/path/to/file.jpg
-        .with_asynchronous_custom_protocol("bae", |_webview_id, request, responder| {
+        .with_custom_protocol("bae", |_webview_id, request| {
             let uri = request.uri().to_string();
 
             // Parse the URI: bae://local/path/to/file
@@ -68,45 +68,35 @@ pub fn make_config() -> DioxusConfig {
                     .unwrap_or_else(|_| encoded_path.to_string())
             } else {
                 warn!("Invalid bae:// URL: {}", uri);
-                responder.respond(
-                    HttpResponse::builder()
-                        .status(400)
-                        .body(Cow::Borrowed(b"Invalid URL" as &[u8]))
-                        .unwrap(),
-                );
-                return;
+                return HttpResponse::builder()
+                    .status(400)
+                    .body(Cow::Borrowed(b"Invalid URL" as &[u8]))
+                    .unwrap();
             };
 
-            // Spawn async task to read the file
-            tokio::spawn(async move {
-                match tokio::fs::read(&path).await {
-                    Ok(data) => {
-                        // Determine MIME type from extension
-                        let mime_type = std::path::Path::new(&path)
-                            .extension()
-                            .and_then(|e| e.to_str())
-                            .map(mime_type_for_extension)
-                            .unwrap_or("application/octet-stream");
+            match std::fs::read(&path) {
+                Ok(data) => {
+                    // Determine MIME type from extension
+                    let mime_type = std::path::Path::new(&path)
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(mime_type_for_extension)
+                        .unwrap_or("application/octet-stream");
 
-                        responder.respond(
-                            HttpResponse::builder()
-                                .status(200)
-                                .header("Content-Type", mime_type)
-                                .body(Cow::Owned(data))
-                                .unwrap(),
-                        );
-                    }
-                    Err(e) => {
-                        warn!("Failed to read file {}: {}", path, e);
-                        responder.respond(
-                            HttpResponse::builder()
-                                .status(404)
-                                .body(Cow::Borrowed(b"File not found" as &[u8]))
-                                .unwrap(),
-                        );
-                    }
+                    HttpResponse::builder()
+                        .status(200)
+                        .header("Content-Type", mime_type)
+                        .body(Cow::Owned(data))
+                        .unwrap()
                 }
-            });
+                Err(e) => {
+                    warn!("Failed to read file {}: {}", path, e);
+                    HttpResponse::builder()
+                        .status(404)
+                        .body(Cow::Borrowed(b"File not found" as &[u8]))
+                        .unwrap()
+                }
+            }
         })
 }
 

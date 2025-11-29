@@ -6,13 +6,20 @@
 
 /// Convert a local file path to a bae:// URL for serving via custom protocol.
 ///
-/// The path will be URL-encoded to handle special characters.
+/// The path will be URL-encoded to handle special characters like spaces,
+/// but forward slashes are preserved to maintain the path structure.
 ///
 /// # Example
 /// ```
 /// let url = local_file_url("/Users/me/Music/cover.jpg");
-/// // Returns: bae://local%2FUsers%2Fme%2FMusic%2Fcover.jpg
+/// // Returns: bae://local/Users/me/Music/cover.jpg
 /// ```
 pub fn local_file_url(path: &str) -> String {
-    format!("bae://local{}", urlencoding::encode(path))
+    // Encode each path segment separately to preserve slashes
+    let encoded_path: String = path
+        .split('/')
+        .map(|segment| urlencoding::encode(segment).into_owned())
+        .collect::<Vec<_>>()
+        .join("/");
+    format!("bae://local{}", encoded_path)
 }
