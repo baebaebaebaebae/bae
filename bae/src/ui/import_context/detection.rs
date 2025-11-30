@@ -195,6 +195,9 @@ pub async fn load_selected_release(
 
     info!("Loading release: {} ({:?})", release.name, release.path);
 
+    // Update folder_path to point to this specific release's folder
+    ctx.set_folder_path(release.path.to_string_lossy().to_string());
+
     let folder_contents = detect_folder_contents(release.path.clone())
         .map_err(|e| format!("Failed to detect folder contents: {}", e))?;
 
