@@ -30,7 +30,6 @@ pub fn ReleaseTabsSection(
                         rsx! {
 
                             // Release dropdown menu
-        
 
                             div { key: "{release.id}", class: "flex items-center gap-2 relative",
                                 button {
