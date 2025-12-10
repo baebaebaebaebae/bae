@@ -41,17 +41,17 @@ pub fn ReleaseSubmenu(
                                     evt.stop_propagation();
                                     on_close.call(());
 
-        
+
 
                                     if is_loading_clone() {
                                         return;
                                     }
-        
+
                                     let release_id = release_id_clone.clone();
                                     let library_manager = library_manager_clone.clone();
                                     let playback = playback_clone.clone();
                                     let action = action;
-        
+
                                     if action == ReleaseAction::Play {
                                         is_loading_clone.set(true);
                                         let mut is_loading = is_loading_clone;
