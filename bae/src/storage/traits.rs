@@ -4,9 +4,10 @@ use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::cloud_storage::CloudStorageManager;
-use crate::db::{DbStorageProfile, StorageLocation};
+use crate::db::{Database, DbChunk, DbFile, DbFileChunk, DbStorageProfile, StorageLocation};
 use crate::encryption::EncryptionService;
 
 #[derive(Error, Debug)]
@@ -28,6 +29,9 @@ pub enum StorageError {
 
     #[error("Cloud storage error: {0}")]
     Cloud(String),
+
+    #[error("Database error: {0}")]
+    Database(String),
 }
 
 /// Trait for reading/writing release files to storage
@@ -66,7 +70,12 @@ pub struct ReleaseStorageImpl {
     profile: DbStorageProfile,
     encryption: Option<EncryptionService>,
     cloud: Option<Arc<CloudStorageManager>>,
+    database: Option<Arc<Database>>,
+    chunk_size_bytes: usize,
 }
+
+/// Default chunk size: 1MB
+const DEFAULT_CHUNK_SIZE: usize = 1024 * 1024;
 
 impl ReleaseStorageImpl {
     /// Create storage for local raw files (no encryption, no chunking)
@@ -75,6 +84,8 @@ impl ReleaseStorageImpl {
             profile,
             encryption: None,
             cloud: None,
+            database: None,
+            chunk_size_bytes: DEFAULT_CHUNK_SIZE,
         }
     }
 
@@ -84,6 +95,8 @@ impl ReleaseStorageImpl {
             profile,
             encryption: Some(encryption),
             cloud: None,
+            database: None,
+            chunk_size_bytes: DEFAULT_CHUNK_SIZE,
         }
     }
 
@@ -93,19 +106,25 @@ impl ReleaseStorageImpl {
             profile,
             encryption: None,
             cloud: Some(cloud),
+            database: None,
+            chunk_size_bytes: DEFAULT_CHUNK_SIZE,
         }
     }
 
-    /// Create storage with both encryption and cloud
+    /// Create fully configured storage (all features)
     pub fn new_full(
         profile: DbStorageProfile,
-        encryption: EncryptionService,
-        cloud: Arc<CloudStorageManager>,
+        encryption: Option<EncryptionService>,
+        cloud: Option<Arc<CloudStorageManager>>,
+        database: Arc<Database>,
+        chunk_size_bytes: usize,
     ) -> Self {
         Self {
             profile,
-            encryption: Some(encryption),
-            cloud: Some(cloud),
+            encryption,
+            cloud,
+            database: Some(database),
+            chunk_size_bytes,
         }
     }
 
@@ -168,18 +187,182 @@ impl ReleaseStorageImpl {
     fn cloud_key(&self, release_id: &str, filename: &str) -> String {
         format!("{}/{}", release_id, filename)
     }
+
+    /// Generate a storage key for a chunk
+    fn chunk_key(&self, release_id: &str, chunk_id: &str) -> String {
+        format!("{}/chunks/{}", release_id, chunk_id)
+    }
+
+    /// Write chunked file data
+    async fn write_chunked(
+        &self,
+        release_id: &str,
+        filename: &str,
+        data: &[u8],
+    ) -> Result<(), StorageError> {
+        let db = self.database.as_ref().ok_or(StorageError::NotConfigured)?;
+
+        // Create file record
+        let format = std::path::Path::new(filename)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("bin")
+            .to_lowercase();
+        let db_file = DbFile::new(release_id, filename, data.len() as i64, &format);
+
+        db.insert_file(&db_file)
+            .await
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        // Split into chunks and store
+        let mut offset = 0usize;
+        let mut chunk_index = 0i32;
+
+        while offset < data.len() {
+            let end = std::cmp::min(offset + self.chunk_size_bytes, data.len());
+            let chunk_data = &data[offset..end];
+            let byte_length = chunk_data.len();
+
+            // Encrypt chunk if needed
+            let chunk_to_store = self.encrypt_if_needed(chunk_data)?;
+            let chunk_id = Uuid::new_v4().to_string();
+
+            // Store chunk
+            let storage_location = match self.profile.location {
+                StorageLocation::Local => {
+                    let chunk_path = self.release_path(release_id).join("chunks").join(&chunk_id);
+                    if let Some(parent) = chunk_path.parent() {
+                        tokio::fs::create_dir_all(parent).await?;
+                    }
+                    tokio::fs::write(&chunk_path, &chunk_to_store).await?;
+                    chunk_path.display().to_string()
+                }
+                StorageLocation::Cloud => {
+                    let cloud = self.cloud.as_ref().ok_or(StorageError::NotConfigured)?;
+                    let key = self.chunk_key(release_id, &chunk_id);
+                    cloud
+                        .upload_chunk_data(&key, &chunk_to_store)
+                        .await
+                        .map_err(|e| StorageError::Cloud(e.to_string()))?
+                }
+            };
+
+            // Create chunk record
+            let db_chunk = DbChunk::from_release_chunk(
+                release_id,
+                &chunk_id,
+                chunk_index,
+                chunk_to_store.len(),
+                &storage_location,
+            );
+
+            db.insert_chunk(&db_chunk)
+                .await
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+
+            // Create file-chunk mapping
+            let file_chunk = DbFileChunk::new(
+                &db_file.id,
+                &chunk_id,
+                chunk_index,
+                0, // byte_offset within chunk (always 0 for per-file chunks)
+                byte_length as i64,
+            );
+
+            db.insert_file_chunk(&file_chunk)
+                .await
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+
+            offset = end;
+            chunk_index += 1;
+        }
+
+        Ok(())
+    }
+
+    /// Read chunked file data
+    async fn read_chunked(
+        &self,
+        release_id: &str,
+        filename: &str,
+    ) -> Result<Vec<u8>, StorageError> {
+        let db = self.database.as_ref().ok_or(StorageError::NotConfigured)?;
+
+        // Find the file record
+        let file = db
+            .get_file_by_release_and_filename(release_id, filename)
+            .await
+            .map_err(|e| StorageError::Database(e.to_string()))?
+            .ok_or_else(|| StorageError::NotFound(filename.to_string()))?;
+
+        // Get file-chunk mappings
+        let file_chunks = db
+            .get_file_chunks(&file.id)
+            .await
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+
+        if file_chunks.is_empty() {
+            return Err(StorageError::NotFound(format!(
+                "No chunks found for file: {}",
+                filename
+            )));
+        }
+
+        // Read and reassemble chunks
+        let mut data = Vec::with_capacity(file.file_size as usize);
+
+        for fc in file_chunks {
+            // Get chunk metadata
+            let chunk = db
+                .get_chunk_by_id(&fc.chunk_id)
+                .await
+                .map_err(|e| StorageError::Database(e.to_string()))?
+                .ok_or_else(|| {
+                    StorageError::NotFound(format!("Chunk not found: {}", fc.chunk_id))
+                })?;
+
+            // Read chunk data
+            let encrypted_chunk = match self.profile.location {
+                StorageLocation::Local => {
+                    let chunk_path = PathBuf::from(&chunk.storage_location);
+                    tokio::fs::read(&chunk_path).await.map_err(|e| {
+                        if e.kind() == std::io::ErrorKind::NotFound {
+                            StorageError::NotFound(chunk_path.display().to_string())
+                        } else {
+                            StorageError::Io(e)
+                        }
+                    })?
+                }
+                StorageLocation::Cloud => {
+                    let cloud = self.cloud.as_ref().ok_or(StorageError::NotConfigured)?;
+                    cloud
+                        .download_chunk(&chunk.storage_location)
+                        .await
+                        .map_err(|e| StorageError::Cloud(e.to_string()))?
+                }
+            };
+
+            // Decrypt if needed
+            let decrypted = self.decrypt_if_needed(&encrypted_chunk)?;
+
+            // Extract the portion of this chunk that belongs to our file
+            let start = fc.byte_offset as usize;
+            let end = start + fc.byte_length as usize;
+            data.extend_from_slice(&decrypted[start..end]);
+        }
+
+        Ok(data)
+    }
 }
 
 #[async_trait]
 impl ReleaseStorage for ReleaseStorageImpl {
     async fn read_file(&self, release_id: &str, filename: &str) -> Result<Vec<u8>, StorageError> {
         if self.profile.chunked {
-            return Err(StorageError::NotSupported(
-                "Chunked storage not yet implemented".to_string(),
-            ));
+            return self.read_chunked(release_id, filename).await;
         }
 
-        // Read raw data from storage backend
+        // Non-chunked: read whole file from storage backend
         let raw_data = match self.profile.location {
             StorageLocation::Local => {
                 let path = self.file_path(release_id, filename);
@@ -212,15 +395,12 @@ impl ReleaseStorage for ReleaseStorageImpl {
         data: &[u8],
     ) -> Result<(), StorageError> {
         if self.profile.chunked {
-            return Err(StorageError::NotSupported(
-                "Chunked storage not yet implemented".to_string(),
-            ));
+            return self.write_chunked(release_id, filename, data).await;
         }
 
-        // Encrypt if needed
+        // Non-chunked: encrypt whole file if needed, write to storage
         let data_to_store = self.encrypt_if_needed(data)?;
 
-        // Write to storage backend
         match self.profile.location {
             StorageLocation::Local => {
                 let path = self.file_path(release_id, filename);
