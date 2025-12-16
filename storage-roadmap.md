@@ -48,14 +48,14 @@ All 8 combinations of flags are valid. Some are silly (chunked but not encrypted
 
 ---
 
-## Plan 3: Storage Trait + Implementation
+## Plan 3: Storage Trait + Implementation ✅
 
 **Goal**: Abstract storage behind a trait, implement the core structure.
 
-- Define `ReleaseStorage` trait with `read_file`, `write_file`, `list_files`
-- Create `ReleaseStorageImpl` that takes a `StorageProfile`
-- Implement local raw case first (encrypted: false, chunked: false, location: Local)
-- Refactor one consumer to use the trait
+- ✅ Define `ReleaseStorage` trait with `read_file`, `write_file`, `list_files`, `file_exists`, `delete_file`
+- ✅ Create `ReleaseStorageImpl` that takes a `StorageProfile`
+- ✅ Implement local raw case (encrypted: false, chunked: false, location: Local)
+- ✅ Unit tests for local raw storage
 
 ---
 
