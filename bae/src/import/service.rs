@@ -32,12 +32,13 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::cache::CacheManager;
 use crate::cd::drive::CdToc;
 use crate::cd::RipProgress;
 use crate::cloud_storage::CloudStorageManager;
-use crate::db::{DbAlbum, DbRelease, DbTrack};
+use crate::db::{Database, DbAlbum, DbRelease, DbStorageProfile, DbTrack};
 use crate::encryption::EncryptionService;
 use crate::import::album_chunk_layout::AlbumChunkLayout;
 use crate::import::handle::{ImportServiceHandle, TorrentImportMetadata};
@@ -49,6 +50,7 @@ use crate::import::types::{
     TrackFile,
 };
 use crate::library::SharedLibraryManager;
+use crate::storage::{ReleaseStorage, ReleaseStorageImpl};
 use crate::torrent::TorrentManagerHandle;
 use futures::stream::StreamExt;
 use tokio::sync::mpsc;
@@ -85,6 +87,8 @@ pub struct ImportService {
     cache_manager: CacheManager,
     /// Handle to torrent manager service for torrent operations
     torrent_handle: TorrentManagerHandle,
+    /// Database for storage operations
+    database: Arc<Database>,
 }
 
 impl ImportService {
@@ -101,6 +105,7 @@ impl ImportService {
         cloud_storage: CloudStorageManager,
         cache_manager: CacheManager,
         torrent_handle: TorrentManagerHandle,
+        database: Arc<Database>,
     ) -> ImportServiceHandle {
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
         let (progress_tx, progress_rx) = mpsc::unbounded_channel();
@@ -124,6 +129,7 @@ impl ImportService {
                     cloud_storage,
                     cache_manager: cache_manager_for_worker,
                     torrent_handle,
+                    database,
                 };
 
                 info!("Worker started");
@@ -743,6 +749,83 @@ impl ImportService {
             .await
             .map_err(|e| format!("Failed to mark release complete: {}", e))?;
 
+        Ok(())
+    }
+
+    /// Create a storage implementation from a profile
+    fn create_storage(&self, profile: DbStorageProfile) -> ReleaseStorageImpl {
+        ReleaseStorageImpl::new_full(
+            profile,
+            Some(self.encryption_service.clone()),
+            Some(Arc::new(self.cloud_storage.clone())),
+            self.database.clone(),
+            self.config.chunk_size_bytes,
+        )
+    }
+
+    /// Import files using the storage trait (new simplified path).
+    ///
+    /// This is the new import method that uses ReleaseStorage instead of
+    /// the hardcoded chunk pipeline. Much simpler - just reads files and
+    /// calls storage.write_file() for each.
+    #[allow(dead_code)] // Will be used when we wire up the new import path
+    async fn run_storage_import(
+        &self,
+        db_release: &DbRelease,
+        discovered_files: &[DiscoveredFile],
+        storage_profile: DbStorageProfile,
+    ) -> Result<(), String> {
+        let storage = self.create_storage(storage_profile);
+        let total_files = discovered_files.len();
+
+        info!(
+            "Starting storage import for release {} ({} files)",
+            db_release.id, total_files
+        );
+
+        for (idx, file) in discovered_files.iter().enumerate() {
+            let filename = file
+                .path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| format!("Invalid filename: {:?}", file.path))?;
+
+            // Read file data
+            let data = tokio::fs::read(&file.path)
+                .await
+                .map_err(|e| format!("Failed to read file {:?}: {}", file.path, e))?;
+
+            // Write to storage (handles chunking, encryption, cloud upload, DB records)
+            storage
+                .write_file(&db_release.id, filename, &data)
+                .await
+                .map_err(|e| format!("Failed to store file {}: {}", filename, e))?;
+
+            info!(
+                "Stored file {}/{}: {} ({} bytes)",
+                idx + 1,
+                total_files,
+                filename,
+                data.len()
+            );
+
+            // Emit progress
+            let _ = self.progress_tx.send(ImportProgress::FileProgress {
+                release_id: db_release.id.clone(),
+                file_index: idx,
+                total_files,
+                filename: filename.to_string(),
+            });
+        }
+
+        // Mark release complete
+        self.library_manager
+            .get()
+            .mark_release_complete(&db_release.id)
+            .await
+            .map_err(|e| format!("Failed to mark release complete: {}", e))?;
+
+        info!("Storage import complete for release {}", db_release.id);
         Ok(())
     }
 }

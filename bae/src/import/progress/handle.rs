@@ -22,12 +22,16 @@ impl SubscriptionFilter {
             SubscriptionFilter::Release { release_id } => match progress {
                 ImportProgress::Started { id } => id == release_id,
                 ImportProgress::Progress { id, .. } => id == release_id,
+                ImportProgress::FileProgress {
+                    release_id: rid, ..
+                } => rid == release_id,
                 ImportProgress::Complete { id } => id == release_id,
                 ImportProgress::Failed { id, .. } => id == release_id,
             },
             SubscriptionFilter::Track { track_id } => match progress {
                 ImportProgress::Started { id } => id == track_id,
                 ImportProgress::Progress { id, .. } => id == track_id,
+                ImportProgress::FileProgress { .. } => false, // FileProgress is release-level only
                 ImportProgress::Complete { id } => id == track_id,
                 ImportProgress::Failed { id, .. } => id == track_id,
             },

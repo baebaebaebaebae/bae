@@ -25,6 +25,7 @@ mod media_controls;
 mod musicbrainz;
 mod network;
 mod playback;
+mod storage;
 mod subsonic;
 mod test_support;
 mod torrent;
@@ -151,6 +152,7 @@ fn main() {
         cloud_storage.clone(),
         cache_manager.clone(),
         torrent_manager.clone(),
+        std::sync::Arc::new(database.clone()),
     );
 
     // Create playback service

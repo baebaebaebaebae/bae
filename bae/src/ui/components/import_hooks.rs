@@ -63,6 +63,15 @@ pub fn use_track_progress(
                             );
                             state.set(TrackImportState::Importing { percent });
                         }
+                        ImportProgress::FileProgress {
+                            file_index,
+                            total_files,
+                            ..
+                        } => {
+                            let percent = ((file_index + 1) * 100 / total_files) as u8;
+                            trace!("Track {} file progress: {}%", track_id, percent);
+                            state.set(TrackImportState::Importing { percent });
+                        }
                         ImportProgress::Complete { .. } => {
                             trace!("Track {} complete", track_id);
                             state.set(TrackImportState::Complete);
