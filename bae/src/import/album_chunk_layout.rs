@@ -32,7 +32,7 @@ extern crate libflac_sys;
 
 /// Build a seektable mapping sample positions to byte positions using libFLAC
 /// Returns a HashMap where key is sample number and value is byte position
-fn build_flac_seektable(flac_path: &Path) -> Result<HashMap<u64, u64>, String> {
+pub fn build_seektable(flac_path: &Path) -> Result<HashMap<u64, u64>, String> {
     use tracing::debug;
 
     debug!("Building seektable for: {:?}", flac_path);
@@ -352,7 +352,7 @@ fn build_flac_seektable(flac_path: &Path) -> Result<HashMap<u64, u64>, String> {
 }
 
 /// Find exact byte range for a track using seektable and Symphonia time-based seeking
-fn find_track_byte_range(
+pub fn find_track_byte_range(
     flac_path: &Path,
     start_time_ms: u64,
     end_time_ms: Option<u64>,
@@ -676,7 +676,7 @@ fn build_chunk_track_mappings(
                 "Building seektable for FLAC file: {}",
                 cue_metadata.flac_path.display()
             );
-            let seektable = build_flac_seektable(&cue_metadata.flac_path)
+            let seektable = build_seektable(&cue_metadata.flac_path)
                 .map_err(|e| format!("Failed to build seektable: {}", e))?;
             debug!("Seektable built with {} entries", seektable.len());
 

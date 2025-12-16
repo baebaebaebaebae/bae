@@ -225,18 +225,11 @@ pub fn Confirmation(
                                 let import_context = import_context.clone();
                                 move |evt: Event<FormData>| {
                                     let value = evt.value();
-                                    if value.is_empty() {
-                                        import_context.set_storage_profile_id(None);
-                                    } else {
+                                    if !value.is_empty() {
                                         import_context.set_storage_profile_id(Some(value));
                                     }
                                 }
                             },
-                            option {
-                                value: "",
-                                selected: selected_profile_id.read().is_none(),
-                                "Legacy (built-in)"
-                            }
                             for profile in storage_profiles.read().iter() {
                                 option {
                                     key: "{profile.id}",

@@ -46,8 +46,8 @@ use crate::import::metadata_persister::MetadataPersister;
 use crate::import::pipeline;
 use crate::import::progress::ImportProgressTracker;
 use crate::import::types::{
-    CueFlacMetadata, DiscoveredFile, FileToChunks, ImportCommand, ImportProgress, TorrentSource,
-    TrackFile,
+    CueFlacLayoutData, CueFlacMetadata, DiscoveredFile, FileToChunks, ImportCommand,
+    ImportProgress, TorrentSource, TrackFile,
 };
 use crate::library::SharedLibraryManager;
 use crate::storage::{ReleaseStorage, ReleaseStorageImpl};
@@ -162,33 +162,20 @@ impl ImportService {
                 cue_flac_metadata,
                 storage_profile_id,
             } => {
-                info!("Starting folder import pipeline for '{}'", db_album.title);
-                if let Some(profile_id) = storage_profile_id {
-                    // New storage-based import path
-                    match self.database.get_storage_profile(&profile_id).await {
-                        Ok(Some(profile)) => {
-                            self.run_storage_import(
-                                &db_release,
-                                &discovered_files,
-                                &tracks_to_files,
-                                cue_flac_metadata,
-                                profile,
-                            )
-                            .await
-                        }
-                        Ok(None) => Err(format!("Storage profile not found: {}", profile_id)),
-                        Err(e) => Err(format!("Failed to fetch storage profile: {}", e)),
+                info!("Starting folder import for '{}'", db_album.title);
+                match self.database.get_storage_profile(&storage_profile_id).await {
+                    Ok(Some(profile)) => {
+                        self.run_storage_import(
+                            &db_release,
+                            &discovered_files,
+                            &tracks_to_files,
+                            cue_flac_metadata,
+                            profile,
+                        )
+                        .await
                     }
-                } else {
-                    // Legacy chunk pipeline
-                    self.import_album_from_folder(
-                        db_album,
-                        db_release,
-                        tracks_to_files,
-                        discovered_files,
-                        cue_flac_metadata,
-                    )
-                    .await
+                    Ok(None) => Err(format!("Storage profile not found: {}", storage_profile_id)),
+                    Err(e) => Err(format!("Failed to fetch storage profile: {}", e)),
                 }
             }
             ImportCommand::Torrent {
@@ -199,19 +186,26 @@ impl ImportService {
                 torrent_metadata,
                 seed_after_download,
                 cover_art_url,
-                storage_profile_id: _, // TODO: implement storage-based torrent import
+                storage_profile_id,
             } => {
-                info!("Starting torrent import pipeline for '{}'", db_album.title);
-                self.import_album_from_torrent(
-                    db_album,
-                    db_release,
-                    tracks_to_files,
-                    torrent_source,
-                    torrent_metadata,
-                    seed_after_download,
-                    cover_art_url,
-                )
-                .await
+                info!("Starting torrent import for '{}'", db_album.title);
+                match self.database.get_storage_profile(&storage_profile_id).await {
+                    Ok(Some(profile)) => {
+                        self.run_torrent_import(
+                            db_album,
+                            db_release,
+                            tracks_to_files,
+                            torrent_source,
+                            torrent_metadata,
+                            seed_after_download,
+                            cover_art_url,
+                            profile,
+                        )
+                        .await
+                    }
+                    Ok(None) => Err(format!("Storage profile not found: {}", storage_profile_id)),
+                    Err(e) => Err(format!("Failed to fetch storage profile: {}", e)),
+                }
             }
             ImportCommand::CD {
                 db_album,
@@ -219,16 +213,24 @@ impl ImportService {
                 db_tracks,
                 drive_path,
                 toc,
-                storage_profile_id: _, // TODO: implement storage-based CD import
+                storage_profile_id,
             } => {
-                info!("Starting CD import pipeline for '{}'", db_album.title);
-                self.import_album_from_cd(db_album, db_release, db_tracks, drive_path, toc)
-                    .await
+                info!("Starting CD import for '{}'", db_album.title);
+                match self.database.get_storage_profile(&storage_profile_id).await {
+                    Ok(Some(profile)) => {
+                        self.run_cd_import(
+                            db_album, db_release, db_tracks, drive_path, toc, profile,
+                        )
+                        .await
+                    }
+                    Ok(None) => Err(format!("Storage profile not found: {}", storage_profile_id)),
+                    Err(e) => Err(format!("Failed to fetch storage profile: {}", e)),
+                }
             }
         };
 
         if let Err(e) = result {
-            error!("Pipeline failed: {}", e);
+            error!("Import failed: {}", e);
             // TODO: Mark album as failed
         }
     }
@@ -785,20 +787,96 @@ impl ImportService {
         )
     }
 
-    /// Import files using the storage trait (new simplified path).
+    /// Build CueFlacLayoutData for CUE/FLAC imports.
     ///
-    /// This is the new import method that uses ReleaseStorage instead of
-    /// the hardcoded chunk pipeline. Much simpler - just reads files and
-    /// calls storage.write_file() for each.
+    /// Extracts FLAC headers and calculates per-track byte/chunk ranges
+    /// needed for accurate seeking during playback.
+    async fn build_cue_flac_layout_data(
+        &self,
+        cue_metadata: &HashMap<PathBuf, CueFlacMetadata>,
+        tracks_to_files: &[TrackFile],
+        files_to_chunks: &[FileToChunks],
+    ) -> Result<HashMap<PathBuf, CueFlacLayoutData>, String> {
+        use crate::cue_flac::CueFlacProcessor;
+        use crate::import::album_chunk_layout::{build_seektable, find_track_byte_range};
+
+        let mut result = HashMap::new();
+        let chunk_size = self.config.chunk_size_bytes as i64;
+
+        for (flac_path, metadata) in cue_metadata {
+            // Extract FLAC headers
+            let flac_headers = CueFlacProcessor::extract_flac_headers(flac_path)
+                .map_err(|e| format!("Failed to extract FLAC headers: {}", e))?;
+
+            // Build seektable from FLAC file
+            let seektable = build_seektable(flac_path)
+                .map_err(|e| format!("Failed to build seektable: {}", e))?;
+
+            // Get tracks that map to this FLAC file
+            let flac_tracks: Vec<_> = tracks_to_files
+                .iter()
+                .filter(|tf| &tf.file_path == flac_path)
+                .collect();
+
+            // Get the FileToChunks for this FLAC
+            let ftc = files_to_chunks
+                .iter()
+                .find(|f| &f.file_path == flac_path)
+                .ok_or_else(|| format!("No chunk mapping for FLAC: {:?}", flac_path))?;
+
+            // Calculate per-track byte and chunk ranges
+            let mut track_chunk_ranges = HashMap::new();
+            let mut track_byte_ranges = HashMap::new();
+
+            for (i, cue_track) in metadata.cue_sheet.tracks.iter().enumerate() {
+                // Find the DB track that corresponds to this CUE track
+                let db_track = flac_tracks
+                    .get(i)
+                    .ok_or_else(|| format!("No track mapping for CUE track {}", cue_track.title))?;
+
+                // Find exact byte positions using seektable + Symphonia
+                let (start_byte, end_byte) = find_track_byte_range(
+                    flac_path,
+                    cue_track.start_time_ms,
+                    cue_track.end_time_ms,
+                    &seektable,
+                )?;
+
+                track_byte_ranges.insert(db_track.db_track_id.clone(), (start_byte, end_byte));
+
+                // Calculate chunk ranges (relative to file's chunks)
+                let start_chunk = (start_byte / chunk_size) as i32;
+                let end_chunk = ((end_byte - 1) / chunk_size) as i32;
+
+                // For per-file chunking, chunks start at 0 for each file
+                track_chunk_ranges.insert(db_track.db_track_id.clone(), (start_chunk, end_chunk));
+            }
+
+            result.insert(
+                flac_path.clone(),
+                CueFlacLayoutData {
+                    cue_sheet: metadata.cue_sheet.clone(),
+                    flac_headers,
+                    track_chunk_ranges,
+                    track_byte_ranges,
+                    seektable: Some(seektable),
+                },
+            );
+        }
+
+        Ok(result)
+    }
+
+    /// Import files using the storage trait.
     ///
-    /// Note: Currently handles one-file-per-track imports only.
-    /// CUE/FLAC imports will fall back to legacy pipeline until this is extended.
+    /// Reads files and calls storage.write_file() for each. The storage layer
+    /// handles chunking, encryption, and cloud upload based on the profile.
     async fn run_storage_import(
         &self,
         db_release: &DbRelease,
         discovered_files: &[DiscoveredFile],
         tracks_to_files: &[TrackFile],
-        _cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
+        cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
         storage_profile: DbStorageProfile,
     ) -> Result<(), String> {
         let library_manager = self.library_manager.get();
@@ -858,7 +936,8 @@ impl ImportService {
         }
 
         // Persist track metadata (audio format, chunk coords for playback)
-        // The storage layer handles file→chunk mapping, but we still need track metadata
+        // The storage layer already created DbFile, DbChunk, and DbFileChunk records.
+        // We just need to create DbAudioFormat and DbTrackChunkCoords for each track.
 
         // Build file-to-chunks mapping from the new DbFileChunk records
         let mut files_to_chunks = Vec::new();
@@ -891,16 +970,29 @@ impl ImportService {
             }
         }
 
-        // Persist track metadata using existing persister
+        // Persist track metadata for each track
         let persister = MetadataPersister::new(library_manager);
-        persister
-            .persist_release_metadata(
-                &db_release.id,
-                tracks_to_files,
-                &files_to_chunks,
-                self.config.chunk_size_bytes,
-            )
-            .await?;
+
+        // Build CueFlacLayoutData if we have CUE/FLAC metadata
+        let cue_flac_data = if let Some(ref cue_metadata) = cue_flac_metadata {
+            self.build_cue_flac_layout_data(cue_metadata, tracks_to_files, &files_to_chunks)
+                .await?
+        } else {
+            HashMap::new()
+        };
+
+        for track_file in tracks_to_files {
+            persister
+                .persist_track_metadata(
+                    &db_release.id,
+                    &track_file.db_track_id,
+                    tracks_to_files,
+                    &files_to_chunks,
+                    self.config.chunk_size_bytes,
+                    &cue_flac_data,
+                )
+                .await?;
+        }
 
         // Mark release complete
         library_manager
@@ -915,5 +1007,52 @@ impl ImportService {
 
         info!("Storage import complete for release {}", db_release.id);
         Ok(())
+    }
+
+    /// Torrent import using storage profile.
+    ///
+    /// Downloads torrent first, then imports files via run_storage_import.
+    #[allow(clippy::too_many_arguments)]
+    async fn run_torrent_import(
+        &self,
+        db_album: DbAlbum,
+        db_release: DbRelease,
+        tracks_to_files: Vec<TrackFile>,
+        torrent_source: TorrentSource,
+        torrent_metadata: TorrentImportMetadata,
+        seed_after_download: bool,
+        cover_art_url: Option<String>,
+        _storage_profile: DbStorageProfile,
+    ) -> Result<(), String> {
+        // TODO: Refactor to use storage profile for file storage
+        // For now, delegate to existing implementation
+        self.import_album_from_torrent(
+            db_album,
+            db_release,
+            tracks_to_files,
+            torrent_source,
+            torrent_metadata,
+            seed_after_download,
+            cover_art_url,
+        )
+        .await
+    }
+
+    /// CD import using storage profile.
+    ///
+    /// Rips CD first, then imports files via run_storage_import.
+    async fn run_cd_import(
+        &self,
+        db_album: DbAlbum,
+        db_release: DbRelease,
+        db_tracks: Vec<DbTrack>,
+        drive_path: PathBuf,
+        toc: CdToc,
+        _storage_profile: DbStorageProfile,
+    ) -> Result<(), String> {
+        // TODO: Refactor to use storage profile for file storage
+        // For now, delegate to existing implementation
+        self.import_album_from_cd(db_album, db_release, db_tracks, drive_path, toc)
+            .await
     }
 }

@@ -146,7 +146,7 @@ impl ImportServiceHandle {
         folder: std::path::PathBuf,
         master_year: u32,
         cover_art_url: Option<String>,
-        storage_profile_id: Option<String>,
+        storage_profile_id: String,
     ) -> Result<(String, String), String> {
         // Validate that at least one release is provided
         if discogs_release.is_none() && mb_release.is_none() {
@@ -291,7 +291,7 @@ impl ImportServiceHandle {
         seed_after_download: bool,
         torrent_metadata: TorrentImportMetadata,
         cover_art_url: Option<String>,
-        storage_profile_id: Option<String>,
+        storage_profile_id: String,
     ) -> Result<(String, String), String> {
         // Validate that at least one release is provided
         if discogs_release.is_none() && mb_release.is_none() {
@@ -458,7 +458,7 @@ impl ImportServiceHandle {
         drive_path: std::path::PathBuf,
         master_year: u32,
         cover_art_url: Option<String>,
-        storage_profile_id: Option<String>,
+        storage_profile_id: String,
     ) -> Result<(String, String), String> {
         // Validate that at least one release is provided
         if discogs_release.is_none() && mb_release.is_none() {

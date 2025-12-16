@@ -82,6 +82,13 @@ pub async fn confirm_and_start_import(
         }
     }
 
+    // Get storage profile - required for all imports
+    let storage_profile_id = ctx
+        .storage_profile_id()
+        .read()
+        .clone()
+        .ok_or_else(|| "No storage profile selected".to_string())?;
+
     // Extract master_year from metadata or release date
     let metadata = ctx.detected_metadata().read().clone();
     let master_year = metadata.as_ref().and_then(|m| m.year).unwrap_or(1970);
@@ -127,7 +134,7 @@ pub async fn confirm_and_start_import(
                         folder: PathBuf::from(folder_path),
                         master_year,
                         cover_art_url: cover_art_url.clone(),
-                        storage_profile_id: ctx.storage_profile_id().read().clone(),
+                        storage_profile_id: storage_profile_id.clone(),
                     }
                 }
                 MatchSource::MusicBrainz(mb_release) => {
@@ -142,7 +149,7 @@ pub async fn confirm_and_start_import(
                         folder: PathBuf::from(folder_path),
                         master_year,
                         cover_art_url: cover_art_url.clone(),
-                        storage_profile_id: ctx.storage_profile_id().read().clone(),
+                        storage_profile_id: storage_profile_id.clone(),
                     }
                 }
             }
@@ -180,7 +187,7 @@ pub async fn confirm_and_start_import(
                         seed_after_download,
                         torrent_metadata,
                         cover_art_url: cover_art_url.clone(),
-                        storage_profile_id: ctx.storage_profile_id().read().clone(),
+                        storage_profile_id: storage_profile_id.clone(),
                     }
                 }
                 MatchSource::MusicBrainz(mb_release) => {
@@ -197,7 +204,7 @@ pub async fn confirm_and_start_import(
                         seed_after_download,
                         torrent_metadata,
                         cover_art_url: cover_art_url.clone(),
-                        storage_profile_id: ctx.storage_profile_id().read().clone(),
+                        storage_profile_id: storage_profile_id.clone(),
                     }
                 }
             }
@@ -220,7 +227,7 @@ pub async fn confirm_and_start_import(
                         drive_path: PathBuf::from(folder_path),
                         master_year,
                         cover_art_url: cover_art_url.clone(),
-                        storage_profile_id: ctx.storage_profile_id().read().clone(),
+                        storage_profile_id: storage_profile_id.clone(),
                     }
                 }
             }
