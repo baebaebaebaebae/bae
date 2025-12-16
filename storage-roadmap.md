@@ -70,17 +70,20 @@ All 8 combinations of flags are valid. Some are silly (chunked but not encrypted
 
 **Goal**: Add chunking support to the trait.
 
-- Add chunking logic to `write_file` (split into chunks, store, track mapping)
-- Add reassembly logic to `read_file` (fetch chunks, concatenate)
+- Add chunking logic to `write_file` (split into chunks, encrypt each, store, track mapping)
+- Add reassembly logic to `read_file` (fetch chunks, decrypt, concatenate)
 - Use `DbFileChunk` from Plan 1 for tracking
+- Storage needs database access to persist chunk records
 
 ---
 
-## Plan 5: Import Pipeline Integration
+## Plan 5: Import Pipeline Refactor
 
-**Goal**: Storage profile selection during import.
+**Goal**: Import uses storage trait instead of hardcoded chunk pipeline.
 
-- Add storage profile picker to import workflow
-- Write releases to selected storage configuration
-- Default profile for quick imports
+- Import selects storage profile (or uses default)
+- Import reads source files, calls `storage.write_file()` for each
+- Storage handles chunking/encryption/location transparently
+- Remove old hardcoded chunk/encrypt/upload logic from import
+- Much simpler import pipeline
 
