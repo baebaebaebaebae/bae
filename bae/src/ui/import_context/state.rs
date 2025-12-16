@@ -76,6 +76,8 @@ pub struct ImportContext {
     pub(crate) magnet_link: Signal<String>,
     // CD-specific state
     pub(crate) cd_toc_info: Signal<Option<(String, u8, u8)>>, // (disc_id, first_track, last_track)
+    // Storage profile selection
+    pub(crate) storage_profile_id: Signal<Option<String>>,
     // UI state (persists across navigation)
     pub(crate) selected_import_source: Signal<ImportSource>,
     pub(crate) search_source: Signal<SearchSource>,
@@ -140,6 +142,7 @@ impl ImportContext {
             torrent_input_mode: Signal::new(TorrentInputMode::File),
             magnet_link: Signal::new(String::new()),
             cd_toc_info: Signal::new(None),
+            storage_profile_id: Signal::new(None),
             selected_import_source: Signal::new(ImportSource::Folder),
             search_source: Signal::new(SearchSource::MusicBrainz),
             manual_match_candidates: Signal::new(Vec::new()),
@@ -262,6 +265,15 @@ impl ImportContext {
 
     pub fn torrent_metadata(&self) -> Signal<Option<TorrentImportMetadata>> {
         self.torrent_metadata
+    }
+
+    pub fn storage_profile_id(&self) -> Signal<Option<String>> {
+        self.storage_profile_id
+    }
+
+    pub fn set_storage_profile_id(&self, value: Option<String>) {
+        let mut signal = self.storage_profile_id;
+        signal.set(value);
     }
 
     pub fn set_search_artist(&self, value: String) {
