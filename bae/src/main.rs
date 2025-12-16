@@ -96,6 +96,53 @@ fn create_library_manager(
     shared_library
 }
 
+/// Ensure a default storage profile exists
+///
+/// Creates "Cloud Storage" profile (encrypted + chunked + cloud) if no default exists.
+/// This matches the legacy import behavior.
+async fn ensure_default_storage_profile(
+    library_manager: &SharedLibraryManager,
+    config: &config::Config,
+) {
+    let manager = library_manager.get();
+
+    // Check if a default profile already exists
+    match manager.get_default_storage_profile().await {
+        Ok(Some(profile)) => {
+            info!("Default storage profile exists: {}", profile.name);
+        }
+        Ok(None) => {
+            // No default profile, create one
+            info!("Creating default storage profile...");
+
+            let profile = db::DbStorageProfile::new(
+                "Cloud Storage",
+                db::StorageLocation::Cloud,
+                &config.s3_config.bucket_name,
+                true, // encrypted
+                true, // chunked
+            )
+            .with_default(true);
+
+            match manager.insert_storage_profile(&profile).await {
+                Ok(()) => {
+                    if let Err(e) = manager.set_default_storage_profile(&profile.id).await {
+                        error!("Failed to set default storage profile: {}", e);
+                    } else {
+                        info!("Created default storage profile: Cloud Storage");
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to create default storage profile: {}", e);
+                }
+            }
+        }
+        Err(e) => {
+            error!("Failed to check for default storage profile: {}", e);
+        }
+    }
+}
+
 fn configure_logging() {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -121,6 +168,9 @@ fn main() {
     let cloud_storage = runtime_handle.block_on(create_cloud_storage_manager(&config));
     let database = runtime_handle.block_on(create_database(&config));
     let library_manager = create_library_manager(database.clone(), cloud_storage.clone());
+
+    // Ensure default storage profile exists
+    runtime_handle.block_on(ensure_default_storage_profile(&library_manager, &config));
 
     let encryption_service = encryption::EncryptionService::new(&config).expect(
         "Failed to initialize encryption service. Check your encryption key configuration.",
