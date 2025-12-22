@@ -52,8 +52,8 @@ pub enum ImportRequest {
         folder: PathBuf,
         master_year: u32,
         cover_art_url: Option<String>,
-        /// Storage profile ID for where to store the imported files
-        storage_profile_id: String,
+        /// Storage profile ID. None means no bae storage (files stay in place).
+        storage_profile_id: Option<String>,
     },
     Torrent {
         torrent_source: TorrentSource,
@@ -63,8 +63,8 @@ pub enum ImportRequest {
         seed_after_download: bool,
         torrent_metadata: TorrentImportMetadata,
         cover_art_url: Option<String>,
-        /// Storage profile ID for where to store the imported files
-        storage_profile_id: String,
+        /// Storage profile ID. None means no bae storage (files stay in temp folder).
+        storage_profile_id: Option<String>,
     },
     CD {
         discogs_release: Option<DiscogsRelease>,
@@ -72,8 +72,8 @@ pub enum ImportRequest {
         drive_path: PathBuf,
         master_year: u32,
         cover_art_url: Option<String>,
-        /// Storage profile ID for where to store the imported files
-        storage_profile_id: String,
+        /// Storage profile ID. None means no bae storage (files stay in temp folder).
+        storage_profile_id: Option<String>,
     },
 }
 
@@ -249,8 +249,8 @@ pub enum ImportCommand {
         discovered_files: Vec<DiscoveredFile>,
         /// Pre-parsed CUE/FLAC metadata (for CUE/FLAC imports only)
         cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
-        /// Storage profile ID for where to store the imported files
-        storage_profile_id: String,
+        /// Storage profile ID. None means no bae storage (files stay in place).
+        storage_profile_id: Option<String>,
     },
     /// Torrent-based import: files arrive incrementally
     Torrent {
@@ -269,8 +269,8 @@ pub enum ImportCommand {
         seed_after_download: bool,
         /// Cover art URL to download after torrent completes
         cover_art_url: Option<String>,
-        /// Storage profile ID for where to store the imported files
-        storage_profile_id: String,
+        /// Storage profile ID. None means no bae storage (files stay in temp folder).
+        storage_profile_id: Option<String>,
     },
     /// CD-based import: service will rip CD first (acquire phase), then process like folder import
     CD {
@@ -284,7 +284,7 @@ pub enum ImportCommand {
         drive_path: PathBuf,
         /// CD TOC (Table of Contents) - read during validation
         toc: CdToc,
-        /// Storage profile ID for where to store the imported files
-        storage_profile_id: String,
+        /// Storage profile ID. None means no bae storage (files stay in temp folder).
+        storage_profile_id: Option<String>,
     },
 }

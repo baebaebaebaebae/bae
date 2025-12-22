@@ -211,14 +211,16 @@ pub struct DbTrack {
 }
 
 /// Physical file belonging to a release
-/// File metadata for export/torrent features
 ///
 /// Stores original file information needed to reconstruct file structure for export
-/// or BitTorrent seeding. Not needed for playback - that uses TrackChunkCoords + AudioFormat.
+/// or BitTorrent seeding.
 ///
 /// Files are linked to releases (not logical albums or tracks), because:
 /// - Files are part of a specific release (e.g., "2016 Remaster" has different files than "1973 Original")
 /// - Some files are metadata (cover.jpg, .cue sheets) not associated with any track
+///
+/// When a release has no storage profile, the `source_path` field stores the actual
+/// file location for direct playback (no chunks exist).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbFile {
     pub id: String,
@@ -227,6 +229,11 @@ pub struct DbFile {
     pub original_filename: String,
     pub file_size: i64,
     pub format: String, // "flac", "mp3", etc.
+    /// Absolute path to the source file on disk.
+    /// Set when release has no storage profile (bae doesn't manage storage).
+    /// For local imports: user's original file path.
+    /// For torrent imports: temp folder path (ephemeral).
+    pub source_path: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -536,8 +543,16 @@ impl DbFile {
             original_filename: original_filename.to_string(),
             file_size,
             format: format.to_string(),
+            source_path: None,
             created_at: Utc::now(),
         }
+    }
+
+    /// Set the source path for None storage mode.
+    /// This is the actual file location on disk for direct playback.
+    pub fn with_source_path(mut self, path: &str) -> Self {
+        self.source_path = Some(path.to_string());
+        self
     }
 }
 
@@ -802,9 +817,9 @@ impl DbImage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[sqlx(type_name = "TEXT", rename_all = "lowercase")]
 pub enum StorageLocation {
-    /// Local filesystem path
+    /// Local filesystem path (bae manages storage)
     Local,
-    /// Cloud storage (S3/MinIO)
+    /// Cloud storage (S3/MinIO, bae manages storage)
     Cloud,
 }
 

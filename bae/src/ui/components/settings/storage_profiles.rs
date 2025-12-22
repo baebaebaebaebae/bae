@@ -339,7 +339,7 @@ fn ProfileEditor(
                 // Location type
                 div {
                     label { class: "block text-sm font-medium text-gray-400 mb-2", "Storage Type" }
-                    div { class: "flex gap-4",
+                    div { class: "flex flex-col gap-3",
                         label { class: "flex items-center gap-2 cursor-pointer",
                             input {
                                 r#type: "radio",
@@ -401,6 +401,10 @@ fn ProfileEditor(
                         }
                         span { class: "text-white", "Chunked" }
                     }
+                }
+
+                // Default option (available for all storage types)
+                div {
                     label { class: "flex items-center gap-2 cursor-pointer",
                         input {
                             r#type: "checkbox",

@@ -632,6 +632,17 @@ impl LibraryManager {
     pub async fn delete_storage_profile(&self, profile_id: &str) -> Result<(), LibraryError> {
         Ok(self.database.delete_storage_profile(profile_id).await?)
     }
+
+    /// Get the storage profile for a release
+    pub async fn get_storage_profile_for_release(
+        &self,
+        release_id: &str,
+    ) -> Result<Option<DbStorageProfile>, LibraryError> {
+        Ok(self
+            .database
+            .get_storage_profile_for_release(release_id)
+            .await?)
+    }
 }
 
 #[cfg(test)]

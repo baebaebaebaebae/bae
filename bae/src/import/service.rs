@@ -38,7 +38,7 @@ use crate::cache::CacheManager;
 use crate::cd::drive::CdToc;
 use crate::cd::RipProgress;
 use crate::cloud_storage::CloudStorageManager;
-use crate::db::{Database, DbAlbum, DbRelease, DbStorageProfile, DbTrack};
+use crate::db::{Database, DbAlbum, DbFile, DbRelease, DbStorageProfile, DbTrack};
 use crate::encryption::EncryptionService;
 use crate::import::album_chunk_layout::AlbumChunkLayout;
 use crate::import::handle::{ImportServiceHandle, TorrentImportMetadata};
@@ -163,19 +163,33 @@ impl ImportService {
                 storage_profile_id,
             } => {
                 info!("Starting folder import for '{}'", db_album.title);
-                match self.database.get_storage_profile(&storage_profile_id).await {
-                    Ok(Some(profile)) => {
-                        self.run_storage_import(
+                match storage_profile_id {
+                    Some(profile_id) => {
+                        match self.database.get_storage_profile(&profile_id).await {
+                            Ok(Some(profile)) => {
+                                self.run_storage_import(
+                                    &db_release,
+                                    &discovered_files,
+                                    &tracks_to_files,
+                                    cue_flac_metadata,
+                                    profile,
+                                )
+                                .await
+                            }
+                            Ok(None) => Err(format!("Storage profile not found: {}", profile_id)),
+                            Err(e) => Err(format!("Failed to fetch storage profile: {}", e)),
+                        }
+                    }
+                    None => {
+                        // No storage profile = files stay in place
+                        self.run_none_import(
                             &db_release,
                             &discovered_files,
                             &tracks_to_files,
                             cue_flac_metadata,
-                            profile,
                         )
                         .await
                     }
-                    Ok(None) => Err(format!("Storage profile not found: {}", storage_profile_id)),
-                    Err(e) => Err(format!("Failed to fetch storage profile: {}", e)),
                 }
             }
             ImportCommand::Torrent {
@@ -189,22 +203,38 @@ impl ImportService {
                 storage_profile_id,
             } => {
                 info!("Starting torrent import for '{}'", db_album.title);
-                match self.database.get_storage_profile(&storage_profile_id).await {
-                    Ok(Some(profile)) => {
-                        self.run_torrent_import(
+                match storage_profile_id {
+                    Some(profile_id) => {
+                        match self.database.get_storage_profile(&profile_id).await {
+                            Ok(Some(profile)) => {
+                                self.run_torrent_import(
+                                    db_album,
+                                    db_release,
+                                    tracks_to_files,
+                                    torrent_source,
+                                    torrent_metadata,
+                                    seed_after_download,
+                                    cover_art_url,
+                                    profile,
+                                )
+                                .await
+                            }
+                            Ok(None) => Err(format!("Storage profile not found: {}", profile_id)),
+                            Err(e) => Err(format!("Failed to fetch storage profile: {}", e)),
+                        }
+                    }
+                    None => {
+                        // No storage profile = files stay in temp folder
+                        self.import_torrent_none_storage(
                             db_album,
                             db_release,
                             tracks_to_files,
                             torrent_source,
                             torrent_metadata,
-                            seed_after_download,
                             cover_art_url,
-                            profile,
                         )
                         .await
                     }
-                    Ok(None) => Err(format!("Storage profile not found: {}", storage_profile_id)),
-                    Err(e) => Err(format!("Failed to fetch storage profile: {}", e)),
                 }
             }
             ImportCommand::CD {
@@ -216,15 +246,26 @@ impl ImportService {
                 storage_profile_id,
             } => {
                 info!("Starting CD import for '{}'", db_album.title);
-                match self.database.get_storage_profile(&storage_profile_id).await {
-                    Ok(Some(profile)) => {
-                        self.run_cd_import(
-                            db_album, db_release, db_tracks, drive_path, toc, profile,
+                match storage_profile_id {
+                    Some(profile_id) => {
+                        match self.database.get_storage_profile(&profile_id).await {
+                            Ok(Some(profile)) => {
+                                self.run_cd_import(
+                                    db_album, db_release, db_tracks, drive_path, toc, profile,
+                                )
+                                .await
+                            }
+                            Ok(None) => Err(format!("Storage profile not found: {}", profile_id)),
+                            Err(e) => Err(format!("Failed to fetch storage profile: {}", e)),
+                        }
+                    }
+                    None => {
+                        // No storage profile = ripped files stay in temp folder
+                        self.run_cd_import_none_storage(
+                            db_album, db_release, db_tracks, drive_path, toc,
                         )
                         .await
                     }
-                    Ok(None) => Err(format!("Storage profile not found: {}", storage_profile_id)),
-                    Err(e) => Err(format!("Failed to fetch storage profile: {}", e)),
                 }
             }
         };
@@ -1009,9 +1050,320 @@ impl ImportService {
         Ok(())
     }
 
+    /// Import for None storage: just record file paths, no chunking/encryption.
+    ///
+    /// For local file imports, records the original file path.
+    /// For torrent imports, records the temp folder path (ephemeral).
+    ///
+    /// No chunks are created. Playback reads directly from source_path.
+    async fn run_none_import(
+        &self,
+        db_release: &DbRelease,
+        discovered_files: &[DiscoveredFile],
+        tracks_to_files: &[TrackFile],
+        _cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
+    ) -> Result<(), String> {
+        let library_manager = self.library_manager.get();
+
+        // Mark release as importing
+        library_manager
+            .mark_release_importing(&db_release.id)
+            .await
+            .map_err(|e| format!("Failed to mark release as importing: {}", e))?;
+
+        // Send started event
+        let _ = self.progress_tx.send(ImportProgress::Started {
+            id: db_release.id.clone(),
+        });
+
+        let total_files = discovered_files.len();
+
+        info!(
+            "Starting None storage import for release {} ({} files)",
+            db_release.id, total_files
+        );
+
+        // Create DbFile records with source_path (no chunks)
+        for (idx, file) in discovered_files.iter().enumerate() {
+            let filename = file
+                .path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| format!("Invalid filename: {:?}", file.path))?;
+
+            let format = file
+                .path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("bin")
+                .to_lowercase();
+
+            let source_path = file
+                .path
+                .to_str()
+                .ok_or_else(|| format!("Cannot convert path to string: {:?}", file.path))?;
+
+            // Create file record with source_path
+            let db_file = DbFile::new(&db_release.id, filename, file.size as i64, &format)
+                .with_source_path(source_path);
+
+            library_manager
+                .add_file(&db_file)
+                .await
+                .map_err(|e| format!("Failed to add file record: {}", e))?;
+
+            info!(
+                "Recorded file {}/{}: {} -> {}",
+                idx + 1,
+                total_files,
+                filename,
+                source_path
+            );
+
+            // Emit progress
+            let _ = self.progress_tx.send(ImportProgress::FileProgress {
+                release_id: db_release.id.clone(),
+                file_index: idx,
+                total_files,
+                filename: filename.to_string(),
+            });
+        }
+
+        // Mark all tracks as complete (no chunk processing needed)
+        for track_file in tracks_to_files {
+            library_manager
+                .mark_track_complete(&track_file.db_track_id)
+                .await
+                .map_err(|e| format!("Failed to mark track complete: {}", e))?;
+        }
+
+        // Mark release complete
+        library_manager
+            .mark_release_complete(&db_release.id)
+            .await
+            .map_err(|e| format!("Failed to mark release complete: {}", e))?;
+
+        // Send completion event
+        let _ = self.progress_tx.send(ImportProgress::Complete {
+            id: db_release.id.clone(),
+        });
+
+        info!("None storage import complete for release {}", db_release.id);
+        Ok(())
+    }
+
+    /// Torrent import for None storage: download to temp, record paths, skip cleanup.
+    ///
+    /// Files stay in the temp folder. This is ephemeral - files may be deleted
+    /// at any time by the OS or user.
+    #[allow(clippy::too_many_arguments)]
+    async fn import_torrent_none_storage(
+        &self,
+        db_album: DbAlbum,
+        db_release: DbRelease,
+        tracks_to_files: Vec<TrackFile>,
+        torrent_source: TorrentSource,
+        torrent_metadata: TorrentImportMetadata,
+        cover_art_url: Option<String>,
+    ) -> Result<(), String> {
+        let library_manager = self.library_manager.get();
+
+        // Mark release as importing
+        library_manager
+            .mark_release_importing(&db_release.id)
+            .await
+            .map_err(|e| format!("Failed to mark release as importing: {}", e))?;
+
+        info!(
+            "Starting torrent import with None storage for '{}'",
+            db_album.title
+        );
+
+        // Send started progress
+        let _ = self.progress_tx.send(ImportProgress::Started {
+            id: db_release.id.clone(),
+        });
+
+        // ========== ACQUIRE PHASE: TORRENT DOWNLOAD ==========
+
+        info!("Starting torrent download (acquire phase)");
+
+        // Add torrent via torrent manager
+        let torrent_handle = self
+            .torrent_handle
+            .add_torrent(torrent_source.clone())
+            .await
+            .map_err(|e| format!("Failed to add torrent: {}", e))?;
+
+        // Wait for metadata if needed
+        torrent_handle
+            .wait_for_metadata()
+            .await
+            .map_err(|e| format!("Failed to wait for metadata: {}", e))?;
+
+        // Download torrent and emit progress (Acquire phase)
+        loop {
+            let progress = torrent_handle
+                .progress()
+                .await
+                .map_err(|e| format!("Failed to check torrent progress: {}", e))?;
+
+            let percent = (progress * 100.0) as u8;
+            let _ = self.progress_tx.send(ImportProgress::Progress {
+                id: db_release.id.clone(),
+                percent,
+                phase: Some(crate::import::types::ImportPhase::Acquire),
+            });
+
+            if progress >= 1.0 {
+                break;
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
+
+        // Wait a bit for libtorrent to finish writing files to disk
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+        info!("Torrent download complete");
+
+        // Get file list from torrent to construct discovered_files
+        let torrent_files = torrent_handle
+            .get_file_list()
+            .await
+            .map_err(|e| format!("Failed to get torrent file list: {}", e))?;
+
+        // Convert torrent files to DiscoveredFile format
+        let temp_dir = std::env::temp_dir();
+        let torrent_save_dir = temp_dir.join(&torrent_metadata.torrent_name);
+        let mut discovered_files: Vec<DiscoveredFile> = torrent_files
+            .iter()
+            .map(|tf| DiscoveredFile {
+                path: temp_dir.join(&tf.path),
+                size: tf.size as u64,
+            })
+            .collect();
+
+        // Download cover art to .bae/ folder in the torrent's temp directory
+        if let Some(ref url) = cover_art_url {
+            use crate::db::ImageSource;
+            use crate::import::cover_art::download_cover_art_to_bae_folder;
+
+            let source = if url.contains("coverartarchive.org") || url.contains("musicbrainz") {
+                ImageSource::MusicBrainz
+            } else {
+                ImageSource::Discogs
+            };
+
+            match download_cover_art_to_bae_folder(url, &torrent_save_dir, source).await {
+                Ok(downloaded) => {
+                    info!("Downloaded cover art to {:?}", downloaded.path);
+                    if let Ok(metadata) = tokio::fs::metadata(&downloaded.path).await {
+                        discovered_files.push(DiscoveredFile {
+                            path: downloaded.path,
+                            size: metadata.len(),
+                        });
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to download cover art: {}", e);
+                }
+            }
+        }
+
+        // Remove torrent from download client (but DON'T delete files)
+        let _ = self
+            .torrent_handle
+            .remove_torrent(torrent_handle, false) // false = don't delete files
+            .await;
+
+        // ========== RECORD FILE PATHS (NO CHUNKS) ==========
+
+        // Use run_none_import to record file paths
+        // Note: We call the inner logic directly since release is already marked as importing
+        let total_files = discovered_files.len();
+
+        info!(
+            "Recording {} files in temp folder for None storage",
+            total_files
+        );
+
+        for (idx, file) in discovered_files.iter().enumerate() {
+            let filename = file
+                .path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| format!("Invalid filename: {:?}", file.path))?;
+
+            let format = file
+                .path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("bin")
+                .to_lowercase();
+
+            let source_path = file
+                .path
+                .to_str()
+                .ok_or_else(|| format!("Cannot convert path to string: {:?}", file.path))?;
+
+            let db_file = DbFile::new(&db_release.id, filename, file.size as i64, &format)
+                .with_source_path(source_path);
+
+            library_manager
+                .add_file(&db_file)
+                .await
+                .map_err(|e| format!("Failed to add file record: {}", e))?;
+
+            info!(
+                "Recorded temp file {}/{}: {} -> {}",
+                idx + 1,
+                total_files,
+                filename,
+                source_path
+            );
+
+            let _ = self.progress_tx.send(ImportProgress::FileProgress {
+                release_id: db_release.id.clone(),
+                file_index: idx,
+                total_files,
+                filename: filename.to_string(),
+            });
+        }
+
+        // Mark all tracks as complete
+        for track_file in &tracks_to_files {
+            library_manager
+                .mark_track_complete(&track_file.db_track_id)
+                .await
+                .map_err(|e| format!("Failed to mark track complete: {}", e))?;
+        }
+
+        // Mark release complete
+        library_manager
+            .mark_release_complete(&db_release.id)
+            .await
+            .map_err(|e| format!("Failed to mark release complete: {}", e))?;
+
+        // Send completion event
+        let _ = self.progress_tx.send(ImportProgress::Complete {
+            id: db_release.id.clone(),
+        });
+
+        // NOTE: We intentionally skip cleanup - files stay in temp folder
+        // This is ephemeral storage that may be deleted at any time
+        info!(
+            "Torrent None storage import complete for '{}' (files in temp: {:?})",
+            db_album.title, torrent_save_dir
+        );
+
+        Ok(())
+    }
+
     /// Torrent import using storage profile.
     ///
     /// Downloads torrent first, then imports files via run_storage_import.
+    /// For None storage, files stay in temp folder (ephemeral).
     #[allow(clippy::too_many_arguments)]
     async fn run_torrent_import(
         &self,
@@ -1024,8 +1376,6 @@ impl ImportService {
         cover_art_url: Option<String>,
         _storage_profile: DbStorageProfile,
     ) -> Result<(), String> {
-        // TODO: Refactor to use storage profile for file storage
-        // For now, delegate to existing implementation
         self.import_album_from_torrent(
             db_album,
             db_release,
@@ -1054,5 +1404,117 @@ impl ImportService {
         // For now, delegate to existing implementation
         self.import_album_from_cd(db_album, db_release, db_tracks, drive_path, toc)
             .await
+    }
+
+    /// CD import with no bae storage: rips to temp folder and records paths.
+    ///
+    /// Files stay in temp folder. This is ephemeral - files may be deleted
+    /// at any time by the OS or user.
+    async fn run_cd_import_none_storage(
+        &self,
+        db_album: DbAlbum,
+        db_release: DbRelease,
+        db_tracks: Vec<DbTrack>,
+        drive_path: PathBuf,
+        toc: CdToc,
+    ) -> Result<(), String> {
+        use crate::cd::{CdDrive, CdRipper};
+
+        let library_manager = self.library_manager.get();
+
+        // Mark release as importing
+        library_manager
+            .mark_release_importing(&db_release.id)
+            .await
+            .map_err(|e| format!("Failed to mark release as importing: {}", e))?;
+
+        info!(
+            "Starting CD import with no storage for '{}' ({} tracks)",
+            db_album.title,
+            db_tracks.len()
+        );
+
+        let _ = self.progress_tx.send(ImportProgress::Started {
+            id: db_release.id.clone(),
+        });
+
+        // Create temp directory for ripped files (will NOT be cleaned up)
+        let temp_dir = std::env::temp_dir().join(format!("bae_cd_rip_{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir_all(&temp_dir)
+            .await
+            .map_err(|e| format!("Failed to create temp directory: {}", e))?;
+
+        let drive = CdDrive {
+            device_path: drive_path.clone(),
+            name: drive_path.to_str().unwrap_or("Unknown").to_string(),
+        };
+        let ripper = CdRipper::new(drive.clone(), toc.clone(), temp_dir.clone());
+
+        // Rip all tracks
+        let rip_results = ripper
+            .rip_all_tracks(None)
+            .await
+            .map_err(|e| format!("Failed to rip CD: {}", e))?;
+
+        info!("CD ripping completed, {} tracks ripped", rip_results.len());
+
+        // Record each ripped file with source_path
+        for (idx, result) in rip_results.iter().enumerate() {
+            let filename = result
+                .output_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown.flac");
+
+            let file_size = tokio::fs::metadata(&result.output_path)
+                .await
+                .map(|m| m.len() as i64)
+                .unwrap_or(0);
+
+            let source_path = result.output_path.to_str().ok_or_else(|| {
+                format!("Cannot convert path to string: {:?}", result.output_path)
+            })?;
+
+            let db_file = DbFile::new(&db_release.id, filename, file_size, "flac")
+                .with_source_path(source_path);
+
+            library_manager
+                .add_file(&db_file)
+                .await
+                .map_err(|e| format!("Failed to add file record: {}", e))?;
+
+            info!(
+                "Recorded ripped file {}/{}: {} -> {}",
+                idx + 1,
+                rip_results.len(),
+                filename,
+                source_path
+            );
+        }
+
+        // Mark all tracks complete
+        for track in &db_tracks {
+            library_manager
+                .mark_track_complete(&track.id)
+                .await
+                .map_err(|e| format!("Failed to mark track complete: {}", e))?;
+        }
+
+        // Mark release complete
+        library_manager
+            .mark_release_complete(&db_release.id)
+            .await
+            .map_err(|e| format!("Failed to mark release complete: {}", e))?;
+
+        let _ = self.progress_tx.send(ImportProgress::Complete {
+            id: db_release.id.clone(),
+        });
+
+        info!(
+            "CD none-storage import complete for '{}'. Files at: {:?}",
+            db_album.title, temp_dir
+        );
+
+        Ok(())
     }
 }

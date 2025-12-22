@@ -2,6 +2,7 @@ use crate::db::DbStorageProfile;
 use crate::import::{MatchCandidate, MatchSource};
 use crate::ui::import_context::ImportContext;
 use crate::ui::local_file_url;
+use crate::ui::Route;
 use dioxus::prelude::*;
 use std::rc::Rc;
 
@@ -215,30 +216,42 @@ pub fn Confirmation(
                 }
 
                 // Storage profile selector
-                if !storage_profiles.read().is_empty() {
-                    div { class: "mb-4 flex items-center gap-3",
-                        label { class: "text-sm text-gray-400", "Storage:" }
-                        select {
-                            class: "bg-gray-700 text-white rounded px-3 py-1.5 text-sm border border-gray-600 focus:border-blue-500 focus:outline-none",
-                            disabled: *is_importing.read(),
-                            onchange: {
-                                let import_context = import_context.clone();
-                                move |evt: Event<FormData>| {
-                                    let value = evt.value();
-                                    if !value.is_empty() {
-                                        import_context.set_storage_profile_id(Some(value));
-                                    }
-                                }
-                            },
-                            for profile in storage_profiles.read().iter() {
-                                option {
-                                    key: "{profile.id}",
-                                    value: "{profile.id}",
-                                    selected: selected_profile_id.read().as_ref() == Some(&profile.id),
-                                    "{profile.name}"
+                div { class: "mb-4 flex items-center gap-3",
+                    label { class: "text-sm text-gray-400", "Storage:" }
+                    select {
+                        class: "bg-gray-700 text-white rounded px-3 py-1.5 text-sm border border-gray-600 focus:border-blue-500 focus:outline-none",
+                        disabled: *is_importing.read(),
+                        onchange: {
+                            let import_context = import_context.clone();
+                            move |evt: Event<FormData>| {
+                                let value = evt.value();
+                                if value == "__none__" {
+                                    import_context.set_storage_profile_id(None);
+                                } else if !value.is_empty() {
+                                    import_context.set_storage_profile_id(Some(value));
                                 }
                             }
+                        },
+                        // "No Storage" option - files stay in place
+                        option {
+                            key: "__none__",
+                            value: "__none__",
+                            selected: selected_profile_id.read().is_none(),
+                            "No Storage (files stay in place)"
                         }
+                        for profile in storage_profiles.read().iter() {
+                            option {
+                                key: "{profile.id}",
+                                value: "{profile.id}",
+                                selected: selected_profile_id.read().as_ref() == Some(&profile.id),
+                                "{profile.name}"
+                            }
+                        }
+                    }
+                    Link {
+                        to: Route::Settings {},
+                        class: "text-xs text-indigo-400 hover:text-indigo-300 transition-colors",
+                        "Configure"
                     }
                 }
 

@@ -179,7 +179,7 @@ impl Database {
         // Files table (metadata for export/torrent features)
         // Files belong to releases, not tracks. Used for reconstructing original
         // file structure during export or BitTorrent seeding.
-        // Playback uses TrackChunkCoords + AudioFormat, not files.
+        // For None storage, source_path is used for direct playback (no chunks).
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS files (
@@ -188,6 +188,7 @@ impl Database {
                 original_filename TEXT NOT NULL,
                 file_size INTEGER NOT NULL,
                 format TEXT NOT NULL,
+                source_path TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (release_id) REFERENCES releases (id) ON DELETE CASCADE
             )
@@ -1149,8 +1150,8 @@ impl Database {
         sqlx::query(
             r#"
             INSERT INTO files (
-                id, release_id, original_filename, file_size, format, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                id, release_id, original_filename, file_size, format, source_path, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&file.id)
@@ -1158,6 +1159,7 @@ impl Database {
         .bind(&file.original_filename)
         .bind(file.file_size)
         .bind(&file.format)
+        .bind(&file.source_path)
         .bind(file.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
@@ -1261,6 +1263,7 @@ impl Database {
                 original_filename: row.get("original_filename"),
                 file_size: row.get("file_size"),
                 format: row.get("format"),
+                source_path: row.get("source_path"),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
@@ -1284,6 +1287,7 @@ impl Database {
                 original_filename: row.get("original_filename"),
                 file_size: row.get("file_size"),
                 format: row.get("format"),
+                source_path: row.get("source_path"),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
@@ -2080,6 +2084,7 @@ impl Database {
             original_filename: row.get("original_filename"),
             file_size: row.get("file_size"),
             format: row.get("format"),
+            source_path: row.get("source_path"),
             created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                 .unwrap()
                 .with_timezone(&Utc),

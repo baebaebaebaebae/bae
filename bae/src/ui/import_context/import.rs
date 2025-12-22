@@ -82,12 +82,8 @@ pub async fn confirm_and_start_import(
         }
     }
 
-    // Get storage profile - required for all imports
-    let storage_profile_id = ctx
-        .storage_profile_id()
-        .read()
-        .clone()
-        .ok_or_else(|| "No storage profile selected".to_string())?;
+    // Get storage profile (optional - None means files stay in place)
+    let storage_profile_id = ctx.storage_profile_id().read().clone();
 
     // Extract master_year from metadata or release date
     let metadata = ctx.detected_metadata().read().clone();

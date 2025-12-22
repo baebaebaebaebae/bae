@@ -595,22 +595,52 @@ impl PlaybackService {
             }
         };
 
-        // Reassemble track chunks
-        let audio_data = match super::reassembly::reassemble_track(
-            track_id,
-            &self.library_manager,
-            &self.cloud_storage,
-            &self.cache,
-            &self.encryption_service,
-            self.chunk_size_bytes,
-        )
-        .await
+        // Check storage profile to determine how to load audio
+        let storage_profile = match self
+            .library_manager
+            .get_storage_profile_for_release(&track.release_id)
+            .await
         {
-            Ok(data) => data,
+            Ok(profile) => profile,
             Err(e) => {
-                error!("Failed to reassemble track: {}", e);
+                error!("Failed to get storage profile: {}", e);
                 self.stop().await;
                 return;
+            }
+        };
+
+        // Load audio data based on storage type
+        // No storage profile = files are in-place, read from source_path
+        let audio_data = if storage_profile.is_none() {
+            match self
+                .load_audio_from_source_path(track_id, &track.release_id)
+                .await
+            {
+                Ok(data) => data,
+                Err(e) => {
+                    error!("Failed to load audio from source path: {}", e);
+                    self.stop().await;
+                    return;
+                }
+            }
+        } else {
+            // Has storage profile: reassemble from chunks
+            match super::reassembly::reassemble_track(
+                track_id,
+                &self.library_manager,
+                &self.cloud_storage,
+                &self.cache,
+                &self.encryption_service,
+                self.chunk_size_bytes,
+            )
+            .await
+            {
+                Ok(data) => data,
+                Err(e) => {
+                    error!("Failed to reassemble track: {}", e);
+                    self.stop().await;
+                    return;
+                }
             }
         };
 
@@ -1192,5 +1222,81 @@ impl PlaybackService {
         let _ = self
             .progress_tx
             .send(PlaybackProgress::QueueUpdated { tracks: track_ids });
+    }
+
+    /// Load audio directly from source_path for None storage.
+    ///
+    /// For single-file-per-track imports, finds the audio file and reads it.
+    /// Note: CUE/FLAC with None storage is not yet supported.
+    async fn load_audio_from_source_path(
+        &self,
+        track_id: &str,
+        release_id: &str,
+    ) -> Result<Vec<u8>, String> {
+        info!(
+            "Loading audio from source path for track {} (None storage)",
+            track_id
+        );
+
+        // Get files for the release
+        let files = self
+            .library_manager
+            .get_files_for_release(release_id)
+            .await
+            .map_err(|e| format!("Failed to get files: {}", e))?;
+
+        // Find an audio file with source_path set
+        // For single-file-per-track, we match by track number in filename
+        let track = self
+            .library_manager
+            .get_track(track_id)
+            .await
+            .map_err(|e| format!("Failed to get track: {}", e))?
+            .ok_or_else(|| format!("Track not found: {}", track_id))?;
+
+        // Try to find a matching audio file
+        let audio_file = files
+            .iter()
+            .filter(|f| {
+                let ext = f.format.to_lowercase();
+                (ext == "flac" || ext == "mp3" || ext == "wav" || ext == "ogg")
+                    && f.source_path.is_some()
+            })
+            .find(|f| {
+                // Try to match by track number in filename
+                if let Some(track_num) = track.track_number {
+                    let num_str = format!("{:02}", track_num);
+                    f.original_filename.contains(&num_str)
+                } else {
+                    // Fallback: just use the first audio file
+                    true
+                }
+            })
+            .or_else(|| {
+                // If no match by track number, use first audio file with source_path
+                files.iter().find(|f| {
+                    let ext = f.format.to_lowercase();
+                    (ext == "flac" || ext == "mp3" || ext == "wav" || ext == "ogg")
+                        && f.source_path.is_some()
+                })
+            })
+            .ok_or_else(|| {
+                format!(
+                    "No audio file with source_path found for release {}",
+                    release_id
+                )
+            })?;
+
+        let source_path = audio_file
+            .source_path
+            .as_ref()
+            .ok_or_else(|| "Audio file has no source_path".to_string())?;
+
+        info!("Reading audio from: {}", source_path);
+
+        // Read the file directly
+        tokio::fs::read(source_path)
+            .await
+            .map_err(|e| format!("Failed to read audio file {}: {}", source_path, e))
     }
 }
