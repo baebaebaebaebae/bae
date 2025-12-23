@@ -20,6 +20,49 @@ use std::rc::Rc;
 use super::types::{ImportPhase, ImportStep};
 use super::{detection, import, navigation};
 
+/// Selected cover for import - stores the actual filename, not just an index
+#[derive(Debug, Clone, PartialEq)]
+pub enum SelectedCover {
+    /// Remote cover (MusicBrainz/Discogs) - stores the expected download filename
+    Remote {
+        url: String,
+        /// The filename the cover will be downloaded to (e.g. ".bae/cover-mb.jpg")
+        expected_filename: String,
+    },
+    /// Local artwork file from the album folder
+    Local {
+        /// Relative path from album folder (e.g. "scans/front.jpg")
+        filename: String,
+    },
+}
+
+/// Compute the expected filename for a remote cover download.
+/// Matches the logic in import/cover_art.rs download_cover_art_to_bae_folder.
+pub fn compute_expected_cover_filename(url: &str, source: &str) -> String {
+    // Extract extension from URL (same logic as cover_art.rs)
+    let extension = url
+        .rsplit('/')
+        .next()
+        .and_then(|filename| {
+            let ext = filename.rsplit('.').next()?;
+            let ext_lower = ext.to_lowercase();
+            if ["jpg", "jpeg", "png", "gif", "webp"].contains(&ext_lower.as_str()) {
+                Some(ext_lower)
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "jpg".to_string());
+
+    let base_name = match source.to_lowercase().as_str() {
+        "musicbrainz" | "mb" => "cover-mb",
+        "discogs" => "cover-discogs",
+        _ => "cover",
+    };
+
+    format!(".bae/{}.{}", base_name, extension)
+}
+
 /// Which search tab is active
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum SearchTab {
@@ -66,8 +109,8 @@ pub struct ImportContext {
     pub(crate) discid_lookup_error: Signal<Option<String>>,
     pub(crate) duplicate_album_id: Signal<Option<String>>,
     pub(crate) folder_files: Signal<CategorizedFileInfo>,
-    /// Selected cover image: None = use remote URL, Some(index) = use local artwork at index
-    pub(crate) selected_cover_index: Signal<Option<usize>>,
+    /// Selected cover for import - stores actual filename
+    pub(crate) selected_cover: Signal<Option<SelectedCover>>,
     // Torrent-specific state
     pub(crate) torrent_source: Signal<Option<TorrentSource>>,
     pub(crate) seed_after_download: Signal<bool>,
@@ -136,7 +179,7 @@ impl ImportContext {
             discid_lookup_error: Signal::new(None),
             duplicate_album_id: Signal::new(None),
             folder_files: Signal::new(CategorizedFileInfo::default()),
-            selected_cover_index: Signal::new(None),
+            selected_cover: Signal::new(None),
             torrent_source: Signal::new(None),
             seed_after_download: Signal::new(true),
             torrent_metadata: Signal::new(None),
@@ -254,8 +297,32 @@ impl ImportContext {
         self.folder_files
     }
 
-    pub fn selected_cover_index(&self) -> Signal<Option<usize>> {
-        self.selected_cover_index
+    pub fn selected_cover(&self) -> Signal<Option<SelectedCover>> {
+        self.selected_cover
+    }
+
+    /// Set a remote cover (MusicBrainz/Discogs). Computes the expected download filename from URL.
+    pub fn set_remote_cover(&self, url: &str, source: &str) {
+        let expected_filename = compute_expected_cover_filename(url, source);
+        let mut signal = self.selected_cover;
+        signal.set(Some(SelectedCover::Remote {
+            url: url.to_string(),
+            expected_filename,
+        }));
+    }
+
+    /// Set a local cover by filename (relative path from album folder)
+    pub fn set_local_cover(&self, filename: &str) {
+        let mut signal = self.selected_cover;
+        signal.set(Some(SelectedCover::Local {
+            filename: filename.to_string(),
+        }));
+    }
+
+    /// Clear cover selection
+    pub fn clear_cover(&self) {
+        let mut signal = self.selected_cover;
+        signal.set(None);
     }
 
     pub fn torrent_source(&self) -> Signal<Option<TorrentSource>> {
@@ -790,5 +857,80 @@ impl ImportContext {
 
     pub fn reject_confirmation(&self) {
         navigation::reject_confirmation(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compute_expected_cover_filename_musicbrainz_jpg() {
+        let filename = compute_expected_cover_filename(
+            "https://coverartarchive.org/release/abc/123.jpg",
+            "musicbrainz",
+        );
+        assert_eq!(filename, ".bae/cover-mb.jpg");
+    }
+
+    #[test]
+    fn test_compute_expected_cover_filename_musicbrainz_jpeg() {
+        let filename = compute_expected_cover_filename(
+            "https://coverartarchive.org/release/abc/456.jpeg",
+            "musicbrainz",
+        );
+        assert_eq!(filename, ".bae/cover-mb.jpeg");
+    }
+
+    #[test]
+    fn test_compute_expected_cover_filename_musicbrainz_png() {
+        let filename = compute_expected_cover_filename(
+            "https://coverartarchive.org/release/abc/789.png",
+            "mb",
+        );
+        assert_eq!(filename, ".bae/cover-mb.png");
+    }
+
+    #[test]
+    fn test_compute_expected_cover_filename_discogs() {
+        let filename =
+            compute_expected_cover_filename("https://i.discogs.com/abc/cover.jpg", "discogs");
+        assert_eq!(filename, ".bae/cover-discogs.jpg");
+    }
+
+    #[test]
+    fn test_compute_expected_cover_filename_no_extension_defaults_to_jpg() {
+        let filename = compute_expected_cover_filename("https://example.com/image", "musicbrainz");
+        assert_eq!(filename, ".bae/cover-mb.jpg");
+    }
+
+    #[test]
+    fn test_selected_cover_local_stores_filename() {
+        let cover = SelectedCover::Local {
+            filename: "scans/front.jpg".to_string(),
+        };
+        if let SelectedCover::Local { filename } = cover {
+            assert_eq!(filename, "scans/front.jpg");
+        } else {
+            panic!("Expected Local variant");
+        }
+    }
+
+    #[test]
+    fn test_selected_cover_remote_stores_expected_filename() {
+        let cover = SelectedCover::Remote {
+            url: "https://example.com/cover.jpeg".to_string(),
+            expected_filename: ".bae/cover-mb.jpeg".to_string(),
+        };
+        if let SelectedCover::Remote {
+            url,
+            expected_filename,
+        } = cover
+        {
+            assert_eq!(url, "https://example.com/cover.jpeg");
+            assert_eq!(expected_filename, ".bae/cover-mb.jpeg");
+        } else {
+            panic!("Expected Remote variant");
+        }
     }
 }

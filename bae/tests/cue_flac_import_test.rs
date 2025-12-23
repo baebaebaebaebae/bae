@@ -111,9 +111,13 @@ async fn test_cue_flac_import() {
 
     // Import
     let params = ImportRequest::Folder {
-        discogs_release,
+        discogs_release: Some(discogs_release),
+        mb_release: None,
         folder: folder_path,
         master_year: 1970,
+        cover_art_url: None,
+        storage_profile_id: None,
+        selected_cover_filename: None,
     };
 
     let (_album_id, release_id) = import_handle

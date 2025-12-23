@@ -84,9 +84,13 @@ impl PlaybackTestFixture {
         let master_year = discogs_release.year.unwrap_or(2024);
         let (_album_id, release_id) = import_handle
             .send_request(ImportRequest::Folder {
-                discogs_release,
+                discogs_release: Some(discogs_release),
+                mb_release: None,
                 folder: album_dir.clone(),
                 master_year,
+                cover_art_url: None,
+                storage_profile_id: None,
+                selected_cover_filename: None,
             })
             .await?;
 

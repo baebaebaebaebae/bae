@@ -1,5 +1,6 @@
 use crate::db::DbStorageProfile;
 use crate::import::{MatchCandidate, MatchSource};
+use crate::ui::import_context::state::SelectedCover;
 use crate::ui::import_context::ImportContext;
 use crate::ui::local_file_url;
 use crate::ui::Route;
@@ -51,8 +52,8 @@ pub fn Confirmation(
         });
     }
 
-    // Use context signal for selected cover image index (None = use remote URL from candidate)
-    let mut selected_cover_index = import_context.selected_cover_index();
+    // Selected cover - stores the actual filename, not just an index
+    let selected_cover = import_context.selected_cover();
 
     if let Some(candidate) = confirmed_candidate.read().as_ref() {
         let remote_cover_url = candidate.cover_art_url();
@@ -62,22 +63,24 @@ pub fn Confirmation(
             MatchSource::Discogs(_) => None,
         };
 
+        // Determine cover source for setting selection
+        let cover_source = match &candidate.source {
+            MatchSource::MusicBrainz(_) => "musicbrainz",
+            MatchSource::Discogs(_) => "discogs",
+        };
+
         // Get local artwork files
         let artwork_files = folder_files.read().artwork.clone();
         let folder_path_str = folder_path.read().clone();
 
         // Determine the cover URL to display
-        let display_cover_url = if let Some(idx) = *selected_cover_index.read() {
-            // User selected a local image
-            if let Some(img) = artwork_files.get(idx) {
-                let path = format!("{}/{}", folder_path_str, img.name);
+        let display_cover_url = match selected_cover.read().as_ref() {
+            Some(SelectedCover::Local { filename }) => {
+                let path = format!("{}/{}", folder_path_str, filename);
                 Some(local_file_url(&path))
-            } else {
-                remote_cover_url.clone()
             }
-        } else {
-            // Default: use remote URL if available
-            remote_cover_url.clone()
+            Some(SelectedCover::Remote { url, .. }) => Some(url.clone()),
+            None => remote_cover_url.clone(),
         };
 
         rsx! {
@@ -164,11 +167,14 @@ pub fn Confirmation(
                             // Remote cover option (if available)
                             if let Some(ref url) = remote_cover_url {
                                 {
-                                    let is_selected = selected_cover_index.read().is_none();
+                                    let is_selected = matches!(selected_cover.read().as_ref(), Some(SelectedCover::Remote { .. }) | None);
+                                    let url_for_click = url.clone();
+                                    let source_for_click = cover_source.to_string();
+                                    let ctx = import_context.clone();
                                     rsx! {
                                         button {
                                             class: if is_selected { "relative w-16 h-16 rounded border-2 border-green-500 overflow-hidden" } else { "relative w-16 h-16 rounded border-2 border-gray-600 hover:border-gray-500 overflow-hidden" },
-                                            onclick: move |_| selected_cover_index.set(None),
+                                            onclick: move |_| ctx.set_remote_cover(&url_for_click, &source_for_click),
                                             img {
                                                 src: "{url}",
                                                 alt: "Remote cover",
@@ -185,15 +191,21 @@ pub fn Confirmation(
                             }
 
                             // Local image options
-                            for (idx , img) in artwork_files.iter().enumerate() {
+                            for img in artwork_files.iter() {
                                 {
-                                    let is_selected = *selected_cover_index.read() == Some(idx);
+                                    let img_name = img.name.clone();
+                                    let is_selected = matches!(
+                                        selected_cover.read().as_ref(),
+                                        Some(SelectedCover::Local { filename }) if filename == &img_name
+                                    );
                                     let img_path = format!("{}/{}", folder_path_str, img.name);
                                     let img_url = local_file_url(&img_path);
+                                    let name_for_click = img.name.clone();
+                                    let ctx = import_context.clone();
                                     rsx! {
                                         button {
                                             class: if is_selected { "relative w-16 h-16 rounded border-2 border-green-500 overflow-hidden" } else { "relative w-16 h-16 rounded border-2 border-gray-600 hover:border-gray-500 overflow-hidden" },
-                                            onclick: move |_| selected_cover_index.set(Some(idx)),
+                                            onclick: move |_| ctx.set_local_cover(&name_for_click),
                                             img {
                                                 src: "{img_url}",
                                                 alt: "{img.name}",

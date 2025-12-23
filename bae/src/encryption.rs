@@ -262,6 +262,7 @@ mod tests {
             max_import_upload_workers: 20,
             max_import_db_write_workers: 10,
             chunk_size_bytes: 1024 * 1024,
+            torrent_bind_interface: None,
         };
 
         EncryptionService::new(&test_config).expect("Failed to create test encryption service")

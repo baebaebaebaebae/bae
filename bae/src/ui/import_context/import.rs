@@ -1,4 +1,4 @@
-use super::state::ImportContext;
+use super::state::{ImportContext, SelectedCover};
 use crate::discogs::DiscogsRelease;
 use crate::import::{ImportRequest, MatchCandidate, MatchSource};
 use crate::ui::components::import::ImportSource;
@@ -90,29 +90,18 @@ pub async fn confirm_and_start_import(
     let metadata = ctx.detected_metadata().read().clone();
     let master_year = metadata.as_ref().and_then(|m| m.year).unwrap_or(1970);
 
-    // Determine cover art URL based on user selection
-    // For local images, use bae://local/... URL so webview can display them
-    let selected_cover_idx = *ctx.selected_cover_index().read();
-    let folder_files = ctx.folder_files().read().clone();
+    // Get cover selection directly from state - filename is already computed
     let folder_path_for_cover = ctx.folder_path().read().clone();
-
-    // Track selected cover filename for import (only for local selections)
-    let mut selected_cover_filename: Option<String> = None;
-
-    let cover_art_url = if let Some(idx) = selected_cover_idx {
-        // User selected a local image - convert to bae://local/... URL
-        if let Some(img) = folder_files.artwork.get(idx) {
-            // Store the relative filename for import service to use
-            selected_cover_filename = Some(img.name.clone());
-            let local_path = format!("{}/{}", folder_path_for_cover, img.name);
-            Some(local_file_url(&local_path))
-        } else {
-            // Fallback to remote if index is invalid
-            candidate.cover_art_url.clone()
+    let (cover_art_url, selected_cover_filename) = match ctx.selected_cover().read().clone() {
+        Some(SelectedCover::Remote {
+            url,
+            expected_filename,
+        }) => (Some(url), Some(expected_filename)),
+        Some(SelectedCover::Local { filename }) => {
+            let local_path = format!("{}/{}", folder_path_for_cover, filename);
+            (Some(local_file_url(&local_path)), Some(filename))
         }
-    } else {
-        // Use remote cover art URL from candidate
-        candidate.cover_art_url.clone()
+        None => (None, None),
     };
 
     // Build import request based on source
@@ -293,3 +282,5 @@ pub async fn confirm_and_start_import(
         }
     }
 }
+
+// Tests for cover selection are in state.rs where compute_expected_cover_filename is defined
