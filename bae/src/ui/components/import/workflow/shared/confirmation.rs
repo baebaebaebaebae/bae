@@ -55,6 +55,24 @@ pub fn Confirmation(
     // Selected cover - stores the actual filename, not just an index
     let selected_cover = import_context.selected_cover();
 
+    // Auto-select remote cover if available and no selection yet
+    {
+        let import_context = import_context.clone();
+        use_effect(move || {
+            if selected_cover.read().is_none() {
+                if let Some(candidate) = confirmed_candidate.read().as_ref() {
+                    if let Some(url) = candidate.cover_art_url() {
+                        let source = match &candidate.source {
+                            MatchSource::MusicBrainz(_) => "musicbrainz",
+                            MatchSource::Discogs(_) => "discogs",
+                        };
+                        import_context.set_remote_cover(&url, source);
+                    }
+                }
+            }
+        });
+    }
+
     if let Some(candidate) = confirmed_candidate.read().as_ref() {
         let remote_cover_url = candidate.cover_art_url();
         let release_year = candidate.year();
@@ -167,7 +185,7 @@ pub fn Confirmation(
                             // Remote cover option (if available)
                             if let Some(ref url) = remote_cover_url {
                                 {
-                                    let is_selected = matches!(selected_cover.read().as_ref(), Some(SelectedCover::Remote { .. }) | None);
+                                    let is_selected = matches!(selected_cover.read().as_ref(), Some(SelectedCover::Remote { .. }));
                                     let url_for_click = url.clone();
                                     let source_for_click = cover_source.to_string();
                                     let ctx = import_context.clone();
