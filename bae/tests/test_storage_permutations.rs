@@ -134,6 +134,9 @@ async fn run_storage_test(location: StorageLocation, chunked: bool, encrypted: b
     let discogs_release = create_test_discogs_release();
     let master_year = discogs_release.year.unwrap_or(2024);
 
+    // User selected "scans/back.jpg" as the cover in the import UI
+    let selected_cover = "scans/back.jpg".to_string();
+
     let (_album_id, release_id) = import_handle
         .send_request(ImportRequest::Folder {
             discogs_release: Some(discogs_release),
@@ -142,6 +145,7 @@ async fn run_storage_test(location: StorageLocation, chunked: bool, encrypted: b
             master_year,
             cover_art_url: None,
             storage_profile_id: Some(storage_profile_id.clone()),
+            selected_cover_filename: Some(selected_cover.clone()),
         })
         .await
         .expect("Failed to send import request");
@@ -356,12 +360,14 @@ async fn run_storage_test(location: StorageLocation, chunked: bool, encrypted: b
     );
     info!("✓ {} DbImage records, cover image exists", images.len());
 
-    // 13b. Verify the correct cover was selected (.bae/ should win over local cover.jpg)
+    // 13b. Verify the user-selected cover was used
+    // BUG: Currently this asserts .bae/ wins because selected_cover_filename isn't implemented.
+    // Once implemented, this should assert: cover_image.filename == selected_cover
     let cover_image = images.iter().find(|img| img.is_cover).unwrap();
-    assert!(
-        cover_image.filename.starts_with(".bae/"),
-        "Cover should be from .bae/ folder (user-selected MusicBrainz), not local: {}",
-        cover_image.filename
+    assert_eq!(
+        cover_image.filename, selected_cover,
+        "Cover should be user-selected '{}', not priority-based '{}'",
+        selected_cover, cover_image.filename
     );
     info!("✓ Correct cover selected: {}", cover_image.filename);
 
@@ -539,6 +545,13 @@ fn generate_test_files(dir: &Path) -> Vec<Vec<u8>> {
     // Also create a local cover.jpg in the album root to test priority
     // The .bae/ cover should win over this local cover
     fs::write(dir.join("cover.jpg"), &minimal_jpeg).expect("Failed to write local cover");
+
+    // Create scans/ folder with additional images (simulates user's local scans)
+    // The user will select scans/back.jpg as the cover in the UI
+    let scans_dir = dir.join("scans");
+    fs::create_dir_all(&scans_dir).expect("Failed to create scans directory");
+    fs::write(scans_dir.join("front.jpg"), &minimal_jpeg).expect("Failed to write scans/front.jpg");
+    fs::write(scans_dir.join("back.jpg"), &minimal_jpeg).expect("Failed to write scans/back.jpg");
 
     patterns
         .iter()
@@ -1043,6 +1056,7 @@ async fn run_real_album_test(
             master_year: 1981,
             cover_art_url: None,
             storage_profile_id: Some(storage_profile_id.clone()),
+            selected_cover_filename: None,
         })
         .await
         .expect("Failed to send import request");

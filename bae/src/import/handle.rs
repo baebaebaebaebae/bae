@@ -85,6 +85,7 @@ impl ImportServiceHandle {
                 master_year,
                 cover_art_url,
                 storage_profile_id,
+                selected_cover_filename,
             } => {
                 self.send_folder_request(
                     discogs_release,
@@ -93,6 +94,7 @@ impl ImportServiceHandle {
                     master_year,
                     cover_art_url,
                     storage_profile_id,
+                    selected_cover_filename,
                 )
                 .await
             }
@@ -105,6 +107,7 @@ impl ImportServiceHandle {
                 torrent_metadata,
                 cover_art_url,
                 storage_profile_id,
+                selected_cover_filename,
             } => {
                 self.send_torrent_request(
                     torrent_source,
@@ -115,6 +118,7 @@ impl ImportServiceHandle {
                     torrent_metadata,
                     cover_art_url,
                     storage_profile_id,
+                    selected_cover_filename,
                 )
                 .await
             }
@@ -125,6 +129,7 @@ impl ImportServiceHandle {
                 master_year,
                 cover_art_url,
                 storage_profile_id,
+                selected_cover_filename,
             } => {
                 self.send_cd_request(
                     discogs_release,
@@ -133,6 +138,7 @@ impl ImportServiceHandle {
                     master_year,
                     cover_art_url,
                     storage_profile_id,
+                    selected_cover_filename,
                 )
                 .await
             }
@@ -147,6 +153,7 @@ impl ImportServiceHandle {
         master_year: u32,
         cover_art_url: Option<String>,
         storage_profile_id: Option<String>,
+        selected_cover_filename: Option<String>,
     ) -> Result<(String, String), String> {
         // Validate that at least one release is provided
         if discogs_release.is_none() && mb_release.is_none() {
@@ -276,6 +283,7 @@ impl ImportServiceHandle {
                 discovered_files,
                 cue_flac_metadata,
                 storage_profile_id,
+                selected_cover_filename,
             })
             .map_err(|_| "Failed to queue validated album for import".to_string())?;
 
@@ -292,6 +300,7 @@ impl ImportServiceHandle {
         torrent_metadata: TorrentImportMetadata,
         cover_art_url: Option<String>,
         storage_profile_id: Option<String>,
+        selected_cover_filename: Option<String>,
     ) -> Result<(String, String), String> {
         // Validate that at least one release is provided
         if discogs_release.is_none() && mb_release.is_none() {
@@ -445,6 +454,7 @@ impl ImportServiceHandle {
                 seed_after_download,
                 cover_art_url,
                 storage_profile_id,
+                selected_cover_filename,
             })
             .map_err(|_| "Failed to queue validated torrent for import".to_string())?;
 
@@ -459,6 +469,7 @@ impl ImportServiceHandle {
         master_year: u32,
         cover_art_url: Option<String>,
         storage_profile_id: Option<String>,
+        selected_cover_filename: Option<String>,
     ) -> Result<(String, String), String> {
         // Validate that at least one release is provided
         if discogs_release.is_none() && mb_release.is_none() {
@@ -565,6 +576,7 @@ impl ImportServiceHandle {
                 drive_path: drive.device_path,
                 toc,
                 storage_profile_id,
+                selected_cover_filename,
             })
             .map_err(|_| "Failed to queue validated CD import".to_string())?;
 

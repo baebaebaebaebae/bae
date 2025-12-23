@@ -161,6 +161,7 @@ impl ImportService {
                 discovered_files,
                 cue_flac_metadata,
                 storage_profile_id,
+                selected_cover_filename,
             } => {
                 info!("Starting folder import for '{}'", db_album.title);
                 match storage_profile_id {
@@ -173,6 +174,7 @@ impl ImportService {
                                     &tracks_to_files,
                                     cue_flac_metadata,
                                     profile,
+                                    selected_cover_filename,
                                 )
                                 .await
                             }
@@ -187,6 +189,7 @@ impl ImportService {
                             &discovered_files,
                             &tracks_to_files,
                             cue_flac_metadata,
+                            selected_cover_filename,
                         )
                         .await
                     }
@@ -201,6 +204,7 @@ impl ImportService {
                 seed_after_download,
                 cover_art_url,
                 storage_profile_id,
+                selected_cover_filename,
             } => {
                 info!("Starting torrent import for '{}'", db_album.title);
                 match storage_profile_id {
@@ -216,6 +220,7 @@ impl ImportService {
                                     seed_after_download,
                                     cover_art_url,
                                     profile,
+                                    selected_cover_filename,
                                 )
                                 .await
                             }
@@ -232,6 +237,7 @@ impl ImportService {
                             torrent_source,
                             torrent_metadata,
                             cover_art_url,
+                            selected_cover_filename,
                         )
                         .await
                     }
@@ -244,6 +250,7 @@ impl ImportService {
                 drive_path,
                 toc,
                 storage_profile_id,
+                selected_cover_filename,
             } => {
                 info!("Starting CD import for '{}'", db_album.title);
                 match storage_profile_id {
@@ -251,7 +258,13 @@ impl ImportService {
                         match self.database.get_storage_profile(&profile_id).await {
                             Ok(Some(profile)) => {
                                 self.run_cd_import(
-                                    db_album, db_release, db_tracks, drive_path, toc, profile,
+                                    db_album,
+                                    db_release,
+                                    db_tracks,
+                                    drive_path,
+                                    toc,
+                                    profile,
+                                    selected_cover_filename,
                                 )
                                 .await
                             }
@@ -262,7 +275,12 @@ impl ImportService {
                     None => {
                         // No storage profile = ripped files stay in temp folder
                         self.run_cd_import_none_storage(
-                            db_album, db_release, db_tracks, drive_path, toc,
+                            db_album,
+                            db_release,
+                            db_tracks,
+                            drive_path,
+                            toc,
+                            selected_cover_filename,
                         )
                         .await
                     }
@@ -875,6 +893,7 @@ impl ImportService {
         tracks_to_files: &[TrackFile],
         cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
         storage_profile: DbStorageProfile,
+        selected_cover_filename: Option<String>,
     ) -> Result<(), String> {
         let library_manager = self.library_manager.get();
 
@@ -1012,6 +1031,7 @@ impl ImportService {
                 &db_release.album_id,
                 discovered_files,
                 library_manager,
+                selected_cover_filename,
             )
             .await?;
 
@@ -1053,6 +1073,9 @@ impl ImportService {
     /// The first image found (preferring .bae/ folder or cover/front named files) is marked as cover.
     /// Also sets the album's cover_image_id to the cover image.
     ///
+    /// If `selected_cover_filename` is provided, that image will be used as cover.
+    /// Otherwise, falls back to priority-based selection (.bae/ folder, cover/front in name).
+    ///
     /// Returns the cover_image_id if one was set.
     async fn create_image_records(
         &self,
@@ -1060,32 +1083,20 @@ impl ImportService {
         album_id: &str,
         discovered_files: &[DiscoveredFile],
         library_manager: &LibraryManager,
+        selected_cover_filename: Option<String>,
     ) -> Result<Option<String>, String> {
         use crate::db::{DbImage, ImageSource};
 
         let image_extensions = ["jpg", "jpeg", "png", "gif", "webp"];
 
-        // Collect image files
+        // Collect image files with their relative paths
         let mut image_files: Vec<(&DiscoveredFile, String)> = discovered_files
             .iter()
             .filter_map(|f| {
-                let filename = f.path.file_name()?.to_str()?;
                 let ext = f.path.extension()?.to_str()?.to_lowercase();
                 if image_extensions.contains(&ext.as_str()) {
-                    // Get relative path (include .bae/ prefix if present)
-                    let relative_path = if let Some(parent) = f.path.parent() {
-                        if let Some(parent_name) = parent.file_name() {
-                            if parent_name == ".bae" {
-                                format!(".bae/{}", filename)
-                            } else {
-                                filename.to_string()
-                            }
-                        } else {
-                            filename.to_string()
-                        }
-                    } else {
-                        filename.to_string()
-                    };
+                    // Build relative path preserving directory structure
+                    let relative_path = self.get_relative_image_path(&f.path);
                     Some((f, relative_path))
                 } else {
                     None
@@ -1097,14 +1108,33 @@ impl ImportService {
             return Ok(None);
         }
 
-        // Sort to prioritize .bae/ folder and cover/front named files for cover selection
-        image_files.sort_by(|(_, a), (_, b)| {
-            let a_priority = Self::image_cover_priority(a);
-            let b_priority = Self::image_cover_priority(b);
-            a_priority.cmp(&b_priority)
+        // Determine which image should be cover
+        let cover_filename = if let Some(ref selected) = selected_cover_filename {
+            // User explicitly selected a cover - use it if it exists
+            if image_files.iter().any(|(_, path)| path == selected) {
+                Some(selected.clone())
+            } else {
+                // Selected file not found, fall back to priority
+                info!(
+                    "Selected cover '{}' not found among images, using priority",
+                    selected
+                );
+                None
+            }
+        } else {
+            None
+        };
+
+        // If no valid selection, sort by priority and use first
+        let cover_filename = cover_filename.unwrap_or_else(|| {
+            image_files.sort_by(|(_, a), (_, b)| {
+                let a_priority = Self::image_cover_priority(a);
+                let b_priority = Self::image_cover_priority(b);
+                a_priority.cmp(&b_priority)
+            });
+            image_files.first().map(|(_, path)| path.clone()).unwrap()
         });
 
-        let mut cover_set = false;
         let mut cover_image_id: Option<String> = None;
 
         for (_file, relative_path) in &image_files {
@@ -1123,11 +1153,8 @@ impl ImportService {
                 ImageSource::Local
             };
 
-            // First image (highest priority) is the cover
-            let is_cover = !cover_set;
-            if is_cover {
-                cover_set = true;
-            }
+            // Mark as cover if this is the selected/priority cover
+            let is_cover = relative_path == &cover_filename;
 
             let db_image = DbImage::new(release_id, relative_path, is_cover, source);
             let image_id = db_image.id.clone();
@@ -1171,6 +1198,27 @@ impl ImportService {
 
         // Everything else
         2
+    }
+
+    /// Get relative path for an image file, preserving subdirectory structure.
+    fn get_relative_image_path(&self, path: &std::path::Path) -> String {
+        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+        // Check parent directory to preserve structure like ".bae/", "scans/", etc.
+        if let Some(parent) = path.parent() {
+            if let Some(parent_name) = parent.file_name().and_then(|n| n.to_str()) {
+                // Preserve common subdirectory patterns
+                if parent_name == ".bae"
+                    || parent_name == "scans"
+                    || parent_name == "artwork"
+                    || parent_name == "images"
+                {
+                    return format!("{}/{}", parent_name, filename);
+                }
+            }
+        }
+
+        filename.to_string()
     }
 
     /// Persist track metadata for non-chunked storage.
@@ -1325,6 +1373,7 @@ impl ImportService {
         discovered_files: &[DiscoveredFile],
         tracks_to_files: &[TrackFile],
         _cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
+        selected_cover_filename: Option<String>,
     ) -> Result<(), String> {
         let library_manager = self.library_manager.get();
 
@@ -1413,6 +1462,7 @@ impl ImportService {
                 &db_release.album_id,
                 discovered_files,
                 library_manager,
+                selected_cover_filename,
             )
             .await?;
 
@@ -1446,6 +1496,7 @@ impl ImportService {
         torrent_source: TorrentSource,
         torrent_metadata: TorrentImportMetadata,
         cover_art_url: Option<String>,
+        selected_cover_filename: Option<String>,
     ) -> Result<(), String> {
         let library_manager = self.library_manager.get();
 
@@ -1633,6 +1684,7 @@ impl ImportService {
                 &db_release.album_id,
                 &discovered_files,
                 library_manager,
+                selected_cover_filename,
             )
             .await?;
 
@@ -1674,6 +1726,7 @@ impl ImportService {
         seed_after_download: bool,
         cover_art_url: Option<String>,
         _storage_profile: DbStorageProfile,
+        _selected_cover_filename: Option<String>,
     ) -> Result<(), String> {
         self.import_album_from_torrent(
             db_album,
@@ -1698,6 +1751,7 @@ impl ImportService {
         drive_path: PathBuf,
         toc: CdToc,
         _storage_profile: DbStorageProfile,
+        _selected_cover_filename: Option<String>,
     ) -> Result<(), String> {
         // TODO: Refactor to use storage profile for file storage
         // For now, delegate to existing implementation
@@ -1716,6 +1770,7 @@ impl ImportService {
         db_tracks: Vec<DbTrack>,
         drive_path: PathBuf,
         toc: CdToc,
+        _selected_cover_filename: Option<String>,
     ) -> Result<(), String> {
         use crate::cd::{CdDrive, CdRipper};
 

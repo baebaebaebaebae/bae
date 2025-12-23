@@ -96,9 +96,14 @@ pub async fn confirm_and_start_import(
     let folder_files = ctx.folder_files().read().clone();
     let folder_path_for_cover = ctx.folder_path().read().clone();
 
+    // Track selected cover filename for import (only for local selections)
+    let mut selected_cover_filename: Option<String> = None;
+
     let cover_art_url = if let Some(idx) = selected_cover_idx {
         // User selected a local image - convert to bae://local/... URL
         if let Some(img) = folder_files.artwork.get(idx) {
+            // Store the relative filename for import service to use
+            selected_cover_filename = Some(img.name.clone());
             let local_path = format!("{}/{}", folder_path_for_cover, img.name);
             Some(local_file_url(&local_path))
         } else {
@@ -133,6 +138,7 @@ pub async fn confirm_and_start_import(
                         master_year,
                         cover_art_url: cover_art_url.clone(),
                         storage_profile_id: storage_profile_id.clone(),
+                        selected_cover_filename: selected_cover_filename.clone(),
                     }
                 }
                 MatchSource::MusicBrainz(mb_release) => {
@@ -148,6 +154,7 @@ pub async fn confirm_and_start_import(
                         master_year,
                         cover_art_url: cover_art_url.clone(),
                         storage_profile_id: storage_profile_id.clone(),
+                        selected_cover_filename: selected_cover_filename.clone(),
                     }
                 }
             }
@@ -186,6 +193,7 @@ pub async fn confirm_and_start_import(
                         torrent_metadata,
                         cover_art_url: cover_art_url.clone(),
                         storage_profile_id: storage_profile_id.clone(),
+                        selected_cover_filename: selected_cover_filename.clone(),
                     }
                 }
                 MatchSource::MusicBrainz(mb_release) => {
@@ -203,6 +211,7 @@ pub async fn confirm_and_start_import(
                         torrent_metadata,
                         cover_art_url: cover_art_url.clone(),
                         storage_profile_id: storage_profile_id.clone(),
+                        selected_cover_filename: selected_cover_filename.clone(),
                     }
                 }
             }
@@ -226,6 +235,7 @@ pub async fn confirm_and_start_import(
                         master_year,
                         cover_art_url: cover_art_url.clone(),
                         storage_profile_id: storage_profile_id.clone(),
+                        selected_cover_filename: selected_cover_filename.clone(),
                     }
                 }
             }

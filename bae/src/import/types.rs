@@ -54,6 +54,9 @@ pub enum ImportRequest {
         cover_art_url: Option<String>,
         /// Storage profile ID. None means no bae storage (files stay in place).
         storage_profile_id: Option<String>,
+        /// User-selected cover image filename (relative path from album folder).
+        /// If set, this image will be marked as the album cover instead of using priority logic.
+        selected_cover_filename: Option<String>,
     },
     Torrent {
         torrent_source: TorrentSource,
@@ -65,6 +68,8 @@ pub enum ImportRequest {
         cover_art_url: Option<String>,
         /// Storage profile ID. None means no bae storage (files stay in temp folder).
         storage_profile_id: Option<String>,
+        /// User-selected cover image filename (relative path from album folder).
+        selected_cover_filename: Option<String>,
     },
     CD {
         discogs_release: Option<DiscogsRelease>,
@@ -74,6 +79,8 @@ pub enum ImportRequest {
         cover_art_url: Option<String>,
         /// Storage profile ID. None means no bae storage (files stay in temp folder).
         storage_profile_id: Option<String>,
+        /// User-selected cover image filename (relative path from album folder).
+        selected_cover_filename: Option<String>,
     },
 }
 
@@ -256,6 +263,8 @@ pub enum ImportCommand {
         cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
         /// Storage profile ID. None means no bae storage (files stay in place).
         storage_profile_id: Option<String>,
+        /// User-selected cover image filename
+        selected_cover_filename: Option<String>,
     },
     /// Torrent-based import: files arrive incrementally
     Torrent {
@@ -276,6 +285,8 @@ pub enum ImportCommand {
         cover_art_url: Option<String>,
         /// Storage profile ID. None means no bae storage (files stay in temp folder).
         storage_profile_id: Option<String>,
+        /// User-selected cover image filename
+        selected_cover_filename: Option<String>,
     },
     /// CD-based import: service will rip CD first (acquire phase), then process like folder import
     CD {
@@ -291,5 +302,7 @@ pub enum ImportCommand {
         toc: CdToc,
         /// Storage profile ID. None means no bae storage (files stay in temp folder).
         storage_profile_id: Option<String>,
+        /// User-selected cover image filename
+        selected_cover_filename: Option<String>,
     },
 }
