@@ -677,6 +677,7 @@ mod tests {
             musicbrainz_release: None,
             bandcamp_album_id: None,
             cover_image_id: None,
+            cover_art_url: None,
             is_compilation: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),

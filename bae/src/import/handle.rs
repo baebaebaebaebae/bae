@@ -161,7 +161,7 @@ impl ImportServiceHandle {
         let (db_album, db_release, db_tracks, artists, album_artists) =
             if let Some(ref discogs_rel) = discogs_release {
                 use crate::import::discogs_parser::parse_discogs_release;
-                parse_discogs_release(discogs_rel, master_year)?
+                parse_discogs_release(discogs_rel, master_year, cover_art_url.clone())?
             } else if let Some(ref mb_rel) = mb_release {
                 use crate::import::musicbrainz_parser::fetch_and_parse_mb_release;
                 fetch_and_parse_mb_release(&mb_rel.release_id, master_year, cover_art_url.clone())
@@ -315,7 +315,7 @@ impl ImportServiceHandle {
         let (db_album, db_release, db_tracks, artists, album_artists) =
             if let Some(ref discogs_rel) = discogs_release {
                 use crate::import::discogs_parser::parse_discogs_release;
-                parse_discogs_release(discogs_rel, master_year)?
+                parse_discogs_release(discogs_rel, master_year, cover_art_url.clone())?
             } else if let Some(ref mb_rel) = mb_release {
                 use crate::import::musicbrainz_parser::fetch_and_parse_mb_release;
                 fetch_and_parse_mb_release(&mb_rel.release_id, master_year, cover_art_url.clone())
@@ -487,7 +487,7 @@ impl ImportServiceHandle {
 
         let (db_album, db_release, db_tracks, artists, album_artists) =
             if let Some(ref discogs_rel) = discogs_release {
-                parse_discogs_release(discogs_rel, master_year)?
+                parse_discogs_release(discogs_rel, master_year, cover_art_url.clone())?
             } else if let Some(ref mb_rel) = mb_release {
                 fetch_and_parse_mb_release(&mb_rel.release_id, master_year, cover_art_url.clone())
                     .await?

@@ -66,19 +66,19 @@ pub async fn fetch_and_parse_mb_release(
 /// Parse MusicBrainz release JSON into database models
 ///
 /// discogs_release: Optional Discogs release data to populate both fields in DbAlbum
-/// _cover_art_url: Cover art URL (unused - kept for caller compatibility, cover_image_id is set after import)
+/// cover_art_url: Cover art URL for immediate display before import completes
 fn parse_mb_release_from_json(
     json: &serde_json::Value,
     mb_release: &crate::musicbrainz::MbRelease,
     master_year: u32,
     discogs_release: Option<crate::discogs::DiscogsRelease>,
-    _cover_art_url: Option<String>,
+    cover_art_url: Option<String>,
 ) -> Result<ParsedMbAlbum, String> {
     // Create album record
     // If we have Discogs data, populate both fields
     let album = if let Some(ref discogs_rel) = discogs_release {
         // Create album with both MB and Discogs data
-        let mut album = DbAlbum::from_mb_release(mb_release, master_year);
+        let mut album = DbAlbum::from_mb_release(mb_release, master_year, cover_art_url);
         // Add Discogs data
         album.discogs_release = Some(crate::db::DiscogsMasterRelease {
             master_id: discogs_rel.master_id.clone(),
@@ -86,11 +86,10 @@ fn parse_mb_release_from_json(
         });
         album
     } else {
-        DbAlbum::from_mb_release(mb_release, master_year)
+        DbAlbum::from_mb_release(mb_release, master_year, cover_art_url)
     };
 
     // Note: cover_image_id will be set after import when images are chunked
-    // The cover_art_url parameter is used for downloading during import
 
     // Create release record
     let db_release = DbRelease::from_mb_release(&album.id, mb_release);

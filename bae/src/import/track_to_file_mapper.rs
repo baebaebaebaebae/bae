@@ -379,7 +379,7 @@ mod tests {
         };
 
         // Parse through album_track_creator to get real DbTracks with vinyl positions
-        let (_, _, tracks, _, _) = parse_discogs_release(&release, master.year).unwrap();
+        let (_, _, tracks, _, _) = parse_discogs_release(&release, master.year, None).unwrap();
 
         // Verify tracks have vinyl positions but sequential track_numbers
         assert_eq!(tracks.len(), 2); // Fixture only has 2 tracks (A1-A2)
@@ -470,7 +470,7 @@ mod tests {
         };
 
         // Parse through album_track_creator to get real DbTracks with vinyl positions
-        let (_, _, tracks, _, _) = parse_discogs_release(&release, master.year).unwrap();
+        let (_, _, tracks, _, _) = parse_discogs_release(&release, master.year, None).unwrap();
 
         assert_eq!(tracks.len(), 2); // Fixture only has 2 tracks (A1-A2)
 

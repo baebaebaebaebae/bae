@@ -111,6 +111,8 @@ pub enum ImportProgress {
         /// For track completions, this is the parent release ID (for filtering)
         /// For release completions, this is None
         release_id: Option<String>,
+        /// For release completions, the cover image ID (for reactive UI update)
+        cover_image_id: Option<String>,
     },
     Failed {
         id: String,

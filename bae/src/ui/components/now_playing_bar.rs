@@ -522,8 +522,13 @@ pub fn NowPlayingBar() -> Element {
                         Ok(album_id) => {
                             match library_manager.get().get_album_by_id(&album_id).await {
                                 Ok(Some(album)) => {
-                                    cover_art_url
-                                        .set(album.cover_image_id.as_ref().map(|id| image_url(id)));
+                                    // Use cover_image_id first, fallback to cover_art_url
+                                    let url = album
+                                        .cover_image_id
+                                        .as_ref()
+                                        .map(|id| image_url(id))
+                                        .or_else(|| album.cover_art_url.clone());
+                                    cover_art_url.set(url);
                                 }
                                 Ok(None) => {
                                     cover_art_url.set(None);

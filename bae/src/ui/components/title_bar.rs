@@ -158,7 +158,12 @@ pub fn TitleBar() -> Element {
                             let album_id = album.id.clone();
                             let album_title = album.title.clone();
                             let album_year = album.year;
-                            let cover_url = album.cover_image_id.as_ref().map(|id| image_url(id));
+                            // Use cover_image_id first, fallback to cover_art_url
+                            let cover_url = album
+                                .cover_image_id
+                                .as_ref()
+                                .map(|id| image_url(id))
+                                .or_else(|| album.cover_art_url.clone());
                             let artists = album_artists().get(&album.id).cloned().unwrap_or_default();
                             let artist_name = if artists.is_empty() {
                                 "Unknown Artist".to_string()

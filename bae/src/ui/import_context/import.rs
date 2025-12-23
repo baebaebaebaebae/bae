@@ -2,6 +2,7 @@ use super::state::ImportContext;
 use crate::discogs::DiscogsRelease;
 use crate::import::{ImportRequest, MatchCandidate, MatchSource};
 use crate::ui::components::import::ImportSource;
+use crate::ui::local_file_url;
 use crate::ui::Route;
 use dioxus::prelude::*;
 use dioxus::router::Navigator;
@@ -90,15 +91,16 @@ pub async fn confirm_and_start_import(
     let master_year = metadata.as_ref().and_then(|m| m.year).unwrap_or(1970);
 
     // Determine cover art URL based on user selection
+    // For local images, use bae://local/... URL so webview can display them
     let selected_cover_idx = *ctx.selected_cover_index().read();
     let folder_files = ctx.folder_files().read().clone();
     let folder_path_for_cover = ctx.folder_path().read().clone();
 
     let cover_art_url = if let Some(idx) = selected_cover_idx {
-        // User selected a local image - use its path as the cover art URL
+        // User selected a local image - convert to bae://local/... URL
         if let Some(img) = folder_files.artwork.get(idx) {
             let local_path = format!("{}/{}", folder_path_for_cover, img.name);
-            Some(local_path)
+            Some(local_file_url(&local_path))
         } else {
             // Fallback to remote if index is invalid
             candidate.cover_art_url.clone()

@@ -193,18 +193,29 @@ fn QueueItem(
 ) -> Element {
     rsx! {
         div { class: if is_current { "flex items-center gap-3 p-3 border-b border-gray-700 bg-blue-500/10 hover:bg-blue-500/15 group" } else { "flex items-center gap-3 p-3 border-b border-gray-700 hover:bg-gray-800 group" },
-            // Album cover
+            // Album cover - use cover_image_id first, fallback to cover_art_url
             div { class: "w-12 h-12 flex-shrink-0 bg-gray-700 rounded overflow-hidden",
                 if let Some(album) = &album {
-                    if let Some(cover_id) = &album.cover_image_id {
-                        img {
-                            src: "{image_url(cover_id)}",
-                            alt: "Album cover",
-                            class: "w-full h-full object-cover",
-                        }
-                    } else {
-                        div { class: "w-full h-full flex items-center justify-center text-gray-500 text-xl",
-                            "🎵"
+                    {
+                        let cover_url = album
+                            .cover_image_id
+                            .as_ref()
+                            .map(|id| image_url(id))
+                            .or_else(|| album.cover_art_url.clone());
+                        if let Some(url) = cover_url {
+                            rsx! {
+                                img {
+                                    src: "{url}",
+                                    alt: "Album cover",
+                                    class: "w-full h-full object-cover",
+                                }
+                            }
+                        } else {
+                            rsx! {
+                                div { class: "w-full h-full flex items-center justify-center text-gray-500 text-xl",
+                                    "🎵"
+                                }
+                            }
                         }
                     }
                 } else {

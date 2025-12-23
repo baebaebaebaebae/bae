@@ -22,8 +22,14 @@ pub fn AlbumCard(album: DbAlbum, artists: Vec<DbArtist>) -> Element {
     let album_id = album.id.clone();
     let album_title = album.title.clone();
     let album_year = album.year;
-    // Convert cover_image_id to a bae://image/{id} URL
-    let cover_url = album.cover_image_id.as_ref().map(|id| image_url(id));
+    // Convert cover_image_id to a bae://image/{id} URL, fallback to cover_art_url
+    let cover_url = album
+        .cover_image_id
+        .as_ref()
+        .map(|id| image_url(id))
+        .or_else(|| album.cover_art_url.clone());
+    // Track if we're showing the temporary cover (for visual treatment)
+    let is_ephemeral_cover = album.cover_image_id.is_none() && album.cover_art_url.is_some();
 
     // Format artist names
     let artist_name = if artists.is_empty() {

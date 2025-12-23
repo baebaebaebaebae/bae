@@ -27,6 +27,14 @@ pub fn AlbumCoverSection(
     let mut hover_cover = use_signal(|| false);
     let mut show_release_info_modal = use_signal(|| None::<String>);
 
+    // Determine cover URL with fallback to cover_art_url
+    let cover_url = album
+        .cover_image_id
+        .as_ref()
+        .map(|id| image_url(id))
+        .or_else(|| album.cover_art_url.clone());
+    let is_ephemeral_cover = album.cover_image_id.is_none() && album.cover_art_url.is_some();
+
     rsx! {
         div {
             class: "mb-6 relative",
@@ -34,8 +42,9 @@ pub fn AlbumCoverSection(
             onmouseleave: move |_| hover_cover.set(false),
             AlbumArt {
                 title: album.title.clone(),
-                cover_url: album.cover_image_id.as_ref().map(|id| image_url(id)),
+                cover_url,
                 import_progress,
+                is_ephemeral: is_ephemeral_cover,
             }
 
             // Three dot menu button

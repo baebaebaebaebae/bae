@@ -137,6 +137,9 @@ pub struct DbAlbum {
     pub bandcamp_album_id: Option<String>,
     /// Reference to the cover image (DbImage.id) - set after import when images are chunked
     pub cover_image_id: Option<String>,
+    /// Cover art URL for immediate display (remote URL or bae://local/... for local files)
+    /// Used before import completes and cover_image_id is set
+    pub cover_art_url: Option<String>,
     /// True for "Various Artists" compilation albums
     pub is_compilation: bool,
     pub created_at: DateTime<Utc>,
@@ -353,6 +356,7 @@ impl DbAlbum {
             musicbrainz_release: None,
             bandcamp_album_id: None,
             cover_image_id: None,
+            cover_art_url: None,
             is_compilation: false,
             created_at: now,
             updated_at: now,
@@ -364,9 +368,11 @@ impl DbAlbum {
     ///
     /// master_id and master_year are always provided for releases imported from Discogs.
     /// The master year is used for the album year (not the release year).
+    /// cover_art_url is for immediate display before import completes.
     pub fn from_discogs_release(
         release: &crate::discogs::DiscogsRelease,
         master_year: u32,
+        cover_art_url: Option<String>,
     ) -> Self {
         let now = Utc::now();
 
@@ -382,14 +388,20 @@ impl DbAlbum {
             discogs_release: Some(discogs_release),
             musicbrainz_release: None,
             bandcamp_album_id: None,
-            cover_image_id: None,  // Set after import when images are chunked
+            cover_image_id: None, // Set after import when images are chunked
+            cover_art_url,
             is_compilation: false, // Will be set based on artist analysis
             created_at: now,
             updated_at: now,
         }
     }
 
-    pub fn from_mb_release(release: &crate::musicbrainz::MbRelease, master_year: u32) -> Self {
+    /// cover_art_url is for immediate display before import completes.
+    pub fn from_mb_release(
+        release: &crate::musicbrainz::MbRelease,
+        master_year: u32,
+        cover_art_url: Option<String>,
+    ) -> Self {
         let now = Utc::now();
 
         let musicbrainz_release = crate::db::MusicBrainzRelease {
@@ -411,7 +423,8 @@ impl DbAlbum {
             discogs_release: None,
             musicbrainz_release: Some(musicbrainz_release),
             bandcamp_album_id: None,
-            cover_image_id: None,  // Set after import when images are chunked
+            cover_image_id: None, // Set after import when images are chunked
+            cover_art_url,
             is_compilation: false, // Will be set based on artist analysis
             created_at: now,
             updated_at: now,
