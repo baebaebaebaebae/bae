@@ -100,6 +100,49 @@
   - [x] Create library management system
   - [x] Implement album and track import workflows
   - [x] Build track-to-chunk mapping system (playback system pending)
+
+#### Flexible Storage System (Composable Flags)
+
+Storage is configured via 4 independent flags that can be combined freely:
+
+| Flag | Description |
+|------|-------------|
+| `location` | `Local(path)` or `Cloud(bucket, endpoint)` |
+| `encrypted` | AES-256-GCM encryption per blob |
+| `chunked` | Split files into fixed-size pieces |
+
+All 8 combinations are valid (user decides what makes sense for their use case).
+
+- [ ] Plan 1: File-Chunk Mapping
+  - [ ] Add `DbFileChunk` model to `models.rs`
+  - [ ] Add `file_chunks` table and DB methods to `client.rs`
+  - [ ] Populate `file_chunks` during import pipeline persist stage
+  - [ ] Refactor `serve_image_from_chunks` to use `file_chunks`
+
+- [ ] Plan 2: Storage Profiles Data Model
+  - [ ] Add `StorageLocation` enum (`Local { path }`, `Cloud { bucket, endpoint }`)
+  - [ ] Add `DbStorageProfile` struct (id, name, location, encrypted, chunked)
+  - [ ] Add `DbReleaseStorage` struct (release_id, profile_id)
+  - [ ] Add `storage_profiles` and `release_storage` tables
+  - [ ] Add CRUD methods for storage profiles
+
+- [ ] Plan 3: Storage Trait + LocalRaw Implementation
+  - [ ] Define `ReleaseStorage` trait with `write_blobs()` / `read_blobs()`
+  - [ ] Implement `LocalRawStorage` (no chunking, no encryption)
+  - [ ] Refactor one consumer (e.g., image serving) to use trait
+
+- [ ] Plan 4: Chunked + Encrypted Storage
+  - [ ] Implement chunking transform (split/reassemble)
+  - [ ] Implement encryption transform (encrypt/decrypt per blob)
+  - [ ] Compose transforms into pipeline: chunk → encrypt → store
+  - [ ] Implement `LocalChunkedStorage` and `CloudStorage` behind trait
+  - [ ] Migrate existing import code to use storage trait
+
+- [ ] Plan 5: Import Pipeline Integration
+  - [ ] Add storage profile selection to import UI
+  - [ ] Wire import service to use selected profile
+  - [ ] Support writing releases to different storage configurations
+
 - [ ] Create storage settings interface
   - [ ] Build storage configuration UI components
   - [ ] Add storage usage monitoring and display

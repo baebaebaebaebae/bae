@@ -148,13 +148,29 @@ async fn run_storage_test(location: StorageLocation, chunked: bool, encrypted: b
 
     info!("Import request sent, release_id: {}", release_id);
 
-    // 7. Wait for completion
+    // 7. Wait for completion and collect Complete events
     let mut progress_rx = import_handle.subscribe_release(release_id.clone());
+    let mut track_complete_ids: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    let mut release_complete_received = false;
+
     while let Some(progress) = progress_rx.recv().await {
         info!("Progress: {:?}", progress);
-        if matches!(progress, ImportProgress::Complete { .. }) {
-            info!("Import completed!");
-            break;
+        if let ImportProgress::Complete {
+            id,
+            release_id: rid,
+        } = &progress
+        {
+            if rid.is_none() {
+                // This is a release completion (release_id is None for release completions)
+                release_complete_received = true;
+                info!("Release completion event received!");
+                break;
+            } else {
+                // This is a track completion
+                track_complete_ids.insert(id.clone());
+                info!("Track completion event received for: {}", id);
+            }
         }
         if let ImportProgress::Failed { error, .. } = progress {
             panic!("Import failed: {}", error);
@@ -197,6 +213,21 @@ async fn run_storage_test(location: StorageLocation, chunked: bool, encrypted: b
         );
     }
     info!("✓ All {} tracks are Complete", tracks.len());
+
+    // 9b. Verify ImportProgress::Complete events were sent for each track
+    assert!(
+        release_complete_received,
+        "Should receive ImportProgress::Complete event for release"
+    );
+    assert_eq!(
+        track_complete_ids.len(),
+        tracks.len(),
+        "Should receive ImportProgress::Complete event for each track. Got {} events for {} tracks. Track IDs received: {:?}",
+        track_complete_ids.len(),
+        tracks.len(),
+        track_complete_ids
+    );
+    info!("✓ Received Complete events for all {} tracks", tracks.len());
 
     // 10. Verify DB: DbFile records exist
     // For chunked: file exists but may not have source_path (data is in chunks)

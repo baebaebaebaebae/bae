@@ -162,6 +162,21 @@ impl TorrentManagerHandle {
     pub fn subscribe_torrent(&self, info_hash: String) -> mpsc::UnboundedReceiver<TorrentProgress> {
         self.progress_handle.subscribe_torrent(info_hash)
     }
+
+    /// Create a dummy handle for testing (commands are dropped)
+    #[cfg(feature = "test-utils")]
+    pub fn new_dummy() -> Self {
+        let (command_tx, _command_rx) = mpsc::unbounded_channel();
+        let (progress_tx, progress_rx) = mpsc::unbounded_channel();
+        let progress_handle =
+            TorrentProgressHandle::new(progress_rx, tokio::runtime::Handle::current());
+        // Drop the progress_tx so the progress_handle's background task exits
+        drop(progress_tx);
+        Self {
+            command_tx,
+            progress_handle,
+        }
+    }
 }
 
 /// Manages all torrent operations (downloads, metadata detection, seeding)

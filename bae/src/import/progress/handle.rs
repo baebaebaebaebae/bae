@@ -25,14 +25,18 @@ impl SubscriptionFilter {
                 ImportProgress::FileProgress {
                     release_id: rid, ..
                 } => rid == release_id,
-                ImportProgress::Complete { id } => id == release_id,
+                // Match if this is the release completion OR a track completion for this release
+                ImportProgress::Complete {
+                    id,
+                    release_id: rid,
+                } => id == release_id || rid.as_ref() == Some(release_id),
                 ImportProgress::Failed { id, .. } => id == release_id,
             },
             SubscriptionFilter::Track { track_id } => match progress {
                 ImportProgress::Started { id } => id == track_id,
                 ImportProgress::Progress { id, .. } => id == track_id,
                 ImportProgress::FileProgress { .. } => false, // FileProgress is release-level only
-                ImportProgress::Complete { id } => id == track_id,
+                ImportProgress::Complete { id, .. } => id == track_id,
                 ImportProgress::Failed { id, .. } => id == track_id,
             },
         }

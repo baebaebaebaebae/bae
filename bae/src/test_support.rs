@@ -9,7 +9,8 @@ use std::sync::Mutex;
 /// Stores chunks in memory instead of uploading to S3.
 /// Useful for testing without external dependencies.
 pub struct MockCloudStorage {
-    chunks: Mutex<HashMap<String, Vec<u8>>>,
+    /// Public for test assertions
+    pub chunks: Mutex<HashMap<String, Vec<u8>>>,
 }
 
 impl Default for MockCloudStorage {

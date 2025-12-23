@@ -317,10 +317,11 @@ impl ImportService {
         )
         .await?;
 
-        // Send completion event
-        let _ = self
-            .progress_tx
-            .send(ImportProgress::Complete { id: db_release.id });
+        // Send release completion event
+        let _ = self.progress_tx.send(ImportProgress::Complete {
+            id: db_release.id,
+            release_id: None,
+        });
 
         info!("Import completed successfully for {}", db_album.title);
         Ok(())
@@ -513,10 +514,11 @@ impl ImportService {
             }
         }
 
-        // Send completion event
-        let _ = self
-            .progress_tx
-            .send(ImportProgress::Complete { id: db_release.id });
+        // Send release completion event
+        let _ = self.progress_tx.send(ImportProgress::Complete {
+            id: db_release.id,
+            release_id: None,
+        });
 
         info!(
             "Torrent import completed successfully for {}",
@@ -709,10 +711,11 @@ impl ImportService {
             info!("Cleaned up temp directory: {:?}", temp_dir);
         }
 
-        // Send completion event
-        let _ = self
-            .progress_tx
-            .send(ImportProgress::Complete { id: db_release.id });
+        // Send release completion event
+        let _ = self.progress_tx.send(ImportProgress::Complete {
+            id: db_release.id,
+            release_id: None,
+        });
 
         info!("CD import completed successfully for {}", db_album.title);
         Ok(())
@@ -1049,15 +1052,29 @@ impl ImportService {
                 .await?;
         }
 
+        // Mark all tracks complete and send completion events
+        for track_file in tracks_to_files {
+            library_manager
+                .mark_track_complete(&track_file.db_track_id)
+                .await
+                .map_err(|e| format!("Failed to mark track complete: {}", e))?;
+
+            let _ = self.progress_tx.send(ImportProgress::Complete {
+                id: track_file.db_track_id.clone(),
+                release_id: Some(db_release.id.clone()),
+            });
+        }
+
         // Mark release complete
         library_manager
             .mark_release_complete(&db_release.id)
             .await
             .map_err(|e| format!("Failed to mark release complete: {}", e))?;
 
-        // Send completion event
+        // Send release completion event
         let _ = self.progress_tx.send(ImportProgress::Complete {
             id: db_release.id.clone(),
+            release_id: None,
         });
 
         info!("Storage import complete for release {}", db_release.id);
@@ -1283,12 +1300,17 @@ impl ImportService {
             });
         }
 
-        // Mark all tracks as complete (no chunk processing needed)
+        // Mark all tracks as complete and send completion events
         for track_file in tracks_to_files {
             library_manager
                 .mark_track_complete(&track_file.db_track_id)
                 .await
                 .map_err(|e| format!("Failed to mark track complete: {}", e))?;
+
+            let _ = self.progress_tx.send(ImportProgress::Complete {
+                id: track_file.db_track_id.clone(),
+                release_id: Some(db_release.id.clone()),
+            });
         }
 
         // Mark release complete
@@ -1297,9 +1319,10 @@ impl ImportService {
             .await
             .map_err(|e| format!("Failed to mark release complete: {}", e))?;
 
-        // Send completion event
+        // Send release completion event
         let _ = self.progress_tx.send(ImportProgress::Complete {
             id: db_release.id.clone(),
+            release_id: None,
         });
 
         info!("None storage import complete for release {}", db_release.id);
@@ -1485,12 +1508,17 @@ impl ImportService {
             });
         }
 
-        // Mark all tracks as complete
+        // Mark all tracks as complete and send completion events
         for track_file in &tracks_to_files {
             library_manager
                 .mark_track_complete(&track_file.db_track_id)
                 .await
                 .map_err(|e| format!("Failed to mark track complete: {}", e))?;
+
+            let _ = self.progress_tx.send(ImportProgress::Complete {
+                id: track_file.db_track_id.clone(),
+                release_id: Some(db_release.id.clone()),
+            });
         }
 
         // Mark release complete
@@ -1499,9 +1527,10 @@ impl ImportService {
             .await
             .map_err(|e| format!("Failed to mark release complete: {}", e))?;
 
-        // Send completion event
+        // Send release completion event
         let _ = self.progress_tx.send(ImportProgress::Complete {
             id: db_release.id.clone(),
+            release_id: None,
         });
 
         // NOTE: We intentionally skip cleanup - files stay in temp folder
@@ -1646,12 +1675,17 @@ impl ImportService {
             );
         }
 
-        // Mark all tracks complete
+        // Mark all tracks complete and send completion events
         for track in &db_tracks {
             library_manager
                 .mark_track_complete(&track.id)
                 .await
                 .map_err(|e| format!("Failed to mark track complete: {}", e))?;
+
+            let _ = self.progress_tx.send(ImportProgress::Complete {
+                id: track.id.clone(),
+                release_id: Some(db_release.id.clone()),
+            });
         }
 
         // Mark release complete
@@ -1660,8 +1694,10 @@ impl ImportService {
             .await
             .map_err(|e| format!("Failed to mark release complete: {}", e))?;
 
+        // Send release completion event
         let _ = self.progress_tx.send(ImportProgress::Complete {
             id: db_release.id.clone(),
+            release_id: None,
         });
 
         info!(

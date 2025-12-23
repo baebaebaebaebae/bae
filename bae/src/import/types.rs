@@ -108,6 +108,9 @@ pub enum ImportProgress {
     },
     Complete {
         id: String,
+        /// For track completions, this is the parent release ID (for filtering)
+        /// For release completions, this is None
+        release_id: Option<String>,
     },
     Failed {
         id: String,

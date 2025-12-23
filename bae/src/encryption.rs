@@ -124,6 +124,19 @@ impl EncryptionService {
         // Decrypt using the nonce and encrypted data
         self.decrypt(&encrypted_chunk.encrypted_data, &encrypted_chunk.nonce)
     }
+
+    /// Decrypt data in simple format: [nonce (12 bytes)][ciphertext]
+    /// This is used by ReleaseStorageImpl which prepends nonce to ciphertext
+    pub fn decrypt_simple(&self, encrypted_data: &[u8]) -> Result<Vec<u8>, EncryptionError> {
+        if encrypted_data.len() < 12 {
+            return Err(EncryptionError::Decryption(
+                "Invalid encrypted data: too short for nonce".to_string(),
+            ));
+        }
+
+        let (nonce, ciphertext) = encrypted_data.split_at(12);
+        self.decrypt(ciphertext, nonce)
+    }
 }
 
 /// Encrypted chunk format that includes all data needed for decryption

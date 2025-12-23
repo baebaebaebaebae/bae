@@ -192,10 +192,11 @@ async fn download_and_decrypt_chunk(
     };
 
     // Decrypt in spawn_blocking to avoid blocking the async runtime
+    // Uses decrypt_simple since storage uses simple nonce+ciphertext format
     let encryption_service = encryption_service.clone();
     let decrypted_data = tokio::task::spawn_blocking(move || {
         encryption_service
-            .decrypt_chunk(&encrypted_data)
+            .decrypt_simple(&encrypted_data)
             .map_err(|e| format!("Failed to decrypt chunk: {}", e))
     })
     .await
@@ -232,7 +233,7 @@ fn extract_file_from_chunks(
     if chunks.len() == 1 {
         // File is entirely within a single chunk
         let start = start_byte_offset as usize;
-        let end = (end_byte_offset + 1) as usize; // end_byte_offset is inclusive
+        let end = ((end_byte_offset + 1) as usize).min(chunks[0].len()); // end_byte_offset is inclusive
         file_data.extend_from_slice(&chunks[0][start..end]);
     } else {
         // File spans multiple chunks
@@ -246,8 +247,9 @@ fn extract_file_from_chunks(
         }
 
         // Last chunk: from start to end_byte_offset
-        let last_chunk_end = (end_byte_offset + 1) as usize; // end_byte_offset is inclusive
-        file_data.extend_from_slice(&chunks[chunks.len() - 1][0..last_chunk_end]);
+        let last_chunk = &chunks[chunks.len() - 1];
+        let last_chunk_end = ((end_byte_offset + 1) as usize).min(last_chunk.len()); // end_byte_offset is inclusive
+        file_data.extend_from_slice(&last_chunk[0..last_chunk_end]);
     }
 
     file_data
