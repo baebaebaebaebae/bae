@@ -81,6 +81,55 @@ pub async fn retry_torrent_metadata_detection(ctx: &ImportContext) -> Result<(),
     load_torrent_for_import(ctx, path_buf, seed_flag).await
 }
 
+/// Retry DiscID lookup for the current detected metadata.
+/// Returns true if the lookup succeeded and found matches.
+pub async fn retry_discid_lookup(ctx: &ImportContext) -> bool {
+    let metadata = ctx.detected_metadata.read();
+    let mb_discid = match metadata.as_ref().and_then(|m| m.mb_discid.clone()) {
+        Some(id) => id,
+        None => {
+            info!("No MB DiscID available for retry");
+            return false;
+        }
+    };
+    drop(metadata);
+
+    ctx.set_is_looking_up(true);
+    ctx.set_discid_lookup_error(None);
+    info!("🔄 Retrying MB DiscID lookup: {}", mb_discid);
+
+    let success = match lookup_by_discid(&mb_discid).await {
+        Ok((releases, external_urls)) => {
+            let result = handle_discid_lookup_result(ctx, releases, external_urls).await;
+            match result {
+                DiscIdLookupResult::SingleMatch(candidate) => {
+                    ctx.set_exact_match_candidates(vec![(*candidate).clone()]);
+                    ctx.set_selected_match_index(Some(0));
+                    ctx.set_import_phase(super::types::ImportPhase::ExactLookup);
+                    true
+                }
+                DiscIdLookupResult::MultipleMatches(candidates) => {
+                    ctx.set_exact_match_candidates(candidates);
+                    ctx.set_import_phase(super::types::ImportPhase::ExactLookup);
+                    true
+                }
+                DiscIdLookupResult::NoMatches => false,
+            }
+        }
+        Err(e) => {
+            info!("MB DiscID retry failed: {}", e);
+            ctx.set_discid_lookup_error(Some(format!(
+                "MusicBrainz lookup failed: {}. You can retry or search manually.",
+                e
+            )));
+            false
+        }
+    };
+
+    ctx.set_is_looking_up(false);
+    success
+}
+
 /// Load a folder for import: read files, detect metadata, and optionally lookup by DiscID
 pub async fn load_folder_for_import(
     ctx: &ImportContext,
@@ -159,6 +208,7 @@ pub async fn load_folder_for_import(
 
     let discid_result = if let Some(ref mb_discid) = metadata.mb_discid {
         ctx.set_is_looking_up(true);
+        ctx.set_discid_lookup_error(None); // Clear any previous error
         info!("🎵 Found MB DiscID: {}, performing exact lookup", mb_discid);
 
         let result = match lookup_by_discid(mb_discid).await {
@@ -167,6 +217,10 @@ pub async fn load_folder_for_import(
             }
             Err(e) => {
                 info!("MB DiscID lookup failed: {}", e);
+                ctx.set_discid_lookup_error(Some(format!(
+                    "MusicBrainz lookup failed: {}. You can retry or search manually.",
+                    e
+                )));
                 DiscIdLookupResult::NoMatches
             }
         };
@@ -216,6 +270,7 @@ pub async fn load_selected_release(
 
     let discid_result = if let Some(ref mb_discid) = metadata.mb_discid {
         ctx.set_is_looking_up(true);
+        ctx.set_discid_lookup_error(None); // Clear any previous error
         info!("🎵 Found MB DiscID: {}, performing exact lookup", mb_discid);
 
         let result = match lookup_by_discid(mb_discid).await {
@@ -224,6 +279,10 @@ pub async fn load_selected_release(
             }
             Err(e) => {
                 info!("MB DiscID lookup failed: {}", e);
+                ctx.set_discid_lookup_error(Some(format!(
+                    "MusicBrainz lookup failed: {}. You can retry or search manually.",
+                    e
+                )));
                 DiscIdLookupResult::NoMatches
             }
         };
@@ -248,6 +307,7 @@ pub async fn load_cd_for_import(
     disc_id: String,
 ) -> Result<DiscIdLookupResult, String> {
     ctx.set_is_looking_up(true);
+    ctx.set_discid_lookup_error(None); // Clear any previous error
 
     let result = match lookup_by_discid(&disc_id).await {
         Ok((releases, external_urls)) => {
@@ -255,6 +315,10 @@ pub async fn load_cd_for_import(
         }
         Err(e) => {
             info!("MB DiscID lookup failed: {}", e);
+            ctx.set_discid_lookup_error(Some(format!(
+                "MusicBrainz lookup failed: {}. You can retry or search manually.",
+                e
+            )));
             DiscIdLookupResult::NoMatches
         }
     };

@@ -1,12 +1,14 @@
 use super::inputs::CdRipper;
-use super::shared::{Confirmation, ErrorDisplay, ExactLookup, ManualSearch, SelectedSource};
+use super::shared::{
+    Confirmation, DiscIdLookupError, ErrorDisplay, ExactLookup, ManualSearch, SelectedSource,
+};
 use crate::import::MatchCandidate;
 use crate::ui::components::import::ImportSource;
-use crate::ui::import_context::{ImportContext, ImportPhase};
+use crate::ui::import_context::{detection, ImportContext, ImportPhase};
 use dioxus::prelude::*;
 use std::path::PathBuf;
 use std::rc::Rc;
-use tracing::warn;
+use tracing::{info, warn};
 
 #[component]
 pub fn CdImport() -> Element {
@@ -150,6 +152,24 @@ pub fn CdImport() -> Element {
 
                     // Phase 3: Manual Search
                     if *import_phase.read() == ImportPhase::ManualSearch {
+                        // Show DiscID lookup error with retry button if applicable
+                        if import_context.discid_lookup_error().read().is_some() {
+                            DiscIdLookupError {
+                                error_message: import_context.discid_lookup_error(),
+                                is_retrying: is_looking_up,
+                                on_retry: {
+                                    let import_context = import_context.clone();
+                                    move |_| {
+                                        let import_context = import_context.clone();
+                                        spawn(async move {
+                                            info!("Retrying DiscID lookup...");
+                                            detection::retry_discid_lookup(&import_context).await;
+                                        });
+                                    }
+                                },
+                            }
+                        }
+
                         ManualSearch {
                             detected_metadata,
                             selected_match_index,

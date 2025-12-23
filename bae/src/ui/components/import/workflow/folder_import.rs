@@ -1,14 +1,15 @@
 use super::inputs::{FolderSelector, ReleaseSelector};
 use super::shared::{
-    Confirmation, DetectingMetadata, ErrorDisplay, ExactLookup, ManualSearch, SelectedSource,
+    Confirmation, DetectingMetadata, DiscIdLookupError, ErrorDisplay, ExactLookup, ManualSearch,
+    SelectedSource,
 };
 use super::smart_file_display::SmartFileDisplay;
 use crate::import::MatchCandidate;
 use crate::ui::components::import::ImportSource;
-use crate::ui::import_context::{ImportContext, ImportPhase};
+use crate::ui::import_context::{detection, ImportContext, ImportPhase};
 use dioxus::prelude::*;
 use std::rc::Rc;
-use tracing::warn;
+use tracing::{info, warn};
 
 #[component]
 pub fn FolderImport() -> Element {
@@ -25,6 +26,7 @@ pub fn FolderImport() -> Element {
     let is_detecting = import_context.is_detecting();
     let is_looking_up = import_context.is_looking_up();
     let import_error_message = import_context.import_error_message();
+    let discid_lookup_error = import_context.discid_lookup_error();
     let duplicate_album_id = import_context.duplicate_album_id();
     let folder_files = import_context.folder_files();
 
@@ -101,6 +103,24 @@ pub fn FolderImport() -> Element {
                     // Show detecting message during MusicBrainz lookup
                     if *is_looking_up.read() && *import_phase.read() == ImportPhase::MetadataDetection {
                         DetectingMetadata { message: "Looking up release...".to_string() }
+                    }
+
+                    // Show DiscID lookup error with retry button (when in ManualSearch after a failed lookup)
+                    if *import_phase.read() == ImportPhase::ManualSearch && discid_lookup_error.read().is_some() {
+                        DiscIdLookupError {
+                            error_message: discid_lookup_error,
+                            is_retrying: is_looking_up,
+                            on_retry: {
+                                let import_context = import_context.clone();
+                                move |_| {
+                                    let import_context = import_context.clone();
+                                    spawn(async move {
+                                        info!("Retrying DiscID lookup...");
+                                        detection::retry_discid_lookup(&import_context).await;
+                                    });
+                                }
+                            },
+                        }
                     }
 
                     // Phase 2: Exact Lookup

@@ -1,10 +1,12 @@
 use super::file_list::FileList;
 use super::inputs::TorrentInput;
-use super::shared::{Confirmation, ErrorDisplay, ExactLookup, ManualSearch, SelectedSource};
+use super::shared::{
+    Confirmation, DiscIdLookupError, ErrorDisplay, ExactLookup, ManualSearch, SelectedSource,
+};
 use crate::import::MatchCandidate;
 use crate::torrent::ffi::TorrentInfo;
 use crate::ui::components::import::ImportSource;
-use crate::ui::import_context::{ImportContext, ImportPhase};
+use crate::ui::import_context::{detection, ImportContext, ImportPhase};
 use dioxus::prelude::*;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -126,6 +128,24 @@ pub fn TorrentImport() -> Element {
 
                     // Phase 3: Manual Search
                     if *import_context.import_phase().read() == ImportPhase::ManualSearch {
+                        // Show DiscID lookup error with retry button if applicable
+                        if import_context.discid_lookup_error().read().is_some() {
+                            DiscIdLookupError {
+                                error_message: import_context.discid_lookup_error(),
+                                is_retrying: import_context.is_looking_up(),
+                                on_retry: {
+                                    let import_context = import_context.clone();
+                                    move |_| {
+                                        let import_context = import_context.clone();
+                                        spawn(async move {
+                                            info!("Retrying DiscID lookup...");
+                                            detection::retry_discid_lookup(&import_context).await;
+                                        });
+                                    }
+                                },
+                            }
+                        }
+
                         if has_cue_files_for_manual && import_context.detected_metadata().read().is_none()
                             && !*import_context.is_detecting().read()
                         {

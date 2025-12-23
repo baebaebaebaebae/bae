@@ -62,6 +62,8 @@ pub struct ImportContext {
     pub(crate) is_looking_up: Signal<bool>,
     pub(crate) is_importing: Signal<bool>,
     pub(crate) import_error_message: Signal<Option<String>>,
+    /// Error from DiscID lookup (shown with retry button)
+    pub(crate) discid_lookup_error: Signal<Option<String>>,
     pub(crate) duplicate_album_id: Signal<Option<String>>,
     pub(crate) folder_files: Signal<CategorizedFileInfo>,
     /// Selected cover image: None = use remote URL, Some(index) = use local artwork at index
@@ -131,6 +133,7 @@ impl ImportContext {
             is_looking_up: Signal::new(false),
             is_importing: Signal::new(false),
             import_error_message: Signal::new(None),
+            discid_lookup_error: Signal::new(None),
             duplicate_album_id: Signal::new(None),
             folder_files: Signal::new(CategorizedFileInfo::default()),
             selected_cover_index: Signal::new(None),
@@ -421,6 +424,15 @@ impl ImportContext {
         signal.set(value);
     }
 
+    pub fn discid_lookup_error(&self) -> Signal<Option<String>> {
+        self.discid_lookup_error
+    }
+
+    pub fn set_discid_lookup_error(&self, value: Option<String>) {
+        let mut signal = self.discid_lookup_error;
+        signal.set(value);
+    }
+
     pub fn set_duplicate_album_id(&self, value: Option<String>) {
         let mut signal = self.duplicate_album_id;
         signal.set(value);
@@ -543,6 +555,7 @@ impl ImportContext {
         self.set_is_looking_up(false);
         self.set_is_importing(false);
         self.set_import_error_message(None);
+        self.set_discid_lookup_error(None);
         self.set_duplicate_album_id(None);
         self.set_folder_files(CategorizedFileInfo::default());
         self.set_torrent_source(None);
