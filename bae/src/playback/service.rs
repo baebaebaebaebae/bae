@@ -610,36 +610,53 @@ impl PlaybackService {
         };
 
         // Load audio data based on storage type
-        // No storage profile = files are in-place, read from source_path
-        let audio_data = if storage_profile.is_none() {
-            match self
-                .load_audio_from_source_path(track_id, &track.release_id)
-                .await
-            {
-                Ok(data) => data,
-                Err(e) => {
-                    error!("Failed to load audio from source path: {}", e);
-                    self.stop().await;
-                    return;
+        let audio_data = match &storage_profile {
+            None => {
+                // No storage profile = files are in-place, read from source_path
+                match self
+                    .load_audio_from_source_path(track_id, &track.release_id)
+                    .await
+                {
+                    Ok(data) => data,
+                    Err(e) => {
+                        error!("Failed to load audio from source path: {}", e);
+                        self.stop().await;
+                        return;
+                    }
                 }
             }
-        } else {
-            // Has storage profile: reassemble from chunks
-            match super::reassembly::reassemble_track(
-                track_id,
-                &self.library_manager,
-                &self.cloud_storage,
-                &self.cache,
-                &self.encryption_service,
-                self.chunk_size_bytes,
-            )
-            .await
-            {
-                Ok(data) => data,
-                Err(e) => {
-                    error!("Failed to reassemble track: {}", e);
-                    self.stop().await;
-                    return;
+            Some(profile) if !profile.chunked => {
+                // Non-chunked storage: read file directly from storage path
+                match self
+                    .load_audio_from_storage(track_id, &track.release_id, profile)
+                    .await
+                {
+                    Ok(data) => data,
+                    Err(e) => {
+                        error!("Failed to load audio from storage: {}", e);
+                        self.stop().await;
+                        return;
+                    }
+                }
+            }
+            Some(_) => {
+                // Chunked storage: reassemble from chunks
+                match super::reassembly::reassemble_track(
+                    track_id,
+                    &self.library_manager,
+                    &self.cloud_storage,
+                    &self.cache,
+                    &self.encryption_service,
+                    self.chunk_size_bytes,
+                )
+                .await
+                {
+                    Ok(data) => data,
+                    Err(e) => {
+                        error!("Failed to reassemble track: {}", e);
+                        self.stop().await;
+                        return;
+                    }
                 }
             }
         };
@@ -1298,5 +1315,124 @@ impl PlaybackService {
         tokio::fs::read(source_path)
             .await
             .map_err(|e| format!("Failed to read audio file {}: {}", source_path, e))
+    }
+
+    /// Load audio from non-chunked storage.
+    ///
+    /// For non-chunked storage, the file is stored whole (not split into chunks).
+    /// For CUE/FLAC tracks, we use byte ranges to extract the track's portion.
+    async fn load_audio_from_storage(
+        &self,
+        track_id: &str,
+        release_id: &str,
+        storage_profile: &crate::db::DbStorageProfile,
+    ) -> Result<Vec<u8>, String> {
+        info!(
+            "Loading audio from non-chunked storage for track {} (profile: {})",
+            track_id, storage_profile.name
+        );
+
+        // Get track chunk coords (contains byte ranges for CUE/FLAC)
+        let coords = self
+            .library_manager
+            .get_track_chunk_coords(track_id)
+            .await
+            .map_err(|e| format!("Database error: {}", e))?;
+
+        // Get audio format (has FLAC headers if needed)
+        let audio_format = self
+            .library_manager
+            .get_audio_format_by_track_id(track_id)
+            .await
+            .map_err(|e| format!("Database error: {}", e))?;
+
+        // Get the audio file for this release
+        let files = self
+            .library_manager
+            .get_files_for_release(release_id)
+            .await
+            .map_err(|e| format!("Failed to get files: {}", e))?;
+
+        let audio_file = files
+            .iter()
+            .find(|f| f.format.to_lowercase() == "flac" && f.source_path.is_some())
+            .ok_or_else(|| format!("No FLAC file found for release {}", release_id))?;
+
+        let source_path = audio_file
+            .source_path
+            .as_ref()
+            .ok_or_else(|| "Audio file has no source_path".to_string())?;
+
+        info!("Reading from storage path: {}", source_path);
+
+        // Read file based on storage location
+        let file_data = match storage_profile.location {
+            crate::db::StorageLocation::Local => tokio::fs::read(source_path)
+                .await
+                .map_err(|e| format!("Failed to read file {}: {}", source_path, e))?,
+            crate::db::StorageLocation::Cloud => {
+                // Download from cloud
+                self.cloud_storage
+                    .download_chunk(source_path)
+                    .await
+                    .map_err(|e| format!("Failed to download from cloud: {}", e))?
+            }
+        };
+
+        // Decrypt if needed
+        // Note: Non-chunked encrypted storage stores the nonce at the start of the file
+        let file_data = if storage_profile.encrypted {
+            if file_data.len() < 12 {
+                return Err("Encrypted file too small to contain nonce".to_string());
+            }
+            let nonce = &file_data[..12];
+            let ciphertext = &file_data[12..];
+            self.encryption_service
+                .decrypt(ciphertext, nonce)
+                .map_err(|e| format!("Failed to decrypt: {}", e))?
+        } else {
+            file_data
+        };
+
+        // Check if this is a CUE/FLAC track (has coords with byte ranges)
+        if let (Some(coords), Some(audio_format)) = (coords, audio_format) {
+            // chunk_index = -1 means non-chunked storage with absolute byte offsets
+            if coords.start_chunk_index == -1 {
+                let start_byte = coords.start_byte_offset as usize;
+                let end_byte = coords.end_byte_offset as usize;
+
+                info!(
+                    "Extracting track bytes {}-{} from {} byte file",
+                    start_byte,
+                    end_byte,
+                    file_data.len()
+                );
+
+                if end_byte > file_data.len() {
+                    return Err(format!(
+                        "Track byte range {}-{} exceeds file size {}",
+                        start_byte,
+                        end_byte,
+                        file_data.len()
+                    ));
+                }
+
+                let track_bytes = file_data[start_byte..end_byte].to_vec();
+
+                // Prepend FLAC headers if needed
+                if audio_format.needs_headers {
+                    if let Some(headers) = &audio_format.flac_headers {
+                        let mut result = headers.clone();
+                        result.extend_from_slice(&track_bytes);
+                        return Ok(result);
+                    }
+                }
+
+                return Ok(track_bytes);
+            }
+        }
+
+        // No coords or single-track file: return whole file
+        Ok(file_data)
     }
 }

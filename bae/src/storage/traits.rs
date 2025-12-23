@@ -401,13 +401,14 @@ impl ReleaseStorage for ReleaseStorageImpl {
         // Non-chunked: encrypt whole file if needed, write to storage
         let data_to_store = self.encrypt_if_needed(data)?;
 
-        match self.profile.location {
+        let storage_path = match self.profile.location {
             StorageLocation::Local => {
                 let path = self.file_path(release_id, filename);
                 if let Some(parent) = path.parent() {
                     tokio::fs::create_dir_all(parent).await?;
                 }
                 tokio::fs::write(&path, &data_to_store).await?;
+                path.display().to_string()
             }
             StorageLocation::Cloud => {
                 let cloud = self.cloud.as_ref().ok_or(StorageError::NotConfigured)?;
@@ -415,8 +416,23 @@ impl ReleaseStorage for ReleaseStorageImpl {
                 cloud
                     .upload_chunk_data(&key, &data_to_store)
                     .await
-                    .map_err(|e| StorageError::Cloud(e.to_string()))?;
+                    .map_err(|e| StorageError::Cloud(e.to_string()))?
             }
+        };
+
+        // Create DbFile record (even for non-chunked, so import can track files)
+        if let Some(db) = &self.database {
+            let format = std::path::Path::new(filename)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("bin")
+                .to_lowercase();
+            let mut db_file = DbFile::new(release_id, filename, data.len() as i64, &format);
+            db_file.source_path = Some(storage_path);
+
+            db.insert_file(&db_file)
+                .await
+                .map_err(|e| StorageError::Database(e.to_string()))?;
         }
 
         Ok(())

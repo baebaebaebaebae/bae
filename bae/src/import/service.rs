@@ -933,6 +933,14 @@ impl ImportService {
             id: db_release.id.clone(),
         });
 
+        // Link release to storage profile
+        let release_storage = crate::db::DbReleaseStorage::new(&db_release.id, &storage_profile.id);
+        self.database
+            .insert_release_storage(&release_storage)
+            .await
+            .map_err(|e| format!("Failed to link release to storage profile: {}", e))?;
+
+        let is_chunked = storage_profile.chunked;
         let storage = self.create_storage(storage_profile);
         let total_files = discovered_files.len();
 
@@ -977,61 +985,67 @@ impl ImportService {
         }
 
         // Persist track metadata (audio format, chunk coords for playback)
-        // The storage layer already created DbFile, DbChunk, and DbFileChunk records.
-        // We just need to create DbAudioFormat and DbTrackChunkCoords for each track.
+        // For chunked storage: DbFile, DbChunk, DbFileChunk already created by storage layer
+        // For non-chunked storage: only DbFile created, no chunks
 
-        // Build file-to-chunks mapping from the new DbFileChunk records
-        let mut files_to_chunks = Vec::new();
-        for file in discovered_files {
-            let filename = file.path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if is_chunked {
+            // Chunked storage: build file-to-chunks mapping from DB records
+            let mut files_to_chunks = Vec::new();
+            for file in discovered_files {
+                let filename = file.path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
-            // Get file record from DB
-            if let Ok(Some(db_file)) = library_manager
-                .get_file_by_release_and_filename(&db_release.id, filename)
-                .await
-            {
-                // Get chunk mappings for this file
-                if let Ok(file_chunks) = library_manager.get_file_chunks(&db_file.id).await {
-                    if !file_chunks.is_empty() {
-                        let start_chunk = file_chunks.first().unwrap().chunk_index;
-                        let end_chunk = file_chunks.last().unwrap().chunk_index;
-                        let start_offset = file_chunks.first().unwrap().byte_offset;
-                        let end_offset = file_chunks.last().unwrap().byte_offset
-                            + file_chunks.last().unwrap().byte_length;
+                // Get file record from DB
+                if let Ok(Some(db_file)) = library_manager
+                    .get_file_by_release_and_filename(&db_release.id, filename)
+                    .await
+                {
+                    // Get chunk mappings for this file
+                    if let Ok(file_chunks) = library_manager.get_file_chunks(&db_file.id).await {
+                        if !file_chunks.is_empty() {
+                            let start_chunk = file_chunks.first().unwrap().chunk_index;
+                            let end_chunk = file_chunks.last().unwrap().chunk_index;
+                            let start_offset = file_chunks.first().unwrap().byte_offset;
+                            let end_offset = file_chunks.last().unwrap().byte_offset
+                                + file_chunks.last().unwrap().byte_length;
 
-                        files_to_chunks.push(FileToChunks {
-                            file_path: file.path.clone(),
-                            start_chunk_index: start_chunk,
-                            end_chunk_index: end_chunk,
-                            start_byte_offset: start_offset,
-                            end_byte_offset: end_offset,
-                        });
+                            files_to_chunks.push(FileToChunks {
+                                file_path: file.path.clone(),
+                                start_chunk_index: start_chunk,
+                                end_chunk_index: end_chunk,
+                                start_byte_offset: start_offset,
+                                end_byte_offset: end_offset,
+                            });
+                        }
                     }
                 }
             }
-        }
 
-        // Persist track metadata for each track
-        let persister = MetadataPersister::new(library_manager);
+            // Build CueFlacLayoutData if we have CUE/FLAC metadata
+            let cue_flac_data = if let Some(ref cue_metadata) = cue_flac_metadata {
+                self.build_cue_flac_layout_data(cue_metadata, tracks_to_files, &files_to_chunks)
+                    .await?
+            } else {
+                HashMap::new()
+            };
 
-        // Build CueFlacLayoutData if we have CUE/FLAC metadata
-        let cue_flac_data = if let Some(ref cue_metadata) = cue_flac_metadata {
-            self.build_cue_flac_layout_data(cue_metadata, tracks_to_files, &files_to_chunks)
-                .await?
+            // Persist track metadata for each track
+            let persister = MetadataPersister::new(library_manager);
+            for track_file in tracks_to_files {
+                persister
+                    .persist_track_metadata(
+                        &db_release.id,
+                        &track_file.db_track_id,
+                        tracks_to_files,
+                        &files_to_chunks,
+                        self.config.chunk_size_bytes,
+                        &cue_flac_data,
+                    )
+                    .await?;
+            }
         } else {
-            HashMap::new()
-        };
-
-        for track_file in tracks_to_files {
-            persister
-                .persist_track_metadata(
-                    &db_release.id,
-                    &track_file.db_track_id,
-                    tracks_to_files,
-                    &files_to_chunks,
-                    self.config.chunk_size_bytes,
-                    &cue_flac_data,
-                )
+            // Non-chunked storage: create audio format records and byte ranges for seeking
+            // Playback uses HTTP range requests for cloud or direct file access for local
+            self.persist_non_chunked_track_metadata(tracks_to_files, cue_flac_metadata)
                 .await?;
         }
 
@@ -1047,6 +1061,146 @@ impl ImportService {
         });
 
         info!("Storage import complete for release {}", db_release.id);
+        Ok(())
+    }
+
+    /// Persist track metadata for non-chunked storage.
+    ///
+    /// For non-chunked storage, we create:
+    /// - DbAudioFormat for all tracks (with FLAC headers/seektable for CUE/FLAC)
+    /// - DbTrackChunkCoords with absolute byte positions for CUE/FLAC tracks
+    ///   (chunk indices are 0, byte offsets are absolute positions in file)
+    ///
+    /// Playback uses HTTP range requests for cloud or direct file seeking for local.
+    async fn persist_non_chunked_track_metadata(
+        &self,
+        tracks_to_files: &[TrackFile],
+        cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
+    ) -> Result<(), String> {
+        use crate::cue_flac::CueFlacProcessor;
+        use crate::db::{DbAudioFormat, DbTrackChunkCoords};
+        use crate::import::album_chunk_layout::{build_seektable, find_track_byte_range};
+
+        let library_manager = self.library_manager.get();
+
+        // Build CUE/FLAC layout data if present
+        let cue_flac_data = if let Some(ref cue_metadata) = cue_flac_metadata {
+            let mut data = HashMap::new();
+            for (flac_path, metadata) in cue_metadata {
+                let flac_headers = CueFlacProcessor::extract_flac_headers(flac_path)
+                    .map_err(|e| format!("Failed to extract FLAC headers: {}", e))?;
+
+                let seektable = build_seektable(flac_path)
+                    .map_err(|e| format!("Failed to build seektable: {}", e))?;
+
+                // Get tracks mapping to this FLAC
+                let flac_tracks: Vec<_> = tracks_to_files
+                    .iter()
+                    .filter(|tf| &tf.file_path == flac_path)
+                    .collect();
+
+                // Calculate byte ranges for each track
+                let mut track_byte_ranges = HashMap::new();
+                for (i, cue_track) in metadata.cue_sheet.tracks.iter().enumerate() {
+                    if let Some(db_track) = flac_tracks.get(i) {
+                        let (start_byte, end_byte) = find_track_byte_range(
+                            flac_path,
+                            cue_track.start_time_ms,
+                            cue_track.end_time_ms,
+                            &seektable,
+                        )?;
+                        track_byte_ranges
+                            .insert(db_track.db_track_id.clone(), (start_byte, end_byte));
+                    }
+                }
+
+                data.insert(
+                    flac_path.clone(),
+                    (metadata.clone(), flac_headers, seektable, track_byte_ranges),
+                );
+            }
+            data
+        } else {
+            HashMap::new()
+        };
+
+        for track_file in tracks_to_files {
+            let format = track_file
+                .file_path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("unknown")
+                .to_lowercase();
+
+            // Check if this is a CUE/FLAC track
+            if let Some((metadata, flac_headers, seektable, track_byte_ranges)) =
+                cue_flac_data.get(&track_file.file_path)
+            {
+                // CUE/FLAC track: store headers, seektable, and byte coords
+                let flac_seektable = bincode::serialize(seektable)
+                    .map_err(|e| format!("Failed to serialize seektable: {}", e))?;
+
+                let audio_format = DbAudioFormat::new_with_seektable(
+                    &track_file.db_track_id,
+                    "flac",
+                    Some(flac_headers.headers.clone()),
+                    Some(flac_seektable),
+                    true, // needs_headers = true for CUE/FLAC
+                );
+
+                library_manager
+                    .add_audio_format(&audio_format)
+                    .await
+                    .map_err(|e| format!("Failed to insert audio format: {}", e))?;
+
+                // Get byte range and time range for this track
+                if let Some(&(start_byte, end_byte)) =
+                    track_byte_ranges.get(&track_file.db_track_id)
+                {
+                    // Find the CUE track for time info
+                    let track_index = tracks_to_files
+                        .iter()
+                        .filter(|tf| tf.file_path == track_file.file_path)
+                        .position(|tf| tf.db_track_id == track_file.db_track_id)
+                        .unwrap_or(0);
+
+                    let cue_track = metadata.cue_sheet.tracks.get(track_index);
+                    let (start_time_ms, end_time_ms) = cue_track
+                        .map(|ct| (ct.start_time_ms as i64, ct.end_time_ms.unwrap_or(0) as i64))
+                        .unwrap_or((0, 0));
+
+                    // Store coords with chunk_index=-1 (sentinel for non-chunked) and absolute byte positions
+                    let coords = DbTrackChunkCoords::new(
+                        &track_file.db_track_id,
+                        -1, // start_chunk_index (-1 = non-chunked, use byte offsets directly)
+                        -1, // end_chunk_index
+                        start_byte, // absolute byte offset in file
+                        end_byte, // absolute byte offset in file
+                        start_time_ms,
+                        end_time_ms,
+                    );
+
+                    library_manager
+                        .add_track_chunk_coords(&coords)
+                        .await
+                        .map_err(|e| format!("Failed to insert track chunk coords: {}", e))?;
+                }
+            } else {
+                // Regular track: just audio format, no chunk coords needed
+                let audio_format = DbAudioFormat::new(
+                    &track_file.db_track_id,
+                    &format,
+                    None,  // No headers - they're in the stored file
+                    false, // needs_headers = false
+                );
+
+                library_manager
+                    .add_audio_format(&audio_format)
+                    .await
+                    .map_err(|e| format!("Failed to insert audio format: {}", e))?;
+            }
+        }
+
         Ok(())
     }
 
