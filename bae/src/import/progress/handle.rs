@@ -29,6 +29,7 @@ impl SubscriptionFilter {
                 ImportProgress::Complete {
                     id,
                     release_id: rid,
+                    ..
                 } => id == release_id || rid.as_ref() == Some(release_id),
                 ImportProgress::Failed { id, .. } => id == release_id,
             },

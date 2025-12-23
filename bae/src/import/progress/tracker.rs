@@ -122,6 +122,7 @@ impl ImportProgressTracker {
             let _ = self.tx.send(ImportProgress::Complete {
                 id: track_id.clone(),
                 release_id: Some(self.release_id.clone()),
+                cover_image_id: None, // Tracks don't have covers
             });
         }
 

@@ -49,7 +49,7 @@ use crate::import::types::{
     CueFlacLayoutData, CueFlacMetadata, DiscoveredFile, FileToChunks, ImportCommand,
     ImportProgress, TorrentSource, TrackFile,
 };
-use crate::library::SharedLibraryManager;
+use crate::library::{LibraryManager, SharedLibraryManager};
 use crate::storage::{ReleaseStorage, ReleaseStorageImpl};
 use crate::torrent::TorrentManagerHandle;
 use futures::stream::StreamExt;
@@ -276,57 +276,6 @@ impl ImportService {
         }
     }
 
-    /// Executes the streaming import pipeline for a folder-based import.
-    ///
-    /// Orchestrates the entire import workflow:
-    /// 1. Marks the album as 'importing'
-    /// 2. Streams files → encrypts → uploads (no upfront layout computation)
-    /// 3. After upload: computes layout, persists metadata, marks complete
-    async fn import_album_from_folder(
-        &self,
-        db_album: DbAlbum,
-        db_release: DbRelease,
-        tracks_to_files: Vec<TrackFile>,
-        discovered_files: Vec<DiscoveredFile>,
-        cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
-    ) -> Result<(), String> {
-        let library_manager = self.library_manager.get();
-
-        // Mark release as importing now that pipeline is starting
-        library_manager
-            .mark_release_importing(&db_release.id)
-            .await
-            .map_err(|e| format!("Failed to mark release as importing: {}", e))?;
-
-        info!("Marked release as 'importing' - starting pipeline");
-
-        // Send started progress
-        let _ = self.progress_tx.send(ImportProgress::Started {
-            id: db_release.id.clone(),
-        });
-
-        // ========== CHUNK PHASE ==========
-        // Folder import has no acquire phase (files already available)
-        // Run chunk phase directly
-
-        self.run_chunk_phase(
-            &db_release,
-            &tracks_to_files,
-            &discovered_files,
-            cue_flac_metadata,
-        )
-        .await?;
-
-        // Send release completion event
-        let _ = self.progress_tx.send(ImportProgress::Complete {
-            id: db_release.id,
-            release_id: None,
-        });
-
-        info!("Import completed successfully for {}", db_album.title);
-        Ok(())
-    }
-
     /// Executes the streaming import pipeline for a torrent-based import.
     ///
     /// Orchestrates the entire import workflow:
@@ -515,9 +464,11 @@ impl ImportService {
         }
 
         // Send release completion event
+        // Note: This old code path doesn't create image records, so cover_image_id is None
         let _ = self.progress_tx.send(ImportProgress::Complete {
             id: db_release.id,
             release_id: None,
+            cover_image_id: None,
         });
 
         info!(
@@ -712,9 +663,11 @@ impl ImportService {
         }
 
         // Send release completion event
+        // Note: This old code path doesn't create image records, so cover_image_id is None
         let _ = self.progress_tx.send(ImportProgress::Complete {
             id: db_release.id,
             release_id: None,
+            cover_image_id: None,
         });
 
         info!("CD import completed successfully for {}", db_album.title);
@@ -1052,6 +1005,16 @@ impl ImportService {
                 .await?;
         }
 
+        // Create DbImage records for image files and set album cover
+        let cover_image_id = self
+            .create_image_records(
+                &db_release.id,
+                &db_release.album_id,
+                discovered_files,
+                library_manager,
+            )
+            .await?;
+
         // Mark all tracks complete and send completion events
         for track_file in tracks_to_files {
             library_manager
@@ -1062,6 +1025,7 @@ impl ImportService {
             let _ = self.progress_tx.send(ImportProgress::Complete {
                 id: track_file.db_track_id.clone(),
                 release_id: Some(db_release.id.clone()),
+                cover_image_id: None, // Tracks don't have covers
             });
         }
 
@@ -1071,14 +1035,142 @@ impl ImportService {
             .await
             .map_err(|e| format!("Failed to mark release complete: {}", e))?;
 
-        // Send release completion event
+        // Send release completion event with cover_image_id for reactive UI update
         let _ = self.progress_tx.send(ImportProgress::Complete {
             id: db_release.id.clone(),
             release_id: None,
+            cover_image_id,
         });
 
         info!("Storage import complete for release {}", db_release.id);
         Ok(())
+    }
+
+    /// Create DbImage records for image files in the discovered files.
+    ///
+    /// Detects image files (.jpg, .jpeg, .png, .gif, .webp) and creates database records.
+    /// Files in .bae/ folder are marked as MusicBrainz/Discogs source based on filename.
+    /// The first image found (preferring .bae/ folder or cover/front named files) is marked as cover.
+    /// Also sets the album's cover_image_id to the cover image.
+    ///
+    /// Returns the cover_image_id if one was set.
+    async fn create_image_records(
+        &self,
+        release_id: &str,
+        album_id: &str,
+        discovered_files: &[DiscoveredFile],
+        library_manager: &LibraryManager,
+    ) -> Result<Option<String>, String> {
+        use crate::db::{DbImage, ImageSource};
+
+        let image_extensions = ["jpg", "jpeg", "png", "gif", "webp"];
+
+        // Collect image files
+        let mut image_files: Vec<(&DiscoveredFile, String)> = discovered_files
+            .iter()
+            .filter_map(|f| {
+                let filename = f.path.file_name()?.to_str()?;
+                let ext = f.path.extension()?.to_str()?.to_lowercase();
+                if image_extensions.contains(&ext.as_str()) {
+                    // Get relative path (include .bae/ prefix if present)
+                    let relative_path = if let Some(parent) = f.path.parent() {
+                        if let Some(parent_name) = parent.file_name() {
+                            if parent_name == ".bae" {
+                                format!(".bae/{}", filename)
+                            } else {
+                                filename.to_string()
+                            }
+                        } else {
+                            filename.to_string()
+                        }
+                    } else {
+                        filename.to_string()
+                    };
+                    Some((f, relative_path))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if image_files.is_empty() {
+            return Ok(None);
+        }
+
+        // Sort to prioritize .bae/ folder and cover/front named files for cover selection
+        image_files.sort_by(|(_, a), (_, b)| {
+            let a_priority = Self::image_cover_priority(a);
+            let b_priority = Self::image_cover_priority(b);
+            a_priority.cmp(&b_priority)
+        });
+
+        let mut cover_set = false;
+        let mut cover_image_id: Option<String> = None;
+
+        for (_file, relative_path) in &image_files {
+            // Determine source based on path
+            let source = if relative_path.starts_with(".bae/") {
+                let filename_lower = relative_path.to_lowercase();
+                if filename_lower.contains("-mb") || filename_lower.contains("musicbrainz") {
+                    ImageSource::MusicBrainz
+                } else if filename_lower.contains("-discogs") || filename_lower.contains("discogs")
+                {
+                    ImageSource::Discogs
+                } else {
+                    ImageSource::Local
+                }
+            } else {
+                ImageSource::Local
+            };
+
+            // First image (highest priority) is the cover
+            let is_cover = !cover_set;
+            if is_cover {
+                cover_set = true;
+            }
+
+            let db_image = DbImage::new(release_id, relative_path, is_cover, source);
+            let image_id = db_image.id.clone();
+
+            library_manager
+                .add_image(&db_image)
+                .await
+                .map_err(|e| format!("Failed to add image record: {}", e))?;
+
+            // Set album's cover_image_id for the cover image
+            if is_cover {
+                library_manager
+                    .set_album_cover_image(album_id, &image_id)
+                    .await
+                    .map_err(|e| format!("Failed to set album cover image: {}", e))?;
+                cover_image_id = Some(image_id.clone());
+            }
+
+            info!(
+                "Created DbImage: {} (cover={}, source={:?})",
+                relative_path, is_cover, source
+            );
+        }
+
+        Ok(cover_image_id)
+    }
+
+    /// Get priority for cover image selection (lower = higher priority)
+    fn image_cover_priority(filename: &str) -> u8 {
+        let lower = filename.to_lowercase();
+
+        // .bae/ folder files have highest priority (downloaded cover art)
+        if lower.starts_with(".bae/") {
+            return 0;
+        }
+
+        // Files named cover/front have second priority
+        if lower.contains("cover") || lower.contains("front") {
+            return 1;
+        }
+
+        // Everything else
+        2
     }
 
     /// Persist track metadata for non-chunked storage.
@@ -1310,8 +1402,19 @@ impl ImportService {
             let _ = self.progress_tx.send(ImportProgress::Complete {
                 id: track_file.db_track_id.clone(),
                 release_id: Some(db_release.id.clone()),
+                cover_image_id: None, // Tracks don't have covers
             });
         }
+
+        // Create DbImage records for image files
+        let cover_image_id = self
+            .create_image_records(
+                &db_release.id,
+                &db_release.album_id,
+                discovered_files,
+                library_manager,
+            )
+            .await?;
 
         // Mark release complete
         library_manager
@@ -1319,10 +1422,11 @@ impl ImportService {
             .await
             .map_err(|e| format!("Failed to mark release complete: {}", e))?;
 
-        // Send release completion event
+        // Send release completion event with cover_image_id for reactive UI update
         let _ = self.progress_tx.send(ImportProgress::Complete {
             id: db_release.id.clone(),
             release_id: None,
+            cover_image_id,
         });
 
         info!("None storage import complete for release {}", db_release.id);
@@ -1518,8 +1622,19 @@ impl ImportService {
             let _ = self.progress_tx.send(ImportProgress::Complete {
                 id: track_file.db_track_id.clone(),
                 release_id: Some(db_release.id.clone()),
+                cover_image_id: None, // Tracks don't have covers
             });
         }
+
+        // Create DbImage records for image files
+        let cover_image_id = self
+            .create_image_records(
+                &db_release.id,
+                &db_release.album_id,
+                &discovered_files,
+                library_manager,
+            )
+            .await?;
 
         // Mark release complete
         library_manager
@@ -1527,10 +1642,11 @@ impl ImportService {
             .await
             .map_err(|e| format!("Failed to mark release complete: {}", e))?;
 
-        // Send release completion event
+        // Send release completion event with cover_image_id for reactive UI update
         let _ = self.progress_tx.send(ImportProgress::Complete {
             id: db_release.id.clone(),
             release_id: None,
+            cover_image_id,
         });
 
         // NOTE: We intentionally skip cleanup - files stay in temp folder
@@ -1685,6 +1801,7 @@ impl ImportService {
             let _ = self.progress_tx.send(ImportProgress::Complete {
                 id: track.id.clone(),
                 release_id: Some(db_release.id.clone()),
+                cover_image_id: None, // Tracks don't have covers
             });
         }
 
@@ -1695,9 +1812,11 @@ impl ImportService {
             .map_err(|e| format!("Failed to mark release complete: {}", e))?;
 
         // Send release completion event
+        // CD rips don't have image files, so cover_image_id is None
         let _ = self.progress_tx.send(ImportProgress::Complete {
             id: db_release.id.clone(),
             release_id: None,
+            cover_image_id: None,
         });
 
         info!(

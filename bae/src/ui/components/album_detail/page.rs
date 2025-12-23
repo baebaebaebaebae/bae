@@ -20,7 +20,7 @@ pub fn AlbumDetail(
 ) -> Element {
     let maybe_release_id = use_memo(move || maybe_not_empty(release_id()));
     let data = use_album_detail_data(album_id, maybe_release_id);
-    let import_progress = use_release_progress(data.album_resource, data.selected_release_id);
+    let import_state = use_release_import_state(data.album_resource, data.selected_release_id);
 
     let on_album_deleted = move |_| {
         // Navigate back to library after deletion
@@ -72,15 +72,22 @@ pub fn AlbumDetail(
                         .and_then(|r| r.as_ref().ok())
                         .cloned()
                         .unwrap_or_default();
+
+                    // Apply reactive cover_image_id override from import completion
+                    let mut album_with_cover = album.clone();
+                    if let Some(cover_id) = import_state.cover_image_id.read().as_ref() {
+                        album_with_cover.cover_image_id = Some(cover_id.clone());
+                    }
+
                     rsx! {
                         AlbumDetailView {
-                            album: album.clone(),
+                            album: album_with_cover,
                             releases: releases.clone(),
                             artists,
                             selected_release_id,
                             on_release_select,
                             tracks,
-                            import_progress,
+                            import_progress: import_state.progress,
                             on_album_deleted,
                         }
                     }
@@ -172,11 +179,20 @@ fn use_album_detail_data(
     }
 }
 
-fn use_release_progress(
+/// State returned by the release import hook
+struct ReleaseImportState {
+    /// Current import progress percentage (None if not importing)
+    progress: Signal<Option<u8>>,
+    /// Cover image ID received from import completion (for reactive UI update)
+    cover_image_id: Signal<Option<String>>,
+}
+
+fn use_release_import_state(
     album_resource: Resource<Result<(DbAlbum, Vec<DbRelease>), LibraryError>>,
     selected_release_id: Memo<Option<String>>,
-) -> Signal<Option<u8>> {
+) -> ReleaseImportState {
     let mut progress = use_signal(|| None::<u8>);
+    let mut cover_image_id = use_signal(|| None::<String>);
     let import_service = use_import_service();
 
     use_effect(move || {
@@ -214,8 +230,6 @@ fn use_release_progress(
                             phase: _phase,
                             ..
                         } => {
-                            // phase can be None (for backward compatibility) or Some(Rip/Chunk)
-                            // UI can display differently based on phase if needed
                             progress.set(Some(percent));
                         }
                         ImportProgress::FileProgress {
@@ -226,7 +240,21 @@ fn use_release_progress(
                             let percent = ((file_index + 1) * 100 / total_files) as u8;
                             progress.set(Some(percent));
                         }
-                        ImportProgress::Complete { .. } | ImportProgress::Failed { .. } => {
+                        ImportProgress::Complete {
+                            cover_image_id: cid,
+                            release_id: rid,
+                            ..
+                        } => {
+                            // Only update cover for release completion (not track completion)
+                            if rid.is_none() {
+                                if let Some(id) = cid {
+                                    cover_image_id.set(Some(id));
+                                }
+                                progress.set(None);
+                                break;
+                            }
+                        }
+                        ImportProgress::Failed { .. } => {
                             progress.set(None);
                             break;
                         }
@@ -239,5 +267,8 @@ fn use_release_progress(
         }
     });
 
-    progress
+    ReleaseImportState {
+        progress,
+        cover_image_id,
+    }
 }
