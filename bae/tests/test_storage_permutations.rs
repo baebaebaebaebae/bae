@@ -15,7 +15,7 @@ use bae::cloud_storage::CloudStorageManager;
 use bae::db::{Database, DbStorageProfile, ImportStatus, StorageLocation};
 use bae::discogs::models::{DiscogsRelease, DiscogsTrack};
 use bae::encryption::EncryptionService;
-use bae::import::{ImportConfig, ImportProgress, ImportRequest, ImportService};
+use bae::import::{ImportConfig, ImportPhase, ImportProgress, ImportRequest, ImportService};
 use bae::library::LibraryManager;
 use bae::test_support::MockCloudStorage;
 use bae::torrent::TorrentManagerHandle;
@@ -44,7 +44,7 @@ async fn test_storage_permutations() {
                     "\n\n========== Testing: {:?} / chunked={} / encrypted={} ==========\n",
                     location, chunked, encrypted
                 );
-                run_storage_test(location.clone(), chunked, encrypted).await;
+                run_storage_test(location, chunked, encrypted).await;
             }
         }
     }
@@ -152,33 +152,58 @@ async fn run_storage_test(location: StorageLocation, chunked: bool, encrypted: b
 
     info!("Import request sent, release_id: {}", release_id);
 
-    // 7. Wait for completion and collect Complete events
+    // 7. Wait for completion and collect progress events
     let mut progress_rx = import_handle.subscribe_release(release_id.clone());
     let mut track_complete_ids: std::collections::HashSet<String> =
         std::collections::HashSet::new();
     let mut release_complete_received = false;
 
+    // Track progress events for verification
+    let mut release_progress_received = false;
+    let mut max_release_percent: u8 = 0;
+    let mut progress_events_with_chunk_phase = 0;
+
     while let Some(progress) = progress_rx.recv().await {
         info!("Progress: {:?}", progress);
-        if let ImportProgress::Complete {
-            id,
-            release_id: rid,
-            ..
-        } = &progress
-        {
-            if rid.is_none() {
-                // This is a release completion (release_id is None for release completions)
-                release_complete_received = true;
-                info!("Release completion event received!");
-                break;
-            } else {
-                // This is a track completion
-                track_complete_ids.insert(id.clone());
-                info!("Track completion event received for: {}", id);
+        match &progress {
+            ImportProgress::Progress { id, percent, phase } => {
+                // Release subscription only receives release-level Progress events (id == release_id)
+                // Track-level Progress events require individual track subscriptions
+                if id == &release_id {
+                    // Verify phase is Chunk for storage imports
+                    assert_eq!(
+                        *phase,
+                        Some(ImportPhase::Chunk),
+                        "Storage import progress should have phase=Chunk"
+                    );
+                    progress_events_with_chunk_phase += 1;
+
+                    release_progress_received = true;
+                    if *percent > max_release_percent {
+                        max_release_percent = *percent;
+                    }
+                }
             }
-        }
-        if let ImportProgress::Failed { error, .. } = progress {
-            panic!("Import failed: {}", error);
+            ImportProgress::Complete {
+                id,
+                release_id: rid,
+                ..
+            } => {
+                if rid.is_none() {
+                    // This is a release completion (release_id is None for release completions)
+                    release_complete_received = true;
+                    info!("Release completion event received!");
+                    break;
+                } else {
+                    // This is a track completion
+                    track_complete_ids.insert(id.clone());
+                    info!("Track completion event received for: {}", id);
+                }
+            }
+            ImportProgress::Failed { error, .. } => {
+                panic!("Import failed: {}", error);
+            }
+            _ => {}
         }
     }
 
@@ -233,6 +258,24 @@ async fn run_storage_test(location: StorageLocation, chunked: bool, encrypted: b
         track_complete_ids
     );
     info!("✓ Received Complete events for all {} tracks", tracks.len());
+
+    // 9c. Verify ImportProgress::Progress events were sent during import
+    assert!(
+        release_progress_received,
+        "Should receive ImportProgress::Progress events for release during import"
+    );
+    assert_eq!(
+        max_release_percent, 100,
+        "Release progress should reach 100%"
+    );
+    assert!(
+        progress_events_with_chunk_phase > 0,
+        "Should receive multiple Progress events with phase=Chunk"
+    );
+    info!(
+        "✓ Received {} Progress events for release (max: {}%, phase=Chunk)",
+        progress_events_with_chunk_phase, max_release_percent
+    );
 
     // 10. Verify DB: DbFile records exist
     // For chunked: file exists but may not have source_path (data is in chunks)

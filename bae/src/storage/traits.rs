@@ -34,6 +34,9 @@ pub enum StorageError {
     Database(String),
 }
 
+/// Progress callback type: (bytes_written, total_bytes)
+pub type ProgressCallback = Box<dyn Fn(usize, usize) + Send + Sync>;
+
 /// Trait for reading/writing release files to storage
 ///
 /// Abstracts over different storage configurations (local/cloud, encrypted/plain, chunked/raw).
@@ -43,13 +46,21 @@ pub trait ReleaseStorage: Send + Sync {
     /// Read a file from storage
     async fn read_file(&self, release_id: &str, filename: &str) -> Result<Vec<u8>, StorageError>;
 
-    /// Write a file to storage
+    /// Write a file to storage with progress reporting.
+    ///
+    /// For chunked storage: reports after each chunk completes.
+    /// For non-chunked storage: streams write in 1MB batches.
+    ///
+    /// `start_chunk_index` is used for sequential chunk numbering across files.
+    /// Returns the next chunk index (for chaining writes).
     async fn write_file(
         &self,
         release_id: &str,
         filename: &str,
         data: &[u8],
-    ) -> Result<(), StorageError>;
+        start_chunk_index: i32,
+        on_progress: ProgressCallback,
+    ) -> Result<i32, StorageError>;
 
     /// List all files for a release
     async fn list_files(&self, release_id: &str) -> Result<Vec<String>, StorageError>;
@@ -59,13 +70,6 @@ pub trait ReleaseStorage: Send + Sync {
 
     /// Delete a file from storage
     async fn delete_file(&self, release_id: &str, filename: &str) -> Result<(), StorageError>;
-
-    /// Write multiple files to storage with proper release-level chunking
-    async fn write_files(
-        &self,
-        release_id: &str,
-        files: &[(&str, &[u8])],
-    ) -> Result<(), StorageError>;
 }
 
 /// Storage implementation that applies transforms based on StorageProfile flags
@@ -200,22 +204,20 @@ impl ReleaseStorageImpl {
         format!("{}/chunks/{}", release_id, chunk_id)
     }
 
-    /// Write chunked file data
-    ///
-    /// Takes a starting chunk index and returns the next available chunk index.
-    /// This allows sequential chunk indices across multiple files in a release.
-    async fn write_chunked(
+    /// Write chunked file data with progress reporting (internal helper).
+    async fn write_chunked<F>(
         &self,
         release_id: &str,
         filename: &str,
         data: &[u8],
         start_chunk_index: i32,
-    ) -> Result<i32, StorageError> {
+        on_progress: &F,
+    ) -> Result<i32, StorageError>
+    where
+        F: Fn(usize, usize) + Send + Sync + ?Sized,
+    {
         use futures::stream::{self, StreamExt};
-        use std::time::Instant;
-        use tracing::info;
 
-        let total_start = Instant::now();
         let db = self.database.clone().ok_or(StorageError::NotConfigured)?;
 
         // Create file record
@@ -232,10 +234,13 @@ impl ReleaseStorageImpl {
             .map_err(|e| StorageError::Database(e.to_string()))?;
 
         let num_chunks = (data.len() + self.chunk_size_bytes - 1) / self.chunk_size_bytes;
+        let total_bytes = data.len();
 
-        // Phase 1: Prepare all chunks (encrypt if needed) - CPU bound, sequential
-        let encrypt_start = Instant::now();
-        let mut prepared_chunks: Vec<(String, i32, Vec<u8>, usize)> =
+        // Report initial progress
+        on_progress(0, total_bytes);
+
+        // Phase 1: Prepare all chunks (encrypt if needed)
+        let mut prepared_chunks: Vec<(String, i32, Vec<u8>, usize, usize)> =
             Vec::with_capacity(num_chunks);
         let mut offset = 0usize;
         let mut chunk_index = start_chunk_index;
@@ -248,15 +253,12 @@ impl ReleaseStorageImpl {
             let chunk_to_store = self.encrypt_if_needed(chunk_data)?;
             let chunk_id = Uuid::new_v4().to_string();
 
-            prepared_chunks.push((chunk_id, chunk_index, chunk_to_store, original_len));
+            // Track cumulative bytes for progress (end position of this chunk)
+            prepared_chunks.push((chunk_id, chunk_index, chunk_to_store, original_len, end));
 
             offset = end;
             chunk_index += 1;
         }
-        let encrypt_ms = encrypt_start.elapsed().as_millis();
-
-        // Phase 2: Write chunks + DB inserts in parallel
-        let write_start = Instant::now();
 
         // Create directory once for local storage
         let chunks_dir = match self.profile.location {
@@ -271,13 +273,18 @@ impl ReleaseStorageImpl {
         let cloud = self.cloud.clone();
         let release_id_owned = release_id.to_string();
 
+        // Phase 2: Write chunks in parallel with per-chunk progress reporting
+        // Use atomic counter to track progress across concurrent chunk completions
+        let bytes_written = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
         let results: Vec<Result<(), StorageError>> = stream::iter(prepared_chunks.into_iter().map(
-            |(chunk_id, idx, encrypted_data, original_len)| {
+            |(chunk_id, idx, encrypted_data, original_len, cumulative_bytes)| {
                 let chunks_dir = chunks_dir.clone();
                 let cloud = cloud.clone();
                 let db = db.clone();
                 let release_id = release_id_owned.clone();
                 let file_id = file_id.clone();
+                let bytes_written = bytes_written.clone();
 
                 async move {
                     // Write to storage
@@ -313,11 +320,21 @@ impl ReleaseStorageImpl {
                         .await
                         .map_err(|e| StorageError::Database(e.to_string()))?;
 
+                    // Update progress (chunks complete out of order, so use max)
+                    bytes_written.fetch_max(cumulative_bytes, std::sync::atomic::Ordering::SeqCst);
+
                     Ok(())
                 }
             },
         ))
         .buffer_unordered(16)
+        .inspect(|result| {
+            // Report progress after each chunk completes (success or failure)
+            if result.is_ok() {
+                let current = bytes_written.load(std::sync::atomic::Ordering::SeqCst);
+                on_progress(current, total_bytes);
+            }
+        })
         .collect()
         .await;
 
@@ -326,19 +343,92 @@ impl ReleaseStorageImpl {
             result?;
         }
 
-        let write_ms = write_start.elapsed().as_millis();
-
-        info!(
-            "write_chunked {} ({} bytes, {} chunks): encrypt={}ms, write+db={}ms, total={}ms",
-            filename,
-            data.len(),
-            num_chunks,
-            encrypt_ms,
-            write_ms,
-            total_start.elapsed().as_millis()
-        );
-
         Ok(chunk_index)
+    }
+
+    /// Write non-chunked file with progress reporting (internal helper).
+    async fn write_non_chunked<F>(
+        &self,
+        release_id: &str,
+        filename: &str,
+        data: &[u8],
+        on_progress: &F,
+    ) -> Result<(), StorageError>
+    where
+        F: Fn(usize, usize) + Send + Sync + ?Sized,
+    {
+        use tokio::io::AsyncWriteExt;
+
+        let total_bytes = data.len();
+
+        // Report initial progress
+        on_progress(0, total_bytes);
+
+        // Encrypt whole file if needed
+        let data_to_store = self.encrypt_if_needed(data)?;
+
+        let storage_path = match self.profile.location {
+            StorageLocation::Local => {
+                let path = self.file_path(release_id, filename);
+                if let Some(parent) = path.parent() {
+                    tokio::fs::create_dir_all(parent).await?;
+                }
+
+                // Stream write in 1MB batches for progress reporting
+                let batch_size = 1_048_576; // 1MB
+                let file = tokio::fs::File::create(&path).await?;
+                let mut writer = tokio::io::BufWriter::new(file);
+
+                let mut bytes_written = 0usize;
+                for chunk in data_to_store.chunks(batch_size) {
+                    writer.write_all(chunk).await?;
+                    bytes_written += chunk.len();
+
+                    // Report progress based on original data size (pre-encryption)
+                    // Scale from encrypted size back to original size
+                    let progress_bytes = if data_to_store.len() != data.len() {
+                        (bytes_written as f64 * data.len() as f64 / data_to_store.len() as f64)
+                            as usize
+                    } else {
+                        bytes_written
+                    };
+                    on_progress(progress_bytes.min(total_bytes), total_bytes);
+                }
+                writer.flush().await?;
+
+                path.display().to_string()
+            }
+            StorageLocation::Cloud => {
+                // For cloud, we upload atomically (no streaming progress within upload)
+                // But we report 0% then 100%
+                let cloud = self.cloud.as_ref().ok_or(StorageError::NotConfigured)?;
+                let key = self.cloud_key(release_id, filename);
+                let storage_location = cloud
+                    .upload_chunk_data(&key, &data_to_store)
+                    .await
+                    .map_err(|e| StorageError::Cloud(e.to_string()))?;
+
+                on_progress(total_bytes, total_bytes);
+                storage_location
+            }
+        };
+
+        // Create DbFile record
+        if let Some(db) = &self.database {
+            let format = std::path::Path::new(filename)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("bin")
+                .to_lowercase();
+            let mut db_file = DbFile::new(release_id, filename, data.len() as i64, &format);
+            db_file.source_path = Some(storage_path);
+
+            db.insert_file(&db_file)
+                .await
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+        }
+
+        Ok(())
     }
 
     /// Read chunked file data
@@ -454,70 +544,17 @@ impl ReleaseStorage for ReleaseStorageImpl {
         release_id: &str,
         filename: &str,
         data: &[u8],
-    ) -> Result<(), StorageError> {
+        start_chunk_index: i32,
+        on_progress: ProgressCallback,
+    ) -> Result<i32, StorageError> {
         if self.profile.chunked {
-            self.write_chunked(release_id, filename, data, 0).await?;
-            return Ok(());
-        }
-
-        // Non-chunked: encrypt whole file if needed, write to storage
-        let data_to_store = self.encrypt_if_needed(data)?;
-
-        let storage_path = match self.profile.location {
-            StorageLocation::Local => {
-                let path = self.file_path(release_id, filename);
-                if let Some(parent) = path.parent() {
-                    tokio::fs::create_dir_all(parent).await?;
-                }
-                tokio::fs::write(&path, &data_to_store).await?;
-                path.display().to_string()
-            }
-            StorageLocation::Cloud => {
-                let cloud = self.cloud.as_ref().ok_or(StorageError::NotConfigured)?;
-                let key = self.cloud_key(release_id, filename);
-                cloud
-                    .upload_chunk_data(&key, &data_to_store)
-                    .await
-                    .map_err(|e| StorageError::Cloud(e.to_string()))?
-            }
-        };
-
-        // Create DbFile record (even for non-chunked, so import can track files)
-        if let Some(db) = &self.database {
-            let format = std::path::Path::new(filename)
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("bin")
-                .to_lowercase();
-            let mut db_file = DbFile::new(release_id, filename, data.len() as i64, &format);
-            db_file.source_path = Some(storage_path);
-
-            db.insert_file(&db_file)
+            self.write_chunked(release_id, filename, data, start_chunk_index, &*on_progress)
                 .await
-                .map_err(|e| StorageError::Database(e.to_string()))?;
-        }
-
-        Ok(())
-    }
-
-    async fn write_files(
-        &self,
-        release_id: &str,
-        files: &[(&str, &[u8])], // (filename, data)
-    ) -> Result<(), StorageError> {
-        if self.profile.chunked {
-            let mut chunk_index = 0i32;
-            for (filename, data) in files {
-                chunk_index = self
-                    .write_chunked(release_id, filename, data, chunk_index)
-                    .await?;
-            }
         } else {
-            for (filename, data) in files {
-                self.write_file(release_id, filename, data).await?;
-            }
+            self.write_non_chunked(release_id, filename, data, &*on_progress)
+                .await?;
+            Ok(start_chunk_index)
         }
-        Ok(())
     }
 
     async fn list_files(&self, release_id: &str) -> Result<Vec<String>, StorageError> {
@@ -616,6 +653,11 @@ mod tests {
         EncryptionService::new_with_key(vec![0u8; 32])
     }
 
+    /// No-op progress callback for tests
+    fn no_progress() -> ProgressCallback {
+        Box::new(|_, _| {})
+    }
+
     #[tokio::test]
     async fn test_write_and_read_file() {
         let temp_dir = TempDir::new().unwrap();
@@ -627,7 +669,7 @@ mod tests {
 
         // Write
         storage
-            .write_file(release_id, filename, data)
+            .write_file(release_id, filename, data, 0, no_progress())
             .await
             .unwrap();
 
@@ -648,7 +690,7 @@ mod tests {
 
         // Write it
         storage
-            .write_file(release_id, "yes.txt", b"hello")
+            .write_file(release_id, "yes.txt", b"hello", 0, no_progress())
             .await
             .unwrap();
 
@@ -669,15 +711,15 @@ mod tests {
 
         // Add some files
         storage
-            .write_file(release_id, "track01.flac", b"audio1")
+            .write_file(release_id, "track01.flac", b"audio1", 0, no_progress())
             .await
             .unwrap();
         storage
-            .write_file(release_id, "track02.flac", b"audio2")
+            .write_file(release_id, "track02.flac", b"audio2", 0, no_progress())
             .await
             .unwrap();
         storage
-            .write_file(release_id, "cover.jpg", b"image")
+            .write_file(release_id, "cover.jpg", b"image", 0, no_progress())
             .await
             .unwrap();
 
@@ -696,7 +738,7 @@ mod tests {
 
         // Write and verify
         storage
-            .write_file(release_id, "delete-me.txt", b"bye")
+            .write_file(release_id, "delete-me.txt", b"bye", 0, no_progress())
             .await
             .unwrap();
         assert!(storage
@@ -738,7 +780,7 @@ mod tests {
 
         // Write encrypted
         storage
-            .write_file(release_id, filename, data)
+            .write_file(release_id, filename, data, 0, no_progress())
             .await
             .unwrap();
 

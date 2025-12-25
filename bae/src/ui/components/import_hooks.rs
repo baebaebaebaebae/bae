@@ -53,7 +53,7 @@ pub fn use_track_progress(
                             state.set(TrackImportState::Importing { percent: 0 });
                         }
                         ImportProgress::Progress { percent, phase, .. } => {
-                            // phase can be None (for backward compatibility) or Some(Rip/Chunk)
+                            // phase can be None (for backward compatibility) or Some(Acquire/Chunk)
                             // UI can display differently based on phase if needed
                             trace!(
                                 "Track {} progress: {}% (phase: {:?})",
@@ -63,15 +63,8 @@ pub fn use_track_progress(
                             );
                             state.set(TrackImportState::Importing { percent });
                         }
-                        ImportProgress::FileProgress {
-                            file_index,
-                            total_files,
-                            ..
-                        } => {
-                            let percent = ((file_index + 1) * 100 / total_files) as u8;
-                            trace!("Track {} file progress: {}%", track_id, percent);
-                            state.set(TrackImportState::Importing { percent });
-                        }
+                        // FileProgress is release-level only, filtered out for track subscriptions
+                        ImportProgress::FileProgress { .. } => {}
                         ImportProgress::Complete { .. } => {
                             trace!("Track {} complete", track_id);
                             state.set(TrackImportState::Complete);

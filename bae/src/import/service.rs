@@ -41,12 +41,13 @@ use crate::cloud_storage::CloudStorageManager;
 use crate::db::{Database, DbAlbum, DbFile, DbRelease, DbStorageProfile, DbTrack};
 use crate::encryption::EncryptionService;
 use crate::import::album_chunk_layout::AlbumChunkLayout;
+use crate::import::album_chunk_layout::{build_seektable, find_track_byte_range};
 use crate::import::handle::{ImportServiceHandle, TorrentImportMetadata};
 use crate::import::metadata_persister::MetadataPersister;
 use crate::import::pipeline;
 use crate::import::progress::ImportProgressTracker;
 use crate::import::types::{
-    CueFlacLayoutData, CueFlacMetadata, DiscoveredFile, FileToChunks, ImportCommand,
+    CueFlacLayoutData, CueFlacMetadata, DiscoveredFile, FileToChunks, ImportCommand, ImportPhase,
     ImportProgress, TorrentSource, TrackFile,
 };
 use crate::library::{LibraryManager, SharedLibraryManager};
@@ -55,6 +56,27 @@ use crate::torrent::TorrentManagerHandle;
 use futures::stream::StreamExt;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
+
+/// Calculate track progress percentage based on bytes written.
+///
+/// For CUE/FLAC: tracks have specific byte ranges within the file.
+/// For one-file-per-track: track spans entire file (start=0, end=file_size).
+fn calculate_track_percent(bytes_written: usize, start_byte: i64, end_byte: i64) -> u8 {
+    let bytes_written = bytes_written as i64;
+    if bytes_written >= end_byte {
+        100
+    } else if bytes_written <= start_byte {
+        0
+    } else {
+        let written_for_track = bytes_written - start_byte;
+        let track_size = end_byte - start_byte;
+        if track_size <= 0 {
+            100
+        } else {
+            ((written_for_track * 100) / track_size) as u8
+        }
+    }
+}
 
 /// Configuration for import service
 #[derive(Clone)]
@@ -802,6 +824,92 @@ impl ImportService {
         )
     }
 
+    /// Build a map from filename to track progress info for progress reporting.
+    ///
+    /// For CUE/FLAC: calculates byte ranges for each track within the shared FLAC file.
+    /// For one-file-per-track: each track spans the entire file (0 to file_size).
+    ///
+    /// Returns: HashMap<filename, Vec<(track_id, start_byte, end_byte)>>
+    async fn build_track_progress_map(
+        &self,
+        tracks_to_files: &[TrackFile],
+        file_data: &[(String, Vec<u8>, PathBuf)],
+        cue_flac_metadata: &Option<HashMap<PathBuf, CueFlacMetadata>>,
+    ) -> Result<HashMap<String, Vec<(String, i64, i64)>>, String> {
+        let mut result: HashMap<String, Vec<(String, i64, i64)>> = HashMap::new();
+
+        // Build file size map for quick lookup
+        let file_sizes: HashMap<&str, usize> = file_data
+            .iter()
+            .map(|(name, data, _)| (name.as_str(), data.len()))
+            .collect();
+
+        // Check if we have CUE/FLAC metadata (need to calculate byte ranges per track)
+        if let Some(ref cue_metadata) = cue_flac_metadata {
+            // For CUE/FLAC: calculate per-track byte ranges using seektable
+            for (flac_path, metadata) in cue_metadata {
+                let filename = flac_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .ok_or_else(|| format!("Invalid FLAC path: {:?}", flac_path))?
+                    .to_string();
+
+                // Build seektable for this FLAC
+                let seektable = build_seektable(flac_path)
+                    .map_err(|e| format!("Failed to build seektable for {:?}: {}", flac_path, e))?;
+
+                // Get tracks that map to this FLAC file
+                let flac_tracks: Vec<_> = tracks_to_files
+                    .iter()
+                    .filter(|tf| &tf.file_path == flac_path)
+                    .collect();
+
+                let mut track_infos = Vec::new();
+
+                for (i, cue_track) in metadata.cue_sheet.tracks.iter().enumerate() {
+                    if let Some(track_file) = flac_tracks.get(i) {
+                        // Calculate byte range for this track
+                        let (start_byte, end_byte) = find_track_byte_range(
+                            flac_path,
+                            cue_track.start_time_ms,
+                            cue_track.end_time_ms,
+                            &seektable,
+                        )?;
+
+                        track_infos.push((track_file.db_track_id.clone(), start_byte, end_byte));
+                    }
+                }
+
+                result.insert(filename, track_infos);
+            }
+        }
+
+        // For one-file-per-track (or files not in CUE/FLAC)
+        for track_file in tracks_to_files {
+            let filename = track_file
+                .file_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| format!("Invalid file path: {:?}", track_file.file_path))?
+                .to_string();
+
+            // Skip if already handled by CUE/FLAC processing
+            if result.contains_key(&filename) {
+                continue;
+            }
+
+            // One-file-per-track: track spans entire file
+            let file_size = *file_sizes.get(filename.as_str()).unwrap_or(&0) as i64;
+            result.entry(filename).or_default().push((
+                track_file.db_track_id.clone(),
+                0,
+                file_size,
+            ));
+        }
+
+        Ok(result)
+    }
+
     /// Build CueFlacLayoutData for CUE/FLAC imports.
     ///
     /// Extracts FLAC headers and calculates per-track byte/chunk ranges
@@ -884,8 +992,8 @@ impl ImportService {
 
     /// Import files using the storage trait.
     ///
-    /// Reads files and calls storage.write_file() for each. The storage layer
-    /// handles chunking, encryption, and cloud upload based on the profile.
+    /// Reads files and calls storage.write_file() for each.
+    /// The storage layer handles chunking, encryption, and cloud upload based on the profile.
     async fn run_storage_import(
         &self,
         db_release: &DbRelease,
@@ -925,7 +1033,7 @@ impl ImportService {
         );
 
         // Read all files first
-        let mut file_data: Vec<(String, Vec<u8>)> = Vec::with_capacity(total_files);
+        let mut file_data: Vec<(String, Vec<u8>, PathBuf)> = Vec::with_capacity(total_files);
         for file in discovered_files.iter() {
             let filename = file
                 .path
@@ -938,36 +1046,70 @@ impl ImportService {
                 .await
                 .map_err(|e| format!("Failed to read file {:?}: {}", file.path, e))?;
 
-            file_data.push((filename, data));
+            file_data.push((filename, data, file.path.clone()));
         }
 
-        // Write all files (handles release-level chunking)
-        let files_ref: Vec<(&str, &[u8])> = file_data
-            .iter()
-            .map(|(name, data)| (name.as_str(), data.as_slice()))
-            .collect();
+        // Build track progress info: filename → [(track_id, start_byte, end_byte)]
+        let file_to_tracks = self
+            .build_track_progress_map(tracks_to_files, &file_data, &cue_flac_metadata)
+            .await?;
 
-        storage
-            .write_files(&db_release.id, &files_ref)
-            .await
-            .map_err(|e| format!("Failed to store files: {}", e))?;
+        // Calculate total bytes for release-level progress
+        let release_total_bytes: usize = file_data.iter().map(|(_, data, _)| data.len()).sum();
+        let mut release_bytes_written = 0usize;
 
-        // Emit progress for each file
-        for (idx, (filename, data)) in file_data.iter().enumerate() {
+        // Write files with progress reporting
+        let mut chunk_index = 0i32;
+        for (idx, (filename, data, _path)) in file_data.iter().enumerate() {
+            let track_infos = file_to_tracks.get(filename).cloned().unwrap_or_default();
+            let progress_tx = self.progress_tx.clone();
+            let release_id = db_release.id.clone();
+            let file_size = data.len();
+
+            // Capture release_bytes_written for the closure
+            let base_bytes = release_bytes_written;
+
+            chunk_index = storage
+                .write_file(
+                    &db_release.id,
+                    filename,
+                    data,
+                    chunk_index,
+                    Box::new(move |file_bytes_written, _file_total| {
+                        // Emit per-track progress
+                        for (track_id, start_byte, end_byte) in &track_infos {
+                            let percent =
+                                calculate_track_percent(file_bytes_written, *start_byte, *end_byte);
+                            let _ = progress_tx.send(ImportProgress::Progress {
+                                id: track_id.clone(),
+                                percent,
+                                phase: Some(ImportPhase::Chunk),
+                            });
+                        }
+
+                        // Emit release-level progress
+                        let total_written = base_bytes + file_bytes_written;
+                        let release_percent =
+                            (total_written * 100 / release_total_bytes.max(1)) as u8;
+                        let _ = progress_tx.send(ImportProgress::Progress {
+                            id: release_id.clone(),
+                            percent: release_percent,
+                            phase: Some(ImportPhase::Chunk),
+                        });
+                    }),
+                )
+                .await
+                .map_err(|e| format!("Failed to store file {}: {}", filename, e))?;
+
+            release_bytes_written += file_size;
+
             info!(
                 "Stored file {}/{}: {} ({} bytes)",
                 idx + 1,
                 total_files,
                 filename,
-                data.len()
+                file_size
             );
-
-            let _ = self.progress_tx.send(ImportProgress::FileProgress {
-                release_id: db_release.id.clone(),
-                file_index: idx,
-                total_files,
-                filename: filename.to_string(),
-            });
         }
 
         // Persist track metadata (audio format, chunk coords for playback)
@@ -1406,6 +1548,19 @@ impl ImportService {
             db_release.id, total_files
         );
 
+        // Build file→tracks map for progress reporting
+        let file_to_tracks: HashMap<String, Vec<String>> = {
+            let mut map: HashMap<String, Vec<String>> = HashMap::new();
+            for tf in tracks_to_files {
+                if let Some(filename) = tf.file_path.file_name().and_then(|n| n.to_str()) {
+                    map.entry(filename.to_string())
+                        .or_default()
+                        .push(tf.db_track_id.clone());
+                }
+            }
+            map
+        };
+
         // Create DbFile records with source_path (no chunks)
         for (idx, file) in discovered_files.iter().enumerate() {
             let filename = file
@@ -1435,6 +1590,25 @@ impl ImportService {
                 .await
                 .map_err(|e| format!("Failed to add file record: {}", e))?;
 
+            // Emit track progress (100% since no actual I/O)
+            if let Some(track_ids) = file_to_tracks.get(filename) {
+                for track_id in track_ids {
+                    let _ = self.progress_tx.send(ImportProgress::Progress {
+                        id: track_id.clone(),
+                        percent: 100,
+                        phase: Some(ImportPhase::Chunk),
+                    });
+                }
+            }
+
+            // Emit release-level progress
+            let release_percent = ((idx + 1) * 100 / total_files.max(1)) as u8;
+            let _ = self.progress_tx.send(ImportProgress::Progress {
+                id: db_release.id.clone(),
+                percent: release_percent,
+                phase: Some(ImportPhase::Chunk),
+            });
+
             info!(
                 "Recorded file {}/{}: {} -> {}",
                 idx + 1,
@@ -1442,14 +1616,6 @@ impl ImportService {
                 filename,
                 source_path
             );
-
-            // Emit progress
-            let _ = self.progress_tx.send(ImportProgress::FileProgress {
-                release_id: db_release.id.clone(),
-                file_index: idx,
-                total_files,
-                filename: filename.to_string(),
-            });
         }
 
         // Mark all tracks as complete and send completion events
