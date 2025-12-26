@@ -87,6 +87,7 @@ impl ImportServiceHandle {
     pub async fn send_request(&self, request: ImportRequest) -> Result<(String, String), String> {
         match request {
             ImportRequest::Folder {
+                import_id,
                 discogs_release,
                 mb_release,
                 folder,
@@ -96,6 +97,7 @@ impl ImportServiceHandle {
                 selected_cover_filename,
             } => {
                 self.send_folder_request(
+                    import_id,
                     discogs_release,
                     mb_release,
                     folder,
@@ -155,6 +157,7 @@ impl ImportServiceHandle {
 
     async fn send_folder_request(
         &self,
+        import_id: String,
         discogs_release: Option<DiscogsRelease>,
         mb_release: Option<MbRelease>,
         folder: std::path::PathBuf,
@@ -171,9 +174,6 @@ impl ImportServiceHandle {
         let library_manager = self.library_manager.get();
 
         // ========== PHASE 0: PREPARATION WITH PROGRESS TRACKING ==========
-
-        // Generate import_id for progress tracking
-        let import_id = uuid::Uuid::new_v4().to_string();
 
         // Extract album title and artist name for DbImport (before parsing)
         let (album_title, artist_name) = if let Some(ref discogs_rel) = discogs_release {

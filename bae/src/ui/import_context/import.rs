@@ -1,6 +1,6 @@
 use super::state::{ImportContext, SelectedCover};
 use crate::discogs::DiscogsRelease;
-use crate::import::{ImportRequest, MatchCandidate, MatchSource};
+use crate::import::{ImportProgress, ImportRequest, MatchCandidate, MatchSource};
 use crate::ui::components::import::ImportSource;
 use crate::ui::local_file_url;
 use crate::ui::Route;
@@ -40,6 +40,24 @@ pub async fn confirm_and_start_import(
     navigator: Navigator,
 ) -> Result<(), String> {
     ctx.set_is_importing(true);
+    ctx.set_preparing_step(None);
+
+    // Generate import_id for progress tracking (for folder imports)
+    let import_id = uuid::Uuid::new_v4().to_string();
+
+    // Subscribe to import progress to show phase 0 steps
+    let import_service = ctx.import_service.clone();
+    let mut progress_rx = import_service.subscribe_import(import_id.clone());
+    let mut preparing_step_signal = ctx.preparing_step();
+
+    // Spawn task to listen for Preparing events and update UI
+    spawn(async move {
+        while let Some(progress) = progress_rx.recv().await {
+            if let ImportProgress::Preparing { step, .. } = progress {
+                preparing_step_signal.set(Some(step));
+            }
+        }
+    });
 
     // Check for duplicates before importing
     match &candidate.source {
@@ -121,6 +139,7 @@ pub async fn confirm_and_start_import(
                     let discogs_release = import_release(ctx, release_id, master_id).await?;
 
                     ImportRequest::Folder {
+                        import_id: import_id.clone(),
                         discogs_release: Some(discogs_release),
                         mb_release: None,
                         folder: PathBuf::from(folder_path),
@@ -137,6 +156,7 @@ pub async fn confirm_and_start_import(
                     );
 
                     ImportRequest::Folder {
+                        import_id: import_id.clone(),
                         discogs_release: None,
                         mb_release: Some(mb_release.clone()),
                         folder: PathBuf::from(folder_path),
@@ -237,6 +257,7 @@ pub async fn confirm_and_start_import(
             info!("Import started successfully: {}", album_id);
 
             ctx.set_is_importing(false);
+            ctx.set_preparing_step(None);
 
             // Check if there are more releases to import in the batch
             if ctx.has_more_releases() {
@@ -277,6 +298,7 @@ pub async fn confirm_and_start_import(
             error!("{}", error_msg);
 
             ctx.set_is_importing(false);
+            ctx.set_preparing_step(None);
             ctx.set_import_error_message(Some(error_msg.clone()));
             Err(error_msg)
         }

@@ -1,5 +1,5 @@
 use crate::db::DbStorageProfile;
-use crate::import::{MatchCandidate, MatchSource};
+use crate::import::{MatchCandidate, MatchSource, PrepareStep};
 use crate::ui::import_context::state::SelectedCover;
 use crate::ui::import_context::ImportContext;
 use crate::ui::local_file_url;
@@ -15,6 +15,7 @@ pub fn Confirmation(
 ) -> Element {
     let import_context = use_context::<Rc<ImportContext>>();
     let is_importing = import_context.is_importing();
+    let preparing_step = import_context.preparing_step();
     let folder_files = import_context.folder_files();
     let folder_path = import_context.folder_path();
 
@@ -285,7 +286,15 @@ pub fn Confirmation(
                     }
                 }
 
-                div { class: "flex justify-end gap-3",
+                div { class: "flex justify-end gap-3 items-center",
+                    // Show current preparation step during import
+                    if *is_importing.read() {
+                        if let Some(step) = *preparing_step.read() {
+                            span { class: "text-sm text-gray-400",
+                                {step.display_text()}
+                            }
+                        }
+                    }
                     button {
                         class: "px-6 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors border border-gray-600",
                         disabled: *is_importing.read(),

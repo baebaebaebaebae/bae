@@ -1,8 +1,8 @@
 use crate::discogs::client::DiscogsSearchResult;
 use crate::discogs::DiscogsClient;
 use crate::import::{
-    DetectedRelease, FolderMetadata, ImportServiceHandle, MatchCandidate, TorrentImportMetadata,
-    TorrentSource,
+    DetectedRelease, FolderMetadata, ImportServiceHandle, MatchCandidate, PrepareStep,
+    TorrentImportMetadata, TorrentSource,
 };
 use crate::library::SharedLibraryManager;
 use crate::musicbrainz::MbRelease;
@@ -104,6 +104,8 @@ pub struct ImportContext {
     pub(crate) is_detecting: Signal<bool>,
     pub(crate) is_looking_up: Signal<bool>,
     pub(crate) is_importing: Signal<bool>,
+    /// Current phase 0 preparation step (shown in UI during import)
+    pub(crate) preparing_step: Signal<Option<PrepareStep>>,
     pub(crate) import_error_message: Signal<Option<String>>,
     /// Error from DiscID lookup (shown with retry button)
     pub(crate) discid_lookup_error: Signal<Option<String>>,
@@ -175,6 +177,7 @@ impl ImportContext {
             is_detecting: Signal::new(false),
             is_looking_up: Signal::new(false),
             is_importing: Signal::new(false),
+            preparing_step: Signal::new(None),
             import_error_message: Signal::new(None),
             discid_lookup_error: Signal::new(None),
             duplicate_album_id: Signal::new(None),
@@ -279,6 +282,10 @@ impl ImportContext {
 
     pub fn is_importing(&self) -> Signal<bool> {
         self.is_importing
+    }
+
+    pub fn preparing_step(&self) -> Signal<Option<PrepareStep>> {
+        self.preparing_step
     }
 
     pub fn error_message(&self) -> Signal<Option<String>> {
@@ -501,6 +508,11 @@ impl ImportContext {
         signal.set(value);
     }
 
+    pub fn set_preparing_step(&self, step: Option<PrepareStep>) {
+        let mut signal = self.preparing_step;
+        signal.set(step);
+    }
+
     pub fn set_import_error_message(&self, value: Option<String>) {
         let mut signal = self.import_error_message;
         signal.set(value);
@@ -636,6 +648,7 @@ impl ImportContext {
         self.set_is_detecting(false);
         self.set_is_looking_up(false);
         self.set_is_importing(false);
+        self.set_preparing_step(None);
         self.set_import_error_message(None);
         self.set_discid_lookup_error(None);
         self.set_duplicate_album_id(None);
