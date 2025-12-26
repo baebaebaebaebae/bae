@@ -4,7 +4,7 @@ use crate::ui::AppContext;
 use dioxus::prelude::*;
 
 /// Represents a single import operation being tracked in the UI
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ActiveImport {
     pub import_id: String,
     pub album_title: String,

@@ -6,6 +6,8 @@ pub mod dialog;
 pub mod dialog_context;
 pub mod import;
 pub mod import_hooks;
+pub mod imports_button;
+pub mod imports_dropdown;
 pub mod library;
 pub mod library_search_context;
 pub mod navbar;

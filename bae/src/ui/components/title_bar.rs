@@ -1,5 +1,7 @@
 use crate::db::{DbAlbum, DbArtist};
 use crate::library::use_library_manager;
+use crate::ui::components::imports_button::ImportsButton;
+use crate::ui::components::imports_dropdown::ImportsDropdown;
 use crate::ui::components::use_library_search;
 use crate::ui::{image_url, Route};
 use dioxus::desktop::use_window;
@@ -25,6 +27,7 @@ pub fn TitleBar() -> Element {
     let mut albums = use_signal(Vec::<DbAlbum>::new);
     let mut album_artists = use_signal(HashMap::<String, Vec<DbArtist>>::new);
     let mut filtered_albums = use_signal(Vec::<DbAlbum>::new);
+    let imports_dropdown_open = use_signal(|| false);
 
     // Load albums on mount
     use_effect(move || {
@@ -114,6 +117,14 @@ pub fn TitleBar() -> Element {
                     label: "Settings",
                     is_active: matches!(current_route, Route::Settings {}),
                 }
+            }
+
+            // Imports button with dropdown
+            div {
+                class: "relative ml-4",
+                style: "-webkit-app-region: no-drag;",
+                ImportsButton { is_open: imports_dropdown_open }
+                ImportsDropdown { is_open: imports_dropdown_open }
             }
 
             // Search input on the right side
