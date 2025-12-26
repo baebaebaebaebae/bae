@@ -676,6 +676,11 @@ impl LibraryManager {
     pub async fn update_import_error(&self, id: &str, error: &str) -> Result<(), LibraryError> {
         Ok(self.database.update_import_error(id, error).await?)
     }
+
+    /// Get all active (non-complete, non-failed) imports
+    pub async fn get_active_imports(&self) -> Result<Vec<DbImport>, LibraryError> {
+        Ok(self.database.get_active_imports().await?)
+    }
 }
 
 #[cfg(test)]

@@ -1,3 +1,4 @@
+pub mod active_imports_context;
 pub mod album_card;
 pub mod album_detail;
 pub mod app;
@@ -15,6 +16,7 @@ pub mod settings;
 pub mod title_bar;
 pub mod torrent_hooks;
 
+pub use active_imports_context::{use_active_imports, ActiveImportsProvider};
 pub use album_detail::AlbumDetail;
 pub use app::App;
 pub use import_hooks::use_track_progress;
