@@ -919,11 +919,14 @@ async fn verify_roundtrip(
                     .await
                     .expect("Failed to reassemble track");
 
-                    assert!(reassembled.len() > 0, "Reassembled track should have data");
+                    assert!(
+                        !reassembled.duration().is_zero(),
+                        "Reassembled track should have data"
+                    );
                     info!(
-                        "✓ Track '{}' reassembled: {} bytes",
+                        "✓ Track '{}' reassembled: {:?}",
                         track.title,
-                        reassembled.len()
+                        reassembled.duration()
                     );
                 }
             }
