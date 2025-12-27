@@ -84,15 +84,16 @@ pub async fn retry_torrent_metadata_detection(ctx: &ImportContext) -> Result<(),
 /// Retry DiscID lookup for the current detected metadata.
 /// Returns true if the lookup succeeded and found matches.
 pub async fn retry_discid_lookup(ctx: &ImportContext) -> bool {
-    let metadata = ctx.detected_metadata.read();
-    let mb_discid = match metadata.as_ref().and_then(|m| m.mb_discid.clone()) {
-        Some(id) => id,
-        None => {
-            info!("No MB DiscID available for retry");
-            return false;
+    let mb_discid = {
+        let metadata = ctx.detected_metadata.read();
+        match metadata.as_ref().and_then(|m| m.mb_discid.clone()) {
+            Some(id) => id,
+            None => {
+                info!("No MB DiscID available for retry");
+                return false;
+            }
         }
     };
-    drop(metadata);
 
     ctx.set_is_looking_up(true);
     ctx.set_discid_lookup_error(None);
@@ -244,20 +245,25 @@ pub async fn load_selected_release(
     ctx: &ImportContext,
     release_index: usize,
 ) -> Result<FolderDetectionResult, String> {
-    let releases = ctx.detected_releases.read();
-    let release = releases
-        .get(release_index)
-        .ok_or_else(|| format!("Invalid release index: {}", release_index))?;
+    // Extract what we need from the release before any await points
+    let (release_name, release_path, files) = {
+        let releases = ctx.detected_releases.read();
+        let release = releases
+            .get(release_index)
+            .ok_or_else(|| format!("Invalid release index: {}", release_index))?;
+        (
+            release.name.clone(),
+            release.path.clone(),
+            CategorizedFileInfo::from_scanned(&release.files),
+        )
+    };
 
-    info!("Loading release: {} ({:?})", release.name, release.path);
+    info!("Loading release: {} ({:?})", release_name, release_path);
 
-    let folder_contents = detect_folder_contents(release.path.clone())
+    let folder_contents = detect_folder_contents(release_path)
         .map_err(|e| format!("Failed to detect folder contents: {}", e))?;
 
     let metadata = folder_contents.metadata;
-
-    // Get categorized files from the release (already populated by folder_scanner)
-    let files = CategorizedFileInfo::from_scanned(&release.files);
 
     info!(
         "Detected metadata: artist={:?}, album={:?}, year={:?}, mb_discid={:?}",
