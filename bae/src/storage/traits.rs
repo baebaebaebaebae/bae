@@ -228,7 +228,7 @@ impl ReleaseStorageImpl {
             .await
             .map_err(|e| StorageError::Database(e.to_string()))?;
 
-        let num_chunks = (data.len() + self.chunk_size_bytes - 1) / self.chunk_size_bytes;
+        let num_chunks = data.len().div_ceil(self.chunk_size_bytes);
         let total_bytes = data.len();
 
         // Report initial progress

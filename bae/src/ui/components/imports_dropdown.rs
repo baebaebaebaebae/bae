@@ -88,7 +88,6 @@ pub fn ImportsDropdown(mut is_open: Signal<bool>) -> Element {
                                     key: "{import_id}",
                                     import: import.clone(),
                                     on_click: {
-                                        let navigator = navigator.clone();
                                         let release_id = import.release_id.clone();
                                         let mut is_open = is_open;
                                         move |_| {

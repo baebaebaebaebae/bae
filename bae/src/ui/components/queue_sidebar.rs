@@ -125,7 +125,7 @@ pub fn QueueSidebar() -> Element {
                                 is_current: true,
                                 track: current_track_val.clone(),
                                 album: current_track_album(),
-                                on_remove: {move |_| {}},
+                                on_remove: move |_| {},
                             }
                         } else {
                             div { class: "px-4 py-3 text-gray-500 text-sm", "Nothing playing" }

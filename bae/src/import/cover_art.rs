@@ -105,7 +105,7 @@ pub async fn fetch_cover_art_from_discogs(
         .or(external_urls.discogs_master_url.as_ref())?;
 
     // Extract release ID from URL (format: https://www.discogs.com/release/123456 or https://www.discogs.com/master/123456)
-    let release_id = discogs_url.split('/').last()?;
+    let release_id = discogs_url.split('/').next_back()?;
 
     debug!("Fetching cover art from Discogs release ID: {}", release_id);
 
@@ -170,7 +170,7 @@ pub async fn download_cover_art_to_bae_folder(
     // Determine filename based on source and URL extension
     let extension = cover_art_url
         .split('.')
-        .last()
+        .next_back()
         .and_then(|ext| {
             let ext_lower = ext.to_lowercase();
             // Only accept common image extensions

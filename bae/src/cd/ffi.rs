@@ -204,20 +204,16 @@ pub fn detect_drives() -> Result<Vec<PathBuf>, LibcdioError> {
                 // Try rdisk* first (raw devices work better for CD access)
                 for path in rdisk_paths {
                     // Silently try to open - permission errors are expected without Full Disk Access
-                    if LibcdioDrive::open(&path).is_ok() {
-                        if !drives.contains(&path) {
-                            drives.push(path);
-                        }
+                    if LibcdioDrive::open(&path).is_ok() && !drives.contains(&path) {
+                        drives.push(path);
                     }
                 }
 
                 // Fall back to disk* if no rdisk* devices worked
                 if drives.is_empty() {
                     for path in disk_paths {
-                        if LibcdioDrive::open(&path).is_ok() {
-                            if !drives.contains(&path) {
-                                drives.push(path);
-                            }
+                        if LibcdioDrive::open(&path).is_ok() && !drives.contains(&path) {
+                            drives.push(path);
                         }
                     }
                 }

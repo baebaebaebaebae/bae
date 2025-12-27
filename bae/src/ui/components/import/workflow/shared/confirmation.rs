@@ -21,7 +21,7 @@ pub fn Confirmation(
 
     // Storage profile state
     let mut storage_profiles: Signal<Vec<DbStorageProfile>> = use_signal(Vec::new);
-    let mut selected_profile_id = import_context.storage_profile_id();
+    let selected_profile_id = import_context.storage_profile_id();
 
     // Load storage profiles on mount
     {
@@ -145,9 +145,9 @@ pub fn Confirmation(
                                     let (format_text, country_text, label_text) = match &candidate.source {
                                         MatchSource::MusicBrainz(release) => {
                                             (
-                                                release.format.as_ref().map(|f| f.clone()),
-                                                release.country.as_ref().map(|c| c.clone()),
-                                                release.label.as_ref().map(|l| l.clone()),
+                                                release.format.clone(),
+                                                release.country.clone(),
+                                                release.label.clone(),
                                             )
                                         }
                                         MatchSource::Discogs(_) => (None, None, None),

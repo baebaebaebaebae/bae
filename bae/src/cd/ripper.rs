@@ -70,7 +70,7 @@ impl CdRipper {
         use tracing::info;
 
         let mut results = Vec::new();
-        let total_tracks = (self.toc.last_track - self.toc.first_track + 1) as u8;
+        let total_tracks = self.toc.last_track - self.toc.first_track + 1;
         info!(
             "Starting to rip {} tracks ({} to {})",
             total_tracks, self.toc.first_track, self.toc.last_track
@@ -136,7 +136,7 @@ impl CdRipper {
         let bits_per_sample = 16u32;
 
         // Read audio data with paranoia error correction
-        let total_tracks = (self.toc.last_track - self.toc.first_track + 1) as u8;
+        let total_tracks = self.toc.last_track - self.toc.first_track + 1;
         let (samples, errors) = match self
             .read_track_samples(track_num, progress_tx, total_tracks)
             .await

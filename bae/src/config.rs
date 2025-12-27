@@ -334,9 +334,9 @@ impl Config {
         // Track which keys we've updated
         let mut found_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        // Update existing lines by index
-        for i in 0..lines.len() {
-            let trimmed = lines[i].trim();
+        // Update existing lines
+        for line in &mut lines {
+            let trimmed = line.trim();
             if trimmed.is_empty() || trimmed.starts_with('#') {
                 continue;
             }
@@ -344,7 +344,7 @@ impl Config {
             if let Some(eq_pos) = trimmed.find('=') {
                 let key = trimmed[..eq_pos].trim().to_string();
                 if let Some(new_value) = new_values.get(&key) {
-                    lines[i] = format!("{}={}", key, new_value);
+                    *line = format!("{}={}", key, new_value);
                     found_keys.insert(key);
                 }
             }

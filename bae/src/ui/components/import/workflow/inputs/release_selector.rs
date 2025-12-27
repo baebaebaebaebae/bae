@@ -7,7 +7,7 @@ use tracing::warn;
 pub fn ReleaseSelector() -> Element {
     let import_context = use_context::<Rc<ImportContext>>();
     let detected_releases = import_context.detected_releases();
-    let mut selected_indices = use_signal(|| Vec::<usize>::new());
+    let mut selected_indices = use_signal(Vec::<usize>::new);
 
     let on_select_all = move |_| {
         let releases = detected_releases.read();

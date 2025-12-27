@@ -78,7 +78,7 @@ pub fn ActiveImportsProvider(children: Element) -> Element {
         is_loading,
     };
 
-    use_context_provider(|| state.clone());
+    use_context_provider(|| state);
 
     let app_context = use_context::<AppContext>();
     let library_manager = app_context.library_manager.clone();
