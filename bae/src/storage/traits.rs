@@ -158,7 +158,7 @@ impl ReleaseStorageImpl {
         let encryption = self
             .encryption
             .as_ref()
-            .ok_or_else(|| StorageError::NotConfigured)?;
+            .ok_or(StorageError::NotConfigured)?;
 
         let (ciphertext, nonce) = encryption
             .encrypt(data)
@@ -179,7 +179,7 @@ impl ReleaseStorageImpl {
         let encryption = self
             .encryption
             .as_ref()
-            .ok_or_else(|| StorageError::NotConfigured)?;
+            .ok_or(StorageError::NotConfigured)?;
 
         if data.len() < 12 {
             return Err(StorageError::Encryption(

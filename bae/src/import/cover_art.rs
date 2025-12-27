@@ -102,7 +102,7 @@ pub async fn fetch_cover_art_from_discogs(
     let discogs_url = external_urls
         .discogs_release_url
         .as_ref()
-        .or_else(|| external_urls.discogs_master_url.as_ref())?;
+        .or(external_urls.discogs_master_url.as_ref())?;
 
     // Extract release ID from URL (format: https://www.discogs.com/release/123456 or https://www.discogs.com/master/123456)
     let release_id = discogs_url.split('/').last()?;
@@ -112,7 +112,7 @@ pub async fn fetch_cover_art_from_discogs(
     match discogs_client.get_release(release_id).await {
         Ok(release) => release
             .cover_image
-            .or_else(|| release.thumb)
+            .or(release.thumb)
             .map(|url| upgrade_to_https(&url)),
         Err(e) => {
             debug!("Failed to fetch Discogs release {}: {}", release_id, e);
