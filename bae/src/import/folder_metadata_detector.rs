@@ -168,58 +168,24 @@ fn find_matching_flac_for_cue<'a>(
     None
 }
 
-/// Read FLAC metadata using symphonia
-/// Note: Symphonia metadata reading is complex, so we'll skip FLAC tag reading for now
-/// and rely on CUE files and MP3 tags. FLAC metadata can be added later if needed.
+/// Read FLAC metadata - currently returns empty, relies on CUE files
 fn read_flac_metadata(_path: &Path) -> (Option<String>, Option<String>, Option<u32>) {
-    // TODO: Implement FLAC metadata reading using symphonia
-    // For now, return empty metadata - CUE files will provide the metadata
+    // CUE files provide the metadata for FLAC imports
     (None, None, None)
 }
 
-/// Get FLAC file duration in seconds using Symphonia
+/// Get FLAC file duration in seconds using libFLAC
 fn get_flac_duration_seconds(flac_path: &Path) -> Result<f64, MetadataDetectionError> {
-    use std::fs::File;
-    use symphonia::core::formats::FormatOptions;
-    use symphonia::core::io::MediaSourceStream;
+    use crate::import::album_chunk_layout::build_seektable;
 
-    let file = File::open(flac_path)?;
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
-
-    let mut hint = symphonia::core::probe::Hint::new();
-    hint.with_extension("flac");
-
-    let probed = symphonia::default::get_probe()
-        .format(&hint, mss, &FormatOptions::default(), &Default::default())
-        .map_err(|e| {
-            MetadataDetectionError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Failed to probe FLAC file: {}", e),
-            ))
-        })?;
-
-    let track = probed.format.default_track().ok_or_else(|| {
+    let flac_info = build_seektable(flac_path).map_err(|e| {
         MetadataDetectionError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "No default track found in FLAC file",
+            format!("Failed to read FLAC metadata: {}", e),
         ))
     })?;
 
-    let total_samples = track.codec_params.n_frames.ok_or_else(|| {
-        MetadataDetectionError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "FLAC file missing sample count",
-        ))
-    })?;
-
-    let sample_rate = track.codec_params.sample_rate.ok_or_else(|| {
-        MetadataDetectionError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "FLAC file missing sample rate",
-        ))
-    })?;
-
-    let duration_seconds = total_samples as f64 / sample_rate as f64;
+    let duration_seconds = flac_info.duration_ms() as f64 / 1000.0;
     Ok(duration_seconds)
 }
 
