@@ -3,19 +3,15 @@ use crate::cloud_storage::CloudStorageManager;
 use crate::db::DbChunk;
 use crate::encryption::EncryptionService;
 use crate::library::LibraryManager;
+use crate::playback::PcmSource;
 use futures::stream::{self, StreamExt};
+use std::sync::Arc;
 use tracing::{debug, info, warn};
 
-/// Reassemble chunks for a track into a continuous audio buffer
+/// Reassemble chunks for a track and decode to PCM for playback
 ///
-/// Unified streaming logic for all tracks using TrackChunkCoords:
-/// 1. Get track chunk coordinates (has all location info)
-/// 2. Get audio format (has FLAC headers if needed)
-/// 3. Download chunks in range and extract byte ranges
-/// 4. Prepend FLAC headers if needed (CUE/FLAC tracks)
-///
-/// Key insight: Both import types produce identical TrackChunkCoords records.
-/// The only difference is whether we need to prepend FLAC headers.
+/// Returns decoded PCM audio ready for cpal output.
+/// Uses libFLAC for decoding, which handles non-standard FLAC files better than symphonia.
 pub async fn reassemble_track(
     track_id: &str,
     library_manager: &LibraryManager,
@@ -23,7 +19,7 @@ pub async fn reassemble_track(
     cache: &CacheManager,
     encryption_service: &EncryptionService,
     chunk_size_bytes: usize,
-) -> Result<Vec<u8>, String> {
+) -> Result<Arc<PcmSource>, String> {
     info!("Reassembling chunks for track: {}", track_id);
 
     // Step 1: Get track chunk coordinates (has all location info)
@@ -122,36 +118,40 @@ pub async fn reassemble_track(
         audio_data.len() / 1_000_000
     );
 
-    // For CUE/FLAC tracks, decode and re-encode using libFLAC
-    if audio_format.needs_headers {
+    // Build complete FLAC data for decoding
+    let flac_data = if audio_format.needs_headers {
         if let Some(ref headers) = audio_format.flac_headers {
-            debug!("CUE/FLAC track: prepending headers and decode/re-encode");
-
-            // Prepend original album headers to make valid FLAC file
+            debug!("CUE/FLAC track: prepending headers for decode");
             let mut temp_flac = headers.clone();
             temp_flac.extend_from_slice(&audio_data);
-
-            // Decode with Symphonia and re-encode with libFLAC
-            // Note: audio_data already contains only this track's byte range,
-            // so we decode from the start (time 0), not from the track's original position
-            audio_data = decode_and_reencode_track(
-                &temp_flac, 0,    // Start from beginning of extracted audio
-                None, // Decode until end
-            )
-            .await?;
-
-            debug!("Decode/re-encode complete: {} bytes", audio_data.len());
+            temp_flac
         } else {
             warn!("Audio format needs headers but none provided");
+            audio_data
         }
-    }
+    } else {
+        // Regular FLAC file - data is already complete
+        audio_data
+    };
+
+    // Decode FLAC to PCM using libFLAC
+    debug!("Decoding {} bytes of FLAC data to PCM", flac_data.len());
+    let decoded = decode_flac_to_pcm(&flac_data).await?;
 
     info!(
-        "Successfully reassembled {} bytes of audio data for track {}",
-        audio_data.len(),
-        track_id
+        "Successfully decoded track {}: {} samples, {}Hz, {} channels",
+        track_id,
+        decoded.samples.len(),
+        decoded.sample_rate,
+        decoded.channels
     );
-    Ok(audio_data)
+
+    Ok(Arc::new(PcmSource::new(
+        decoded.samples,
+        decoded.sample_rate,
+        decoded.channels,
+        decoded.bits_per_sample,
+    )))
 }
 
 /// Download and decrypt a single chunk with caching
@@ -255,31 +255,14 @@ fn extract_file_from_chunks(
     file_data
 }
 
-/// Decode and re-encode a track from FLAC data using libFLAC
-///
-/// Uses libFLAC for both decoding and encoding, which is more tolerant of
-/// non-standard FLAC files than symphonia.
-async fn decode_and_reencode_track(
-    flac_data: &[u8],
-    start_ms: u64,
-    end_ms: Option<u64>,
-) -> Result<Vec<u8>, String> {
-    // Run decode/encode in spawn_blocking since it's CPU-intensive
+/// Decode FLAC data to PCM using libFLAC
+async fn decode_flac_to_pcm(flac_data: &[u8]) -> Result<crate::flac_decoder::DecodedFlac, String> {
     let flac_data = flac_data.to_vec();
     tokio::task::spawn_blocking(move || {
-        // Decode with libFLAC
-        let decoded = crate::flac_decoder::decode_flac_range(&flac_data, Some(start_ms), end_ms)?;
-
-        // Re-encode with libFLAC
-        crate::flac_encoder::encode_to_flac(
-            &decoded.samples,
-            decoded.sample_rate,
-            decoded.channels,
-            decoded.bits_per_sample,
-        )
+        crate::flac_decoder::decode_flac_range(&flac_data, None, None)
     })
     .await
-    .map_err(|e| format!("Decode/encode task failed: {}", e))?
+    .map_err(|e| format!("Decode task failed: {}", e))?
 }
 
 #[cfg(test)]

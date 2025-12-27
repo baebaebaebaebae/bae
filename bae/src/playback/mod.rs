@@ -1,8 +1,10 @@
 mod cpal_output;
+mod pcm_source;
 pub mod progress;
 pub mod reassembly; // Public for tests and internal use
 pub mod service;
-pub mod symphonia_decoder;
+
+pub use pcm_source::PcmSource;
 
 pub use progress::PlaybackProgress;
 #[cfg(feature = "test-utils")]

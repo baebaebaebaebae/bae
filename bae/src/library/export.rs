@@ -162,8 +162,8 @@ impl ExportService {
     ) -> Result<(), String> {
         info!("Exporting track {} to {}", track_id, output_path.display());
 
-        // Use existing reassemble_track function
-        let audio_data = reassemble_track(
+        // Reassemble and decode track to PCM
+        let pcm_source = reassemble_track(
             track_id,
             library_manager,
             cloud_storage,
@@ -173,14 +173,23 @@ impl ExportService {
         )
         .await?;
 
+        // Re-encode to FLAC for export
+        let flac_data = crate::flac_encoder::encode_to_flac(
+            pcm_source.raw_samples(),
+            pcm_source.sample_rate(),
+            pcm_source.channels(),
+            pcm_source.bits_per_sample(),
+        )
+        .map_err(|e| format!("Failed to encode FLAC: {}", e))?;
+
         // Write to file
-        std::fs::write(output_path, &audio_data)
+        std::fs::write(output_path, &flac_data)
             .map_err(|e| format!("Failed to write track file: {}", e))?;
 
         info!(
             "Successfully exported track {} ({} bytes)",
             track_id,
-            audio_data.len()
+            flac_data.len()
         );
         Ok(())
     }

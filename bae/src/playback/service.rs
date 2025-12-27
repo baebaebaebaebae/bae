@@ -5,7 +5,7 @@ use crate::encryption::EncryptionService;
 use crate::library::LibraryManager;
 use crate::playback::cpal_output::AudioOutput;
 use crate::playback::progress::{PlaybackProgress, PlaybackProgressHandle};
-use crate::playback::symphonia_decoder::TrackDecoder;
+use crate::playback::PcmSource;
 use cpal::traits::StreamTrait;
 use std::collections::VecDeque;
 use std::sync::{mpsc, Arc};
@@ -146,16 +146,15 @@ pub struct PlaybackService {
     queue: VecDeque<String>,           // track IDs
     previous_track_id: Option<String>, // Track ID of the previous track
     current_track: Option<DbTrack>,
-    current_audio_data: Option<Vec<u8>>, // Cached audio data for seeking
     current_position: Option<std::time::Duration>, // Current playback position
     current_duration: Option<std::time::Duration>, // Current track duration
-    is_paused: bool,                     // Whether playback is currently paused
+    is_paused: bool,                               // Whether playback is currently paused
     current_position_shared: Arc<std::sync::Mutex<Option<std::time::Duration>>>, // Shared position for bridge tasks
     audio_output: AudioOutput,
     stream: Option<cpal::Stream>,
-    next_decoder: Option<TrackDecoder>, // Preloaded for gapless playback
-    next_audio_data: Option<Vec<u8>>,   // Preloaded audio data for gapless playback
-    next_track_id: Option<String>,      // Track ID of preloaded track
+    current_pcm_source: Option<Arc<PcmSource>>, // Current PCM for seeking
+    next_pcm_source: Option<Arc<PcmSource>>,    // Preloaded for gapless playback
+    next_track_id: Option<String>,              // Track ID of preloaded track
     next_duration: Option<std::time::Duration>, // Duration of preloaded track
 }
 
@@ -220,15 +219,14 @@ impl PlaybackService {
                     queue: VecDeque::new(),
                     previous_track_id: None,
                     current_track: None,
-                    current_audio_data: None,
                     current_position: None,
                     current_duration: None,
                     is_paused: false,
                     current_position_shared: Arc::new(std::sync::Mutex::new(None)),
                     audio_output,
                     stream: None,
-                    next_decoder: None,
-                    next_audio_data: None,
+                    current_pcm_source: None,
+                    next_pcm_source: None,
                     next_track_id: None,
                     next_duration: None,
                 };
@@ -253,8 +251,7 @@ impl PlaybackService {
                     self.audio_output
                         .send_command(crate::playback::cpal_output::AudioCommand::Stop);
                     // Clear preloaded data
-                    self.next_decoder = None;
-                    self.next_audio_data = None;
+                    self.next_pcm_source = None;
                     self.next_track_id = None;
                     self.next_duration = None;
 
@@ -353,14 +350,8 @@ impl PlaybackService {
                 PlaybackCommand::Next => {
                     info!("Next command received, queue length: {}", self.queue.len());
                     // Check if we have a preloaded track ready for gapless playback
-                    if let Some((preloaded_decoder, preloaded_audio_data, preloaded_track_id)) =
-                        self.next_decoder
-                            .take()
-                            .zip(self.next_audio_data.take())
-                            .zip(self.next_track_id.take())
-                            .map(|((decoder, audio_data), track_id)| {
-                                (decoder, audio_data, track_id)
-                            })
+                    if let Some((preloaded_source, preloaded_track_id)) =
+                        self.next_pcm_source.take().zip(self.next_track_id.take())
                     {
                         let preloaded_duration = self
                             .next_duration
@@ -374,7 +365,6 @@ impl PlaybackService {
                         }
 
                         // Remove the preloaded track from the queue if it's at the front
-                        // This ensures play_track_with_decoder preloads the NEXT track
                         if self
                             .queue
                             .front()
@@ -385,7 +375,7 @@ impl PlaybackService {
                             self.emit_queue_update();
                         }
 
-                        // Use preloaded decoder for gapless playback
+                        // Use preloaded source for gapless playback
                         let track = match self.library_manager.get_track(&preloaded_track_id).await
                         {
                             Ok(Some(track)) => track,
@@ -401,11 +391,10 @@ impl PlaybackService {
                             }
                         };
 
-                        self.play_track_with_decoder(
+                        self.play_track_with_source(
                             &preloaded_track_id,
                             track,
-                            preloaded_decoder,
-                            preloaded_audio_data,
+                            preloaded_source,
                             preloaded_duration,
                         )
                         .await;
@@ -482,8 +471,7 @@ impl PlaybackService {
                                 }
 
                                 // Clear preloaded data before switching tracks
-                                self.next_decoder = None;
-                                self.next_audio_data = None;
+                                self.next_pcm_source = None;
                                 self.next_track_id = None;
                                 self.next_duration = None;
 
@@ -609,15 +597,22 @@ impl PlaybackService {
             }
         };
 
-        // Load audio data based on storage type
-        let audio_data = match &storage_profile {
+        // Load and decode audio based on storage type
+        let pcm_source = match &storage_profile {
             None => {
                 // No storage profile = files are in-place, read from source_path
                 match self
                     .load_audio_from_source_path(track_id, &track.release_id)
                     .await
                 {
-                    Ok(data) => data,
+                    Ok(data) => match Self::decode_flac_bytes(&data).await {
+                        Ok(source) => source,
+                        Err(e) => {
+                            error!("Failed to decode FLAC: {}", e);
+                            self.stop().await;
+                            return;
+                        }
+                    },
                     Err(e) => {
                         error!("Failed to load audio from source path: {}", e);
                         self.stop().await;
@@ -631,7 +626,14 @@ impl PlaybackService {
                     .load_audio_from_storage(track_id, &track.release_id, profile)
                     .await
                 {
-                    Ok(data) => data,
+                    Ok(data) => match Self::decode_flac_bytes(&data).await {
+                        Ok(source) => source,
+                        Err(e) => {
+                            error!("Failed to decode FLAC: {}", e);
+                            self.stop().await;
+                            return;
+                        }
+                    },
                     Err(e) => {
                         error!("Failed to load audio from storage: {}", e);
                         self.stop().await;
@@ -640,7 +642,7 @@ impl PlaybackService {
                 }
             }
             Some(_) => {
-                // Chunked storage: reassemble from chunks
+                // Chunked storage: reassemble and decode from chunks
                 match super::reassembly::reassemble_track(
                     track_id,
                     &self.library_manager,
@@ -651,7 +653,7 @@ impl PlaybackService {
                 )
                 .await
                 {
-                    Ok(data) => data,
+                    Ok(source) => source,
                     Err(e) => {
                         error!("Failed to reassemble track: {}", e);
                         self.stop().await;
@@ -661,39 +663,13 @@ impl PlaybackService {
             }
         };
 
-        info!("Track loaded: {} bytes", audio_data.len());
+        info!(
+            "Track decoded: {} samples, {}Hz",
+            pcm_source.duration().as_millis(),
+            pcm_source.sample_rate()
+        );
 
-        // Validate FLAC header
-        if audio_data.len() < 4 {
-            error!("Audio data too small: {} bytes", audio_data.len());
-            self.stop().await;
-            return;
-        }
-
-        if &audio_data[0..4] != b"fLaC" {
-            error!(
-                "Invalid FLAC header: expected 'fLaC', got {:?}",
-                &audio_data[0..4.min(audio_data.len())]
-            );
-            self.stop().await;
-            return;
-        }
-
-        info!("Valid FLAC header detected");
-
-        // Create decoder
-        let decoder = match TrackDecoder::new(audio_data.clone()) {
-            Ok(decoder) => decoder,
-            Err(e) => {
-                error!("Failed to create decoder: {:?}", e);
-                self.stop().await;
-                return;
-            }
-        };
-
-        info!("Decoder created, sample rate: {} Hz", decoder.sample_rate());
-
-        // Use stored duration from database - required for playback
+        // Use stored duration from database
         let track_duration = track
             .duration_ms
             .map(|ms| std::time::Duration::from_millis(ms as u64))
@@ -701,25 +677,43 @@ impl PlaybackService {
 
         info!("Track duration: {:?}", track_duration);
 
-        // Cache audio data for seeking
-        self.current_audio_data = Some(audio_data.clone());
-
-        self.play_track_with_decoder(track_id, track, decoder, audio_data, track_duration)
+        self.play_track_with_source(track_id, track, pcm_source, track_duration)
             .await;
     }
 
-    async fn play_track_with_decoder(
+    /// Decode raw FLAC bytes to PCM source
+    async fn decode_flac_bytes(flac_data: &[u8]) -> Result<Arc<PcmSource>, String> {
+        // Validate FLAC header
+        if flac_data.len() < 4 || &flac_data[0..4] != b"fLaC" {
+            return Err("Invalid FLAC header".to_string());
+        }
+
+        let flac_data = flac_data.to_vec();
+        let decoded = tokio::task::spawn_blocking(move || {
+            crate::flac_decoder::decode_flac_range(&flac_data, None, None)
+        })
+        .await
+        .map_err(|e| format!("Decode task failed: {}", e))??;
+
+        Ok(Arc::new(PcmSource::new(
+            decoded.samples,
+            decoded.sample_rate,
+            decoded.channels,
+            decoded.bits_per_sample,
+        )))
+    }
+
+    async fn play_track_with_source(
         &mut self,
         track_id: &str,
         track: DbTrack,
-        decoder: TrackDecoder,
-        audio_data: Vec<u8>,
+        pcm_source: Arc<PcmSource>,
         track_duration: std::time::Duration,
     ) {
-        info!("Starting playback with decoder for track: {}", track_id);
+        info!("Starting playback for track: {}", track_id);
 
-        // Cache audio data for seeking
-        self.current_audio_data = Some(audio_data);
+        // Store source for seeking
+        self.current_pcm_source = Some(pcm_source.clone());
 
         // Stop current stream if playing
         if let Some(stream) = self.stream.take() {
@@ -767,7 +761,7 @@ impl PlaybackService {
         // Create audio stream
         let stream = match self
             .audio_output
-            .create_stream(decoder, position_tx, completion_tx)
+            .create_stream(pcm_source, position_tx, completion_tx)
         {
             Ok(stream) => {
                 info!("Audio stream created successfully");
@@ -865,8 +859,8 @@ impl PlaybackService {
     }
 
     async fn preload_next_track(&mut self, track_id: &str) {
-        // Reassemble track chunks
-        let audio_data = match super::reassembly::reassemble_track(
+        // Reassemble and decode track to PCM
+        let pcm_source = match super::reassembly::reassemble_track(
             track_id,
             &self.library_manager,
             &self.cloud_storage,
@@ -876,15 +870,14 @@ impl PlaybackService {
         )
         .await
         {
-            Ok(data) => data,
+            Ok(source) => source,
             Err(e) => {
                 error!("Failed to preload track {}: {}", track_id, e);
                 return;
             }
         };
 
-        // Fetch track to get stored duration (correct for CUE/FLAC)
-        // Duration is calculated once during import and stored in database - required for playback
+        // Fetch track to get stored duration
         let track = match self.library_manager.get_track(track_id).await {
             Ok(Some(track)) => track,
             Ok(None) => panic!("Cannot preload track {} without track record", track_id),
@@ -899,11 +892,7 @@ impl PlaybackService {
             .map(|ms| std::time::Duration::from_millis(ms as u64))
             .unwrap_or_else(|| panic!("Cannot preload track {} without duration", track_id));
 
-        let decoder = TrackDecoder::new(audio_data.clone())
-            .unwrap_or_else(|_| panic!("Cannot preload track {} without decoder", track_id));
-
-        self.next_decoder = Some(decoder);
-        self.next_audio_data = Some(audio_data);
+        self.next_pcm_source = Some(pcm_source);
         self.next_track_id = Some(track_id.to_string());
         self.next_duration = Some(duration);
         info!("Preloaded next track: {}", track_id);
@@ -964,11 +953,10 @@ impl PlaybackService {
             drop(stream);
         }
         self.current_track = None;
-        self.current_audio_data = None;
+        self.current_pcm_source = None;
         self.current_position = None;
         self.current_duration = None;
-        self.next_decoder = None;
-        self.next_audio_data = None;
+        self.next_pcm_source = None;
         self.next_track_id = None;
         self.next_duration = None;
         self.audio_output
@@ -980,11 +968,11 @@ impl PlaybackService {
     }
 
     async fn seek(&mut self, position: std::time::Duration) {
-        // Can only seek if we have a current track and cached audio data
-        let (track_id, audio_data) = match (&self.current_track, &self.current_audio_data) {
-            (Some(track), Some(audio_data)) => (track.id.clone(), audio_data.clone()),
+        // Can only seek if we have a current track and PCM source
+        let (track_id, pcm_source) = match (&self.current_track, &self.current_pcm_source) {
+            (Some(track), Some(source)) => (track.id.clone(), source.clone()),
             _ => {
-                error!("Cannot seek: no track playing or audio data not cached");
+                error!("Cannot seek: no track playing or PCM source not available");
                 return;
             }
         };
@@ -1008,8 +996,6 @@ impl PlaybackService {
                 "Seek: Skipping seek to same position (difference: {:?} < 100ms)",
                 position_diff
             );
-            // Send SeekSkipped event to clear is_seeking flag in UI
-            trace!("Seek: Sending SeekSkipped event to clear is_seeking flag");
             let _ = self.progress_tx.send(PlaybackProgress::SeekSkipped {
                 requested_position: position,
                 current_position,
@@ -1026,29 +1012,18 @@ impl PlaybackService {
             trace!("Seek: No stream to drop");
         }
 
-        // Create new decoder with seeked position
-        let decoder = match TrackDecoder::new(audio_data.clone()) {
-            Ok(decoder) => decoder,
-            Err(e) => {
-                error!("Failed to create decoder for seek: {:?}", e);
-                self.stop().await;
-                return;
-            }
-        };
-
-        // Use stored track duration for validation (required - should always be Some if playing)
+        // Use stored track duration for validation
         let track_duration = self
             .current_duration
             .expect("Cannot seek: track has no duration");
 
-        // Check if seeking past the end - return error instead of clamping
+        // Check if seeking past the end
         if position > track_duration {
             error!(
                 "Cannot seek past end of track: requested {}, track duration {}",
                 position.as_secs_f64(),
                 track_duration.as_secs_f64()
             );
-            // Send error notification through progress channel
             let _ = self.progress_tx.send(PlaybackProgress::SeekError {
                 requested_position: position,
                 track_duration,
@@ -1056,15 +1031,10 @@ impl PlaybackService {
             return;
         }
 
-        // Seek decoder to desired position
-        let mut decoder = decoder;
-        if let Err(e) = decoder.seek(position) {
-            error!("Failed to seek decoder: {:?}", e);
-            self.stop().await;
-            return;
-        }
+        // Seek the PCM source to desired position
+        pcm_source.seek(position);
 
-        trace!("Seek: Decoder seeked successfully, creating new channels");
+        trace!("Seek: PCM source seeked successfully, creating new channels");
 
         // Create channels for position updates and completion
         let (position_tx, position_rx) = mpsc::channel();
@@ -1179,7 +1149,7 @@ impl PlaybackService {
         // Reuse existing audio output (don't create a new one)
         let stream = match self
             .audio_output
-            .create_stream(decoder, position_tx, completion_tx)
+            .create_stream(pcm_source, position_tx, completion_tx)
         {
             Ok(stream) => {
                 trace!("Seek: Audio stream created successfully");

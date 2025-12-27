@@ -17,7 +17,6 @@ use crate::import::types::{
 };
 use crate::library::{LibraryManager, SharedLibraryManager};
 use crate::musicbrainz::MbRelease;
-use crate::playback::symphonia_decoder::TrackDecoder;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -753,47 +752,21 @@ pub async fn extract_and_store_durations(
     Ok(())
 }
 
-/// Extract duration from an audio file
+/// Extract duration from an audio file (FLAC only)
 fn extract_duration_from_file(file_path: &Path) -> Option<i64> {
     debug!("Extracting duration from file: {}", file_path.display());
 
-    // For FLAC files, use libFLAC directly (more tolerant of non-standard files)
     let extension = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if extension.eq_ignore_ascii_case("flac") {
         return extract_flac_duration(file_path);
     }
 
-    // For other formats, use symphonia via TrackDecoder
-    let file_data = match std::fs::read(file_path) {
-        Ok(data) => {
-            debug!("Read {} bytes from file", data.len());
-            data
-        }
-        Err(e) => {
-            warn!("Failed to read file for duration extraction: {}", e);
-            return None;
-        }
-    };
-
-    match TrackDecoder::new(file_data) {
-        Ok(decoder) => {
-            let duration = decoder.duration().map(|d| d.as_millis() as i64);
-            if let Some(dur_ms) = duration {
-                debug!(
-                    "Extracted duration: {} ms from {}",
-                    dur_ms,
-                    file_path.display()
-                );
-            } else {
-                warn!("Duration not available for file: {}", file_path.display());
-            }
-            duration
-        }
-        Err(e) => {
-            warn!("Failed to decode file for duration extraction: {:?}", e);
-            None
-        }
-    }
+    // Non-FLAC formats not currently supported
+    warn!(
+        "Duration extraction not supported for non-FLAC file: {}",
+        file_path.display()
+    );
+    None
 }
 
 /// Extract duration from a FLAC file using libFLAC
