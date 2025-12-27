@@ -217,7 +217,7 @@ pub fn decode_flac_range(
             state.total_samples = streaminfo.total_samples;
 
             // Calculate sample positions from milliseconds
-            if let Some(start_ms) = state.start_sample.map(|_| ()).and(None::<u64>).or_else(|| {
+            if let Some(start_ms) = state.start_sample.map(|_| ()).and(None::<u64>).or({
                 // This is a bit awkward - we set start_sample later after metadata
                 None
             }) {

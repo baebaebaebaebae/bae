@@ -105,7 +105,7 @@ pub async fn reassemble_track(
         coords.end_byte_offset,
         chunk_size_bytes
     );
-    let mut audio_data = extract_file_from_chunks(
+    let audio_data = extract_file_from_chunks(
         &chunk_data,
         coords.start_byte_offset,
         coords.end_byte_offset,
