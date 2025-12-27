@@ -862,32 +862,91 @@ impl PlaybackService {
     }
 
     async fn preload_next_track(&mut self, track_id: &str) {
-        // Reassemble and decode track to PCM
-        let pcm_source = match super::reassembly::reassemble_track(
-            track_id,
-            &self.library_manager,
-            &self.cloud_storage,
-            &self.cache,
-            &self.encryption_service,
-            self.chunk_size_bytes,
-        )
-        .await
-        {
-            Ok(source) => source,
+        // Fetch track metadata first
+        let track = match self.library_manager.get_track(track_id).await {
+            Ok(Some(track)) => track,
+            Ok(None) => {
+                error!("Cannot preload track {} - not found", track_id);
+                return;
+            }
             Err(e) => {
-                error!("Failed to preload track {}: {}", track_id, e);
+                error!("Cannot preload track {} - database error: {}", track_id, e);
                 return;
             }
         };
 
-        // Fetch track to get stored duration
-        let track = match self.library_manager.get_track(track_id).await {
-            Ok(Some(track)) => track,
-            Ok(None) => panic!("Cannot preload track {} without track record", track_id),
-            Err(e) => panic!(
-                "Cannot preload track {} due to database error: {}",
-                track_id, e
-            ),
+        // Check storage profile to determine how to load audio
+        let storage_profile = match self
+            .library_manager
+            .get_storage_profile_for_release(&track.release_id)
+            .await
+        {
+            Ok(profile) => profile,
+            Err(e) => {
+                error!("Failed to get storage profile for preload: {}", e);
+                return;
+            }
+        };
+
+        // Load and decode audio based on storage type (same logic as play_track)
+        let pcm_source = match &storage_profile {
+            None => {
+                // No storage profile = files are in-place, read from source_path
+                match self
+                    .load_audio_from_source_path(track_id, &track.release_id)
+                    .await
+                {
+                    Ok(data) => match Self::decode_flac_bytes(&data).await {
+                        Ok(source) => source,
+                        Err(e) => {
+                            error!("Failed to decode FLAC for preload: {}", e);
+                            return;
+                        }
+                    },
+                    Err(e) => {
+                        error!("Failed to load audio from source path for preload: {}", e);
+                        return;
+                    }
+                }
+            }
+            Some(profile) if !profile.chunked => {
+                // Non-chunked storage: read file directly from storage path
+                match self
+                    .load_audio_from_storage(track_id, &track.release_id, profile)
+                    .await
+                {
+                    Ok(data) => match Self::decode_flac_bytes(&data).await {
+                        Ok(source) => source,
+                        Err(e) => {
+                            error!("Failed to decode FLAC for preload: {}", e);
+                            return;
+                        }
+                    },
+                    Err(e) => {
+                        error!("Failed to load audio from storage for preload: {}", e);
+                        return;
+                    }
+                }
+            }
+            Some(_) => {
+                // Chunked storage: reassemble and decode from chunks
+                match super::reassembly::reassemble_track(
+                    track_id,
+                    &self.library_manager,
+                    &self.cloud_storage,
+                    &self.cache,
+                    &self.encryption_service,
+                    self.chunk_size_bytes,
+                )
+                .await
+                {
+                    Ok(source) => source,
+                    Err(e) => {
+                        error!("Failed to preload track {}: {}", track_id, e);
+                        return;
+                    }
+                }
+            }
         };
 
         let duration = track
