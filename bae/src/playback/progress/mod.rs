@@ -38,4 +38,8 @@ pub enum PlaybackProgress {
     QueueUpdated {
         tracks: Vec<String>,
     },
+    /// Playback error occurred (e.g. storage offline)
+    PlaybackError {
+        message: String,
+    },
 }

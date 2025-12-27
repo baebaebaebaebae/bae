@@ -254,6 +254,7 @@ pub fn NowPlayingBar() -> Element {
     let mut current_artist = use_signal(|| "Unknown Artist".to_string());
     let mut cover_art_url = use_signal(|| Option::<String>::None);
     let mut is_seeking = use_signal(|| false);
+    let mut playback_error = use_signal(|| Option::<String>::None);
 
     // Subscribe to playback progress updates
     use_effect({
@@ -426,6 +427,14 @@ pub fn NowPlayingBar() -> Element {
                         PlaybackProgress::QueueUpdated { .. } => {
                             // Queue updates are handled by the queue hook, ignore here
                         }
+                        PlaybackProgress::PlaybackError { message } => {
+                            playback_error.set(Some(message.clone()));
+
+                            spawn(async move {
+                                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                                playback_error.set(None);
+                            });
+                        }
                     }
                 }
             });
@@ -592,6 +601,19 @@ pub fn NowPlayingBar() -> Element {
                         queue_sidebar_open.is_open.set(!current);
                     },
                     "☰"
+                }
+            }
+        }
+
+        if let Some(error) = playback_error() {
+            div { class: "fixed bottom-20 right-4 bg-red-600 text-white px-6 py-4 rounded-lg shadow-lg z-50 max-w-md",
+                div { class: "flex items-center justify-between gap-4",
+                    span { {error} }
+                    button {
+                        class: "text-white hover:text-gray-200",
+                        onclick: move |_| playback_error.set(None),
+                        "✕"
+                    }
                 }
             }
         }

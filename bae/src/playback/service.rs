@@ -656,6 +656,9 @@ impl PlaybackService {
                     Ok(source) => source,
                     Err(e) => {
                         error!("Failed to reassemble track: {}", e);
+                        let _ = self.progress_tx.send(PlaybackProgress::PlaybackError {
+                            message: format!("Failed to load track: {}", e),
+                        });
                         self.stop().await;
                         return;
                     }
