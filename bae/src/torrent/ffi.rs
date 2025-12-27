@@ -5,6 +5,8 @@
 
 #[cxx::bridge]
 #[allow(clippy::module_inception)]
+// Safety docs are present but clippy doesn't recognize them in CXX bridge context
+#[allow(clippy::missing_safety_doc)]
 mod ffi {
     unsafe extern "C++" {
         include!("bae_storage.h");

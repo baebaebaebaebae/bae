@@ -280,9 +280,9 @@ fn DetailsTab(album: DbAlbum, release: Option<DbRelease>) -> Element {
 
 #[component]
 fn FilesTab(
-    files: ReadOnlySignal<Vec<DbFile>>,
-    is_loading: ReadOnlySignal<bool>,
-    error_message: ReadOnlySignal<Option<String>>,
+    files: ReadSignal<Vec<DbFile>>,
+    is_loading: ReadSignal<bool>,
+    error_message: ReadSignal<Option<String>>,
 ) -> Element {
     let files = files();
     let is_loading = is_loading();
@@ -327,9 +327,9 @@ fn format_file_size(bytes: i64) -> String {
 
 #[component]
 fn GalleryTab(
-    images: ReadOnlySignal<Vec<DbImage>>,
-    is_loading: ReadOnlySignal<bool>,
-    error_message: ReadOnlySignal<Option<String>>,
+    images: ReadSignal<Vec<DbImage>>,
+    is_loading: ReadSignal<bool>,
+    error_message: ReadSignal<Option<String>>,
 ) -> Element {
     let images = images();
     let is_loading = is_loading();
