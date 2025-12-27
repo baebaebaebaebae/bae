@@ -244,6 +244,9 @@ mod tests {
         assert!(!filter.matches(&ImportProgress::Preparing {
             import_id: "import-1".to_string(),
             step: PrepareStep::ParsingMetadata,
+            album_title: "Test".to_string(),
+            artist_name: "Artist".to_string(),
+            cover_art_url: None,
         }));
     }
 
@@ -304,6 +307,9 @@ mod tests {
         assert!(!filter.matches(&ImportProgress::Preparing {
             import_id: "import-1".to_string(),
             step: PrepareStep::ParsingMetadata,
+            album_title: "Test".to_string(),
+            artist_name: "Artist".to_string(),
+            cover_art_url: None,
         }));
     }
 
@@ -317,17 +323,26 @@ mod tests {
         assert!(filter.matches(&ImportProgress::Preparing {
             import_id: "import-1".to_string(),
             step: PrepareStep::ParsingMetadata,
+            album_title: "Test".to_string(),
+            artist_name: "Artist".to_string(),
+            cover_art_url: None,
         }));
 
         assert!(filter.matches(&ImportProgress::Preparing {
             import_id: "import-1".to_string(),
             step: PrepareStep::DownloadingCoverArt,
+            album_title: "Test".to_string(),
+            artist_name: "Artist".to_string(),
+            cover_art_url: None,
         }));
 
         // Should NOT match Preparing events with different import_id
         assert!(!filter.matches(&ImportProgress::Preparing {
             import_id: "import-2".to_string(),
             step: PrepareStep::ParsingMetadata,
+            album_title: "Test".to_string(),
+            artist_name: "Artist".to_string(),
+            cover_art_url: None,
         }));
     }
 
@@ -391,10 +406,16 @@ mod tests {
         assert!(filter.matches(&ImportProgress::Preparing {
             import_id: "import-1".to_string(),
             step: PrepareStep::ParsingMetadata,
+            album_title: "Test".to_string(),
+            artist_name: "Artist".to_string(),
+            cover_art_url: None,
         }));
         assert!(filter.matches(&ImportProgress::Preparing {
             import_id: "import-2".to_string(),
             step: PrepareStep::DownloadingCoverArt,
+            album_title: "Test".to_string(),
+            artist_name: "Artist".to_string(),
+            cover_art_url: None,
         }));
 
         // Should match events with any import_id
@@ -456,6 +477,9 @@ mod tests {
             let event = ImportProgress::Preparing {
                 import_id: "test".to_string(),
                 step,
+                album_title: "Test".to_string(),
+                artist_name: "Artist".to_string(),
+                cover_art_url: None,
             };
             let filter = SubscriptionFilter::Import {
                 import_id: "test".to_string(),

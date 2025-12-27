@@ -100,6 +100,9 @@ pub enum ImportProgress {
     Preparing {
         import_id: String,
         step: PrepareStep,
+        album_title: String,
+        artist_name: String,
+        cover_art_url: Option<String>,
     },
     Started {
         id: String,

@@ -1,6 +1,6 @@
 use super::active_imports_context::{use_active_imports, ActiveImport};
 use crate::db::ImportOperationStatus;
-use crate::ui::Route;
+use crate::ui::{image_url, Route};
 use dioxus::prelude::*;
 
 /// Dropdown showing list of active imports with progress
@@ -170,52 +170,80 @@ fn ImportItem(
             },
 
             div { class: "flex items-start gap-3",
-                // Status icon
-                div { class: "flex-shrink-0 mt-0.5",
-                    if is_complete {
-                        svg {
-                            class: "h-5 w-5 text-green-500",
-                            fill: "none",
-                            stroke: "currentColor",
-                            view_box: "0 0 24 24",
-                            stroke_width: "2",
-                            path {
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                d: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                // Cover thumbnail with status overlay
+                {
+                    let cover_url = import.cover_image_id
+                        .as_ref()
+                        .map(|id| image_url(id))
+                        .or(import.cover_art_url.clone());
+
+                    rsx! {
+                        div { class: "flex-shrink-0 w-10 h-10 bg-gray-700 rounded overflow-hidden relative",
+                            if let Some(url) = cover_url {
+                                img {
+                                    src: "{url}",
+                                    alt: "Album cover",
+                                    class: "w-full h-full object-cover",
+                                }
+                            } else {
+                                div { class: "w-full h-full flex items-center justify-center text-gray-500 text-lg",
+                                    "🎵"
+                                }
                             }
-                        }
-                    } else if is_failed {
-                        svg {
-                            class: "h-5 w-5 text-red-500",
-                            fill: "none",
-                            stroke: "currentColor",
-                            view_box: "0 0 24 24",
-                            stroke_width: "2",
-                            path {
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                d: "M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                            }
-                        }
-                    } else {
-                        // Animated spinner
-                        svg {
-                            class: "h-5 w-5 text-indigo-400 animate-spin",
-                            fill: "none",
-                            view_box: "0 0 24 24",
-                            circle {
-                                class: "opacity-25",
-                                cx: "12",
-                                cy: "12",
-                                r: "10",
-                                stroke: "currentColor",
-                                stroke_width: "4",
-                            }
-                            path {
-                                class: "opacity-75",
-                                fill: "currentColor",
-                                d: "M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+
+                            // Status badge overlay
+                            if is_complete {
+                                div { class: "absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center",
+                                    svg {
+                                        class: "h-2.5 w-2.5 text-white",
+                                        fill: "none",
+                                        stroke: "currentColor",
+                                        view_box: "0 0 24 24",
+                                        stroke_width: "3",
+                                        path {
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            d: "M5 13l4 4L19 7"
+                                        }
+                                    }
+                                }
+                            } else if is_failed {
+                                div { class: "absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center",
+                                    svg {
+                                        class: "h-2.5 w-2.5 text-white",
+                                        fill: "none",
+                                        stroke: "currentColor",
+                                        view_box: "0 0 24 24",
+                                        stroke_width: "3",
+                                        path {
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            d: "M6 18L18 6M6 6l12 12"
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Spinning indicator for in-progress
+                                div { class: "absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-indigo-500 rounded-full flex items-center justify-center",
+                                    svg {
+                                        class: "h-2.5 w-2.5 text-white animate-spin",
+                                        fill: "none",
+                                        view_box: "0 0 24 24",
+                                        circle {
+                                            class: "opacity-25",
+                                            cx: "12",
+                                            cy: "12",
+                                            r: "10",
+                                            stroke: "currentColor",
+                                            stroke_width: "4",
+                                        }
+                                        path {
+                                            class: "opacity-75",
+                                            fill: "currentColor",
+                                            d: "M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

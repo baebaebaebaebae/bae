@@ -13,6 +13,10 @@ pub struct ActiveImport {
     pub current_step: Option<PrepareStep>,
     pub progress_percent: Option<u8>,
     pub release_id: Option<String>,
+    /// External cover art URL (ephemeral, shown during import)
+    pub cover_art_url: Option<String>,
+    /// Stored cover image ID (shown after import complete)
+    pub cover_image_id: Option<String>,
 }
 
 impl From<DbImport> for ActiveImport {
@@ -25,6 +29,8 @@ impl From<DbImport> for ActiveImport {
             current_step: None,
             progress_percent: None,
             release_id: db_import.release_id,
+            cover_art_url: None,
+            cover_image_id: None,
         }
     }
 }
@@ -111,7 +117,13 @@ pub fn ActiveImportsProvider(children: Element) -> Element {
 fn handle_progress_event(imports: Signal<Vec<ActiveImport>>, event: ImportProgress) {
     let mut imports = imports;
     match event {
-        ImportProgress::Preparing { import_id, step } => {
+        ImportProgress::Preparing {
+            import_id,
+            step,
+            album_title,
+            artist_name,
+            cover_art_url,
+        } => {
             imports.with_mut(|list| {
                 if let Some(import) = list.iter_mut().find(|i| i.import_id == import_id) {
                     import.current_step = Some(step);
@@ -120,12 +132,14 @@ fn handle_progress_event(imports: Signal<Vec<ActiveImport>>, event: ImportProgre
                     // New import - add it to the list
                     list.push(ActiveImport {
                         import_id,
-                        album_title: "Importing...".to_string(),
-                        artist_name: String::new(),
+                        album_title,
+                        artist_name,
                         status: ImportOperationStatus::Preparing,
                         current_step: Some(step),
                         progress_percent: None,
                         release_id: None,
+                        cover_art_url,
+                        cover_image_id: None,
                     });
                 }
             });
@@ -162,6 +176,7 @@ fn handle_progress_event(imports: Signal<Vec<ActiveImport>>, event: ImportProgre
         ImportProgress::Complete {
             import_id,
             release_id,
+            cover_image_id,
             ..
         } => {
             if let Some(ref iid) = import_id {
@@ -171,6 +186,9 @@ fn handle_progress_event(imports: Signal<Vec<ActiveImport>>, event: ImportProgre
                         import.progress_percent = Some(100);
                         if release_id.is_some() {
                             import.release_id = release_id.clone();
+                        }
+                        if cover_image_id.is_some() {
+                            import.cover_image_id = cover_image_id.clone();
                         }
                     }
                 });

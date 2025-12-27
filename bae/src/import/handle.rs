@@ -202,11 +202,21 @@ impl ImportServiceHandle {
             .map_err(|e| format!("Failed to create import record: {}", e))?;
 
         // Helper to emit preparing events
-        let emit_preparing = |step: PrepareStep| {
-            let _ = self.progress_tx.send(ImportProgress::Preparing {
-                import_id: import_id.clone(),
-                step,
-            });
+        let emit_preparing = {
+            let import_id = import_id.clone();
+            let album_title = album_title.clone();
+            let artist_name = artist_name.clone();
+            let cover_art_url = cover_art_url.clone();
+            let progress_tx = self.progress_tx.clone();
+            move |step: PrepareStep| {
+                let _ = progress_tx.send(ImportProgress::Preparing {
+                    import_id: import_id.clone(),
+                    step,
+                    album_title: album_title.clone(),
+                    artist_name: artist_name.clone(),
+                    cover_art_url: cover_art_url.clone(),
+                });
+            }
         };
 
         // 1. Parse release into database models (Discogs or MusicBrainz)
