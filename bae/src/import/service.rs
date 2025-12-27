@@ -967,7 +967,6 @@ impl ImportService {
         use crate::import::album_chunk_layout::{build_seektable, find_track_byte_range};
 
         let mut result = HashMap::new();
-        let chunk_size = self.config.chunk_size_bytes as i64;
 
         for (flac_path, metadata) in cue_metadata {
             // Extract FLAC headers
@@ -984,8 +983,7 @@ impl ImportService {
                 .filter(|tf| &tf.file_path == flac_path)
                 .collect();
 
-            // Calculate per-track byte and chunk ranges
-            let mut track_chunk_ranges = HashMap::new();
+            // Calculate per-track byte ranges
             let mut track_byte_ranges = HashMap::new();
 
             for (i, cue_track) in metadata.cue_sheet.tracks.iter().enumerate() {
@@ -1004,13 +1002,6 @@ impl ImportService {
                 )?;
 
                 track_byte_ranges.insert(db_track.db_track_id.clone(), (start_byte, end_byte));
-
-                // Calculate chunk ranges (relative to file's chunks)
-                let start_chunk = (start_byte / chunk_size) as i32;
-                let end_chunk = ((end_byte - 1) / chunk_size) as i32;
-
-                // For per-file chunking, chunks start at 0 for each file
-                track_chunk_ranges.insert(db_track.db_track_id.clone(), (start_chunk, end_chunk));
             }
 
             result.insert(
@@ -1018,7 +1009,6 @@ impl ImportService {
                 CueFlacLayoutData {
                     cue_sheet: metadata.cue_sheet.clone(),
                     flac_headers,
-                    track_chunk_ranges,
                     track_byte_ranges,
                     seektable: Some(flac_info.seektable),
                 },

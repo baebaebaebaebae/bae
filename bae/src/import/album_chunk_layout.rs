@@ -661,7 +661,6 @@ fn build_chunk_track_mappings(
             debug!("Seektable built with {} entries", flac_info.seektable.len());
 
             // For CUE/FLAC, calculate exact byte ranges using seektable
-            let mut track_chunk_ranges = HashMap::new();
             let mut track_byte_ranges = HashMap::new();
             let chunk_size_i64 = chunk_size as i64;
 
@@ -706,11 +705,7 @@ fn build_chunk_track_mappings(
                     end_chunk_index - start_chunk_index + 1
                 );
 
-                // Store chunk range and byte range for this track
-                track_chunk_ranges.insert(
-                    track_file.db_track_id.clone(),
-                    (start_chunk_index, end_chunk_index),
-                );
+                // Store byte range for this track
                 track_byte_ranges.insert(
                     track_file.db_track_id.clone(),
                     (absolute_start_byte, absolute_end_byte),
@@ -736,7 +731,6 @@ fn build_chunk_track_mappings(
                 CueFlacLayoutData {
                     cue_sheet: cue_metadata.cue_sheet.clone(),
                     flac_headers,
-                    track_chunk_ranges,
                     track_byte_ranges,
                     seektable: Some(flac_info.seektable),
                 },

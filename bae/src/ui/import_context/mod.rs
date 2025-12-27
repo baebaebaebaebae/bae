@@ -24,7 +24,6 @@ pub fn ImportContextProvider(children: Element) -> Element {
 
     let import_ctx = ImportContext::new(
         &config,
-        app_context.torrent_manager.clone(),
         app_context.library_manager.clone(),
         app_context.import_handle.clone(),
         dialog,

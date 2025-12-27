@@ -1,6 +1,5 @@
 use crate::db::{DbAlbum, DbFile, DbImage, DbRelease};
 use crate::library::use_library_manager;
-use crate::ui::local_file_url;
 use dioxus::prelude::*;
 use tracing::error;
 

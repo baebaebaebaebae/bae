@@ -7,7 +7,6 @@ use crate::import::{
 use crate::library::SharedLibraryManager;
 use crate::musicbrainz::MbRelease;
 use crate::torrent::ffi::TorrentInfo;
-use crate::torrent::TorrentManagerHandle;
 use crate::ui::components::dialog_context::DialogContext;
 use crate::ui::components::import::{
     CategorizedFileInfo, ImportSource, SearchSource, TorrentInputMode,
@@ -131,8 +130,6 @@ pub struct ImportContext {
     pub(crate) manual_match_candidates: Signal<Vec<MatchCandidate>>,
     pub(crate) dialog: DialogContext,
     pub(crate) discogs_client: DiscogsClient,
-    /// Handle to torrent manager service for all torrent operations
-    pub(crate) torrent_manager: TorrentManagerHandle,
     /// Handle to library manager for duplicate checking and import operations
     pub(crate) library_manager: SharedLibraryManager,
     /// Handle to import service for submitting import requests
@@ -142,7 +139,6 @@ pub struct ImportContext {
 impl ImportContext {
     pub fn new(
         config: &crate::config::Config,
-        torrent_manager: TorrentManagerHandle,
         library_manager: SharedLibraryManager,
         import_service: ImportServiceHandle,
         dialog: DialogContext,
@@ -197,7 +193,6 @@ impl ImportContext {
             manual_match_candidates: Signal::new(Vec::new()),
             dialog,
             discogs_client: DiscogsClient::new(config.discogs_api_key.clone()),
-            torrent_manager,
             library_manager,
             import_service,
         }

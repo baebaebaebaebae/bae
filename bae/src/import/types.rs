@@ -260,8 +260,6 @@ pub struct CueFlacLayoutData {
     pub cue_sheet: CueSheet,
     /// Extracted FLAC headers (needed for byte position estimation)
     pub flac_headers: FlacHeaders,
-    /// Per-track chunk ranges: track_id → (start_chunk_index, end_chunk_index)
-    pub track_chunk_ranges: HashMap<String, (i32, i32)>,
     /// Per-track byte ranges: track_id → (start_byte, end_byte) in file
     pub track_byte_ranges: HashMap<String, (i64, i64)>,
     /// Seektable mapping sample positions to byte positions in the original FLAC file

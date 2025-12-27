@@ -28,8 +28,6 @@ pub fn AlbumCard(album: DbAlbum, artists: Vec<DbArtist>) -> Element {
         .as_ref()
         .map(|id| image_url(id))
         .or_else(|| album.cover_art_url.clone());
-    // Track if we're showing the temporary cover (for visual treatment)
-    let is_ephemeral_cover = album.cover_image_id.is_none() && album.cover_art_url.is_some();
 
     // Format artist names
     let artist_name = if artists.is_empty() {

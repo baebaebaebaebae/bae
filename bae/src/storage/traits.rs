@@ -199,11 +199,6 @@ impl ReleaseStorageImpl {
         format!("{}/{}", release_id, filename)
     }
 
-    /// Generate a storage key for a chunk
-    fn chunk_key(&self, release_id: &str, chunk_id: &str) -> String {
-        format!("{}/chunks/{}", release_id, chunk_id)
-    }
-
     /// Write chunked file data with progress reporting (internal helper).
     async fn write_chunked<F>(
         &self,

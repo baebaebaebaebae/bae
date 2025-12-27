@@ -23,7 +23,6 @@ pub fn FolderImport() -> Element {
     let exact_match_candidates = import_context.exact_match_candidates();
     let selected_match_index = import_context.selected_match_index();
     let confirmed_candidate = import_context.confirmed_candidate();
-    let is_detecting = import_context.is_detecting();
     let is_looking_up = import_context.is_looking_up();
     let import_error_message = import_context.import_error_message();
     let discid_lookup_error = import_context.discid_lookup_error();

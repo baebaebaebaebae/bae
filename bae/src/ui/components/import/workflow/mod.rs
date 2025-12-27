@@ -13,7 +13,6 @@ mod smart_file_display;
 mod source_selector;
 mod text_file_modal;
 mod torrent_import;
-mod torrent_status;
 
 pub use file_list::{AudioContentInfo, CategorizedFileInfo, CueFlacPairInfo, FileInfo};
 pub use page::ImportPage;

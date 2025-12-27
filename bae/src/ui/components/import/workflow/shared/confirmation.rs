@@ -1,5 +1,5 @@
 use crate::db::DbStorageProfile;
-use crate::import::{MatchCandidate, MatchSource, PrepareStep};
+use crate::import::{MatchCandidate, MatchSource};
 use crate::ui::import_context::state::SelectedCover;
 use crate::ui::import_context::ImportContext;
 use crate::ui::local_file_url;
