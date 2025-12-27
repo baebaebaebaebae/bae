@@ -125,7 +125,6 @@ async fn run_storage_test(location: StorageLocation, chunked: bool, encrypted: b
         shared_library_manager,
         encryption_service.clone(),
         cloud_storage.clone(),
-        cache_manager.clone(),
         torrent_handle,
         database_arc,
     );
@@ -1107,7 +1106,6 @@ async fn run_real_album_test(
         shared_library_manager,
         encryption_service.clone(),
         cloud_storage.clone(),
-        cache_manager.clone(),
         torrent_handle,
         database_arc.clone(),
     );

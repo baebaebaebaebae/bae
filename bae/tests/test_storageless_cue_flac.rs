@@ -90,7 +90,6 @@ async fn test_storageless_cue_flac_records_track_positions() {
         shared_library_manager,
         encryption_service,
         cloud_storage,
-        cache_manager,
         torrent_handle,
         database_arc,
     );
@@ -300,7 +299,6 @@ async fn test_storageless_cue_flac_playback_uses_track_positions() {
         shared_library_manager,
         encryption_service.clone(),
         cloud_storage.clone(),
-        cache_manager.clone(),
         torrent_handle,
         database_arc,
     );

@@ -34,7 +34,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::cache::CacheManager;
 use crate::cd::drive::CdToc;
 use crate::cd::RipProgress;
 use crate::cloud_storage::CloudStorageManager;
@@ -107,8 +106,6 @@ pub struct ImportService {
     cloud_storage: CloudStorageManager,
     /// Shared manager for library database operations
     library_manager: SharedLibraryManager,
-    /// Cache manager for chunk storage
-    cache_manager: CacheManager,
     /// Handle to torrent manager service for torrent operations
     torrent_handle: TorrentManagerHandle,
     /// Database for storage operations
@@ -127,7 +124,6 @@ impl ImportService {
         library_manager: SharedLibraryManager,
         encryption_service: EncryptionService,
         cloud_storage: CloudStorageManager,
-        cache_manager: CacheManager,
         torrent_handle: TorrentManagerHandle,
         database: Arc<Database>,
     ) -> ImportServiceHandle {
@@ -137,9 +133,8 @@ impl ImportService {
         // Clone progress_tx for the handle (before it's moved to worker)
         let progress_tx_for_handle = progress_tx.clone();
 
-        // Clone library_manager, cache_manager, and database for the thread
+        // Clone library_manager and database for the thread
         let library_manager_for_worker = library_manager.clone();
-        let cache_manager_for_worker = cache_manager.clone();
         let database_for_handle = database.clone();
 
         // Spawn the service task on a dedicated thread
@@ -155,7 +150,6 @@ impl ImportService {
                     library_manager: library_manager_for_worker,
                     encryption_service,
                     cloud_storage,
-                    cache_manager: cache_manager_for_worker,
                     torrent_handle,
                     database,
                 };

@@ -108,7 +108,6 @@ pub async fn do_roundtrip<F, G>(
         shared_library_manager,
         encryption_service.clone(),
         cloud_storage.clone(),
-        cache_manager.clone(),
         torrent_handle,
         database_arc,
     );

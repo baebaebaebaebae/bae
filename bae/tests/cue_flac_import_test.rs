@@ -101,7 +101,6 @@ async fn test_cue_flac_import() {
         library_manager.clone(),
         encryption_service.clone(),
         cloud_storage.clone(),
-        cache_manager.clone(),
         torrent_handle,
         database.clone(),
     );

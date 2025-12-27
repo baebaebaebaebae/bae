@@ -82,7 +82,6 @@ impl PlaybackTestFixture {
             shared_library_manager.clone(),
             encryption_service.clone(),
             cloud_storage.clone(),
-            cache_manager.clone(),
             torrent_handle,
             database_arc,
         );
@@ -1191,7 +1190,6 @@ async fn test_playback_error_emitted_when_storage_offline() {
         shared_library_manager.clone(),
         encryption_service.clone(),
         cloud_storage.clone(),
-        cache_manager.clone(),
         torrent_handle,
         database_arc,
     );

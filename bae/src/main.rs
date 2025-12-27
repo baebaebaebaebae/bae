@@ -205,7 +205,6 @@ fn main() {
         library_manager.clone(),
         encryption_service.clone(),
         cloud_storage.clone(),
-        cache_manager.clone(),
         torrent_manager.clone(),
         std::sync::Arc::new(database.clone()),
     );
