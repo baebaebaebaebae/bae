@@ -1,184 +1,80 @@
-# bae CUE/FLAC Support Specification
+# CUE/FLAC Support
 
-This document specifies how bae handles CUE sheet + FLAC albums. For overall import process see `BAE_IMPORT_WORKFLOW.md` and for streaming details see `BAE_STREAMING_ARCHITECTURE.md`.
+How bae handles CUE sheet + FLAC albums (single FLAC file containing entire album with CUE sheet defining track boundaries).
 
-## Problem Statement
+## The Problem
 
-**Design Requirement:** In addition to individual audio files (`1 file = 1 track`), bae needs to handle CUE/FLAC albums (`1 file = entire album`).
+CUE/FLAC albums have one FLAC file for the entire album. Track boundaries are defined in a CUE sheet with time positions. bae needs to:
+1. Stream individual tracks without splitting the file
+2. Show correct track durations in players
+3. Support seeking within tracks
 
-**CUE/FLAC Format:**
-- Single FLAC file contains entire album
-- CUE sheet defines track boundaries with time positions
-- Common in audiophile releases for gapless playback
+## How It Works
 
-## Architecture Overview
+### Chunking
 
-bae uses album-level chunking where all files (audio + artwork + notes) are concatenated and split into uniform encrypted chunks.
+The FLAC file is chunked as-is during import. No modification to the audio data.
 
-### Individual Tracks vs. CUE/FLAC Model
-
-**Individual Tracks (bae chunking):**
 ```
-Import: cover.jpg + notes.txt + track01.flac + track02.flac + track03.flac
-Re-chunk → bae chunks 001-145 (uniform size, encrypted, bae UUIDs)
+album.flac (150MB) → chunks 001-150 (1MB each, encrypted)
 
-Track 1: track01.flac 00:00-03:45 → chunks 003-048
-Track 2: track02.flac 00:00-03:37 → chunks 048-095  
-Track 3: track03.flac 00:00-03:23 → chunks 095-145
+Track 1: 00:00-03:45 → chunks 003-048
+Track 2: 03:45-07:22 → chunks 048-095
+Track 3: 07:22-11:05 → chunks 095-145
 ```
 
-**CUE/FLAC (bae chunking):**
-```
-Import: cover.jpg + notes.txt + album.flac + album.cue
-Re-chunk → bae chunks 001-145 (uniform size, encrypted, bae UUIDs)
+Track positions within chunks are stored in `track_chunk_coords` table.
 
-Track 1: album.flac 00:00-03:45 → chunks 003-048
-Track 2: album.flac 03:45-07:22 → chunks 048-095
-Track 3: album.flac 07:22-11:05 → chunks 095-145
-```
+### FLAC Headers
 
-## Data Storage
+FLAC decoders need headers to play audio. The original headers have album-level metadata (total samples = entire album). For individual track playback, we generate corrected headers per track:
 
-### CUE/FLAC File Records
+**What we store (in `audio_formats` table):**
+- STREAMINFO block only (required for playback)
+- `total_samples` corrected to track duration
+- MD5 signature zeroed (signals "no signature")
+- Min/max frame sizes zeroed (signals "unknown")
 
-**During Import:**
-- The FLAC file is chunked and uploaded as-is (no modification to audio data)
-- After chunks upload, we generate corrected FLAC headers for each track
-- Headers are stored in the database as metadata (not in the chunks themselves)
+**What we discard:**
+- SEEKTABLE - offsets are wrong for extracted tracks
+- VORBIS_COMMENT - album-level tags
+- PADDING, APPLICATION - unnecessary
 
-**Database-Stored FLAC Headers (per track):**
-- Only STREAMINFO block (all other metadata blocks removed)
-- `total_samples` corrected to reflect track duration (not album duration)
-- MD5 and min/max frame sizes zeroed (unknown for extracted track)
+Headers are stored in the database, not in the chunks. During playback, headers are prepended to the decrypted chunk data.
 
-**Chunks (uploaded audio data):**
-- Original FLAC file bytes, including original headers and all frames
-- No modification during import
+### Frame Rewriting
 
-**Why This Matters:**
-- Enables playback without downloading initial chunks (headers come from database)
-- Ensures decoder shows correct track duration
+FLAC frames have sequence numbers. For track 2, frames might start at number 10000 (where track 2 begins in the album). Decoders expect frames to start at 0.
 
-### Track Position Records  
-- Track timing boundaries in milliseconds
-- Chunk index ranges for efficient retrieval
+During reassembly, we rewrite frame headers:
+1. Find frame boundaries (sync code 0xFFF8)
+2. Parse the frame/sample number (UTF-8 variable-length integer)
+3. Subtract track start position to get relative number (starts from 0)
+4. Re-encode and recalculate CRC-8
 
-## FLAC Processing for CUE Tracks
+This produces a valid standalone FLAC file from the chunk data.
 
-### Header Generation (Metadata Persistence)
-After chunks are uploaded, we generate corrected FLAC headers and store them in the database:
+### Seektables
 
-- **Extract STREAMINFO** from album FLAC
-- **Update `total_samples`** to track duration (samples in this track, not entire album)
-- **Zero MD5 signature** - signals "no signature" (unknown for extracted track)
-- **Zero min/max frame sizes** - signals "unknown" for extracted track
-- **Remove all other metadata blocks**:
-  - SEEKTABLE (type 3) - offsets are incorrect for extracted track
-  - VORBIS_COMMENT (type 4) - album-level tags don't apply to track
-  - PADDING (type 1) - unnecessary space filler
-  - APPLICATION (type 2) - encoder-specific data not needed
-- **Keep only STREAMINFO** (type 0) - required for playback
+For seeking within CUE/FLAC tracks, we need to map sample positions to byte positions. The original album seektable doesn't help (wrong offsets). We generate a track-specific seektable during import and store it in `audio_formats.flac_seektable`.
 
-Note: The FLAC file is chunked and uploaded as-is. Headers are generated and stored as metadata
-in the database, not written to the chunks. Track metadata lives in the database. SEEKTABLE
-could be rebuilt with correct offsets if needed in the future. Tags can be added later if needed.
+## Database Tables
 
-### Frame Rewriting (Playback Time)
-During track reassembly, we rewrite FLAC frame headers to create valid standalone FLAC files:
+**`track_chunk_coords`** - Where each track's audio lives in the chunk stream:
+- `start_chunk_index`, `end_chunk_index`
+- `start_byte_offset`, `end_byte_offset`
+- `start_time_ms`, `end_time_ms`
 
-1. **Calculate track's starting position**: `start_sample = (start_time_ms * sample_rate) / 1000`
-2. **Scan reassembled audio** for FLAC frame boundaries (sync code 0xFFF8)
-3. **For each frame header**:
-   - Parse frame/sample number (UTF-8 coded variable-length integer)
-   - Subtract track start to get relative number (starts from 0)
-   - Re-encode number in UTF-8 (size may change)
-   - Rebuild header with new number
-   - Recalculate CRC-8 checksum
-4. **Result**: Byte-correct FLAC file with frames starting from 0
+**`audio_formats`** - Per-track audio metadata:
+- `flac_headers` - Corrected STREAMINFO for prepending
+- `flac_seektable` - Track-specific seektable for seeking
+- `needs_headers` - True for CUE/FLAC tracks
 
-### Why Frame Rewriting?
-- Makes extracted tracks valid standalone FLAC files
-- Enables future streaming without full reassembly
-- Ensures correct seeking behavior in decoders
-- Frame/sample numbers must start from 0 for proper playback
-- Handles both fixed and variable block size strategies
+## Playback Flow
 
-## Requirements
-
-### File Detection
-- Detect .flac files with matching .cue files in import folders
-
-### Data Extraction
-- Extract FLAC metadata and headers
-- Parse CUE sheet track boundaries and timing
-- Convert CUE time format (MM:SS:FF) to milliseconds
-
-### Import Process
-1. Extract FLAC headers and store in database
-2. Parse CUE sheet for track boundaries  
-3. Album-level chunking (entire folder concatenated and split)
-4. Calculate track positions within chunks
-5. Store track position mappings
-
-See `BAE_IMPORT_WORKFLOW.md` for complete import process details.
-
-### Streaming Process
-1. Retrieve track position from database
-2. Get FLAC headers from database
-3. Download only required chunks for track
-4. Prepend headers to chunk data
-5. Use audio library for precise track extraction
-
-See `BAE_STREAMING_ARCHITECTURE.md` for complete streaming pipeline details.
-
-## Chunk Download Behavior
-
-### Track-Specific Chunk Retrieval
-```
-Album: 150MB FLAC → 150 chunks
-Track 3: chunks 45-55 → Download 10 chunks (10MB)
-```
-
-### Header Storage
-- FLAC headers stored in database
-- No need to download initial chunks for headers
-
-
-## Dependencies
-```toml
-# CUE sheet parsing
-nom = "7.1"              # Parser combinator for CUE format
-
-# Audio processing and FLAC handling
-symphonia = "0.5"        # Audio framework with FLAC support
-
-# Alternative options considered:
-# rodio = "0.17"         # Alternative: Audio playback and processing
-# ffmpeg-next = "6.0"    # Alternative: FFmpeg bindings for transcoding
-# flac = "0.3"           # Alternative: Dedicated FLAC library (not needed with symphonia)
-```
-
-## Migration Strategy
-
-### Backward Compatibility
-- Existing single-file tracks continue to work unchanged
-- New CUE/FLAC detection only applies to new imports
-- Database schema supports both individual files and CUE/FLAC
-
-
-## Testing Strategy
-
-### Test Cases
-1. **CUE Parsing**: Various CUE sheet formats and edge cases
-2. **FLAC Headers**: Different FLAC encoding parameters
-3. **Time Conversion**: Accuracy of time→byte estimation
-4. **Chunk Ranges**: Correct chunk selection for track boundaries
-5. **Streaming**: End-to-end CUE track playback
-6. **Chunk Retrieval**: Verify correct chunk selection for track boundaries
-
-### Test Data
-- Sample CUE/FLAC albums with known track boundaries
-- Various FLAC encoding settings (different sample rates, bit depths)
-- Edge cases: single track, many short tracks, long tracks
-
-This specification covers CUE/FLAC support implementation in bae.
+1. Look up track in `track_chunk_coords`
+2. Download required chunks (only the ones containing this track)
+3. Decrypt chunks
+4. Prepend FLAC headers from `audio_formats`
+5. Rewrite frame numbers
+6. Stream to audio output
