@@ -39,11 +39,9 @@ async fn test_storageless_cue_flac_records_track_positions() {
     let temp_root = TempDir::new().expect("temp root");
     let album_dir = temp_root.path().join("album");
     let db_dir = temp_root.path().join("db");
-    let cache_dir = temp_root.path().join("cache");
 
     std::fs::create_dir_all(&album_dir).expect("album dir");
     std::fs::create_dir_all(&db_dir).expect("db dir");
-    std::fs::create_dir_all(&cache_dir).expect("cache dir");
 
     // Generate CUE/FLAC test files
     generate_cue_flac_files(&album_dir);
@@ -59,15 +57,6 @@ async fn test_storageless_cue_flac_records_track_positions() {
         .expect("database");
 
     let encryption_service = EncryptionService::new_with_key(vec![0u8; 32]);
-
-    let cache_config = CacheConfig {
-        cache_dir,
-        max_size_bytes: 1024 * 1024 * 1024,
-        max_chunks: 10000,
-    };
-    let cache_manager = CacheManager::with_config(cache_config)
-        .await
-        .expect("cache");
 
     let library_manager = LibraryManager::new(database.clone(), cloud_storage.clone());
     let shared_library_manager = SharedLibraryManager::new(library_manager.clone());
