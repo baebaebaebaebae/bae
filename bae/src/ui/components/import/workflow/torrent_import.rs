@@ -11,12 +11,10 @@ use dioxus::prelude::*;
 use std::path::PathBuf;
 use std::rc::Rc;
 use tracing::{info, warn};
-
 #[component]
 pub fn TorrentImport() -> Element {
     let navigator = use_navigator();
     let import_context = use_context::<Rc<ImportContext>>();
-
     let on_torrent_file_select = {
         let import_context = import_context.clone();
         move |(path, seed_flag): (PathBuf, bool)| {
@@ -31,20 +29,16 @@ pub fn TorrentImport() -> Element {
             });
         }
     };
-
     let on_magnet_link = move |(magnet, seed_after_download): (String, bool)| {
-        // TODO: Handle magnet link
-        let _ = (magnet, seed_after_download); // Placeholder until implementation
+        let _ = (magnet, seed_after_download);
         info!("Magnet link selection not yet implemented");
     };
-
     let on_torrent_error = {
         let import_context = import_context.clone();
         move |error: String| {
             import_context.set_import_error_message(Some(error));
         }
     };
-
     let on_confirm_from_manual = {
         let import_context = import_context.clone();
         move |candidate: MatchCandidate| {
@@ -60,15 +54,12 @@ pub fn TorrentImport() -> Element {
             });
         }
     };
-
     let on_change_folder = {
         let import_context = import_context.clone();
         EventHandler::new(move |()| {
             import_context.reset();
         })
     };
-
-    // Check if there are .cue files available for metadata detection (computed before rsx!)
     let has_cue_files_for_manual = {
         let folder_files = import_context.folder_files();
         let files = folder_files.read();
@@ -79,10 +70,8 @@ pub fn TorrentImport() -> Element {
         drop(files);
         result
     };
-
     rsx! {
         div {
-            // Phase 1: Torrent Selection
             if *import_context.import_phase().read() == ImportPhase::FolderSelection {
                 TorrentInput {
                     on_file_select: on_torrent_file_select,
@@ -92,7 +81,6 @@ pub fn TorrentImport() -> Element {
                 }
             } else {
                 div { class: "space-y-6",
-                    // Show selected torrent with all info
                     SelectedSource {
                         title: "Selected Torrent".to_string(),
                         path: import_context.folder_path(),
@@ -110,8 +98,6 @@ pub fn TorrentImport() -> Element {
                             TorrentFilesDisplay { info: import_context.torrent_info() }
                         }),
                     }
-
-                    // Phase 2: Exact Lookup
                     if *import_context.import_phase().read() == ImportPhase::ExactLookup {
                         ExactLookup {
                             is_looking_up: import_context.is_looking_up(),
@@ -125,10 +111,7 @@ pub fn TorrentImport() -> Element {
                             },
                         }
                     }
-
-                    // Phase 3: Manual Search
                     if *import_context.import_phase().read() == ImportPhase::ManualSearch {
-                        // Show DiscID lookup error with retry button if applicable
                         if import_context.discid_lookup_error().read().is_some() {
                             DiscIdLookupError {
                                 error_message: import_context.discid_lookup_error(),
@@ -145,7 +128,6 @@ pub fn TorrentImport() -> Element {
                                 },
                             }
                         }
-
                         if has_cue_files_for_manual && import_context.detected_metadata().read().is_none()
                             && !*import_context.is_detecting().read()
                         {
@@ -163,7 +145,6 @@ pub fn TorrentImport() -> Element {
                                 },
                             }
                         }
-
                         ManualSearch {
                             detected_metadata: import_context.detected_metadata(),
                             selected_match_index: import_context.selected_match_index(),
@@ -181,8 +162,6 @@ pub fn TorrentImport() -> Element {
                             },
                         }
                     }
-
-                    // Phase 4: Confirmation
                     if *import_context.import_phase().read() == ImportPhase::Confirmation {
                         Confirmation {
                             confirmed_candidate: import_context.confirmed_candidate(),
@@ -208,8 +187,6 @@ pub fn TorrentImport() -> Element {
                             },
                         }
                     }
-
-                    // Error messages
                     ErrorDisplay {
                         error_message: import_context.import_error_message(),
                         duplicate_album_id: import_context.duplicate_album_id(),
@@ -219,7 +196,6 @@ pub fn TorrentImport() -> Element {
         }
     }
 }
-
 #[component]
 fn TorrentTrackerDisplay(trackers: Vec<String>) -> Element {
     if trackers.is_empty() {
@@ -227,39 +203,31 @@ fn TorrentTrackerDisplay(trackers: Vec<String>) -> Element {
             div { "No trackers available" }
         };
     }
-
-    // Fake data for tracker status
     struct TrackerStatus {
         url: String,
         announce_status: String,
-        announce_progress: Option<(usize, usize)>, // (current, total) for announcing, None for connected
+        announce_progress: Option<(usize, usize)>,
         peer_count: usize,
         seeders: usize,
         leechers: usize,
     }
-
     let tracker_statuses: Vec<TrackerStatus> = trackers
         .iter()
         .enumerate()
         .map(|(idx, url)| {
-            // Generate fake data - use index to vary peer counts
-            let peer_count = 15 + (idx * 7) % 35; // Varies between 15-49
-            let seeders = peer_count / 4; // Roughly 25% seeders
+            let peer_count = 15 + (idx * 7) % 35;
+            let seeders = peer_count / 4;
             let leechers = peer_count - seeders;
-
-            // Determine announce status and progress
             let (announce_status, announce_progress) = if url.contains("udp") {
                 ("Connected".to_string(), None)
             } else {
-                // Simulate announcing progress (0/2, 1/2, or 2/2 = Connected)
-                let progress = idx % 3; // Cycle through 0, 1, 2
+                let progress = idx % 3;
                 if progress == 2 {
                     ("Connected".to_string(), None)
                 } else {
                     ("Announcing".to_string(), Some((progress, 2)))
                 }
             };
-
             TrackerStatus {
                 url: url.clone(),
                 announce_status,
@@ -270,18 +238,13 @@ fn TorrentTrackerDisplay(trackers: Vec<String>) -> Element {
             }
         })
         .collect();
-
     let mut expanded = use_signal(|| false);
-
     let total_peers: usize = tracker_statuses.iter().map(|ts| ts.peer_count).sum();
     let total_seeders: usize = tracker_statuses.iter().map(|ts| ts.seeders).sum();
     let total_leechers: usize = tracker_statuses.iter().map(|ts| ts.leechers).sum();
-
-    // Generate summary for collapsed state
     let mut connected_count = 0;
     let mut announcing_count = 0;
     let mut error_count = 0;
-
     for tracker in tracker_statuses.iter() {
         match tracker.announce_status.as_str() {
             "Connected" => connected_count += 1,
@@ -289,7 +252,6 @@ fn TorrentTrackerDisplay(trackers: Vec<String>) -> Element {
             _ => error_count += 1,
         }
     }
-
     let mut summary_parts = Vec::new();
     if connected_count > 0 {
         summary_parts.push(format!("{} connected", connected_count));
@@ -305,7 +267,6 @@ fn TorrentTrackerDisplay(trackers: Vec<String>) -> Element {
     } else {
         summary_parts.join(", ")
     };
-
     rsx! {
         div { class: "mb-4",
             button {
@@ -346,7 +307,6 @@ fn TorrentTrackerDisplay(trackers: Vec<String>) -> Element {
                     }
                 }
             }
-
             if *expanded.read() {
                 div { class: "mt-3 space-y-2",
                     for tracker in tracker_statuses.iter() {
@@ -364,7 +324,6 @@ fn TorrentTrackerDisplay(trackers: Vec<String>) -> Element {
         }
     }
 }
-
 #[component]
 fn TrackerItem(
     url: String,
@@ -405,19 +364,15 @@ fn TrackerItem(
         }
     }
 }
-
 #[component]
 fn TorrentInfoDisplay(info: ReadSignal<Option<TorrentInfo>>) -> Element {
     let mut expanded = use_signal(|| false);
-
     let torrent_info_opt = info.read();
     let Some(torrent_info) = torrent_info_opt.as_ref() else {
         return rsx! {
             div { "No torrent info available" }
         };
     };
-
-    // Format file size
     let format_size = |bytes: i64| -> String {
         if bytes < 1024 {
             format!("{} B", bytes)
@@ -429,8 +384,6 @@ fn TorrentInfoDisplay(info: ReadSignal<Option<TorrentInfo>>) -> Element {
             format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
         }
     };
-
-    // Format creation date
     let format_date = |timestamp: i64| -> String {
         if timestamp == 0 {
             "Not available".to_string()
@@ -443,10 +396,8 @@ fn TorrentInfoDisplay(info: ReadSignal<Option<TorrentInfo>>) -> Element {
             }
         }
     };
-
     rsx! {
         div { class: "mt-4",
-            // Header with toggle button
             button {
                 class: "w-full flex items-center justify-between text-left p-3 bg-gray-800 rounded border border-gray-700 hover:bg-gray-700 transition-colors",
                 onclick: move |_| {
@@ -464,10 +415,8 @@ fn TorrentInfoDisplay(info: ReadSignal<Option<TorrentInfo>>) -> Element {
                     }
                 }
             }
-
             if *expanded.read() {
                 div { class: "mt-3 space-y-4",
-                    // Basic Info
                     div { class: "grid grid-cols-2 gap-4",
                         div {
                             h4 { class: "text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2",
@@ -514,8 +463,6 @@ fn TorrentInfoDisplay(info: ReadSignal<Option<TorrentInfo>>) -> Element {
                             }
                         }
                     }
-
-                    // Comment
                     if !torrent_info.comment.is_empty() {
                         div {
                             h4 { class: "text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2",
@@ -526,8 +473,6 @@ fn TorrentInfoDisplay(info: ReadSignal<Option<TorrentInfo>>) -> Element {
                             }
                         }
                     }
-
-                    // Creator
                     if !torrent_info.creator.is_empty() {
                         div {
                             h4 { class: "text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2",
@@ -538,8 +483,6 @@ fn TorrentInfoDisplay(info: ReadSignal<Option<TorrentInfo>>) -> Element {
                             }
                         }
                     }
-
-                    // Creation Date
                     if torrent_info.creation_date != 0 {
                         div {
                             h4 { class: "text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2",
@@ -555,20 +498,16 @@ fn TorrentInfoDisplay(info: ReadSignal<Option<TorrentInfo>>) -> Element {
         }
     }
 }
-
 #[component]
 fn TorrentFilesDisplay(info: ReadSignal<Option<TorrentInfo>>) -> Element {
     use crate::ui::components::import::FileInfo;
     let mut expanded = use_signal(|| false);
-
     let torrent_info_opt = info.read();
     let Some(torrent_info) = torrent_info_opt.as_ref() else {
         return rsx! {
             div { "No torrent info available" }
         };
     };
-
-    // Convert files to FileInfo format
     let mut files: Vec<FileInfo> = torrent_info
         .files
         .iter()
@@ -592,16 +531,13 @@ fn TorrentFilesDisplay(info: ReadSignal<Option<TorrentInfo>>) -> Element {
         })
         .collect();
     files.sort_by(|a, b| a.name.cmp(&b.name));
-
     if files.is_empty() {
         return rsx! {
             div { "No files available" }
         };
     }
-
     rsx! {
         div { class: "mt-4",
-            // Header with toggle button
             button {
                 class: "w-full flex items-center justify-between text-left p-3 bg-gray-800 rounded border border-gray-700 hover:bg-gray-700 transition-colors",
                 onclick: move |_| {
@@ -619,7 +555,6 @@ fn TorrentFilesDisplay(info: ReadSignal<Option<TorrentInfo>>) -> Element {
                     }
                 }
             }
-
             if *expanded.read() {
                 div { class: "mt-3",
                     FileList { files }
@@ -628,7 +563,6 @@ fn TorrentFilesDisplay(info: ReadSignal<Option<TorrentInfo>>) -> Element {
         }
     }
 }
-
 #[component]
 fn MetadataDetectionPrompt(on_detect: EventHandler<()>) -> Element {
     rsx! {

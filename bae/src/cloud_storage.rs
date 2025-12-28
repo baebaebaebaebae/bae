@@ -4,7 +4,6 @@ use aws_sdk_s3::{primitives::ByteStreamError, Client, Error as S3Error};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
-
 #[derive(Error, Debug)]
 pub enum CloudStorageError {
     #[error("S3 error: {0}")]
@@ -20,7 +19,6 @@ pub enum CloudStorageError {
     #[error("Download error: {0}")]
     Download(String),
 }
-
 /// S3 configuration for cloud storage
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct S3Config {
@@ -28,9 +26,8 @@ pub struct S3Config {
     pub region: String,
     pub access_key_id: String,
     pub secret_access_key: String,
-    pub endpoint_url: Option<String>, // For MinIO/S3-compatible services
+    pub endpoint_url: Option<String>,
 }
-
 impl S3Config {
     pub fn validate(&self) -> Result<(), CloudStorageError> {
         if self.bucket_name.trim().is_empty() {
@@ -56,7 +53,6 @@ impl S3Config {
         Ok(())
     }
 }
-
 /// Trait for cloud storage operations (allows mocking for tests)
 #[async_trait::async_trait]
 pub trait CloudStorage: Send + Sync {
@@ -64,88 +60,65 @@ pub trait CloudStorage: Send + Sync {
     async fn download_chunk(&self, storage_location: &str) -> Result<Vec<u8>, CloudStorageError>;
     async fn delete_chunk(&self, storage_location: &str) -> Result<(), CloudStorageError>;
 }
-
 /// Format AWS SDK error for better debugging
 fn format_error_details(err: &dyn std::fmt::Debug) -> String {
     let err_str = format!("{:?}", err);
-
-    // Check for common errors and provide helpful messages
     if err_str.contains("RequestTimeTooSkewed") {
         return format!(
             "RequestTimeTooSkewed: Clock skew detected. Your system clock and MinIO server clock are out of sync (difference > 15 minutes). \
             Please sync your system clock or the MinIO server clock. Error details: {}",
-            err_str
+            err_str,
         );
     }
-
-    // Try to extract error code and message from the debug string
     if let Some(code_start) = err_str.find("code: Some(\"") {
         let code_end = err_str[code_start + 11..].find('"').unwrap_or(0);
         let code = &err_str[code_start + 11..code_start + 11 + code_end];
-
         if let Some(msg_start) = err_str.find("message: Some(\"") {
             let msg_end = err_str[msg_start + 15..].find('"').unwrap_or(0);
             let msg = &err_str[msg_start + 15..msg_start + 15 + msg_end];
             return format!("{}: {}", code, msg);
         }
     }
-
     err_str
 }
-
 /// Production S3 cloud storage implementation
 pub struct S3CloudStorage {
     client: Client,
     bucket_name: String,
 }
-
 impl S3CloudStorage {
     /// Create a new S3 cloud storage client
     pub async fn new(config: S3Config) -> Result<Self, CloudStorageError> {
         Self::new_with_bucket_creation(config, true).await
     }
-
     /// Create a new S3 cloud storage client with optional bucket creation
     pub async fn new_with_bucket_creation(
         config: S3Config,
         create_bucket: bool,
     ) -> Result<Self, CloudStorageError> {
-        // Create AWS credentials
         let credentials = Credentials::new(
             config.access_key_id,
             config.secret_access_key,
-            None, // session_token
-            None, // expiration
+            None,
+            None,
             "bae-s3-config",
         );
-
-        // Build AWS config
         let mut aws_config_builder = aws_config::defaults(BehaviorVersion::latest())
             .region(Region::new(config.region))
             .credentials_provider(credentials);
-
-        // Set custom endpoint if provided (for S3-compatible services)
         if let Some(endpoint) = &config.endpoint_url {
-            // Normalize endpoint URL: remove trailing slashes
             let normalized_endpoint = endpoint.trim_end_matches('/').to_string();
             info!("Using custom S3 endpoint: {}", normalized_endpoint);
             aws_config_builder = aws_config_builder.endpoint_url(normalized_endpoint);
         } else {
             info!("Using default AWS S3 endpoint");
         }
-
         let aws_config = aws_config_builder.load().await;
-
-        // Force path-style addressing for S3-compatible services (required for localhost/MinIO)
         let s3_config = aws_sdk_s3::config::Builder::from(&aws_config)
             .force_path_style(true)
             .build();
-
         let client = Client::from_conf(s3_config);
-
         let bucket_name = config.bucket_name.clone();
-
-        // Create bucket if it doesn't exist (useful for dev/testing)
         if create_bucket {
             info!("Checking if bucket '{}' exists...", bucket_name);
             match client.head_bucket().bucket(&bucket_name).send().await {
@@ -156,14 +129,12 @@ impl S3CloudStorage {
                     let err_details = format_error_details(&e);
                     debug!("Bucket check failed: {} ({:?})", err_details, e);
                     info!("Creating bucket '{}'", bucket_name);
-
                     match client.create_bucket().bucket(&bucket_name).send().await {
                         Ok(_) => {
                             info!("Bucket '{}' created successfully", bucket_name);
                         }
                         Err(create_err) => {
                             let create_err_details = format_error_details(&create_err);
-                            // Check if the error is because bucket already exists
                             let err_str = format!("{:?}", create_err);
                             if err_str.contains("BucketAlreadyOwnedByYou")
                                 || err_str.contains("BucketAlreadyExists")
@@ -173,13 +144,10 @@ impl S3CloudStorage {
                                     bucket_name, create_err_details
                                 );
                             } else {
-                                // Try to use the bucket anyway - maybe we have access
                                 warn!(
                                     "Failed to create bucket '{}': {}. Attempting to use it anyway...",
                                     bucket_name, create_err_details
                                 );
-
-                                // Test if we can actually use the bucket by listing objects
                                 match client
                                     .list_objects_v2()
                                     .bucket(&bucket_name)
@@ -196,7 +164,10 @@ impl S3CloudStorage {
                                     Err(list_err) => {
                                         let error_msg = format!(
                                             "Cannot access bucket '{}'. Create error: {}. List error: {}. Endpoint: {:?}",
-                                            bucket_name, create_err, list_err, config.endpoint_url
+                                            bucket_name,
+                                            create_err,
+                                            list_err,
+                                            config.endpoint_url,
                                         );
                                         error!("{}", error_msg);
                                         return Err(CloudStorageError::SdkError(error_msg));
@@ -208,34 +179,27 @@ impl S3CloudStorage {
                 }
             }
         }
-
         Ok(S3CloudStorage {
             client,
             bucket_name,
         })
     }
-
     /// Generate S3 key for a chunk using hash-based partitioning
     /// Example: chunk_abcd1234-5678-9abc-def0-123456789abc -> chunks/ab/cd/chunk_abcd1234-5678-9abc-def0-123456789abc.enc
     fn chunk_key(&self, chunk_id: &str) -> String {
         if chunk_id.len() < 4 {
-            // Fallback for malformed chunk IDs
             return format!("chunks/misc/{}.enc", chunk_id);
         }
-
-        let prefix = &chunk_id[..2]; // First 2 chars: "ab"
-        let subprefix = &chunk_id[2..4]; // Next 2 chars: "cd"
+        let prefix = &chunk_id[..2];
+        let subprefix = &chunk_id[2..4];
         format!("chunks/{}/{}/{}.enc", prefix, subprefix, chunk_id)
     }
 }
-
 #[async_trait::async_trait]
 impl CloudStorage for S3CloudStorage {
     async fn upload_chunk(&self, chunk_id: &str, data: &[u8]) -> Result<String, CloudStorageError> {
         let key = self.chunk_key(chunk_id);
-
         debug!("Uploading chunk {} ({} bytes)", chunk_id, data.len());
-
         self.client
             .put_object()
             .bucket(&self.bucket_name)
@@ -245,23 +209,17 @@ impl CloudStorage for S3CloudStorage {
             .send()
             .await
             .map_err(|e| CloudStorageError::SdkError(format!("Put object failed: {}", e)))?;
-
         let storage_location = format!("s3://{}/{}", self.bucket_name, key);
         debug!("Successfully uploaded chunk to {}", storage_location);
-
         Ok(storage_location)
     }
-
     async fn download_chunk(&self, storage_location: &str) -> Result<Vec<u8>, CloudStorageError> {
-        // Parse S3 location: s3://bucket/key
         let key = storage_location
             .strip_prefix(&format!("s3://{}/", self.bucket_name))
             .ok_or_else(|| {
                 CloudStorageError::Download(format!("Invalid S3 location: {}", storage_location))
             })?;
-
         debug!("Downloading chunk from {}", storage_location);
-
         let response = self
             .client
             .get_object()
@@ -270,23 +228,17 @@ impl CloudStorage for S3CloudStorage {
             .send()
             .await
             .map_err(|e| CloudStorageError::SdkError(format!("Get object failed: {}", e)))?;
-
         let data = response.body.collect().await?.into_bytes().to_vec();
-
         debug!("Successfully downloaded {} bytes", data.len());
         Ok(data)
     }
-
     async fn delete_chunk(&self, storage_location: &str) -> Result<(), CloudStorageError> {
-        // Parse S3 location: s3://bucket/key
         let key = storage_location
             .strip_prefix(&format!("s3://{}/", self.bucket_name))
             .ok_or_else(|| {
                 CloudStorageError::Download(format!("Invalid S3 location: {}", storage_location))
             })?;
-
         debug!("Deleting chunk from {}", storage_location);
-
         self.client
             .delete_object()
             .bucket(&self.bucket_name)
@@ -294,18 +246,15 @@ impl CloudStorage for S3CloudStorage {
             .send()
             .await
             .map_err(|e| CloudStorageError::SdkError(format!("Delete object failed: {}", e)))?;
-
         debug!("Successfully deleted chunk from {}", storage_location);
         Ok(())
     }
 }
-
 /// Cloud storage manager that handles chunk lifecycle
 #[derive(Clone)]
 pub struct CloudStorageManager {
     storage: std::sync::Arc<dyn CloudStorage>,
 }
-
 impl std::fmt::Debug for CloudStorageManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CloudStorageManager")
@@ -313,7 +262,6 @@ impl std::fmt::Debug for CloudStorageManager {
             .finish()
     }
 }
-
 impl CloudStorageManager {
     /// Create a new cloud storage manager with S3 configuration
     pub async fn new(config: S3Config) -> Result<Self, CloudStorageError> {
@@ -322,14 +270,12 @@ impl CloudStorageManager {
             storage: std::sync::Arc::new(storage),
         })
     }
-
     /// Create a cloud storage manager from any CloudStorage implementation (for testing)
     #[cfg(feature = "test-utils")]
-    #[allow(unused)] // Used in tests
+    #[allow(unused)]
     pub fn from_storage(storage: std::sync::Arc<dyn CloudStorage>) -> Self {
         CloudStorageManager { storage }
     }
-
     /// Upload chunk data directly from memory
     pub async fn upload_chunk_data(
         &self,
@@ -338,7 +284,6 @@ impl CloudStorageManager {
     ) -> Result<String, CloudStorageError> {
         self.storage.upload_chunk(chunk_id, data).await
     }
-
     /// Download chunk data from cloud storage
     pub async fn download_chunk(
         &self,
@@ -346,7 +291,6 @@ impl CloudStorageManager {
     ) -> Result<Vec<u8>, CloudStorageError> {
         self.storage.download_chunk(storage_location).await
     }
-
     /// Delete chunk data from cloud storage
     pub async fn delete_chunk(&self, storage_location: &str) -> Result<(), CloudStorageError> {
         self.storage.delete_chunk(storage_location).await

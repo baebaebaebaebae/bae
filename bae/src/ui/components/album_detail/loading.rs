@@ -1,5 +1,4 @@
 use dioxus::prelude::*;
-
 /// Loading spinner for album detail page
 #[component]
 pub fn AlbumDetailLoading() -> Element {

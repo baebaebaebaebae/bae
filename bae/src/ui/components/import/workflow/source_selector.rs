@@ -1,11 +1,9 @@
 use dioxus::prelude::*;
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum SearchSource {
     MusicBrainz,
     Discogs,
 }
-
 #[component]
 pub fn SearchSourceSelector(
     selected_source: Signal<SearchSource>,

@@ -1,17 +1,14 @@
+use super::utils::format_release_display;
 use crate::db::DbRelease;
 use crate::library::SharedLibraryManager;
 use crate::playback::{PlaybackProgress, PlaybackState};
 use crate::ui::components::use_playback_service;
 use dioxus::prelude::*;
-
-use super::utils::format_release_display;
-
 #[derive(Clone, Copy, PartialEq)]
 pub enum ReleaseAction {
     Play,
     Queue,
 }
-
 #[component]
 pub fn ReleaseSubmenu(
     releases: ReadSignal<Vec<DbRelease>>,
@@ -27,7 +24,6 @@ pub fn ReleaseSubmenu(
                 {
                     let release_id = release.id.clone();
                     let release_display = format_release_display(release);
-
                     rsx! {
                         button {
                             class: "w-full px-4 py-2 text-left text-white hover:bg-gray-600 transition-colors text-sm",
@@ -40,18 +36,13 @@ pub fn ReleaseSubmenu(
                                 move |evt| {
                                     evt.stop_propagation();
                                     on_close.call(());
-
-
-
                                     if is_loading_clone() {
                                         return;
                                     }
-
                                     let release_id = release_id_clone.clone();
                                     let library_manager = library_manager_clone.clone();
                                     let playback = playback_clone.clone();
                                     let action = action;
-
                                     if action == ReleaseAction::Play {
                                         is_loading_clone.set(true);
                                         let mut is_loading = is_loading_clone;

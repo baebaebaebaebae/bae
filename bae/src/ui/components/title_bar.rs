@@ -4,18 +4,16 @@ use crate::ui::components::imports_button::ImportsButton;
 use crate::ui::components::imports_dropdown::ImportsDropdown;
 use crate::ui::components::use_library_search;
 use crate::ui::{image_url, Route};
-use dioxus::desktop::use_window;
-use dioxus::prelude::*;
-use std::collections::HashMap;
-use tracing::info;
-
 #[cfg(target_os = "macos")]
 use cocoa::appkit::NSApplication;
 #[cfg(target_os = "macos")]
 use cocoa::base::{id, nil};
+use dioxus::desktop::use_window;
+use dioxus::prelude::*;
 #[cfg(target_os = "macos")]
 use objc::{msg_send, sel, sel_impl};
-
+use std::collections::HashMap;
+use tracing::info;
 /// Custom title bar component with navigation (macOS: native traffic lights + nav)
 #[component]
 pub fn TitleBar() -> Element {
@@ -28,8 +26,6 @@ pub fn TitleBar() -> Element {
     let mut album_artists = use_signal(HashMap::<String, Vec<DbArtist>>::new);
     let mut filtered_albums = use_signal(Vec::<DbAlbum>::new);
     let imports_dropdown_open = use_signal(|| false);
-
-    // Load albums on mount
     use_effect(move || {
         let library_manager = library_manager.clone();
         spawn(async move {
@@ -47,8 +43,6 @@ pub fn TitleBar() -> Element {
             }
         });
     });
-
-    // Filter albums when search query changes
     use_effect({
         move || {
             let query = search_query().to_lowercase();
@@ -77,9 +71,7 @@ pub fn TitleBar() -> Element {
             }
         }
     });
-
     rsx! {
-        // Click outside to close - render BEFORE everything
         if show_results() {
             div {
                 class: "fixed inset-0 z-[1500]",
@@ -89,7 +81,6 @@ pub fn TitleBar() -> Element {
                 },
             }
         }
-
         div {
             id: "title-bar",
             class: "fixed top-0 left-0 right-0 h-10 bg-[#1e222d] flex items-center pl-20 pr-2 cursor-move z-[1000] border-b border-[#2d3138]",
@@ -118,14 +109,10 @@ pub fn TitleBar() -> Element {
                     is_active: matches!(current_route, Route::Settings {}),
                 }
             }
-
-            // Imports button with dropdown
             div { class: "relative ml-4", style: "-webkit-app-region: no-drag;",
                 ImportsButton { is_open: imports_dropdown_open }
                 ImportsDropdown { is_open: imports_dropdown_open }
             }
-
-            // Search input on the right side
             div {
                 class: "flex-1 flex justify-end items-center relative",
                 style: "-webkit-app-region: no-drag;",
@@ -151,8 +138,6 @@ pub fn TitleBar() -> Element {
                 }
             }
         }
-
-        // Results popover - rendered OUTSIDE title-bar so z-index works properly
         if show_results() && !filtered_albums().is_empty() {
             div {
                 class: "fixed top-10 right-2 w-64 z-[2000]",
@@ -167,7 +152,6 @@ pub fn TitleBar() -> Element {
                             let album_id = album.id.clone();
                             let album_title = album.title.clone();
                             let album_year = album.year;
-                            // Use cover_image_id first, fallback to cover_art_url
                             let cover_url = album
                                 .cover_image_id
                                 .as_ref()
@@ -230,7 +214,6 @@ pub fn TitleBar() -> Element {
         }
     }
 }
-
 /// Navigation button component for titlebar
 #[component]
 fn NavButton(route: Route, label: &'static str, is_active: bool) -> Element {
@@ -248,21 +231,18 @@ fn NavButton(route: Route, label: &'static str, is_active: bool) -> Element {
         }
     }
 }
-
 /// Perform window zoom (maximize/restore) using native macOS API
 #[cfg(target_os = "macos")]
 fn perform_zoom() {
     unsafe {
         let app = NSApplication::sharedApplication(nil);
         let window: id = msg_send![app, keyWindow];
-
         if window != nil {
-            let _: () = msg_send![window, performSelector: sel!(performZoom:) withObject: nil];
+            let _: () = msg_send![
+                window, performSelector : sel!(performZoom :) withObject : nil
+            ];
         }
     }
 }
-
 #[cfg(not(target_os = "macos"))]
-fn perform_zoom() {
-    // No-op on non-macOS platforms
-}
+fn perform_zoom() {}

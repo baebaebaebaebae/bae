@@ -1,10 +1,8 @@
+use super::dropdown_menu::AlbumDropdownMenu;
 use crate::db::{DbAlbum, DbArtist};
 use crate::library::use_library_manager;
 use crate::ui::{image_url, Route};
 use dioxus::prelude::*;
-
-use super::dropdown_menu::AlbumDropdownMenu;
-
 /// Individual album card component
 ///
 /// Note: Albums now represent logical albums that can have multiple releases.
@@ -17,19 +15,14 @@ pub fn AlbumCard(album: DbAlbum, artists: Vec<DbArtist>) -> Element {
     let mut hover_cover = use_signal(|| false);
     let mut show_dropdown = use_signal(|| false);
     let mut releases_signal = use_signal(Vec::new);
-
-    // Extract album fields to avoid move issues
     let album_id = album.id.clone();
     let album_title = album.title.clone();
     let album_year = album.year;
-    // Convert cover_image_id to a bae://image/{id} URL, fallback to cover_art_url
     let cover_url = album
         .cover_image_id
         .as_ref()
         .map(|id| image_url(id))
         .or_else(|| album.cover_art_url.clone());
-
-    // Format artist names
     let artist_name = if artists.is_empty() {
         "Unknown Artist".to_string()
     } else if artists.len() == 1 {
@@ -41,9 +34,7 @@ pub fn AlbumCard(album: DbAlbum, artists: Vec<DbArtist>) -> Element {
             .collect::<Vec<_>>()
             .join(", ")
     };
-
     let card_class = "bg-gray-800 rounded-lg overflow-hidden shadow-lg hover:shadow-xl transition-shadow duration-300 cursor-pointer group";
-
     rsx! {
         div {
             class: "{card_class}",
@@ -58,8 +49,6 @@ pub fn AlbumCard(album: DbAlbum, artists: Vec<DbArtist>) -> Element {
                         });
                 }
             },
-
-            // Album cover
             div {
                 class: "aspect-square bg-gray-700 flex items-center justify-center relative",
                 onmouseenter: move |_| hover_cover.set(true),
@@ -68,7 +57,6 @@ pub fn AlbumCard(album: DbAlbum, artists: Vec<DbArtist>) -> Element {
                         hover_cover.set(false);
                     }
                 },
-
                 if let Some(url) = &cover_url {
                     img {
                         src: "{url}",
@@ -78,8 +66,6 @@ pub fn AlbumCard(album: DbAlbum, artists: Vec<DbArtist>) -> Element {
                 } else {
                     div { class: "text-gray-500 text-4xl", "🎵" }
                 }
-
-                // Three dot menu button - appears on hover or when dropdown is open
                 if hover_cover() || show_dropdown() {
                     div { class: "absolute top-2 right-2 z-10",
                         button {
@@ -111,8 +97,6 @@ pub fn AlbumCard(album: DbAlbum, artists: Vec<DbArtist>) -> Element {
                                 div { class: "w-1 h-1 bg-white rounded-full" }
                             }
                         }
-
-                        // Dropdown menu
                         if show_dropdown() {
                             AlbumDropdownMenu {
                                 album_id: album_id.clone(),
@@ -128,8 +112,6 @@ pub fn AlbumCard(album: DbAlbum, artists: Vec<DbArtist>) -> Element {
                     }
                 }
             }
-
-            // Album info
             div { class: "p-4",
                 h3 {
                     class: "font-bold text-white text-lg mb-1 truncate",
@@ -145,8 +127,6 @@ pub fn AlbumCard(album: DbAlbum, artists: Vec<DbArtist>) -> Element {
                     p { class: "text-gray-500 text-xs mt-1", "{year}" }
                 }
             }
-
-            // Click outside to close dropdown
             if show_dropdown() {
                 div {
                     class: "fixed inset-0 z-[5]",

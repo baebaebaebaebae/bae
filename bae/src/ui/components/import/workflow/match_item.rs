@@ -1,6 +1,5 @@
 use crate::import::{MatchCandidate, MatchSource};
 use dioxus::prelude::*;
-
 #[component]
 pub fn MatchItem(
     candidate: MatchCandidate,
@@ -12,8 +11,6 @@ pub fn MatchItem(
     } else {
         "border-gray-700"
     };
-
-    // Extract MusicBrainz-specific info for display
     let (format_text, country_text, label_text, catalog_text) = match &candidate.source {
         MatchSource::MusicBrainz(release) => (
             release.format.as_ref().map(|f| format!("Format: {}", f)),
@@ -26,13 +23,11 @@ pub fn MatchItem(
         ),
         MatchSource::Discogs(_) => (None, None, None, None),
     };
-
     rsx! {
         div {
             class: "border rounded-lg p-4 cursor-pointer hover:bg-gray-700 transition-colors {border_class}",
             onclick: move |_| on_select.call(()),
             div { class: "flex items-start gap-4",
-                // Album cover
                 div { class: "w-16 h-16 flex-shrink-0 bg-gray-700 rounded overflow-hidden",
                     if let Some(cover_url) = candidate.cover_art_url() {
                         img {
@@ -46,12 +41,10 @@ pub fn MatchItem(
                         }
                     }
                 }
-
                 div { class: "flex-1 min-w-0",
                     div { class: "flex items-center gap-2 mb-1",
                         h4 { class: "text-lg font-semibold text-white", "{candidate.title()}" }
                     }
-
                     div { class: "text-sm text-gray-400 mb-2 space-y-1",
                         if let Some(ref year) = candidate.year() {
                             p { "Year: {year}" }

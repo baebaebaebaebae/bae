@@ -5,7 +5,6 @@ use souvlaki::{
 };
 use std::sync::{Arc, Mutex};
 use tracing::{error, info, trace};
-
 /// Initialize media controls for macOS
 /// This handles system media key events (play/pause FN key)
 /// Returns the MediaControls handle which must be kept alive for the app lifetime
@@ -14,29 +13,21 @@ pub fn setup_media_controls(
     library_manager: SharedLibraryManager,
     runtime_handle: tokio::runtime::Handle,
 ) -> Result<Arc<Mutex<MediaControls>>, souvlaki::Error> {
-    // Track current playback state to determine play/pause toggle
     let current_state = Arc::new(Mutex::new(PlaybackState::Stopped));
     let playback_handle_for_controls = playback_handle.clone();
     let playback_handle_for_progress = playback_handle.clone();
     let library_manager_for_metadata = library_manager.clone();
     let current_state_for_controls = current_state.clone();
     let current_state_for_progress = current_state.clone();
-
-    // Configure media controls for macOS
     let config = PlatformConfig {
-        dbus_name: "com.bae.app", // Used on Linux; ignored on macOS
+        dbus_name: "com.bae.app",
         display_name: "bae",
-        hwnd: None, // Used on Windows; ignored on macOS
+        hwnd: None,
     };
-
-    // Initialize media controls
     let mut controls = MediaControls::new(config)?;
-
-    // Attach event handler for media key events
     controls.attach(move |event: MediaControlEvent| {
         let playback = playback_handle_for_controls.clone();
         let state = current_state_for_controls.clone();
-
         match event {
             MediaControlEvent::Toggle => {
                 info!("Media key event received: Toggle");
@@ -52,7 +43,6 @@ pub fn setup_media_controls(
                         playback.resume();
                     }
                     PlaybackState::Stopped | PlaybackState::Loading { .. } => {
-                        // Do nothing if stopped or loading
                         info!("Media key: Ignored (stopped or loading)");
                     }
                 }
@@ -97,7 +87,6 @@ pub fn setup_media_controls(
                 playback.previous();
             }
             MediaControlEvent::SetPosition(media_position) => {
-                // Extract Duration from MediaPosition tuple struct
                 let position = media_position.0;
                 info!("Media control: SetPosition requested: {:?}", position);
                 playback.seek(position);
@@ -111,25 +100,17 @@ pub fn setup_media_controls(
             }
         }
     })?;
-
-    // Wrap controls in Arc<Mutex> so it can be shared with async task
     let controls_shared = Arc::new(Mutex::new(controls));
-
-    // Subscribe to playback progress to:
-    // 1. Update current state for play/pause toggle
-    // 2. Update media metadata when tracks change
     {
         let controls_shared = controls_shared.clone();
         runtime_handle.spawn(async move {
             let mut progress_rx = playback_handle_for_progress.subscribe_progress();
             let current_state = current_state_for_progress;
             let library_manager = library_manager_for_metadata;
-
             while let Some(progress) = progress_rx.recv().await {
                 match progress {
                     PlaybackProgress::StateChanged { state } => {
                         info!("Media controls: Received state change: {:?}", state);
-                        // Update tracked state
                         {
                             let mut state_guard = current_state.lock().unwrap();
                             *state_guard = state.clone();
@@ -138,8 +119,6 @@ pub fn setup_media_controls(
                                 *state_guard
                             );
                         }
-
-                        // Update playback state on MediaControls to register as active media player
                         {
                             let mut controls = controls_shared.lock().unwrap();
                             let playback_state = match state {
@@ -153,15 +132,12 @@ pub fn setup_media_controls(
                                     MediaPlayback::Stopped
                                 }
                             };
-
                             if let Err(e) = controls.set_playback(playback_state) {
                                 error!("Failed to set playback state: {:?}", e);
                             } else {
                                 info!("Media controls: Set playback state successfully");
                             }
-                        } // Lock released here
-
-                        // Update media metadata
+                        }
                         match state {
                             PlaybackState::Playing {
                                 ref track,
@@ -182,7 +158,6 @@ pub fn setup_media_controls(
                                 .await;
                             }
                             PlaybackState::Stopped | PlaybackState::Loading { .. } => {
-                                // Clear metadata when stopped
                                 let mut controls = controls_shared.lock().unwrap();
                                 if let Err(e) = controls.set_metadata(MediaMetadata::default()) {
                                     error!("Failed to clear media metadata: {:?}", e);
@@ -191,25 +166,19 @@ pub fn setup_media_controls(
                         }
                     }
                     PlaybackProgress::PositionUpdate { position, .. } => {
-                        // Update playback position continuously
                         update_playback_position(&controls_shared, &current_state, position);
                     }
                     PlaybackProgress::Seeked { position, .. } => {
-                        // Update position after a seek
                         update_playback_position(&controls_shared, &current_state, position);
                     }
-                    _ => {
-                        // Ignore other progress events
-                    }
+                    _ => {}
                 }
             }
         });
     }
-
     info!("Media controls initialized");
     Ok(controls_shared)
 }
-
 /// Update playback position in macOS media controls
 fn update_playback_position(
     controls_shared: &Arc<Mutex<MediaControls>>,
@@ -225,12 +194,10 @@ fn update_playback_position(
             progress: Some(MediaPosition(position)),
         },
         PlaybackState::Stopped | PlaybackState::Loading { .. } => {
-            // Don't update position if stopped or loading
             return;
         }
     };
-    drop(state_guard); // Release lock before acquiring controls lock
-
+    drop(state_guard);
     let mut controls = controls_shared.lock().unwrap();
     if let Err(e) = controls.set_playback(playback_state) {
         error!("Failed to update playback position: {:?}", e);
@@ -241,7 +208,6 @@ fn update_playback_position(
         );
     }
 }
-
 /// Update media metadata in system media controls
 async fn update_media_metadata(
     controls: &Arc<Mutex<MediaControls>>,
@@ -249,7 +215,6 @@ async fn update_media_metadata(
     track: &crate::db::DbTrack,
     duration: Option<std::time::Duration>,
 ) {
-    // Fetch artist names
     let artist_name = match library_manager.get().get_artists_for_track(&track.id).await {
         Ok(artists) => {
             if artists.is_empty() {
@@ -271,8 +236,6 @@ async fn update_media_metadata(
             None
         }
     };
-
-    // Fetch album name (cover art is stored in chunks and not accessible via HTTP URL)
     let album_name = match library_manager
         .get()
         .get_album_id_for_release(&track.release_id)
@@ -300,17 +263,11 @@ async fn update_media_metadata(
             None
         }
     };
-    // Cover art is stored in chunk storage (bae://image/{id} protocol)
-    // System media controls can't access our custom protocol, so no cover for now
     let cover_url: Option<String> = None;
-
-    // Store strings so we can create references
     let title = track.title.clone();
     let artist_str = artist_name.as_deref();
     let album_str = album_name.as_deref();
     let cover_str = cover_url.as_deref();
-
-    // Set metadata
     let metadata = MediaMetadata {
         title: Some(title.as_str()),
         artist: artist_str,
@@ -318,7 +275,6 @@ async fn update_media_metadata(
         cover_url: cover_str,
         duration,
     };
-
     let mut controls = controls.lock().unwrap();
     if let Err(e) = controls.set_metadata(metadata) {
         error!("Failed to set media metadata: {:?}", e);

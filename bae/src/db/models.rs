@@ -2,13 +2,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
 use uuid::Uuid;
-
-// String constants for SQL DEFAULT clauses (keep in sync with as_str())
 const IMPORT_STATUS_QUEUED: &str = "queued";
 const IMPORT_STATUS_IMPORTING: &str = "importing";
 const IMPORT_STATUS_COMPLETE: &str = "complete";
 const IMPORT_STATUS_FAILED: &str = "failed";
-
 /// Database models for bae storage system
 ///
 /// This implements the storage strategy described in the README:
@@ -21,12 +18,11 @@ const IMPORT_STATUS_FAILED: &str = "failed";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[sqlx(type_name = "TEXT", rename_all = "lowercase")]
 pub enum ImportStatus {
-    Queued,    // Validated and in import queue, waiting to start
-    Importing, // Actively being processed (chunks being read/encrypted/uploaded)
-    Complete,  // Successfully imported
-    Failed,    // Import failed
+    Queued,
+    Importing,
+    Complete,
+    Failed,
 }
-
 impl ImportStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -37,7 +33,6 @@ impl ImportStatus {
         }
     }
 }
-
 /// Artist metadata
 ///
 /// Represents an individual artist or band. Artists are linked to albums and tracks
@@ -63,7 +58,6 @@ pub struct DbArtist {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
-
 /// Links artists to albums (many-to-many)
 ///
 /// Supports albums with multiple artists (e.g., collaborations).
@@ -76,7 +70,6 @@ pub struct DbAlbumArtist {
     /// Order of this artist in multi-artist albums (0-indexed)
     pub position: i32,
 }
-
 /// Links artists to tracks (many-to-many)
 ///
 /// Supports tracks with multiple artists (features, remixes, etc.).
@@ -91,7 +84,6 @@ pub struct DbTrackArtist {
     /// Role: "main", "featuring", "remixer", etc.
     pub role: Option<String>,
 }
-
 /// Discogs master release information for an album
 ///
 /// When an album is imported from Discogs, both the master_id and release_id
@@ -101,17 +93,15 @@ pub struct DiscogsMasterRelease {
     pub master_id: String,
     pub release_id: String,
 }
-
 /// MusicBrainz release information for an album
 ///
 /// MusicBrainz has Release Groups (abstract albums) and Releases (specific versions).
 /// Similar to Discogs master_id/release_id relationship.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MusicBrainzRelease {
-    pub release_group_id: String, // Abstract album (like Discogs master)
-    pub release_id: String,       // Specific version/pressing
+    pub release_group_id: String,
+    pub release_id: String,
 }
-
 /// Album metadata - represents a logical album (the "master")
 ///
 /// A logical album can have multiple physical releases (e.g., "1973 Original", "2016 Remaster").
@@ -145,7 +135,6 @@ pub struct DbAlbum {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
-
 /// Release metadata - represents a specific version/pressing of an album
 ///
 /// A release is a physical or digital version of a logical album.
@@ -185,7 +174,6 @@ pub struct DbRelease {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
-
 /// Track metadata within a release
 ///
 /// Represents a single track on a specific release. Tracks are linked to releases
@@ -212,7 +200,6 @@ pub struct DbTrack {
     pub import_status: ImportStatus,
     pub created_at: DateTime<Utc>,
 }
-
 /// Physical file belonging to a release
 ///
 /// Stores original file information needed to reconstruct file structure for export
@@ -231,7 +218,7 @@ pub struct DbFile {
     pub release_id: String,
     pub original_filename: String,
     pub file_size: i64,
-    pub format: String, // "flac", "mp3", etc.
+    pub format: String,
     /// Absolute path to the source file on disk.
     /// Set when release has no storage profile (bae doesn't manage storage).
     /// For local imports: user's original file path.
@@ -239,7 +226,6 @@ pub struct DbFile {
     pub source_path: Option<String>,
     pub created_at: DateTime<Utc>,
 }
-
 /// Encrypted chunk of a release's data
 ///
 /// Releases are split into encrypted chunks for cloud storage.
@@ -261,7 +247,6 @@ pub struct DbChunk {
     pub last_accessed: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
-
 /// Audio format metadata for a track
 ///
 /// Stores format information needed for playback. One record per track (1:1 with track).
@@ -276,14 +261,13 @@ pub struct DbChunk {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbAudioFormat {
     pub id: String,
-    pub track_id: String,                // 1:1 with track
-    pub format: String,                  // "flac", "mp3", etc.
-    pub flac_headers: Option<Vec<u8>>,   // ONLY for CUE/FLAC tracks
-    pub flac_seektable: Option<Vec<u8>>, // ONLY for CUE/FLAC tracks, serialized HashMap<u64, u64>
-    pub needs_headers: bool,             // True for CUE/FLAC tracks
+    pub track_id: String,
+    pub format: String,
+    pub flac_headers: Option<Vec<u8>>,
+    pub flac_seektable: Option<Vec<u8>>,
+    pub needs_headers: bool,
     pub created_at: DateTime<Utc>,
 }
-
 /// Track chunk coordinates - precise location of track audio in chunked album stream
 ///
 /// This IS the TrackChunkCoords concept. Stores the coordinates that locate a track's
@@ -295,16 +279,14 @@ pub struct DbAudioFormat {
 pub struct DbTrackChunkCoords {
     pub id: String,
     pub track_id: String,
-    pub start_chunk_index: i32, // First chunk containing this track
-    pub end_chunk_index: i32,   // Last chunk containing this track
-    pub start_byte_offset: i64, // Where track starts in start_chunk
-    pub end_byte_offset: i64,   // Where track ends in end_chunk
-    pub start_time_ms: i64,     // Track start time (metadata/display)
-    pub end_time_ms: i64,       // Track end time (metadata/display)
+    pub start_chunk_index: i32,
+    pub end_chunk_index: i32,
+    pub start_byte_offset: i64,
+    pub end_byte_offset: i64,
+    pub start_time_ms: i64,
+    pub end_time_ms: i64,
     pub created_at: DateTime<Utc>,
 }
-
-// Helper functions for creating database records from Discogs data
 impl DbArtist {
     /// Create an artist from Discogs artist data
     pub fn from_discogs_artist(discogs_artist_id: &str, name: &str) -> Self {
@@ -312,7 +294,7 @@ impl DbArtist {
         DbArtist {
             id: Uuid::new_v4().to_string(),
             name: name.to_string(),
-            sort_name: None, // Could be computed from name (e.g., "Beatles, The")
+            sort_name: None,
             discogs_artist_id: Some(discogs_artist_id.to_string()),
             bandcamp_artist_id: None,
             created_at: now,
@@ -320,7 +302,6 @@ impl DbArtist {
         }
     }
 }
-
 impl DbAlbumArtist {
     pub fn new(album_id: &str, artist_id: &str, position: i32) -> Self {
         DbAlbumArtist {
@@ -331,7 +312,6 @@ impl DbAlbumArtist {
         }
     }
 }
-
 impl DbTrackArtist {
     pub fn new(track_id: &str, artist_id: &str, position: i32, role: Option<String>) -> Self {
         DbTrackArtist {
@@ -343,7 +323,6 @@ impl DbTrackArtist {
         }
     }
 }
-
 impl DbAlbum {
     #[cfg(test)]
     pub fn new_test(title: &str) -> Self {
@@ -362,7 +341,6 @@ impl DbAlbum {
             updated_at: now,
         }
     }
-
     /// Create a logical album from a Discogs release
     /// Note: Artists should be created separately and linked via DbAlbumArtist
     ///
@@ -375,12 +353,10 @@ impl DbAlbum {
         cover_art_url: Option<String>,
     ) -> Self {
         let now = Utc::now();
-
         let discogs_release = DiscogsMasterRelease {
             master_id: release.master_id.clone(),
             release_id: release.id.clone(),
         };
-
         DbAlbum {
             id: Uuid::new_v4().to_string(),
             title: release.title.clone(),
@@ -388,14 +364,13 @@ impl DbAlbum {
             discogs_release: Some(discogs_release),
             musicbrainz_release: None,
             bandcamp_album_id: None,
-            cover_image_id: None, // Set after import when images are chunked
+            cover_image_id: None,
             cover_art_url,
-            is_compilation: false, // Will be set based on artist analysis
+            is_compilation: false,
             created_at: now,
             updated_at: now,
         }
     }
-
     /// cover_art_url is for immediate display before import completes.
     pub fn from_mb_release(
         release: &crate::musicbrainz::MbRelease,
@@ -403,19 +378,15 @@ impl DbAlbum {
         cover_art_url: Option<String>,
     ) -> Self {
         let now = Utc::now();
-
         let musicbrainz_release = crate::db::MusicBrainzRelease {
             release_group_id: release.release_group_id.clone(),
             release_id: release.release_id.clone(),
         };
-
-        // Use first_release_date (original album year) for the album, not the specific release date
         let year = release
             .first_release_date
             .as_ref()
             .and_then(|d| d.split('-').next().and_then(|y| y.parse::<i32>().ok()))
             .or(Some(master_year as i32));
-
         DbAlbum {
             id: Uuid::new_v4().to_string(),
             title: release.title.clone(),
@@ -423,15 +394,14 @@ impl DbAlbum {
             discogs_release: None,
             musicbrainz_release: Some(musicbrainz_release),
             bandcamp_album_id: None,
-            cover_image_id: None, // Set after import when images are chunked
+            cover_image_id: None,
             cover_art_url,
-            is_compilation: false, // Will be set based on artist analysis
+            is_compilation: false,
             created_at: now,
             updated_at: now,
         }
     }
 }
-
 impl DbRelease {
     #[cfg(test)]
     pub fn new_test(album_id: &str, release_id: &str) -> Self {
@@ -453,37 +423,32 @@ impl DbRelease {
             updated_at: now,
         }
     }
-
     /// Create a release from a Discogs release
     pub fn from_discogs_release(album_id: &str, release: &crate::discogs::DiscogsRelease) -> Self {
         let now = Utc::now();
         DbRelease {
             id: Uuid::new_v4().to_string(),
             album_id: album_id.to_string(),
-            release_name: None, // Could parse from release title if needed
+            release_name: None,
             year: release.year.map(|y| y as i32),
             discogs_release_id: Some(release.id.clone()),
             bandcamp_release_id: None,
-            format: None,         // TODO: Extract from Discogs release format data
-            label: None,          // TODO: Extract from Discogs release labels
-            catalog_number: None, // TODO: Extract from Discogs release
-            country: None,        // TODO: Extract from Discogs release country
-            barcode: None,        // TODO: Extract from Discogs release identifiers
+            format: None,
+            label: None,
+            catalog_number: None,
+            country: None,
+            barcode: None,
             import_status: ImportStatus::Queued,
             created_at: now,
             updated_at: now,
         }
     }
-
     pub fn from_mb_release(album_id: &str, release: &crate::musicbrainz::MbRelease) -> Self {
         let now = Utc::now();
-
-        // Extract year from date string if available
         let year = release
             .date
             .as_ref()
             .and_then(|d| d.split('-').next().and_then(|y| y.parse::<i32>().ok()));
-
         DbRelease {
             id: Uuid::new_v4().to_string(),
             album_id: album_id.to_string(),
@@ -502,7 +467,6 @@ impl DbRelease {
         }
     }
 }
-
 impl DbTrack {
     #[cfg(test)]
     pub fn new_test(
@@ -523,7 +487,6 @@ impl DbTrack {
             created_at: chrono::Utc::now(),
         }
     }
-
     pub fn from_discogs_track(
         discogs_track: &crate::discogs::DiscogsTrack,
         release_id: &str,
@@ -536,14 +499,13 @@ impl DbTrack {
             title: discogs_track.title.clone(),
             disc_number,
             track_number: Some((track_index + 1) as i32),
-            duration_ms: None, // Will be filled in during track mapping
+            duration_ms: None,
             discogs_position: Some(discogs_track.position.clone()),
             import_status: ImportStatus::Queued,
             created_at: Utc::now(),
         })
     }
 }
-
 impl DbFile {
     /// Create a file record for export/torrent metadata
     ///
@@ -560,7 +522,6 @@ impl DbFile {
             created_at: Utc::now(),
         }
     }
-
     /// Set the source path for None storage mode.
     /// This is the actual file location on disk for direct playback.
     pub fn with_source_path(mut self, path: &str) -> Self {
@@ -568,7 +529,6 @@ impl DbFile {
         self
     }
 }
-
 /// Maps a file to its chunks with byte offsets
 ///
 /// Similar to DbTrackChunkCoords but for files instead of tracks.
@@ -586,7 +546,6 @@ pub struct DbFileChunk {
     pub byte_length: i64,
     pub created_at: DateTime<Utc>,
 }
-
 impl DbFileChunk {
     pub fn new(
         file_id: &str,
@@ -606,7 +565,6 @@ impl DbFileChunk {
         }
     }
 }
-
 impl DbChunk {
     pub fn from_release_chunk(
         release_id: &str,
@@ -626,7 +584,6 @@ impl DbChunk {
         }
     }
 }
-
 impl DbAudioFormat {
     pub fn new(
         track_id: &str,
@@ -636,7 +593,6 @@ impl DbAudioFormat {
     ) -> Self {
         Self::new_with_seektable(track_id, format, flac_headers, None, needs_headers)
     }
-
     pub fn new_with_seektable(
         track_id: &str,
         format: &str,
@@ -655,7 +611,6 @@ impl DbAudioFormat {
         }
     }
 }
-
 impl DbTrackChunkCoords {
     pub fn new(
         track_id: &str,
@@ -679,7 +634,6 @@ impl DbTrackChunkCoords {
         }
     }
 }
-
 /// Torrent import metadata for a release
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbTorrent {
@@ -694,18 +648,16 @@ pub struct DbTorrent {
     pub is_seeding: bool,
     pub created_at: DateTime<Utc>,
 }
-
 /// Maps torrent pieces to bae chunks
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbTorrentPieceMapping {
     pub id: String,
     pub torrent_id: String,
     pub piece_index: i32,
-    pub chunk_ids: String, // JSON array of chunk IDs
+    pub chunk_ids: String,
     pub start_byte_in_first_chunk: i64,
     pub end_byte_in_last_chunk: i64,
 }
-
 impl DbTorrent {
     pub fn new(
         release_id: &str,
@@ -730,7 +682,6 @@ impl DbTorrent {
         }
     }
 }
-
 impl DbTorrentPieceMapping {
     pub fn new(
         torrent_id: &str,
@@ -748,22 +699,14 @@ impl DbTorrentPieceMapping {
             end_byte_in_last_chunk,
         })
     }
-
     pub fn chunk_ids(&self) -> Result<Vec<String>, serde_json::Error> {
         serde_json::from_str(&self.chunk_ids)
     }
 }
-
-// ============================================================================
-// Import Operations
-// ============================================================================
-
-// String constants for import operation status (keep in sync with as_str())
 const IMPORT_OP_STATUS_PREPARING: &str = "preparing";
 const IMPORT_OP_STATUS_IMPORTING: &str = "importing";
 const IMPORT_OP_STATUS_COMPLETE: &str = "complete";
 const IMPORT_OP_STATUS_FAILED: &str = "failed";
-
 /// Status of an import operation (distinct from release/track ImportStatus)
 ///
 /// Tracks the lifecycle of an import from button click through completion:
@@ -779,7 +722,6 @@ pub enum ImportOperationStatus {
     Complete,
     Failed,
 }
-
 impl ImportOperationStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -790,7 +732,6 @@ impl ImportOperationStatus {
         }
     }
 }
-
 /// Tracks an import operation from button click through completion
 ///
 /// Created when user clicks Import, before any database records exist.
@@ -813,7 +754,6 @@ pub struct DbImport {
     /// Error message if status is Failed
     pub error_message: Option<String>,
 }
-
 impl DbImport {
     pub fn new(id: &str, album_title: &str, artist_name: &str, folder_path: &str) -> Self {
         let now = Utc::now().timestamp();
@@ -830,7 +770,6 @@ impl DbImport {
         }
     }
 }
-
 /// Source of an image file
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[sqlx(type_name = "TEXT", rename_all = "lowercase")]
@@ -842,7 +781,6 @@ pub enum ImageSource {
     /// Fetched from Discogs
     Discogs,
 }
-
 impl ImageSource {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -852,7 +790,6 @@ impl ImageSource {
         }
     }
 }
-
 /// Image metadata for a release
 ///
 /// Tracks all images associated with a release, including:
@@ -877,7 +814,6 @@ pub struct DbImage {
     pub height: Option<i32>,
     pub created_at: DateTime<Utc>,
 }
-
 impl DbImage {
     pub fn new(release_id: &str, filename: &str, is_cover: bool, source: ImageSource) -> Self {
         DbImage {
@@ -891,18 +827,12 @@ impl DbImage {
             created_at: Utc::now(),
         }
     }
-
     pub fn with_dimensions(mut self, width: i32, height: i32) -> Self {
         self.width = Some(width);
         self.height = Some(height);
         self
     }
 }
-
-// ============================================================================
-// Storage Configuration
-// ============================================================================
-
 /// Where release data is stored
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[sqlx(type_name = "TEXT", rename_all = "lowercase")]
@@ -912,7 +842,6 @@ pub enum StorageLocation {
     /// Cloud storage (S3/MinIO, bae manages storage)
     Cloud,
 }
-
 impl StorageLocation {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -921,7 +850,6 @@ impl StorageLocation {
         }
     }
 }
-
 /// Reusable storage configuration template
 ///
 /// Defines how releases should be stored. Users create profiles like
@@ -940,8 +868,6 @@ pub struct DbStorageProfile {
     pub chunked: bool,
     /// True if this is the default profile for new imports
     pub is_default: bool,
-
-    // Cloud-specific fields (only used when location == Cloud)
     /// S3 bucket name
     pub cloud_bucket: Option<String>,
     /// AWS region (e.g., "us-east-1")
@@ -952,11 +878,9 @@ pub struct DbStorageProfile {
     pub cloud_access_key: Option<String>,
     /// Secret access key
     pub cloud_secret_key: Option<String>,
-
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
-
 impl DbStorageProfile {
     /// Create a new local storage profile
     pub fn new_local(name: &str, path: &str, encrypted: bool, chunked: bool) -> Self {
@@ -978,7 +902,6 @@ impl DbStorageProfile {
             updated_at: now,
         }
     }
-
     /// Create a new cloud storage profile
     pub fn new_cloud(
         name: &str,
@@ -995,7 +918,7 @@ impl DbStorageProfile {
             id: Uuid::new_v4().to_string(),
             name: name.to_string(),
             location: StorageLocation::Cloud,
-            location_path: String::new(), // Not used for cloud
+            location_path: String::new(),
             encrypted,
             chunked,
             is_default: false,
@@ -1008,13 +931,11 @@ impl DbStorageProfile {
             updated_at: now,
         }
     }
-
     pub fn with_default(mut self, is_default: bool) -> Self {
         self.is_default = is_default;
         self
     }
 }
-
 /// Links a release to its storage profile
 ///
 /// Each release has exactly one storage configuration that determines
@@ -1026,7 +947,6 @@ pub struct DbReleaseStorage {
     pub storage_profile_id: String,
     pub created_at: DateTime<Utc>,
 }
-
 impl DbReleaseStorage {
     pub fn new(release_id: &str, storage_profile_id: &str) -> Self {
         DbReleaseStorage {

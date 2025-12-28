@@ -4,9 +4,7 @@ mod encryption;
 mod import_settings;
 mod network;
 mod storage_profiles;
-
 use dioxus::prelude::*;
-
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum SettingsTab {
     StorageProfiles,
@@ -16,7 +14,6 @@ pub enum SettingsTab {
     Network,
     About,
 }
-
 impl SettingsTab {
     fn label(&self) -> &'static str {
         match self {
@@ -28,7 +25,6 @@ impl SettingsTab {
             SettingsTab::About => "About",
         }
     }
-
     fn all() -> &'static [SettingsTab] {
         &[
             SettingsTab::StorageProfiles,
@@ -40,21 +36,16 @@ impl SettingsTab {
         ]
     }
 }
-
 /// Settings page with tabbed navigation
 #[component]
 pub fn Settings() -> Element {
     let mut active_tab = use_signal(|| SettingsTab::StorageProfiles);
-
     rsx! {
         div { class: "flex flex-col h-full bg-gray-900",
-            // Header
             div { class: "p-6 border-b border-gray-700",
                 h1 { class: "text-2xl font-bold text-white", "Settings" }
             }
-
             div { class: "flex flex-1 overflow-hidden",
-                // Sidebar navigation
                 nav { class: "w-56 bg-gray-800 border-r border-gray-700 p-4 flex-shrink-0",
                     ul { class: "space-y-1",
                         for tab in SettingsTab::all() {
@@ -75,8 +66,6 @@ pub fn Settings() -> Element {
                         }
                     }
                 }
-
-                // Content area
                 div { class: "flex-1 overflow-y-auto p-6",
                     match *active_tab.read() {
                         SettingsTab::StorageProfiles => rsx! {

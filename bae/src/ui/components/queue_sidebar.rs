@@ -1,25 +1,21 @@
+use super::album_detail::utils::format_duration;
+use super::playback_hooks::{use_playback_queue, use_playback_service, use_playback_state};
 use crate::db::{DbAlbum, DbTrack};
 use crate::library::use_library_manager;
 use crate::playback::PlaybackState;
 use crate::ui::{image_url, Route};
 use dioxus::prelude::*;
-
-use super::album_detail::utils::format_duration;
-use super::playback_hooks::{use_playback_queue, use_playback_service, use_playback_state};
-
 /// Shared state for queue sidebar visibility
 #[derive(Clone)]
 pub struct QueueSidebarState {
     pub is_open: Signal<bool>,
 }
-
 /// Track info with album details
 #[derive(Clone, Debug)]
 struct TrackWithAlbum {
     track: DbTrack,
     album: Option<DbAlbum>,
 }
-
 /// Queue sidebar component - toggleable right sidebar showing playback queue
 #[component]
 pub fn QueueSidebar() -> Element {
@@ -28,22 +24,16 @@ pub fn QueueSidebar() -> Element {
     let queue_hook = use_playback_queue();
     let playback_state = use_playback_state();
     let library_manager = use_library_manager();
-
-    // Get current playing track
     let current_track = use_memo(move || match playback_state() {
         PlaybackState::Playing { ref track, .. } | PlaybackState::Paused { ref track, .. } => {
             Some(track.clone())
         }
         _ => None,
     });
-
-    // Fetch track details for each queue item
     let queue = queue_hook.tracks;
     let playback = use_playback_service();
     let clear_fn = queue_hook.clear;
     let track_details = use_signal(std::collections::HashMap::<String, TrackWithAlbum>::new);
-
-    // Fetch track and album details when queue or current track changes
     use_effect({
         let library_manager = library_manager.clone();
         move || {
@@ -52,15 +42,11 @@ pub fn QueueSidebar() -> Element {
             let mut track_details = track_details;
             spawn(async move {
                 let mut new_details = std::collections::HashMap::<String, TrackWithAlbum>::new();
-
-                // Fetch details for queue items
                 for track_id in queue_val.iter() {
                     if let Ok(Some(track)) = library_manager.get().get_track(track_id).await {
                         new_details.insert(track_id.clone(), TrackWithAlbum { track, album: None });
                     }
                 }
-
-                // Fetch album details for all tracks
                 for (track_id, track_with_album) in new_details.iter_mut() {
                     if let Ok(album_id) =
                         library_manager.get().get_album_id_for_track(track_id).await
@@ -72,13 +58,10 @@ pub fn QueueSidebar() -> Element {
                         }
                     }
                 }
-
                 track_details.set(new_details);
             });
         }
     });
-
-    // Fetch album for current track
     let mut current_track_album = use_signal(|| Option::<DbAlbum>::None);
     use_effect({
         let library_manager = library_manager.clone();
@@ -105,13 +88,10 @@ pub fn QueueSidebar() -> Element {
             }
         }
     });
-
     rsx! {
         if is_open() {
             div { class: "fixed top-0 right-0 h-full w-80 bg-gray-900 border-l border-gray-700 z-50 flex flex-col shadow-2xl",
-                // Content
                 div { class: "flex-1 overflow-y-auto",
-                    // Now playing section
                     div {
                         div { class: "px-4 pt-4 pb-2",
                             h3 { class: "text-sm font-semibold text-gray-400 uppercase tracking-wide",
@@ -131,7 +111,6 @@ pub fn QueueSidebar() -> Element {
                             div { class: "px-4 py-3 text-gray-500 text-sm", "Nothing playing" }
                         }
                     }
-                    // Up next section
                     div {
                         div { class: "px-4 pt-4 pb-2",
                             h3 { class: "text-sm font-semibold text-gray-400 uppercase tracking-wide",
@@ -161,7 +140,6 @@ pub fn QueueSidebar() -> Element {
                         }
                     }
                 }
-                // Footer with buttons
                 div { class: "flex items-center justify-between p-4 border-t border-gray-700",
                     button {
                         class: "px-3 py-2 bg-gray-700 rounded hover:bg-gray-600 text-sm",
@@ -180,7 +158,6 @@ pub fn QueueSidebar() -> Element {
         }
     }
 }
-
 /// Individual queue item component
 #[component]
 fn QueueItem(
@@ -193,7 +170,6 @@ fn QueueItem(
 ) -> Element {
     rsx! {
         div { class: if is_current { "flex items-center gap-3 p-3 border-b border-gray-700 bg-blue-500/10 hover:bg-blue-500/15 group" } else { "flex items-center gap-3 p-3 border-b border-gray-700 hover:bg-gray-800 group" },
-            // Album cover - use cover_image_id first, fallback to cover_art_url
             div { class: "w-12 h-12 flex-shrink-0 bg-gray-700 rounded overflow-hidden",
                 if let Some(album) = &album {
                     {
@@ -220,9 +196,7 @@ fn QueueItem(
                     }
                 }
             }
-            // Track info
             div { class: "flex-1 min-w-0",
-                // Title and duration on same line
                 div { class: "flex items-center gap-2",
                     button {
                         class: if is_current { "font-medium text-blue-300 hover:text-blue-200 text-left truncate flex-1" } else { "font-medium text-white hover:text-blue-300 text-left truncate flex-1" },
@@ -249,14 +223,12 @@ fn QueueItem(
                         }
                     }
                 }
-                // Album title on second line
                 if let Some(album) = &album {
                     div { class: "text-sm text-gray-400 truncate", "{album.title}" }
                 } else {
                     div { class: "text-sm text-gray-400 truncate", "Loading..." }
                 }
             }
-            // Remove button (only show for queue items, not current track)
             if !is_current {
                 button {
                     class: "px-2 py-1 text-sm text-gray-400 hover:text-red-400 rounded opacity-0 group-hover:opacity-100 transition-opacity",

@@ -2,7 +2,6 @@
 pub enum ImportStep {
     FolderIdentification,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImportPhase {
     FolderSelection,

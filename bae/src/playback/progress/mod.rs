@@ -1,9 +1,7 @@
 pub mod handle;
-
 use crate::playback::service::PlaybackState;
 pub use handle::PlaybackProgressHandle;
 use std::time::Duration;
-
 /// Progress updates during playback
 #[derive(Debug, Clone)]
 pub enum PlaybackProgress {

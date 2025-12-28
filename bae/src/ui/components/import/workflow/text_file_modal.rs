@@ -1,5 +1,4 @@
 use dioxus::prelude::*;
-
 #[component]
 pub fn TextFileModal(filename: String, content: String, on_close: EventHandler<()>) -> Element {
     rsx! {
@@ -9,8 +8,6 @@ pub fn TextFileModal(filename: String, content: String, on_close: EventHandler<(
             div {
                 class: "bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col",
                 onclick: move |e| e.stop_propagation(),
-
-                // Header
                 div { class: "flex items-center justify-between p-4 border-b border-gray-700",
                     h3 { class: "text-lg font-semibold text-white", {filename} }
                     button {
@@ -19,8 +16,6 @@ pub fn TextFileModal(filename: String, content: String, on_close: EventHandler<(
                         "✕"
                     }
                 }
-
-                // Content
                 div { class: "flex-1 overflow-auto p-4",
                     pre { class: "text-sm text-gray-300 font-mono whitespace-pre-wrap select-text",
                         {content}

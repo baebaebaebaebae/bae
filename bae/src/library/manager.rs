@@ -10,7 +10,6 @@ use crate::library::export::ExportService;
 use std::path::Path;
 use thiserror::Error;
 use tracing::warn;
-
 #[derive(Error, Debug)]
 pub enum LibraryError {
     #[error("Database error: {0}")]
@@ -24,7 +23,6 @@ pub enum LibraryError {
     #[error("Cloud storage error: {0}")]
     CloudStorage(#[from] CloudStorageError),
 }
-
 /// The main library manager for database operations and entity persistence
 ///
 /// Handles:
@@ -37,7 +35,6 @@ pub struct LibraryManager {
     database: Database,
     cloud_storage: CloudStorageManager,
 }
-
 impl LibraryManager {
     /// Create a new library manager
     pub fn new(database: Database, cloud_storage: CloudStorageManager) -> Self {
@@ -46,12 +43,10 @@ impl LibraryManager {
             cloud_storage,
         }
     }
-
     /// Get a reference to the database
     pub fn database(&self) -> &Database {
         &self.database
     }
-
     /// Insert album, release, and tracks into database in a transaction
     pub async fn insert_album_with_release_and_tracks(
         &self,
@@ -64,7 +59,6 @@ impl LibraryManager {
             .await?;
         Ok(())
     }
-
     /// Mark release as importing when pipeline starts processing
     pub async fn mark_release_importing(&self, release_id: &str) -> Result<(), LibraryError> {
         self.database
@@ -72,7 +66,6 @@ impl LibraryManager {
             .await?;
         Ok(())
     }
-
     /// Mark track as complete after successful import
     pub async fn mark_track_complete(&self, track_id: &str) -> Result<(), LibraryError> {
         self.database
@@ -80,7 +73,6 @@ impl LibraryManager {
             .await?;
         Ok(())
     }
-
     /// Mark track as failed if import errors
     pub async fn mark_track_failed(&self, track_id: &str) -> Result<(), LibraryError> {
         self.database
@@ -88,7 +80,6 @@ impl LibraryManager {
             .await?;
         Ok(())
     }
-
     /// Update track duration
     pub async fn update_track_duration(
         &self,
@@ -100,7 +91,6 @@ impl LibraryManager {
             .await?;
         Ok(())
     }
-
     /// Mark release as complete after successful import
     pub async fn mark_release_complete(&self, release_id: &str) -> Result<(), LibraryError> {
         self.database
@@ -108,7 +98,6 @@ impl LibraryManager {
             .await?;
         Ok(())
     }
-
     /// Mark release as failed if import errors
     pub async fn mark_release_failed(&self, release_id: &str) -> Result<(), LibraryError> {
         self.database
@@ -116,31 +105,26 @@ impl LibraryManager {
             .await?;
         Ok(())
     }
-
     /// Add a chunk to the library
     pub async fn add_chunk(&self, chunk: &DbChunk) -> Result<(), LibraryError> {
         self.database.insert_chunk(chunk).await?;
         Ok(())
     }
-
     /// Add a file to the library
     pub async fn add_file(&self, file: &DbFile) -> Result<(), LibraryError> {
         self.database.insert_file(file).await?;
         Ok(())
     }
-
     /// Add a file chunk mapping
     pub async fn add_file_chunk(&self, file_chunk: &DbFileChunk) -> Result<(), LibraryError> {
         self.database.insert_file_chunk(file_chunk).await?;
         Ok(())
     }
-
     /// Add audio format for a track
     pub async fn add_audio_format(&self, audio_format: &DbAudioFormat) -> Result<(), LibraryError> {
         self.database.insert_audio_format(audio_format).await?;
         Ok(())
     }
-
     /// Add track chunk coordinates
     pub async fn add_track_chunk_coords(
         &self,
@@ -149,13 +133,11 @@ impl LibraryManager {
         self.database.insert_track_chunk_coords(coords).await?;
         Ok(())
     }
-
     /// Insert torrent metadata
     pub async fn insert_torrent(&self, torrent: &DbTorrent) -> Result<(), LibraryError> {
         self.database.insert_torrent(torrent).await?;
         Ok(())
     }
-
     /// Get torrent by release ID
     pub async fn get_torrent_by_release(
         &self,
@@ -163,7 +145,6 @@ impl LibraryManager {
     ) -> Result<Option<DbTorrent>, LibraryError> {
         Ok(self.database.get_torrent_by_release(release_id).await?)
     }
-
     /// Insert torrent piece mapping
     pub async fn insert_torrent_piece_mapping(
         &self,
@@ -172,12 +153,10 @@ impl LibraryManager {
         self.database.insert_torrent_piece_mapping(mapping).await?;
         Ok(())
     }
-
     /// Get all torrents that are marked as seeding
     pub async fn get_seeding_torrents(&self) -> Result<Vec<DbTorrent>, LibraryError> {
         Ok(self.database.get_seeding_torrents().await?)
     }
-
     /// Mark a torrent as seeding
     pub async fn set_torrent_seeding(
         &self,
@@ -189,17 +168,14 @@ impl LibraryManager {
             .await?;
         Ok(())
     }
-
     /// Get all albums in the library
     pub async fn get_albums(&self) -> Result<Vec<DbAlbum>, LibraryError> {
         Ok(self.database.get_albums().await?)
     }
-
     /// Get album by ID
     pub async fn get_album_by_id(&self, album_id: &str) -> Result<Option<DbAlbum>, LibraryError> {
         Ok(self.database.get_album_by_id(album_id).await?)
     }
-
     /// Get all releases for a specific album
     pub async fn get_releases_for_album(
         &self,
@@ -207,17 +183,14 @@ impl LibraryManager {
     ) -> Result<Vec<DbRelease>, LibraryError> {
         Ok(self.database.get_releases_for_album(album_id).await?)
     }
-
     /// Get tracks for a specific release
     pub async fn get_tracks(&self, release_id: &str) -> Result<Vec<DbTrack>, LibraryError> {
         Ok(self.database.get_tracks_for_release(release_id).await?)
     }
-
     /// Get a single track by ID
     pub async fn get_track(&self, track_id: &str) -> Result<Option<DbTrack>, LibraryError> {
         Ok(self.database.get_track_by_id(track_id).await?)
     }
-
     /// Get all files for a specific release
     ///
     /// Files belong to releases (not albums or tracks). This includes both:
@@ -229,7 +202,6 @@ impl LibraryManager {
     ) -> Result<Vec<DbFile>, LibraryError> {
         Ok(self.database.get_files_for_release(release_id).await?)
     }
-
     /// Get a specific file by ID
     ///
     /// Used during streaming to retrieve the file record after looking up
@@ -237,7 +209,6 @@ impl LibraryManager {
     pub async fn get_file_by_id(&self, file_id: &str) -> Result<Option<DbFile>, LibraryError> {
         Ok(self.database.get_file_by_id(file_id).await?)
     }
-
     /// Get audio format for a track
     pub async fn get_audio_format_by_track_id(
         &self,
@@ -245,7 +216,6 @@ impl LibraryManager {
     ) -> Result<Option<DbAudioFormat>, LibraryError> {
         Ok(self.database.get_audio_format_by_track_id(track_id).await?)
     }
-
     /// Get all chunks for a release (for testing/verification)
     pub async fn get_chunks_for_release(
         &self,
@@ -253,7 +223,6 @@ impl LibraryManager {
     ) -> Result<Vec<DbChunk>, LibraryError> {
         Ok(self.database.get_chunks_for_release(release_id).await?)
     }
-
     /// Get track chunk coordinates for a track
     pub async fn get_track_chunk_coords(
         &self,
@@ -261,7 +230,6 @@ impl LibraryManager {
     ) -> Result<Option<DbTrackChunkCoords>, LibraryError> {
         Ok(self.database.get_track_chunk_coords(track_id).await?)
     }
-
     /// Get chunks in a specific range for CUE/FLAC streaming
     pub async fn get_chunks_in_range(
         &self,
@@ -273,17 +241,14 @@ impl LibraryManager {
             .get_chunks_in_range(release_id, chunk_range)
             .await?)
     }
-
     /// Get a chunk by ID
     pub async fn get_chunk_by_id(&self, chunk_id: &str) -> Result<Option<DbChunk>, LibraryError> {
         Ok(self.database.get_chunk_by_id(chunk_id).await?)
     }
-
     /// Get file chunk mappings for a file
     pub async fn get_file_chunks(&self, file_id: &str) -> Result<Vec<DbFileChunk>, LibraryError> {
         Ok(self.database.get_file_chunks(file_id).await?)
     }
-
     /// Get release ID for a track
     pub async fn get_release_id_for_track(&self, track_id: &str) -> Result<String, LibraryError> {
         let track = self
@@ -293,7 +258,6 @@ impl LibraryManager {
             .ok_or_else(|| LibraryError::TrackMapping("Track not found".to_string()))?;
         Ok(track.release_id)
     }
-
     /// Get album ID for a track
     pub async fn get_album_id_for_track(&self, track_id: &str) -> Result<String, LibraryError> {
         let track = self
@@ -308,7 +272,6 @@ impl LibraryManager {
             .ok_or_else(|| LibraryError::TrackMapping("Release not found".to_string()))?;
         Ok(album_id)
     }
-
     /// Get album ID for a release
     pub async fn get_album_id_for_release(&self, release_id: &str) -> Result<String, LibraryError> {
         let album_id = self
@@ -318,13 +281,11 @@ impl LibraryManager {
             .ok_or_else(|| LibraryError::TrackMapping("Release not found".to_string()))?;
         Ok(album_id)
     }
-
     /// Insert an artist
     pub async fn insert_artist(&self, artist: &DbArtist) -> Result<(), LibraryError> {
         self.database.insert_artist(artist).await?;
         Ok(())
     }
-
     /// Get artist by Discogs ID (for deduplication)
     pub async fn get_artist_by_discogs_id(
         &self,
@@ -335,7 +296,6 @@ impl LibraryManager {
             .get_artist_by_discogs_id(discogs_artist_id)
             .await?)
     }
-
     /// Insert album-artist relationship
     pub async fn insert_album_artist(
         &self,
@@ -344,7 +304,6 @@ impl LibraryManager {
         self.database.insert_album_artist(album_artist).await?;
         Ok(())
     }
-
     /// Insert track-artist relationship
     pub async fn insert_track_artist(
         &self,
@@ -353,7 +312,6 @@ impl LibraryManager {
         self.database.insert_track_artist(track_artist).await?;
         Ok(())
     }
-
     /// Get artists for an album
     pub async fn get_artists_for_album(
         &self,
@@ -361,7 +319,6 @@ impl LibraryManager {
     ) -> Result<Vec<DbArtist>, LibraryError> {
         Ok(self.database.get_artists_for_album(album_id).await?)
     }
-
     /// Get artists for a track
     pub async fn get_artists_for_track(
         &self,
@@ -369,13 +326,11 @@ impl LibraryManager {
     ) -> Result<Vec<DbArtist>, LibraryError> {
         Ok(self.database.get_artists_for_track(track_id).await?)
     }
-
     /// Add an image to a release
     pub async fn add_image(&self, image: &DbImage) -> Result<(), LibraryError> {
         self.database.insert_image(image).await?;
         Ok(())
     }
-
     /// Get all images for a release
     pub async fn get_images_for_release(
         &self,
@@ -383,7 +338,6 @@ impl LibraryManager {
     ) -> Result<Vec<DbImage>, LibraryError> {
         Ok(self.database.get_images_for_release(release_id).await?)
     }
-
     /// Get the cover image for a release
     pub async fn get_cover_image_for_release(
         &self,
@@ -394,7 +348,6 @@ impl LibraryManager {
             .get_cover_image_for_release(release_id)
             .await?)
     }
-
     /// Set an image as the cover for a release
     pub async fn set_cover_image(
         &self,
@@ -404,12 +357,10 @@ impl LibraryManager {
         self.database.set_cover_image(release_id, image_id).await?;
         Ok(())
     }
-
     /// Get an image by ID
     pub async fn get_image_by_id(&self, image_id: &str) -> Result<Option<DbImage>, LibraryError> {
         Ok(self.database.get_image_by_id(image_id).await?)
     }
-
     /// Get a file by release ID and filename
     pub async fn get_file_by_release_and_filename(
         &self,
@@ -421,7 +372,6 @@ impl LibraryManager {
             .get_file_by_release_and_filename(release_id, filename)
             .await?)
     }
-
     /// Set an album's cover image
     pub async fn set_album_cover_image(
         &self,
@@ -433,7 +383,6 @@ impl LibraryManager {
             .await?;
         Ok(())
     }
-
     /// Delete a release and its associated data
     ///
     /// This will:
@@ -442,13 +391,8 @@ impl LibraryManager {
     /// 3. Delete the release from database (cascades to tracks, files, chunks, etc.)
     /// 4. If this was the last release for the album, also delete the album
     pub async fn delete_release(&self, release_id: &str) -> Result<(), LibraryError> {
-        // Get album_id before deletion to check if we need to delete the album
         let album_id = self.get_album_id_for_release(release_id).await?;
-
-        // Get all chunks for the release to delete from cloud storage
         let chunks = self.get_chunks_for_release(release_id).await?;
-
-        // Delete chunks from cloud storage
         for chunk in &chunks {
             if let Err(e) = self
                 .cloud_storage
@@ -461,20 +405,13 @@ impl LibraryManager {
                 );
             }
         }
-
-        // Delete release from database (cascades to tracks, files, chunks, etc.)
         self.database.delete_release(release_id).await?;
-
-        // Check if this was the last release for the album
         let remaining_releases = self.get_releases_for_album(&album_id).await?;
         if remaining_releases.is_empty() {
-            // Delete the album as well
             self.database.delete_album(&album_id).await?;
         }
-
         Ok(())
     }
-
     /// Delete an album and all its associated data
     ///
     /// This will:
@@ -482,10 +419,7 @@ impl LibraryManager {
     /// 2. For each release, get chunks and delete from cloud storage
     /// 3. Delete the album from database (cascades to releases and all related data)
     pub async fn delete_album(&self, album_id: &str) -> Result<(), LibraryError> {
-        // Get all releases for the album
         let releases = self.get_releases_for_album(album_id).await?;
-
-        // For each release, get chunks and delete from cloud storage
         for release in &releases {
             let chunks = self.get_chunks_for_release(&release.id).await?;
             for chunk in &chunks {
@@ -501,13 +435,9 @@ impl LibraryManager {
                 }
             }
         }
-
-        // Delete album from database (cascades to releases and all related data)
         self.database.delete_album(album_id).await?;
-
         Ok(())
     }
-
     /// Export all files for a release to a directory
     ///
     /// Reconstructs files sequentially from chunks in the order they were imported.
@@ -533,7 +463,6 @@ impl LibraryManager {
         .await
         .map_err(LibraryError::Import)
     }
-
     /// Export a single track as a FLAC file
     ///
     /// For one-file-per-track: extracts the original file.
@@ -559,7 +488,6 @@ impl LibraryManager {
         .await
         .map_err(LibraryError::Import)
     }
-
     /// Check if an album already exists by Discogs IDs
     ///
     /// Used for duplicate detection before import.
@@ -574,7 +502,6 @@ impl LibraryManager {
             .find_album_by_discogs_ids(master_id, release_id)
             .await?)
     }
-
     /// Check if an album already exists by MusicBrainz IDs
     ///
     /// Used for duplicate detection before import.
@@ -589,21 +516,16 @@ impl LibraryManager {
             .find_album_by_mb_ids(release_id, release_group_id)
             .await?)
     }
-
-    // ==================== Storage Profile Methods ====================
-
     /// Get all storage profiles
     pub async fn get_all_storage_profiles(&self) -> Result<Vec<DbStorageProfile>, LibraryError> {
         Ok(self.database.get_all_storage_profiles().await?)
     }
-
     /// Get the default storage profile
     pub async fn get_default_storage_profile(
         &self,
     ) -> Result<Option<DbStorageProfile>, LibraryError> {
         Ok(self.database.get_default_storage_profile().await?)
     }
-
     /// Insert a new storage profile
     pub async fn insert_storage_profile(
         &self,
@@ -611,7 +533,6 @@ impl LibraryManager {
     ) -> Result<(), LibraryError> {
         Ok(self.database.insert_storage_profile(profile).await?)
     }
-
     /// Set a profile as the default
     pub async fn set_default_storage_profile(&self, profile_id: &str) -> Result<(), LibraryError> {
         Ok(self
@@ -619,7 +540,6 @@ impl LibraryManager {
             .set_default_storage_profile(profile_id)
             .await?)
     }
-
     /// Update a storage profile
     pub async fn update_storage_profile(
         &self,
@@ -627,12 +547,10 @@ impl LibraryManager {
     ) -> Result<(), LibraryError> {
         Ok(self.database.update_storage_profile(profile).await?)
     }
-
     /// Delete a storage profile
     pub async fn delete_storage_profile(&self, profile_id: &str) -> Result<(), LibraryError> {
         Ok(self.database.delete_storage_profile(profile_id).await?)
     }
-
     /// Get the storage profile for a release
     pub async fn get_storage_profile_for_release(
         &self,
@@ -643,14 +561,10 @@ impl LibraryManager {
             .get_storage_profile_for_release(release_id)
             .await?)
     }
-
-    // ========== Import Operations ==========
-
     /// Insert a new import operation record
     pub async fn insert_import(&self, import: &DbImport) -> Result<(), LibraryError> {
         Ok(self.database.insert_import(import).await?)
     }
-
     /// Update the status of an import operation
     pub async fn update_import_status(
         &self,
@@ -659,7 +573,6 @@ impl LibraryManager {
     ) -> Result<(), LibraryError> {
         Ok(self.database.update_import_status(id, status).await?)
     }
-
     /// Link an import operation to a release (after release is created)
     pub async fn link_import_to_release(
         &self,
@@ -671,18 +584,15 @@ impl LibraryManager {
             .link_import_to_release(import_id, release_id)
             .await?)
     }
-
     /// Record an error for an import operation
     pub async fn update_import_error(&self, id: &str, error: &str) -> Result<(), LibraryError> {
         Ok(self.database.update_import_error(id, error).await?)
     }
-
     /// Get all active (non-complete, non-failed) imports
     pub async fn get_active_imports(&self) -> Result<Vec<DbImport>, LibraryError> {
         Ok(self.database.get_active_imports().await?)
     }
 }
-
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "test-utils")]
@@ -701,7 +611,6 @@ mod tests {
     use tempfile::TempDir;
     #[cfg(feature = "test-utils")]
     use uuid::Uuid;
-
     #[cfg(feature = "test-utils")]
     async fn setup_test_manager() -> (LibraryManager, TempDir, CloudStorageManager) {
         let temp_dir = TempDir::new().unwrap();
@@ -712,7 +621,6 @@ mod tests {
         let manager = LibraryManager::new(database, cloud_storage.clone());
         (manager, temp_dir, cloud_storage)
     }
-
     #[cfg(feature = "test-utils")]
     fn create_test_album() -> DbAlbum {
         DbAlbum {
@@ -729,7 +637,6 @@ mod tests {
             updated_at: Utc::now(),
         }
     }
-
     #[cfg(feature = "test-utils")]
     fn create_test_release(album_id: &str) -> DbRelease {
         DbRelease {
@@ -749,7 +656,6 @@ mod tests {
             updated_at: Utc::now(),
         }
     }
-
     #[cfg(feature = "test-utils")]
     async fn create_test_chunk(
         release_id: &str,
@@ -771,29 +677,19 @@ mod tests {
             created_at: Utc::now(),
         }
     }
-
     #[tokio::test]
     #[cfg(feature = "test-utils")]
     async fn test_delete_release_with_single_release_deletes_album() {
         let (manager, _temp_dir, _cloud_storage) = setup_test_manager().await;
-
-        // Create album and release
         let album = create_test_album();
         let release = create_test_release(&album.id);
         let chunk = create_test_chunk(&release.id, 0, &manager.cloud_storage).await;
-
         manager.database.insert_album(&album).await.unwrap();
         manager.database.insert_release(&release).await.unwrap();
         manager.database.insert_chunk(&chunk).await.unwrap();
-
-        // Delete release
         manager.delete_release(&release.id).await.unwrap();
-
-        // Verify album is deleted
         let album_result = manager.database.get_album_by_id(&album.id).await.unwrap();
         assert!(album_result.is_none());
-
-        // Verify release is deleted
         let releases = manager
             .database
             .get_releases_for_album(&album.id)
@@ -801,33 +697,23 @@ mod tests {
             .unwrap();
         assert!(releases.is_empty());
     }
-
     #[tokio::test]
     #[cfg(feature = "test-utils")]
     async fn test_delete_release_with_multiple_releases_preserves_album() {
         let (manager, _temp_dir, _cloud_storage) = setup_test_manager().await;
-
-        // Create album with two releases
         let album = create_test_album();
         let release1 = create_test_release(&album.id);
         let release2 = create_test_release(&album.id);
         let chunk1 = create_test_chunk(&release1.id, 0, &manager.cloud_storage).await;
         let chunk2 = create_test_chunk(&release2.id, 0, &manager.cloud_storage).await;
-
         manager.database.insert_album(&album).await.unwrap();
         manager.database.insert_release(&release1).await.unwrap();
         manager.database.insert_release(&release2).await.unwrap();
         manager.database.insert_chunk(&chunk1).await.unwrap();
         manager.database.insert_chunk(&chunk2).await.unwrap();
-
-        // Delete first release
         manager.delete_release(&release1.id).await.unwrap();
-
-        // Verify album still exists
         let album_result = manager.database.get_album_by_id(&album.id).await.unwrap();
         assert!(album_result.is_some());
-
-        // Verify only release2 remains
         let releases = manager
             .database
             .get_releases_for_album(&album.id)
@@ -836,13 +722,10 @@ mod tests {
         assert_eq!(releases.len(), 1);
         assert_eq!(releases[0].id, release2.id);
     }
-
     #[tokio::test]
     #[cfg(feature = "test-utils")]
     async fn test_delete_album_deletes_all_releases_and_chunks() {
         let (manager, _temp_dir, cloud_storage) = setup_test_manager().await;
-
-        // Create album with two releases
         let album = create_test_album();
         let release1 = create_test_release(&album.id);
         let release2 = create_test_release(&album.id);
@@ -850,59 +733,38 @@ mod tests {
         let chunk2 = create_test_chunk(&release2.id, 0, &manager.cloud_storage).await;
         let location1 = chunk1.storage_location.clone();
         let location2 = chunk2.storage_location.clone();
-
         manager.database.insert_album(&album).await.unwrap();
         manager.database.insert_release(&release1).await.unwrap();
         manager.database.insert_release(&release2).await.unwrap();
         manager.database.insert_chunk(&chunk1).await.unwrap();
         manager.database.insert_chunk(&chunk2).await.unwrap();
-
-        // Verify chunks exist in storage
         assert!(cloud_storage.download_chunk(&location1).await.is_ok());
         assert!(cloud_storage.download_chunk(&location2).await.is_ok());
-
-        // Delete album
         manager.delete_album(&album.id).await.unwrap();
-
-        // Verify album is deleted
         let album_result = manager.database.get_album_by_id(&album.id).await.unwrap();
         assert!(album_result.is_none());
-
-        // Verify releases are deleted
         let releases = manager
             .database
             .get_releases_for_album(&album.id)
             .await
             .unwrap();
         assert!(releases.is_empty());
-
-        // Verify chunks are deleted from cloud storage
         assert!(cloud_storage.download_chunk(&location1).await.is_err());
         assert!(cloud_storage.download_chunk(&location2).await.is_err());
     }
-
     #[tokio::test]
     #[cfg(feature = "test-utils")]
     async fn test_delete_release_cloud_storage_cleanup() {
         let (manager, _temp_dir, cloud_storage) = setup_test_manager().await;
-
-        // Create album and release with chunk
         let album = create_test_album();
         let release = create_test_release(&album.id);
         let chunk = create_test_chunk(&release.id, 0, &manager.cloud_storage).await;
         let location = chunk.storage_location.clone();
-
         manager.database.insert_album(&album).await.unwrap();
         manager.database.insert_release(&release).await.unwrap();
         manager.database.insert_chunk(&chunk).await.unwrap();
-
-        // Verify chunk exists
         assert!(cloud_storage.download_chunk(&location).await.is_ok());
-
-        // Delete release
         manager.delete_release(&release.id).await.unwrap();
-
-        // Verify chunk is deleted from cloud storage
         assert!(cloud_storage.download_chunk(&location).await.is_err());
     }
 }

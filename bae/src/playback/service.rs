@@ -11,12 +11,11 @@ use std::collections::VecDeque;
 use std::sync::{mpsc, Arc};
 use tokio::sync::mpsc as tokio_mpsc;
 use tracing::{error, info, trace};
-
 /// Playback commands sent to the service
 #[derive(Debug, Clone)]
 pub enum PlaybackCommand {
-    Play(String),           // track_id
-    PlayAlbum(Vec<String>), // list of track_ids
+    Play(String),
+    PlayAlbum(Vec<String>),
     Pause,
     Resume,
     Stop,
@@ -24,15 +23,13 @@ pub enum PlaybackCommand {
     Previous,
     Seek(std::time::Duration),
     SetVolume(f32),
-    // Queue management commands
-    AddToQueue(Vec<String>),                 // Add tracks to end of queue
-    AddNext(Vec<String>), // Insert tracks immediately after currently playing track
-    RemoveFromQueue(usize), // Remove track at index
-    ReorderQueue { from: usize, to: usize }, // Move track from index to index
+    AddToQueue(Vec<String>),
+    AddNext(Vec<String>),
+    RemoveFromQueue(usize),
+    ReorderQueue { from: usize, to: usize },
     ClearQueue,
-    GetQueue, // Request current queue state
+    GetQueue,
 }
-
 /// Current playback state
 #[derive(Debug, Clone)]
 pub enum PlaybackState {
@@ -55,89 +52,69 @@ pub enum PlaybackState {
         track_id: String,
     },
 }
-
 /// Handle to the playback service for sending commands
 #[derive(Clone)]
 pub struct PlaybackHandle {
     command_tx: tokio_mpsc::UnboundedSender<PlaybackCommand>,
     progress_handle: PlaybackProgressHandle,
 }
-
 impl PlaybackHandle {
     pub fn play(&self, track_id: String) {
         let _ = self.command_tx.send(PlaybackCommand::Play(track_id));
     }
-
     pub fn play_album(&self, track_ids: Vec<String>) {
         let _ = self.command_tx.send(PlaybackCommand::PlayAlbum(track_ids));
     }
-
     pub fn pause(&self) {
         let _ = self.command_tx.send(PlaybackCommand::Pause);
     }
-
     pub fn resume(&self) {
         let _ = self.command_tx.send(PlaybackCommand::Resume);
     }
-
     pub fn stop(&self) {
         let _ = self.command_tx.send(PlaybackCommand::Stop);
     }
-
     pub fn next(&self) {
         let _ = self.command_tx.send(PlaybackCommand::Next);
     }
-
     pub fn previous(&self) {
         let _ = self.command_tx.send(PlaybackCommand::Previous);
     }
-
     pub fn seek(&self, position: std::time::Duration) {
         let _ = self.command_tx.send(PlaybackCommand::Seek(position));
     }
-
     pub fn set_volume(&self, volume: f32) {
         let _ = self.command_tx.send(PlaybackCommand::SetVolume(volume));
     }
-
     pub async fn get_state(&self) -> PlaybackState {
-        // Deprecated - use subscribe_progress instead
         PlaybackState::Stopped
     }
-
     pub fn subscribe_progress(&self) -> tokio_mpsc::UnboundedReceiver<PlaybackProgress> {
         self.progress_handle.subscribe_all()
     }
-
     pub fn add_to_queue(&self, track_ids: Vec<String>) {
         let _ = self.command_tx.send(PlaybackCommand::AddToQueue(track_ids));
     }
-
     pub fn add_next(&self, track_ids: Vec<String>) {
         let _ = self.command_tx.send(PlaybackCommand::AddNext(track_ids));
     }
-
     pub fn remove_from_queue(&self, index: usize) {
         let _ = self
             .command_tx
             .send(PlaybackCommand::RemoveFromQueue(index));
     }
-
     pub fn reorder_queue(&self, from: usize, to: usize) {
         let _ = self
             .command_tx
             .send(PlaybackCommand::ReorderQueue { from, to });
     }
-
     pub fn clear_queue(&self) {
         let _ = self.command_tx.send(PlaybackCommand::ClearQueue);
     }
-
     pub fn get_queue(&self) {
         let _ = self.command_tx.send(PlaybackCommand::GetQueue);
     }
 }
-
 /// Playback service that manages audio playback
 pub struct PlaybackService {
     library_manager: LibraryManager,
@@ -147,22 +124,21 @@ pub struct PlaybackService {
     chunk_size_bytes: usize,
     command_rx: tokio_mpsc::UnboundedReceiver<PlaybackCommand>,
     progress_tx: tokio_mpsc::UnboundedSender<PlaybackProgress>,
-    queue: VecDeque<String>,           // track IDs
-    previous_track_id: Option<String>, // Track ID of the previous track
+    queue: VecDeque<String>,
+    previous_track_id: Option<String>,
     current_track: Option<DbTrack>,
-    current_position: Option<std::time::Duration>, // Current playback position
-    current_duration: Option<std::time::Duration>, // Current track duration (from db)
-    current_decoded_duration: Option<std::time::Duration>, // Actual decoded audio duration
-    is_paused: bool,                               // Whether playback is currently paused
-    current_position_shared: Arc<std::sync::Mutex<Option<std::time::Duration>>>, // Shared position for bridge tasks
+    current_position: Option<std::time::Duration>,
+    current_duration: Option<std::time::Duration>,
+    current_decoded_duration: Option<std::time::Duration>,
+    is_paused: bool,
+    current_position_shared: Arc<std::sync::Mutex<Option<std::time::Duration>>>,
     audio_output: AudioOutput,
     stream: Option<cpal::Stream>,
-    current_pcm_source: Option<Arc<PcmSource>>, // Current PCM for seeking
-    next_pcm_source: Option<Arc<PcmSource>>,    // Preloaded for gapless playback
-    next_track_id: Option<String>,              // Track ID of preloaded track
-    next_duration: Option<std::time::Duration>, // Duration of preloaded track
+    current_pcm_source: Option<Arc<PcmSource>>,
+    next_pcm_source: Option<Arc<PcmSource>>,
+    next_track_id: Option<String>,
+    next_duration: Option<std::time::Duration>,
 }
-
 impl PlaybackService {
     pub fn start(
         library_manager: LibraryManager,
@@ -174,15 +150,11 @@ impl PlaybackService {
     ) -> PlaybackHandle {
         let (command_tx, command_rx) = tokio_mpsc::unbounded_channel();
         let (progress_tx, progress_rx) = tokio_mpsc::unbounded_channel();
-
         let progress_handle = PlaybackProgressHandle::new(progress_rx, runtime_handle.clone());
-
         let handle = PlaybackHandle {
             command_tx: command_tx.clone(),
             progress_handle: progress_handle.clone(),
         };
-
-        // Spawn task to listen for track completion and auto-advance
         let command_tx_for_completion = command_tx.clone();
         let progress_handle_for_completion = progress_handle.clone();
         runtime_handle.spawn(async move {
@@ -193,17 +165,12 @@ impl PlaybackService {
                         "Auto-advance: Track completed, sending Next command: {}",
                         track_id
                     );
-                    // Auto-advance to next track
                     let _ = command_tx_for_completion.send(PlaybackCommand::Next);
                 }
             }
         });
-
-        // Spawn the service task on a dedicated thread (CPAL Stream isn't Send-safe)
         std::thread::spawn(move || {
-            // Create a new tokio runtime for this thread
             let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-
             rt.block_on(async move {
                 let audio_output = match AudioOutput::new() {
                     Ok(output) => output,
@@ -212,7 +179,6 @@ impl PlaybackService {
                         return;
                     }
                 };
-
                 let mut service = PlaybackService {
                     library_manager,
                     cloud_storage,
@@ -236,57 +202,40 @@ impl PlaybackService {
                     next_track_id: None,
                     next_duration: None,
                 };
-
                 service.run().await;
             });
         });
-
         handle
     }
-
     async fn run(&mut self) {
         info!("PlaybackService started");
-
         while let Some(command) = self.command_rx.recv().await {
             match command {
                 PlaybackCommand::Play(track_id) => {
-                    // Stop current playback before switching tracks (without state change)
                     if let Some(stream) = self.stream.take() {
                         drop(stream);
                     }
                     self.audio_output
                         .send_command(crate::playback::cpal_output::AudioCommand::Stop);
-                    // Clear preloaded data
                     self.next_pcm_source = None;
                     self.next_track_id = None;
                     self.next_duration = None;
-
-                    // Save current track as previous before switching
                     if let Some(current_track) = &self.current_track {
                         self.previous_track_id = Some(current_track.id.clone());
                     }
-
-                    // Clear queue
                     self.queue.clear();
                     self.emit_queue_update();
-
-                    // Fetch track to get release_id
                     if let Ok(Some(track)) = self.library_manager.get_track(&track_id).await {
-                        // Get all tracks for this release
                         if let Ok(mut release_tracks) =
                             self.library_manager.get_tracks(&track.release_id).await
                         {
-                            // Sort tracks by disc_number then track_number for proper ordering
                             release_tracks.sort_by(|a, b| {
-                                // First compare disc numbers
                                 let disc_cmp = match (a.disc_number, b.disc_number) {
                                     (Some(a_disc), Some(b_disc)) => a_disc.cmp(&b_disc),
                                     (Some(_), None) => std::cmp::Ordering::Less,
                                     (None, Some(_)) => std::cmp::Ordering::Greater,
                                     (None, None) => std::cmp::Ordering::Equal,
                                 };
-
-                                // If disc numbers are equal, compare track numbers
                                 if disc_cmp == std::cmp::Ordering::Equal {
                                     match (a.track_number, b.track_number) {
                                         (Some(a_num), Some(b_num)) => a_num.cmp(&b_num),
@@ -298,8 +247,6 @@ impl PlaybackService {
                                     disc_cmp
                                 }
                             });
-
-                            // If we don't have a previous track (starting fresh), set it based on album order
                             if self.previous_track_id.is_none() {
                                 let mut previous_track_id = None;
                                 for release_track in &release_tracks {
@@ -310,8 +257,6 @@ impl PlaybackService {
                                 }
                                 self.previous_track_id = previous_track_id;
                             }
-
-                            // Add remaining tracks to queue (tracks after the current one)
                             let mut found_current = false;
                             for release_track in release_tracks {
                                 if found_current {
@@ -323,16 +268,12 @@ impl PlaybackService {
                             self.emit_queue_update();
                         }
                     }
-
-                    // Play the selected track
                     self.play_track(&track_id).await;
                 }
                 PlaybackCommand::PlayAlbum(track_ids) => {
-                    // Save current track as previous before switching
                     if let Some(current_track) = &self.current_track {
                         self.previous_track_id = Some(current_track.id.clone());
                     }
-
                     self.queue.clear();
                     for track_id in track_ids {
                         self.queue.push_back(track_id);
@@ -355,7 +296,6 @@ impl PlaybackService {
                 }
                 PlaybackCommand::Next => {
                     info!("Next command received, queue length: {}", self.queue.len());
-                    // Check if we have a preloaded track ready for gapless playback
                     if let Some((preloaded_source, preloaded_track_id)) =
                         self.next_pcm_source.take().zip(self.next_track_id.take())
                     {
@@ -364,13 +304,9 @@ impl PlaybackService {
                             .take()
                             .expect("Preloaded track has no duration");
                         info!("Using preloaded track: {}", preloaded_track_id);
-
-                        // Save current track as previous before switching
                         if let Some(current_track) = &self.current_track {
                             self.previous_track_id = Some(current_track.id.clone());
                         }
-
-                        // Remove the preloaded track from the queue if it's at the front
                         if self
                             .queue
                             .front()
@@ -380,8 +316,6 @@ impl PlaybackService {
                             self.queue.pop_front();
                             self.emit_queue_update();
                         }
-
-                        // Use preloaded source for gapless playback
                         let track = match self.library_manager.get_track(&preloaded_track_id).await
                         {
                             Ok(Some(track)) => track,
@@ -396,7 +330,6 @@ impl PlaybackService {
                                 continue;
                             }
                         };
-
                         self.play_track_with_source(
                             &preloaded_track_id,
                             track,
@@ -407,11 +340,9 @@ impl PlaybackService {
                     } else if let Some(next_track) = self.queue.pop_front() {
                         info!("No preloaded track, playing from queue: {}", next_track);
                         self.emit_queue_update();
-                        // Save current track as previous before switching
                         if let Some(current_track) = &self.current_track {
                             self.previous_track_id = Some(current_track.id.clone());
                         }
-                        // No preloaded track, reassemble from scratch
                         self.play_track(&next_track).await;
                     } else {
                         info!("No next track available, stopping");
@@ -426,15 +357,9 @@ impl PlaybackService {
                             .lock()
                             .unwrap()
                             .unwrap_or(std::time::Duration::ZERO);
-
-                        // If we're less than 3 seconds into the track, go to previous track
-                        // Otherwise restart the current track
                         if current_position < std::time::Duration::from_secs(3) {
                             if let Some(previous_track_id) = self.previous_track_id.clone() {
                                 info!("Going to previous track: {}", previous_track_id);
-
-                                // Update previous_track_id for the track we're navigating to
-                                // based on album order, similar to Play command
                                 if let Ok(Some(previous_track)) =
                                     self.library_manager.get_track(&previous_track_id).await
                                 {
@@ -451,8 +376,6 @@ impl PlaybackService {
                                                 (None, None) => std::cmp::Ordering::Equal,
                                             }
                                         });
-
-                                        // Find the previous track for the track we're navigating to
                                         let mut new_previous_track_id = None;
                                         for release_track in &release_tracks {
                                             if release_track.id == previous_track_id {
@@ -461,8 +384,6 @@ impl PlaybackService {
                                             new_previous_track_id = Some(release_track.id.clone());
                                         }
                                         self.previous_track_id = new_previous_track_id;
-
-                                        // Rebuild queue for the track we're navigating to
                                         self.queue.clear();
                                         let mut found_current = false;
                                         for release_track in release_tracks {
@@ -475,28 +396,20 @@ impl PlaybackService {
                                         self.emit_queue_update();
                                     }
                                 }
-
-                                // Clear preloaded data before switching tracks
                                 self.next_pcm_source = None;
                                 self.next_track_id = None;
                                 self.next_duration = None;
-
                                 self.play_track(&previous_track_id).await;
                             } else {
-                                // No previous track, restart current track
                                 info!("No previous track, restarting current track");
                                 let track_id = track.id.clone();
                                 self.play_track(&track_id).await;
                             }
                         } else {
-                            // More than 3 seconds in, restart current track
-                            // Preserve previous_track_id so we can still go back after restarting
                             info!("Restarting current track from beginning");
                             let track_id = track.id.clone();
                             let saved_previous = self.previous_track_id.clone();
                             self.play_track(&track_id).await;
-                            // Restore previous_track_id after play_track updates it
-                            // This allows going back to the original previous track after restart
                             if saved_previous.is_some() {
                                 self.previous_track_id = saved_previous;
                             }
@@ -517,7 +430,6 @@ impl PlaybackService {
                     self.emit_queue_update();
                 }
                 PlaybackCommand::AddNext(track_ids) => {
-                    // Insert tracks immediately after current track (at front of queue)
                     for track_id in track_ids.into_iter().rev() {
                         self.queue.push_front(track_id);
                     }
@@ -526,7 +438,6 @@ impl PlaybackService {
                 PlaybackCommand::RemoveFromQueue(index) => {
                     if index < self.queue.len() {
                         if let Some(removed_track_id) = self.queue.remove(index) {
-                            // If the removed track is currently playing, stop playback
                             if let Some(current_track) = &self.current_track {
                                 if removed_track_id == current_track.id {
                                     self.stop().await;
@@ -540,10 +451,8 @@ impl PlaybackService {
                     if from < self.queue.len() && to < self.queue.len() && from != to {
                         if let Some(track_id) = self.queue.remove(from) {
                             if to > from {
-                                // Moving forward - insert at new position
                                 self.queue.insert(to - 1, track_id);
                             } else {
-                                // Moving backward - insert at new position
                                 self.queue.insert(to, track_id);
                             }
                             self.emit_queue_update();
@@ -555,26 +464,19 @@ impl PlaybackService {
                     self.emit_queue_update();
                 }
                 PlaybackCommand::GetQueue => {
-                    // Emit current queue state
                     self.emit_queue_update();
                 }
             }
         }
-
         info!("PlaybackService stopped");
     }
-
     async fn play_track(&mut self, track_id: &str) {
         info!("Playing track: {}", track_id);
-
-        // Update state to loading
         let _ = self.progress_tx.send(PlaybackProgress::StateChanged {
             state: PlaybackState::Loading {
                 track_id: track_id.to_string(),
             },
         });
-
-        // Fetch track metadata
         let track = match self.library_manager.get_track(track_id).await {
             Ok(Some(track)) => track,
             Ok(None) => {
@@ -588,8 +490,6 @@ impl PlaybackService {
                 return;
             }
         };
-
-        // Check storage profile to determine how to load audio
         let storage_profile = match self
             .library_manager
             .get_storage_profile_for_release(&track.release_id)
@@ -602,11 +502,8 @@ impl PlaybackService {
                 return;
             }
         };
-
-        // Load and decode audio based on storage type
         let pcm_source = match &storage_profile {
             None => {
-                // No storage profile = files are in-place, read from source_path
                 match self
                     .load_audio_from_source_path(track_id, &track.release_id)
                     .await
@@ -627,7 +524,6 @@ impl PlaybackService {
                 }
             }
             Some(profile) if !profile.chunked => {
-                // Non-chunked storage: read file directly from storage path
                 match self
                     .load_audio_from_storage(track_id, &track.release_id, profile)
                     .await
@@ -648,7 +544,6 @@ impl PlaybackService {
                 }
             }
             Some(_) => {
-                // Chunked storage: reassemble and decode from chunks
                 match super::reassembly::reassemble_track(
                     track_id,
                     &self.library_manager,
@@ -671,32 +566,24 @@ impl PlaybackService {
                 }
             }
         };
-
         info!(
             "Track decoded: {} samples, {}Hz",
             pcm_source.duration().as_millis(),
             pcm_source.sample_rate()
         );
-
-        // Use stored duration from database
         let track_duration = track
             .duration_ms
             .map(|ms| std::time::Duration::from_millis(ms as u64))
             .unwrap_or_else(|| panic!("Cannot play track {} without duration", track_id));
-
         info!("Track duration: {:?}", track_duration);
-
         self.play_track_with_source(track_id, track, pcm_source, track_duration)
             .await;
     }
-
     /// Decode raw FLAC bytes to PCM source
     async fn decode_flac_bytes(flac_data: &[u8]) -> Result<Arc<PcmSource>, PlaybackError> {
-        // Validate FLAC header
         if flac_data.len() < 4 || &flac_data[0..4] != b"fLaC" {
             return Err(PlaybackError::flac("Invalid FLAC header"));
         }
-
         let flac_data = flac_data.to_vec();
         let decoded = tokio::task::spawn_blocking(move || {
             crate::flac_decoder::decode_flac_range(&flac_data, None, None)
@@ -704,7 +591,6 @@ impl PlaybackService {
         .await
         .map_err(PlaybackError::task)?
         .map_err(PlaybackError::flac)?;
-
         Ok(Arc::new(PcmSource::new(
             decoded.samples,
             decoded.sample_rate,
@@ -712,7 +598,6 @@ impl PlaybackService {
             decoded.bits_per_sample,
         )))
     }
-
     async fn play_track_with_source(
         &mut self,
         track_id: &str,
@@ -721,27 +606,15 @@ impl PlaybackService {
         track_duration: std::time::Duration,
     ) {
         info!("Starting playback for track: {}", track_id);
-
-        // Get decoded duration before moving pcm_source
         let decoded_duration = pcm_source.duration();
-
-        // Store source for seeking
         self.current_pcm_source = Some(pcm_source.clone());
-
-        // Stop current stream if playing
         if let Some(stream) = self.stream.take() {
             drop(stream);
         }
-
-        // Create channels for position updates and completion
         let (position_tx, position_rx) = mpsc::channel();
         let (completion_tx, completion_rx) = mpsc::channel();
-
-        // Bridge blocking channels to async channels
         let (position_tx_async, mut position_rx_async) = tokio_mpsc::unbounded_channel();
         let (completion_tx_async, mut completion_rx_async) = tokio_mpsc::unbounded_channel();
-
-        // Bridge position updates
         let position_rx_clone = position_rx;
         tokio::spawn(async move {
             let position_rx = Arc::new(std::sync::Mutex::new(position_rx_clone));
@@ -755,8 +628,6 @@ impl PlaybackService {
                 }
             }
         });
-
-        // Bridge completion signals
         let completion_rx_clone = completion_rx;
         tokio::spawn(async move {
             let completion_rx = Arc::new(std::sync::Mutex::new(completion_rx_clone));
@@ -770,8 +641,6 @@ impl PlaybackService {
                 }
             }
         });
-
-        // Create audio stream
         let stream = match self
             .audio_output
             .create_stream(pcm_source, position_tx, completion_tx)
@@ -786,30 +655,21 @@ impl PlaybackService {
                 return;
             }
         };
-
-        // Start playback
         if let Err(e) = stream.play() {
             error!("Failed to start stream: {:?}", e);
             self.stop().await;
             return;
         }
-
         info!("Stream started, sending Play command");
-
-        // Send Play command to start audio
         self.audio_output
             .send_command(crate::playback::cpal_output::AudioCommand::Play);
-
         self.stream = Some(stream);
         self.current_track = Some(track.clone());
         self.current_position = Some(std::time::Duration::ZERO);
         self.current_duration = Some(track_duration);
         self.current_decoded_duration = Some(decoded_duration);
         self.is_paused = false;
-        // Initialize shared position
         *self.current_position_shared.lock().unwrap() = Some(std::time::Duration::ZERO);
-
-        // Update state
         let _ = self.progress_tx.send(PlaybackProgress::StateChanged {
             state: PlaybackState::Playing {
                 track: track.clone(),
@@ -818,8 +678,6 @@ impl PlaybackService {
                 decoded_duration,
             },
         });
-
-        // Spawn task to handle position updates and completion
         let progress_tx = self.progress_tx.clone();
         let track_id = track_id.to_string();
         let track_duration_for_completion = track_duration;
@@ -829,36 +687,19 @@ impl PlaybackService {
                 "Play: Spawning completion listener task for track: {}",
                 track_id
             );
-
             info!("Play: Task started, waiting for position updates and completion");
-
             loop {
                 tokio::select! {
-                    Some(position) = position_rx_async.recv() => {
-                        // Update shared position
-                        *current_position_for_listener.lock().unwrap() = Some(position);
-                        // Send PositionUpdate event
-                        let _ = progress_tx.send(PlaybackProgress::PositionUpdate {
-                            position,
-                            track_id: track_id.clone(),
-                        });
-                    }
-                    Some(()) = completion_rx_async.recv() => {
-                        info!("Track completed: {}", track_id);
-                        // Send final position update matching duration to ensure progress bar reaches 100%
-                        let _ = progress_tx.send(PlaybackProgress::PositionUpdate {
-                            position: track_duration_for_completion,
-                            track_id: track_id.clone(),
-                        });
-                        let _ = progress_tx.send(PlaybackProgress::TrackCompleted {
-                            track_id: track_id.clone(),
-                        });
-                        break;
-                    }
-                    else => {
-                        info!("Play: Channels closed, exiting");
-                        break;
-                    }
+                    Some(position) = position_rx_async.recv() => { *
+                    current_position_for_listener.lock().unwrap() = Some(position); let _
+                    = progress_tx.send(PlaybackProgress::PositionUpdate { position,
+                    track_id : track_id.clone(), }); } Some(()) = completion_rx_async
+                    .recv() => { info!("Track completed: {}", track_id); let _ =
+                    progress_tx.send(PlaybackProgress::PositionUpdate { position :
+                    track_duration_for_completion, track_id : track_id.clone(), }); let _
+                    = progress_tx.send(PlaybackProgress::TrackCompleted { track_id :
+                    track_id.clone(), }); break; } else => {
+                    info!("Play: Channels closed, exiting"); break; }
                 }
             }
             info!(
@@ -866,15 +707,11 @@ impl PlaybackService {
                 track_id
             );
         });
-
-        // Preload next track for gapless playback
         if let Some(next_track_id) = self.queue.front().cloned() {
             self.preload_next_track(&next_track_id).await;
         }
     }
-
     async fn preload_next_track(&mut self, track_id: &str) {
-        // Fetch track metadata first
         let track = match self.library_manager.get_track(track_id).await {
             Ok(Some(track)) => track,
             Ok(None) => {
@@ -886,8 +723,6 @@ impl PlaybackService {
                 return;
             }
         };
-
-        // Check storage profile to determine how to load audio
         let storage_profile = match self
             .library_manager
             .get_storage_profile_for_release(&track.release_id)
@@ -899,11 +734,8 @@ impl PlaybackService {
                 return;
             }
         };
-
-        // Load and decode audio based on storage type (same logic as play_track)
         let pcm_source = match &storage_profile {
             None => {
-                // No storage profile = files are in-place, read from source_path
                 match self
                     .load_audio_from_source_path(track_id, &track.release_id)
                     .await
@@ -922,7 +754,6 @@ impl PlaybackService {
                 }
             }
             Some(profile) if !profile.chunked => {
-                // Non-chunked storage: read file directly from storage path
                 match self
                     .load_audio_from_storage(track_id, &track.release_id, profile)
                     .await
@@ -941,7 +772,6 @@ impl PlaybackService {
                 }
             }
             Some(_) => {
-                // Chunked storage: reassemble and decode from chunks
                 match super::reassembly::reassemble_track(
                     track_id,
                     &self.library_manager,
@@ -960,25 +790,18 @@ impl PlaybackService {
                 }
             }
         };
-
         let duration = track
             .duration_ms
             .map(|ms| std::time::Duration::from_millis(ms as u64))
             .unwrap_or_else(|| panic!("Cannot preload track {} without duration", track_id));
-
         self.next_pcm_source = Some(pcm_source);
         self.next_track_id = Some(track_id.to_string());
         self.next_duration = Some(duration);
         info!("Preloaded next track: {}", track_id);
     }
-
     async fn pause(&mut self) {
         self.audio_output
             .send_command(crate::playback::cpal_output::AudioCommand::Pause);
-
-        // Send StateChanged event so UI can update button state
-        // Position/duration are maintained via PositionUpdate events, but we include
-        // current position here for cases where PositionUpdate hasn't arrived yet
         if let Some(track) = &self.current_track {
             let position = self
                 .current_position_shared
@@ -1000,14 +823,9 @@ impl PlaybackService {
             });
         }
     }
-
     async fn resume(&mut self) {
         self.audio_output
             .send_command(crate::playback::cpal_output::AudioCommand::Resume);
-
-        // Send StateChanged event so UI can update button state
-        // Position/duration are maintained via PositionUpdate events, but we include
-        // current position here for cases where PositionUpdate hasn't arrived yet
         if let Some(track) = &self.current_track {
             let position = self
                 .current_position_shared
@@ -1029,7 +847,6 @@ impl PlaybackService {
             });
         }
     }
-
     async fn stop(&mut self) {
         if let Some(stream) = self.stream.take() {
             drop(stream);
@@ -1043,14 +860,11 @@ impl PlaybackService {
         self.next_duration = None;
         self.audio_output
             .send_command(crate::playback::cpal_output::AudioCommand::Stop);
-
         let _ = self.progress_tx.send(PlaybackProgress::StateChanged {
             state: PlaybackState::Stopped,
         });
     }
-
     async fn seek(&mut self, position: std::time::Duration) {
-        // Can only seek if we have a current track and PCM source
         let (track_id, pcm_source) = match (&self.current_track, &self.current_pcm_source) {
             (Some(track), Some(source)) => (track.id.clone(), source.clone()),
             _ => {
@@ -1058,21 +872,16 @@ impl PlaybackService {
                 return;
             }
         };
-
         let current_position = self
             .current_position_shared
             .lock()
             .unwrap()
             .unwrap_or(std::time::Duration::ZERO);
-
         let position_diff = position.abs_diff(current_position);
-
         info!(
             "Seeking to position: {:?}, current position: {:?}, difference: {:?}",
             position, current_position, position_diff
         );
-
-        // If seeking to roughly the same position (within 100ms), skip to avoid disrupting playback
         if position_diff < std::time::Duration::from_millis(100) {
             trace!(
                 "Seek: Skipping seek to same position (difference: {:?} < 100ms)",
@@ -1084,8 +893,6 @@ impl PlaybackService {
             });
             return;
         }
-
-        // Stop current stream
         if let Some(stream) = self.stream.take() {
             trace!("Seek: Dropping old stream");
             drop(stream);
@@ -1093,13 +900,9 @@ impl PlaybackService {
         } else {
             trace!("Seek: No stream to drop");
         }
-
-        // Use stored track duration for validation
         let track_duration = self
             .current_duration
             .expect("Cannot seek: track has no duration");
-
-        // Check if seeking past the end
         if position > track_duration {
             error!(
                 "Cannot seek past end of track: requested {}, track duration {}",
@@ -1112,23 +915,13 @@ impl PlaybackService {
             });
             return;
         }
-
-        // Seek the PCM source to desired position
         pcm_source.seek(position);
-
         trace!("Seek: PCM source seeked successfully, creating new channels");
-
-        // Create channels for position updates and completion
         let (position_tx, position_rx) = mpsc::channel();
         let (completion_tx, completion_rx) = mpsc::channel();
-
-        // Bridge blocking channels to async channels
         let (position_tx_async, mut position_rx_async) = tokio_mpsc::unbounded_channel();
         let (completion_tx_async, mut completion_rx_async) = tokio_mpsc::unbounded_channel();
-
         trace!("Seek: Created new channels for position updates");
-
-        // Bridge position updates
         let position_rx_clone = position_rx;
         tokio::spawn(async move {
             let position_rx = Arc::new(std::sync::Mutex::new(position_rx_clone));
@@ -1152,8 +945,6 @@ impl PlaybackService {
             }
             trace!("Seek: Bridge position task exiting");
         });
-
-        // Bridge completion signals
         let completion_rx_clone = completion_rx;
         tokio::spawn(async move {
             let completion_rx = Arc::new(std::sync::Mutex::new(completion_rx_clone));
@@ -1171,9 +962,6 @@ impl PlaybackService {
                 }
             }
         });
-
-        // Spawn task to handle position updates and completion BEFORE creating stream
-        // This ensures the receiver is ready when completion signals arrive
         let progress_tx_for_task = self.progress_tx.clone();
         let track_id_for_task = track_id.clone();
         let track_duration_for_completion = track_duration;
@@ -1184,40 +972,24 @@ impl PlaybackService {
                 "Seek: Spawning completion listener task for track: {}",
                 track_id_for_task
             );
-
             trace!("Seek: Task started, waiting for position updates and completion");
-
             loop {
                 tokio::select! {
                     Some(pos) = position_rx_async.recv() => {
-                        trace!("Seek: Listener received position update: {:?}", pos);
-                        // Update shared position
-                        *current_position_for_seek_listener.lock().unwrap() = Some(pos);
-                        // Send PositionUpdate event
-                        let send_result = progress_tx_for_task.send(PlaybackProgress::PositionUpdate {
-                            position: pos,
-                            track_id: track_id_for_task.clone(),
-                        });
-                        if let Err(e) = send_result {
-                            error!("Seek: Listener failed to send position update: {:?}", e);
-                        }
-                    }
+                    trace!("Seek: Listener received position update: {:?}", pos); *
+                    current_position_for_seek_listener.lock().unwrap() = Some(pos); let
+                    send_result = progress_tx_for_task
+                    .send(PlaybackProgress::PositionUpdate { position : pos, track_id :
+                    track_id_for_task.clone(), }); if let Err(e) = send_result {
+                    error!("Seek: Listener failed to send position update: {:?}", e); } }
                     Some(()) = completion_rx_async.recv() => {
-                        info!("Seek: Track completed: {}", track_id_for_task);
-                        // Send final position update matching duration to ensure progress bar reaches 100%
-                        let _ = progress_tx_for_task.send(PlaybackProgress::PositionUpdate {
-                            position: track_duration_for_completion,
-                            track_id: track_id_for_task.clone(),
-                        });
-                        let _ = progress_tx_for_task.send(PlaybackProgress::TrackCompleted {
-                            track_id: track_id_for_task.clone(),
-                        });
-                        break;
-                    }
-                    else => {
-                        trace!("Seek: Channels closed, exiting listener task");
-                        break;
-                    }
+                    info!("Seek: Track completed: {}", track_id_for_task); let _ =
+                    progress_tx_for_task.send(PlaybackProgress::PositionUpdate { position
+                    : track_duration_for_completion, track_id : track_id_for_task
+                    .clone(), }); let _ = progress_tx_for_task
+                    .send(PlaybackProgress::TrackCompleted { track_id : track_id_for_task
+                    .clone(), }); break; } else => {
+                    trace!("Seek: Channels closed, exiting listener task"); break; }
                 }
             }
             trace!(
@@ -1225,10 +997,7 @@ impl PlaybackService {
                 track_id_for_task
             );
         });
-
         trace!("Seek: Creating new audio stream");
-
-        // Reuse existing audio output (don't create a new one)
         let stream = match self
             .audio_output
             .create_stream(pcm_source, position_tx, completion_tx)
@@ -1243,38 +1012,24 @@ impl PlaybackService {
                 return;
             }
         };
-
-        // Start playback from seeked position
         if let Err(e) = stream.play() {
             error!("Failed to start stream after seek: {:?}", e);
             self.stop().await;
             return;
         }
-
         trace!("Seek: Stream started successfully");
-
         self.stream = Some(stream);
-
-        // Update shared position
-        // Note: We preserve self.current_duration (track duration) instead of using decoder.duration()
-        // because for CUE/FLAC tracks, decoder.duration() returns the full album duration, not track duration
         *self.current_position_shared.lock().unwrap() = Some(position);
-        // self.current_duration remains unchanged - it's already the correct track duration
         trace!("Seek: Updated shared position to: {:?}", position);
-
-        // If we were paused, keep it paused; otherwise play
         if was_paused {
             trace!("Seek: Was paused, keeping paused");
             self.audio_output
                 .send_command(crate::playback::cpal_output::AudioCommand::Pause);
         } else {
             trace!("Seek: Was playing, sending Play command");
-            // Send Play command to start audio
             self.audio_output
                 .send_command(crate::playback::cpal_output::AudioCommand::Play);
         }
-
-        // Send Seeked event with new position
         if let Some(track) = &self.current_track {
             trace!("Seek: Sending Seeked event with position: {:?}", position);
             let _ = self.progress_tx.send(PlaybackProgress::Seeked {
@@ -1284,7 +1039,6 @@ impl PlaybackService {
             });
         }
     }
-
     /// Emit queue update to all subscribers
     fn emit_queue_update(&self) {
         let track_ids: Vec<String> = self.queue.iter().cloned().collect();
@@ -1292,7 +1046,6 @@ impl PlaybackService {
             .progress_tx
             .send(PlaybackProgress::QueueUpdated { tracks: track_ids });
     }
-
     /// Load audio directly from source_path for None storage.
     ///
     /// For single-file-per-track imports, finds the audio file and reads it.
@@ -1306,38 +1059,27 @@ impl PlaybackService {
             "Loading audio from source path for track {} (None storage)",
             track_id
         );
-
-        // Get track chunk coords (contains byte ranges for CUE/FLAC)
         let coords = self
             .library_manager
             .get_track_chunk_coords(track_id)
             .await
             .map_err(PlaybackError::database)?;
-
-        // Get audio format (has FLAC headers if needed)
         let audio_format = self
             .library_manager
             .get_audio_format_by_track_id(track_id)
             .await
             .map_err(PlaybackError::database)?;
-
-        // Get files for the release
         let files = self
             .library_manager
             .get_files_for_release(release_id)
             .await
             .map_err(PlaybackError::database)?;
-
-        // Find an audio file with source_path set
-        // For single-file-per-track, we match by track number in filename
         let track = self
             .library_manager
             .get_track(track_id)
             .await
             .map_err(PlaybackError::database)?
             .ok_or_else(|| PlaybackError::not_found("Track", track_id))?;
-
-        // Try to find a matching audio file
         let audio_file = files
             .iter()
             .filter(|f| {
@@ -1346,17 +1088,14 @@ impl PlaybackService {
                     && f.source_path.is_some()
             })
             .find(|f| {
-                // Try to match by track number in filename
                 if let Some(track_num) = track.track_number {
                     let num_str = format!("{:02}", track_num);
                     f.original_filename.contains(&num_str)
                 } else {
-                    // Fallback: just use the first audio file
                     true
                 }
             })
             .or_else(|| {
-                // If no match by track number, use first audio file with source_path
                 files.iter().find(|f| {
                     let ext = f.format.to_lowercase();
                     (ext == "flac" || ext == "mp3" || ext == "wav" || ext == "ogg")
@@ -1364,43 +1103,31 @@ impl PlaybackService {
                 })
             })
             .ok_or_else(|| PlaybackError::not_found("Audio file", release_id))?;
-
         let source_path = audio_file
             .source_path
             .as_ref()
             .ok_or_else(|| PlaybackError::not_found("Source path", &audio_file.id))?;
-
         info!("Reading audio from: {}", source_path);
-
-        // Read the file
         let file_data = tokio::fs::read(source_path).await?;
-
-        // Check if this is a CUE/FLAC track (has coords with byte ranges)
         if let (Some(coords), Some(audio_format)) = (coords, audio_format) {
-            // chunk_index = -1 means non-chunked storage with absolute byte offsets
             if coords.start_chunk_index == -1 {
                 let start_byte = coords.start_byte_offset as usize;
                 let end_byte = coords.end_byte_offset as usize;
-
                 info!(
                     "CUE/FLAC: Extracting track bytes {}-{} from {} byte file",
                     start_byte,
                     end_byte,
                     file_data.len()
                 );
-
                 if end_byte > file_data.len() {
                     return Err(PlaybackError::flac(format!(
                         "Track byte range {}-{} exceeds file size {}",
                         start_byte,
                         end_byte,
-                        file_data.len()
+                        file_data.len(),
                     )));
                 }
-
                 let track_bytes = file_data[start_byte..end_byte].to_vec();
-
-                // Prepend FLAC headers if needed
                 if audio_format.needs_headers {
                     if let Some(headers) = &audio_format.flac_headers {
                         info!(
@@ -1413,15 +1140,11 @@ impl PlaybackService {
                         return Ok(result);
                     }
                 }
-
                 return Ok(track_bytes);
             }
         }
-
-        // No coords or single-track file: return whole file
         Ok(file_data)
     }
-
     /// Load audio from non-chunked storage.
     ///
     /// For non-chunked storage, the file is stored whole (not split into chunks).
@@ -1436,54 +1159,38 @@ impl PlaybackService {
             "Loading audio from non-chunked storage for track {} (profile: {})",
             track_id, storage_profile.name
         );
-
-        // Get track chunk coords (contains byte ranges for CUE/FLAC)
         let coords = self
             .library_manager
             .get_track_chunk_coords(track_id)
             .await
             .map_err(PlaybackError::database)?;
-
-        // Get audio format (has FLAC headers if needed)
         let audio_format = self
             .library_manager
             .get_audio_format_by_track_id(track_id)
             .await
             .map_err(PlaybackError::database)?;
-
-        // Get the audio file for this release
         let files = self
             .library_manager
             .get_files_for_release(release_id)
             .await
             .map_err(PlaybackError::database)?;
-
         let audio_file = files
             .iter()
             .find(|f| f.format.to_lowercase() == "flac" && f.source_path.is_some())
             .ok_or_else(|| PlaybackError::not_found("FLAC file", release_id))?;
-
         let source_path = audio_file
             .source_path
             .as_ref()
             .ok_or_else(|| PlaybackError::not_found("Source path", &audio_file.id))?;
-
         info!("Reading from storage path: {}", source_path);
-
-        // Read file based on storage location
         let file_data = match storage_profile.location {
             crate::db::StorageLocation::Local => tokio::fs::read(source_path).await?,
-            crate::db::StorageLocation::Cloud => {
-                // Download from cloud
-                self.cloud_storage
-                    .download_chunk(source_path)
-                    .await
-                    .map_err(PlaybackError::cloud)?
-            }
+            crate::db::StorageLocation::Cloud => self
+                .cloud_storage
+                .download_chunk(source_path)
+                .await
+                .map_err(PlaybackError::cloud)?,
         };
-
-        // Decrypt if needed
-        // Note: Non-chunked encrypted storage stores the nonce at the start of the file
         let file_data = if storage_profile.encrypted {
             if file_data.len() < 12 {
                 return Err(PlaybackError::decrypt("File too small to contain nonce"));
@@ -1496,33 +1203,25 @@ impl PlaybackService {
         } else {
             file_data
         };
-
-        // Check if this is a CUE/FLAC track (has coords with byte ranges)
         if let (Some(coords), Some(audio_format)) = (coords, audio_format) {
-            // chunk_index = -1 means non-chunked storage with absolute byte offsets
             if coords.start_chunk_index == -1 {
                 let start_byte = coords.start_byte_offset as usize;
                 let end_byte = coords.end_byte_offset as usize;
-
                 info!(
                     "Extracting track bytes {}-{} from {} byte file",
                     start_byte,
                     end_byte,
                     file_data.len()
                 );
-
                 if end_byte > file_data.len() {
                     return Err(PlaybackError::flac(format!(
                         "Track byte range {}-{} exceeds file size {}",
                         start_byte,
                         end_byte,
-                        file_data.len()
+                        file_data.len(),
                     )));
                 }
-
                 let track_bytes = file_data[start_byte..end_byte].to_vec();
-
-                // Prepend FLAC headers if needed
                 if audio_format.needs_headers {
                     if let Some(headers) = &audio_format.flac_headers {
                         let mut result = headers.clone();
@@ -1530,12 +1229,9 @@ impl PlaybackService {
                         return Ok(result);
                     }
                 }
-
                 return Ok(track_bytes);
             }
         }
-
-        // No coords or single-track file: return whole file
         Ok(file_data)
     }
 }

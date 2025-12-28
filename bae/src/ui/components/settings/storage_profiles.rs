@@ -2,22 +2,18 @@ use crate::db::{DbStorageProfile, StorageLocation};
 use crate::library::use_library_manager;
 use dioxus::prelude::*;
 use tracing::{error, info};
-
 /// Storage Profiles section - CRUD for profiles
 #[component]
 pub fn StorageProfilesSection() -> Element {
     let library_manager = use_library_manager();
-
     let mut profiles = use_signal(Vec::<DbStorageProfile>::new);
     let mut editing_profile = use_signal(|| Option::<DbStorageProfile>::None);
     let mut is_creating = use_signal(|| false);
     let mut is_loading = use_signal(|| true);
     let mut refresh_trigger = use_signal(|| 0u32);
-
-    // Load profiles on mount and when refresh_trigger changes
     let lm = library_manager.clone();
     use_effect(move || {
-        let _ = *refresh_trigger.read(); // React to changes
+        let _ = *refresh_trigger.read();
         let lm = lm.clone();
         spawn(async move {
             is_loading.set(true);
@@ -28,7 +24,6 @@ pub fn StorageProfilesSection() -> Element {
             is_loading.set(false);
         });
     });
-
     rsx! {
         div { class: "max-w-2xl",
             div { class: "flex items-center justify-between mb-6",
@@ -56,8 +51,6 @@ pub fn StorageProfilesSection() -> Element {
                     }
                 }
             }
-
-            // Editor/Creator form
             if *is_creating.read() {
                 ProfileEditor {
                     profile: None,
@@ -83,8 +76,6 @@ pub fn StorageProfilesSection() -> Element {
                     },
                 }
             }
-
-            // Profile list
             if !*is_creating.read() && editing_profile.read().is_none() {
                 if *is_loading.read() {
                     div { class: "bg-gray-800 rounded-lg p-6 text-center text-gray-400",
@@ -115,8 +106,6 @@ pub fn StorageProfilesSection() -> Element {
                     }
                 }
             }
-
-            // Help text
             div { class: "mt-6 p-4 bg-gray-700/50 rounded-lg",
                 p { class: "text-sm text-gray-400",
                     "Storage profiles determine how release files are stored. You can have multiple profiles "
@@ -127,7 +116,6 @@ pub fn StorageProfilesSection() -> Element {
         }
     }
 }
-
 #[component]
 fn ProfileCard(
     profile: DbStorageProfile,
@@ -137,11 +125,9 @@ fn ProfileCard(
     let library_manager = use_library_manager();
     let mut is_deleting = use_signal(|| false);
     let mut show_delete_confirm = use_signal(|| false);
-
     let profile_for_edit = profile.clone();
     let profile_id_for_default = profile.id.clone();
     let profile_id_for_delete = profile.id.clone();
-
     rsx! {
         div { class: "bg-gray-800 rounded-lg p-4",
             div { class: "flex items-start justify-between",
@@ -154,7 +140,6 @@ fn ProfileCard(
                             }
                         }
                     }
-
                     div { class: "flex flex-wrap gap-2 mt-2",
                         span { class: "px-2 py-1 bg-gray-700 text-gray-300 rounded text-xs",
                             match profile.location {
@@ -173,11 +158,8 @@ fn ProfileCard(
                             }
                         }
                     }
-
                     p { class: "text-sm text-gray-500 mt-2 font-mono", "{profile.location_path}" }
                 }
-
-                // Actions
                 div { class: "flex items-center gap-2",
                     if !profile.is_default {
                         button {
@@ -253,8 +235,6 @@ fn ProfileCard(
                     }
                 }
             }
-
-            // Delete confirmation
             if *show_delete_confirm.read() {
                 div { class: "mt-4 p-3 bg-red-900/30 border border-red-700 rounded-lg",
                     p { class: "text-sm text-red-300 mb-3",
@@ -301,7 +281,6 @@ fn ProfileCard(
         }
     }
 }
-
 #[component]
 fn ProfileEditor(
     profile: Option<DbStorageProfile>,
@@ -310,7 +289,6 @@ fn ProfileEditor(
 ) -> Element {
     let library_manager = use_library_manager();
     let is_edit = profile.is_some();
-
     let mut name = use_signal(|| profile.as_ref().map(|p| p.name.clone()).unwrap_or_default());
     let mut location = use_signal(|| {
         profile
@@ -318,14 +296,12 @@ fn ProfileEditor(
             .map(|p| p.location)
             .unwrap_or(StorageLocation::Cloud)
     });
-    // Local storage path
     let mut location_path = use_signal(|| {
         profile
             .as_ref()
             .map(|p| p.location_path.clone())
             .unwrap_or_default()
     });
-    // Cloud-specific fields
     let mut cloud_bucket = use_signal(|| {
         profile
             .as_ref()
@@ -357,14 +333,11 @@ fn ProfileEditor(
             .unwrap_or_default()
     });
     let mut show_secrets = use_signal(|| false);
-
     let mut encrypted = use_signal(|| profile.as_ref().map(|p| p.encrypted).unwrap_or(true));
     let mut chunked = use_signal(|| profile.as_ref().map(|p| p.chunked).unwrap_or(true));
     let mut is_default = use_signal(|| profile.as_ref().map(|p| p.is_default).unwrap_or(false));
-
     let mut is_saving = use_signal(|| false);
     let mut save_error = use_signal(|| Option::<String>::None);
-
     rsx! {
         div { class: "bg-gray-800 rounded-lg p-6 mb-6",
             h3 { class: "text-lg font-medium text-white mb-4",
@@ -374,9 +347,7 @@ fn ProfileEditor(
                     "New Profile"
                 }
             }
-
             div { class: "space-y-4",
-                // Name
                 div {
                     label { class: "block text-sm font-medium text-gray-400 mb-2", "Name" }
                     input {
@@ -388,8 +359,6 @@ fn ProfileEditor(
                         oninput: move |e| name.set(e.value()),
                     }
                 }
-
-                // Location type
                 div {
                     label { class: "block text-sm font-medium text-gray-400 mb-2", "Storage Type" }
                     div { class: "flex flex-col gap-3",
@@ -415,8 +384,6 @@ fn ProfileEditor(
                         }
                     }
                 }
-
-                // Location-specific fields
                 if *location.read() == StorageLocation::Local {
                     div {
                         label { class: "block text-sm font-medium text-gray-400 mb-2",
@@ -432,7 +399,6 @@ fn ProfileEditor(
                         }
                     }
                 } else {
-                    // Cloud storage fields
                     div {
                         label { class: "block text-sm font-medium text-gray-400 mb-2",
                             "Bucket Name"
@@ -516,8 +482,6 @@ fn ProfileEditor(
                         }
                     }
                 }
-
-                // Options
                 div { class: "space-y-3",
                     label { class: "flex items-start gap-3 cursor-pointer",
                         input {
@@ -548,8 +512,6 @@ fn ProfileEditor(
                         }
                     }
                 }
-
-                // Default option (available for all storage types)
                 div {
                     label { class: "flex items-center gap-2 cursor-pointer",
                         input {
@@ -561,14 +523,11 @@ fn ProfileEditor(
                         span { class: "text-white", "Set as default" }
                     }
                 }
-
                 if let Some(error) = save_error.read().as_ref() {
                     div { class: "p-3 bg-red-900/30 border border-red-700 rounded-lg text-sm text-red-300",
                         "{error}"
                     }
                 }
-
-                // Actions
                 div { class: "flex gap-3 pt-2",
                     button {
                         class: "px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
@@ -590,18 +549,14 @@ fn ProfileEditor(
                                 let new_is_default = *is_default.read();
                                 let existing = existing_profile.clone();
                                 let lm = lm.clone();
-
                                 spawn(async move {
                                     is_saving.set(true);
                                     save_error.set(None);
-
-                                    // Validation
                                     if new_name.trim().is_empty() {
                                         save_error.set(Some("Name is required".to_string()));
                                         is_saving.set(false);
                                         return;
                                     }
-
                                     if new_location == StorageLocation::Local {
                                         if new_location_path.trim().is_empty() {
                                             save_error.set(Some("Directory path is required".to_string()));
@@ -609,7 +564,6 @@ fn ProfileEditor(
                                             return;
                                         }
                                     } else {
-                                        // Cloud validation
                                         if new_cloud_bucket.trim().is_empty() {
                                             save_error.set(Some("Bucket name is required".to_string()));
                                             is_saving.set(false);
@@ -631,9 +585,7 @@ fn ProfileEditor(
                                             return;
                                         }
                                     }
-
                                     let result = if let Some(mut profile) = existing {
-                                        // Update existing
                                         profile.name = new_name.clone();
                                         profile.location = new_location;
                                         profile.location_path = new_location_path;
@@ -647,8 +599,6 @@ fn ProfileEditor(
                                             {
                                                 None
                                             } else {
-                                                // Create new
-
                                                 Some(new_cloud_endpoint)
                                             };
                                             profile.cloud_access_key = Some(new_cloud_access_key);

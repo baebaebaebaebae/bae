@@ -1,12 +1,10 @@
+use super::image_lightbox::ImageLightbox;
+use super::text_file_modal::TextFileModal;
 use crate::ui::components::import::{AudioContentInfo, CategorizedFileInfo, FileInfo};
 use crate::ui::local_file_url;
 use chardetng::EncodingDetector;
 use dioxus::prelude::*;
 use tracing::warn;
-
-use super::image_lightbox::ImageLightbox;
-use super::text_file_modal::TextFileModal;
-
 fn format_file_size(bytes: u64) -> String {
     if bytes < 1024 {
         format!("{} B", bytes)
@@ -18,7 +16,6 @@ fn format_file_size(bytes: u64) -> String {
         format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
     }
 }
-
 /// Render audio content based on type (CUE/FLAC pairs or track files)
 fn render_audio_content(
     audio: &AudioContentInfo,
@@ -59,12 +56,10 @@ fn render_audio_content(
             }
         }
         AudioContentInfo::TrackFiles(_) => {
-            // Empty tracks - render nothing
             rsx! {}
         }
     }
 }
-
 /// Render a single CUE/FLAC pair with click-to-view CUE functionality
 fn render_cue_flac_pair(
     pair: &crate::ui::components::import::CueFlacPairInfo,
@@ -76,7 +71,6 @@ fn render_cue_flac_pair(
     let flac_name = pair.flac_name.clone();
     let track_count = pair.track_count;
     let total_size = pair.total_size;
-
     rsx! {
         div {
             class: "p-4 bg-gray-800/50 border border-purple-500/30 rounded-lg hover:bg-gray-800/70 hover:border-purple-500/50 transition-colors cursor-pointer",
@@ -101,25 +95,18 @@ fn render_cue_flac_pair(
         }
     }
 }
-
 /// Read a text file with automatic encoding detection
 async fn read_text_file_with_encoding(path: &str) -> Result<String, String> {
     let bytes = tokio::fs::read(path)
         .await
         .map_err(|e| format!("Failed to read file: {}", e))?;
-
-    // Try UTF-8 first (fast path)
     if let Ok(content) = String::from_utf8(bytes.clone()) {
         return Ok(content);
     }
-
-    // Use encoding detection
     let mut detector = EncodingDetector::new();
     detector.feed(&bytes, true);
     let encoding = detector.guess(None, true);
-
     let (decoded, _, had_errors) = encoding.decode(&bytes);
-
     if had_errors {
         warn!(
             "Decoding errors occurred while reading {} with encoding {}",
@@ -127,16 +114,13 @@ async fn read_text_file_with_encoding(path: &str) -> Result<String, String> {
             encoding.name()
         );
     }
-
     Ok(decoded.into_owned())
 }
-
 #[component]
 pub fn SmartFileDisplay(files: CategorizedFileInfo, folder_path: String) -> Element {
     let mut modal_state = use_signal(|| None::<(String, String)>);
     let mut lightbox_index = use_signal(|| None::<usize>);
     let mut show_other_files = use_signal(|| false);
-
     let on_text_file_click = move |filename: String, filepath: String| {
         spawn(async move {
             match read_text_file_with_encoding(&filepath).await {
@@ -149,8 +133,6 @@ pub fn SmartFileDisplay(files: CategorizedFileInfo, folder_path: String) -> Elem
             }
         });
     };
-
-    // Build image data for lightbox
     let image_data: Vec<(String, String)> = files
         .artwork
         .iter()
@@ -160,29 +142,22 @@ pub fn SmartFileDisplay(files: CategorizedFileInfo, folder_path: String) -> Elem
             (img.name.clone(), url)
         })
         .collect();
-
-    // Compute clamped lightbox index to prevent out-of-bounds access
     let image_count = image_data.len();
     let current_idx = *lightbox_index.read();
     let clamped_lightbox_index = current_idx.and_then(|idx| {
         if image_count == 0 || idx >= image_count {
-            // Index out of bounds or no images - close lightbox
             lightbox_index.set(None);
             None
         } else {
             Some(idx)
         }
     });
-
     rsx! {
         if files.is_empty() {
             div { class: "text-gray-400 text-center py-8", "No files found" }
         } else {
             div { class: "space-y-3",
-                // Audio section - render based on content type
                 {render_audio_content(&files.audio, &folder_path, on_text_file_click)}
-
-                // Artwork gallery
                 if !files.artwork.is_empty() {
                     div { class: "grid grid-cols-3 gap-2",
                         for (idx , image) in files.artwork.iter().enumerate() {
@@ -190,13 +165,9 @@ pub fn SmartFileDisplay(files: CategorizedFileInfo, folder_path: String) -> Elem
                         }
                     }
                 }
-
-                // Documents section
                 for doc in files.documents.iter() {
                     {render_text_file(doc, &folder_path, on_text_file_click)}
                 }
-
-                // Other files section (initially hidden)
                 if !files.other.is_empty() {
                     div { class: "pt-2",
                         button {
@@ -219,7 +190,6 @@ pub fn SmartFileDisplay(files: CategorizedFileInfo, folder_path: String) -> Elem
                                 }
                             }
                         }
-
                         if show_other_files() {
                             div { class: "mt-3 space-y-2",
                                 for file in files.other.iter() {
@@ -231,8 +201,6 @@ pub fn SmartFileDisplay(files: CategorizedFileInfo, folder_path: String) -> Elem
                 }
             }
         }
-
-        // Modal for text files
         if let Some((filename, content)) = modal_state.read().as_ref() {
             TextFileModal {
                 filename: filename.clone(),
@@ -240,15 +208,12 @@ pub fn SmartFileDisplay(files: CategorizedFileInfo, folder_path: String) -> Elem
                 on_close: move |_| modal_state.set(None),
             }
         }
-
-        // Lightbox for images
         if let Some(clamped_idx) = clamped_lightbox_index {
             ImageLightbox {
                 images: image_data.clone(),
                 current_index: clamped_idx,
                 on_close: move |_| lightbox_index.set(None),
                 on_navigate: move |new_idx: usize| {
-                    // Clamp navigation to valid range
                     let max_idx = image_count.saturating_sub(1);
                     lightbox_index.set(Some(new_idx.min(max_idx)));
                 },
@@ -256,7 +221,6 @@ pub fn SmartFileDisplay(files: CategorizedFileInfo, folder_path: String) -> Elem
         }
     }
 }
-
 fn render_gallery_thumbnail(
     file: &FileInfo,
     folder_path: &str,
@@ -266,7 +230,6 @@ fn render_gallery_thumbnail(
     let image_path = format!("{}/{}", folder_path, file.name);
     let image_url = local_file_url(&image_path);
     let filename = file.name.clone();
-
     rsx! {
         button {
             class: "relative aspect-square bg-gray-800 border border-gray-700 rounded-lg overflow-hidden hover:border-gray-500 transition-colors group",
@@ -276,14 +239,12 @@ fn render_gallery_thumbnail(
                 alt: "{filename}",
                 class: "w-full h-full object-cover",
             }
-            // Hover overlay with filename
             div { class: "absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-2",
                 span { class: "text-xs text-white truncate w-full", {filename.clone()} }
             }
         }
     }
 }
-
 fn render_text_file(
     file: &FileInfo,
     folder_path: &str,
@@ -310,7 +271,6 @@ fn render_text_file(
         }
     }
 }
-
 fn render_other_file(file: &FileInfo) -> Element {
     rsx! {
         div { class: "p-2 bg-gray-800 border border-gray-700 rounded",

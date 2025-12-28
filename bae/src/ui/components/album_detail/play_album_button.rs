@@ -1,10 +1,8 @@
+use super::super::use_playback_service;
+use super::utils::get_album_track_ids;
 use crate::db::DbTrack;
 use crate::library::use_library_manager;
 use dioxus::prelude::*;
-
-use super::super::use_playback_service;
-use super::utils::get_album_track_ids;
-
 #[component]
 pub fn PlayAlbumButton(
     album_id: String,
@@ -16,7 +14,6 @@ pub fn PlayAlbumButton(
     let playback = use_playback_service();
     let library_manager = use_library_manager();
     let mut show_play_menu = use_signal(|| false);
-
     let is_disabled = import_progress().is_some() || import_error().is_some() || is_deleting();
     let button_text = if import_progress().is_some() {
         "Importing..."
@@ -25,11 +22,9 @@ pub fn PlayAlbumButton(
     } else {
         "▶ Play Album"
     };
-
     rsx! {
         div { class: "relative mt-6",
             div { class: "flex rounded-lg overflow-hidden",
-                // Main play button (left side)
                 button {
                     class: "flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold transition-colors flex items-center justify-center gap-2",
                     disabled: is_disabled,
@@ -44,7 +39,6 @@ pub fn PlayAlbumButton(
                     },
                     "{button_text}"
                 }
-                // Divider and dropdown trigger (right side)
                 div { class: "border-l border-blue-500",
                     button {
                         class: "px-3 py-3 bg-blue-600 hover:bg-blue-500 text-white transition-colors flex items-center justify-center",
@@ -60,8 +54,6 @@ pub fn PlayAlbumButton(
                     }
                 }
             }
-
-            // Play menu dropdown
             if show_play_menu() {
                 div { class: "absolute top-full left-0 right-0 mt-2 bg-gray-700 rounded-lg shadow-lg overflow-hidden z-10 border border-gray-600",
                     button {
@@ -96,8 +88,6 @@ pub fn PlayAlbumButton(
                 }
             }
         }
-
-        // Click outside to close dropdown
         if show_play_menu() {
             div {
                 class: "fixed inset-0 z-[5]",

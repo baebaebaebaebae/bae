@@ -1,34 +1,25 @@
+use crate::db::models::*;
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 use tracing::info;
 use uuid::Uuid;
-
-use crate::db::models::*;
-
-// String constants for SQL DEFAULT clauses (keep in sync with as_str())
 const IMPORT_STATUS_QUEUED: &str = "queued";
-
 #[derive(Debug, Clone)]
 pub struct Database {
     pool: SqlitePool,
 }
-
 impl Database {
     /// Initialize database connection and create tables
     pub async fn new(database_path: &str) -> Result<Self, sqlx::Error> {
-        // Use sqlite:// with ?mode=rwc to create if it doesn't exist
         let database_url = format!("sqlite://{}?mode=rwc", database_path);
         info!("Connecting to {}", database_url);
         let pool = SqlitePool::connect(&database_url).await?;
-
         let db = Database { pool };
         db.create_tables().await?;
         Ok(db)
     }
-
     /// Create all necessary tables
     async fn create_tables(&self) -> Result<(), sqlx::Error> {
-        // Artists table
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS artists (
@@ -44,8 +35,6 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
-
-        // Albums table (logical albums)
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS albums (
@@ -63,8 +52,6 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
-
-        // Album-Discogs join table (one-to-one relationship)
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS album_discogs (
@@ -78,8 +65,6 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
-
-        // Album-MusicBrainz join table (one-to-one relationship)
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS album_musicbrainz (
@@ -93,8 +78,6 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
-
-        // Album-Artist junction table
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS album_artists (
@@ -110,8 +93,6 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
-
-        // Releases table (specific versions/pressings of albums)
         sqlx::query(&format!(
             r#"
             CREATE TABLE IF NOT EXISTS releases (
@@ -134,12 +115,10 @@ impl Database {
                 UNIQUE(album_id, bandcamp_release_id)
             )
             "#,
-            IMPORT_STATUS_QUEUED
+            IMPORT_STATUS_QUEUED,
         ))
         .execute(&self.pool)
         .await?;
-
-        // Tracks table
         sqlx::query(&format!(
             r#"
             CREATE TABLE IF NOT EXISTS tracks (
@@ -155,12 +134,10 @@ impl Database {
                 FOREIGN KEY (release_id) REFERENCES releases (id) ON DELETE CASCADE
             )
             "#,
-            IMPORT_STATUS_QUEUED
+            IMPORT_STATUS_QUEUED,
         ))
         .execute(&self.pool)
         .await?;
-
-        // Track-Artist junction table
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS track_artists (
@@ -176,11 +153,6 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
-
-        // Files table (metadata for export/torrent features)
-        // Files belong to releases, not tracks. Used for reconstructing original
-        // file structure during export or BitTorrent seeding.
-        // For None storage, source_path is used for direct playback (no chunks).
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS files (
@@ -197,8 +169,6 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
-
-        // Chunks table (encrypted release chunks for cloud storage)
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS chunks (
@@ -215,10 +185,6 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
-
-        // Audio formats table (format metadata per track)
-        // Stores format information needed for playback.
-        // FLAC headers only needed for CUE/FLAC tracks.
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS audio_formats (
@@ -235,11 +201,6 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
-
-        // Track chunk coordinates table (precise location of track audio in chunked stream)
-        // This IS the TrackChunkCoords concept. Stores coordinates that locate a track's
-        // audio data within the chunked album stream, regardless of source structure.
-        // Both one-file-per-track and CUE/FLAC imports produce identical records here.
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS track_chunk_coords (
@@ -258,9 +219,6 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
-
-        // File chunks table (maps files to chunks with byte offsets)
-        // Enables reconstructing files from chunks without fragile offset calculations.
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS file_chunks (
@@ -278,65 +236,51 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
-
-        // Create indexes for performance
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_artists_discogs_id ON artists (discogs_artist_id)",
         )
         .execute(&self.pool)
         .await?;
-
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_album_artists_album_id ON album_artists (album_id)",
         )
         .execute(&self.pool)
         .await?;
-
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_album_artists_artist_id ON album_artists (artist_id)",
         )
         .execute(&self.pool)
         .await?;
-
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_track_artists_track_id ON track_artists (track_id)",
         )
         .execute(&self.pool)
         .await?;
-
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_track_artists_artist_id ON track_artists (artist_id)",
         )
         .execute(&self.pool)
         .await?;
-
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_releases_album_id ON releases (album_id)")
             .execute(&self.pool)
             .await?;
-
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_tracks_release_id ON tracks (release_id)")
             .execute(&self.pool)
             .await?;
-
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_files_release_id ON files (release_id)")
             .execute(&self.pool)
             .await?;
-
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_chunks_release_id ON chunks (release_id)")
             .execute(&self.pool)
             .await?;
-
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_file_chunks_file_id ON file_chunks (file_id)")
             .execute(&self.pool)
             .await?;
-
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_file_chunks_chunk_id ON file_chunks (chunk_id)",
         )
         .execute(&self.pool)
         .await?;
-
-        // Torrents table (torrent import metadata)
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS torrents (
@@ -356,8 +300,6 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
-
-        // Torrent piece mappings table (maps torrent pieces to bae chunks)
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS torrent_piece_mappings (
@@ -374,28 +316,22 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
-
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_torrents_release_id ON torrents (release_id)")
             .execute(&self.pool)
             .await?;
-
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_torrents_info_hash ON torrents (info_hash)")
             .execute(&self.pool)
             .await?;
-
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_torrent_piece_mappings_torrent_id ON torrent_piece_mappings (torrent_id)",
-        )
-        .execute(&self.pool)
-        .await?;
-
+                "CREATE INDEX IF NOT EXISTS idx_torrent_piece_mappings_torrent_id ON torrent_piece_mappings (torrent_id)",
+            )
+            .execute(&self.pool)
+            .await?;
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_audio_formats_track_id ON audio_formats (track_id)",
         )
         .execute(&self.pool)
         .await?;
-
-        // Images table (release artwork and cover art)
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS images (
@@ -413,12 +349,9 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
-
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_images_release_id ON images (release_id)")
             .execute(&self.pool)
             .await?;
-
-        // Storage profiles table (reusable storage configurations)
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS storage_profiles (
@@ -441,8 +374,6 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
-
-        // Release storage table (links releases to storage profiles)
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS release_storage (
@@ -457,26 +388,21 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
-
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_release_storage_profile_id ON release_storage (storage_profile_id)",
-        )
-        .execute(&self.pool)
-        .await?;
-
+                "CREATE INDEX IF NOT EXISTS idx_release_storage_profile_id ON release_storage (storage_profile_id)",
+            )
+            .execute(&self.pool)
+            .await?;
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_track_chunk_coords_track_id ON track_chunk_coords (track_id)",
-        )
-        .execute(&self.pool)
-        .await?;
-
+                "CREATE INDEX IF NOT EXISTS idx_track_chunk_coords_track_id ON track_chunk_coords (track_id)",
+            )
+            .execute(&self.pool)
+            .await?;
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_chunks_last_accessed ON chunks (last_accessed)",
         )
         .execute(&self.pool)
         .await?;
-
-        // Imports table (tracks import operations from button click through completion)
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS imports (
@@ -494,18 +420,14 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
-
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_imports_status ON imports (status)")
             .execute(&self.pool)
             .await?;
-
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_imports_release_id ON imports (release_id)")
             .execute(&self.pool)
             .await?;
-
         Ok(())
     }
-
     /// Insert a new artist
     pub async fn insert_artist(&self, artist: &DbArtist) -> Result<(), sqlx::Error> {
         sqlx::query(
@@ -525,10 +447,8 @@ impl Database {
         .bind(artist.updated_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
-
         Ok(())
     }
-
     /// Get artist by Discogs artist ID (for deduplication)
     pub async fn get_artist_by_discogs_id(
         &self,
@@ -538,7 +458,6 @@ impl Database {
             .bind(discogs_artist_id)
             .fetch_optional(&self.pool)
             .await?;
-
         if let Some(row) = row {
             Ok(Some(DbArtist {
                 id: row.get("id"),
@@ -557,7 +476,6 @@ impl Database {
             Ok(None)
         }
     }
-
     /// Insert album-artist relationship
     pub async fn insert_album_artist(
         &self,
@@ -575,10 +493,8 @@ impl Database {
         .bind(album_artist.position)
         .execute(&self.pool)
         .await?;
-
         Ok(())
     }
-
     /// Insert track-artist relationship
     pub async fn insert_track_artist(
         &self,
@@ -597,10 +513,8 @@ impl Database {
         .bind(&track_artist.role)
         .execute(&self.pool)
         .await?;
-
         Ok(())
     }
-
     /// Get artists for an album (ordered by position)
     pub async fn get_artists_for_album(
         &self,
@@ -617,7 +531,6 @@ impl Database {
         .bind(album_id)
         .fetch_all(&self.pool)
         .await?;
-
         let mut artists = Vec::new();
         for row in rows {
             artists.push(DbArtist {
@@ -634,10 +547,8 @@ impl Database {
                     .with_timezone(&Utc),
             });
         }
-
         Ok(artists)
     }
-
     /// Get artists for a track (ordered by position)
     pub async fn get_artists_for_track(
         &self,
@@ -654,7 +565,6 @@ impl Database {
         .bind(track_id)
         .fetch_all(&self.pool)
         .await?;
-
         let mut artists = Vec::new();
         for row in rows {
             artists.push(DbArtist {
@@ -671,35 +581,29 @@ impl Database {
                     .with_timezone(&Utc),
             });
         }
-
         Ok(artists)
     }
-
     /// Insert a new album
     pub async fn insert_album(&self, album: &DbAlbum) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-
-        // Insert album
         sqlx::query(
-            r#"
+                r#"
             INSERT INTO albums (
                 id, title, year, bandcamp_album_id, cover_image_id, cover_art_url, is_compilation, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
-        )
-        .bind(&album.id)
-        .bind(&album.title)
-        .bind(album.year)
-        .bind(&album.bandcamp_album_id)
-        .bind(&album.cover_image_id)
-        .bind(&album.cover_art_url)
-        .bind(album.is_compilation)
-        .bind(album.created_at.to_rfc3339())
-        .bind(album.updated_at.to_rfc3339())
-        .execute(&mut *tx)
-        .await?;
-
-        // Insert Discogs info if present
+            )
+            .bind(&album.id)
+            .bind(&album.title)
+            .bind(album.year)
+            .bind(&album.bandcamp_album_id)
+            .bind(&album.cover_image_id)
+            .bind(&album.cover_art_url)
+            .bind(album.is_compilation)
+            .bind(album.created_at.to_rfc3339())
+            .bind(album.updated_at.to_rfc3339())
+            .execute(&mut *tx)
+            .await?;
         if let Some(discogs_release) = &album.discogs_release {
             sqlx::query(
                 r#"
@@ -715,8 +619,6 @@ impl Database {
             .execute(&mut *tx)
             .await?;
         }
-
-        // Insert MusicBrainz info if present
         if let Some(mb_release) = &album.musicbrainz_release {
             sqlx::query(
                 r#"
@@ -732,11 +634,9 @@ impl Database {
             .execute(&mut *tx)
             .await?;
         }
-
         tx.commit().await?;
         Ok(())
     }
-
     /// Insert a new release
     pub async fn insert_release(&self, release: &DbRelease) -> Result<(), sqlx::Error> {
         sqlx::query(
@@ -764,10 +664,8 @@ impl Database {
         .bind(release.updated_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
-
         Ok(())
     }
-
     /// Insert a new track
     pub async fn insert_track(&self, track: &DbTrack) -> Result<(), sqlx::Error> {
         sqlx::query(
@@ -789,10 +687,8 @@ impl Database {
         .bind(track.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
-
         Ok(())
     }
-
     /// Insert album, release, and tracks in a single transaction
     /// Note: Artists and artist relationships should be inserted separately before calling this
     pub async fn insert_album_with_release_and_tracks(
@@ -802,28 +698,24 @@ impl Database {
         tracks: &[DbTrack],
     ) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-
-        // Insert album
         sqlx::query(
-            r#"
+                r#"
             INSERT INTO albums (
                 id, title, year, bandcamp_album_id, cover_image_id, cover_art_url, is_compilation, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
-        )
-        .bind(&album.id)
-        .bind(&album.title)
-        .bind(album.year)
-        .bind(&album.bandcamp_album_id)
-        .bind(&album.cover_image_id)
-        .bind(&album.cover_art_url)
-        .bind(album.is_compilation)
-        .bind(album.created_at.to_rfc3339())
-        .bind(album.updated_at.to_rfc3339())
-        .execute(&mut *tx)
-        .await?;
-
-        // Insert Discogs info if present
+            )
+            .bind(&album.id)
+            .bind(&album.title)
+            .bind(album.year)
+            .bind(&album.bandcamp_album_id)
+            .bind(&album.cover_image_id)
+            .bind(&album.cover_art_url)
+            .bind(album.is_compilation)
+            .bind(album.created_at.to_rfc3339())
+            .bind(album.updated_at.to_rfc3339())
+            .execute(&mut *tx)
+            .await?;
         if let Some(discogs_release) = &album.discogs_release {
             sqlx::query(
                 r#"
@@ -839,8 +731,6 @@ impl Database {
             .execute(&mut *tx)
             .await?;
         }
-
-        // Insert MusicBrainz info if present
         if let Some(mb_release) = &album.musicbrainz_release {
             sqlx::query(
                 r#"
@@ -856,8 +746,6 @@ impl Database {
             .execute(&mut *tx)
             .await?;
         }
-
-        // Insert release
         sqlx::query(
             r#"
             INSERT INTO releases (
@@ -883,8 +771,6 @@ impl Database {
         .bind(release.updated_at.to_rfc3339())
         .execute(&mut *tx)
         .await?;
-
-        // Insert all tracks
         for track in tracks {
             sqlx::query(
                 r#"
@@ -906,11 +792,9 @@ impl Database {
             .execute(&mut *tx)
             .await?;
         }
-
         tx.commit().await?;
         Ok(())
     }
-
     /// Update track import status
     pub async fn update_track_status(
         &self,
@@ -924,7 +808,6 @@ impl Database {
             .await?;
         Ok(())
     }
-
     /// Update track duration
     pub async fn update_track_duration(
         &self,
@@ -938,7 +821,6 @@ impl Database {
             .await?;
         Ok(())
     }
-
     /// Update release import status
     pub async fn update_release_status(
         &self,
@@ -953,7 +835,6 @@ impl Database {
             .await?;
         Ok(())
     }
-
     /// Get all albums
     pub async fn get_albums(&self) -> Result<Vec<DbAlbum>, sqlx::Error> {
         let rows = sqlx::query(
@@ -971,7 +852,6 @@ impl Database {
         )
         .fetch_all(&self.pool)
         .await?;
-
         let mut albums = Vec::new();
         for row in rows {
             let discogs_master_id: Option<String> = row.get("discogs_master_id");
@@ -983,7 +863,6 @@ impl Database {
                 }),
                 _ => None,
             };
-
             let mb_release_group_id: Option<String> = row.get("musicbrainz_release_group_id");
             let mb_release_id: Option<String> = row.get("musicbrainz_release_id");
             let musicbrainz_release = match (mb_release_group_id, mb_release_id) {
@@ -993,7 +872,6 @@ impl Database {
                 }),
                 _ => None,
             };
-
             albums.push(DbAlbum {
                 id: row.get("id"),
                 title: row.get("title"),
@@ -1012,10 +890,8 @@ impl Database {
                     .with_timezone(&Utc),
             });
         }
-
         Ok(albums)
     }
-
     /// Get album by ID
     pub async fn get_album_by_id(&self, album_id: &str) -> Result<Option<DbAlbum>, sqlx::Error> {
         let row = sqlx::query(
@@ -1034,7 +910,6 @@ impl Database {
         .bind(album_id)
         .fetch_optional(&self.pool)
         .await?;
-
         Ok(row.map(|row| {
             let discogs_master_id: Option<String> = row.get("discogs_master_id");
             let discogs_release_id: Option<String> = row.get("discogs_release_id");
@@ -1045,7 +920,6 @@ impl Database {
                 }),
                 _ => None,
             };
-
             let mb_release_group_id: Option<String> = row.get("musicbrainz_release_group_id");
             let mb_release_id: Option<String> = row.get("musicbrainz_release_id");
             let musicbrainz_release = match (mb_release_group_id, mb_release_id) {
@@ -1055,7 +929,6 @@ impl Database {
                 }),
                 _ => None,
             };
-
             DbAlbum {
                 id: row.get("id"),
                 title: row.get("title"),
@@ -1075,7 +948,6 @@ impl Database {
             }
         }))
     }
-
     /// Get all releases for an album
     pub async fn get_releases_for_album(
         &self,
@@ -1085,7 +957,6 @@ impl Database {
             .bind(album_id)
             .fetch_all(&self.pool)
             .await?;
-
         let mut releases = Vec::new();
         for row in rows {
             releases.push(DbRelease {
@@ -1109,17 +980,14 @@ impl Database {
                     .with_timezone(&Utc),
             });
         }
-
         Ok(releases)
     }
-
     /// Get a track by ID
     pub async fn get_track_by_id(&self, track_id: &str) -> Result<Option<DbTrack>, sqlx::Error> {
         let row = sqlx::query("SELECT * FROM tracks WHERE id = ?")
             .bind(track_id)
             .fetch_optional(&self.pool)
             .await?;
-
         if let Some(row) = row {
             Ok(Some(DbTrack {
                 id: row.get("id"),
@@ -1136,7 +1004,6 @@ impl Database {
             Ok(None)
         }
     }
-
     /// Get album_id for a release
     pub async fn get_album_id_for_release(
         &self,
@@ -1146,10 +1013,8 @@ impl Database {
             .bind(release_id)
             .fetch_optional(&self.pool)
             .await?;
-
         Ok(row.map(|r| r.get("album_id")))
     }
-
     /// Get tracks for a release
     pub async fn get_tracks_for_release(
         &self,
@@ -1161,7 +1026,6 @@ impl Database {
         .bind(release_id)
         .fetch_all(&self.pool)
         .await?;
-
         let mut tracks = Vec::new();
         for row in rows {
             tracks.push(DbTrack {
@@ -1178,10 +1042,8 @@ impl Database {
                     .with_timezone(&Utc),
             });
         }
-
         Ok(tracks)
     }
-
     /// Insert a new file record
     pub async fn insert_file(&self, file: &DbFile) -> Result<(), sqlx::Error> {
         sqlx::query(
@@ -1200,10 +1062,8 @@ impl Database {
         .bind(file.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
-
         Ok(())
     }
-
     /// Insert a new chunk record
     pub async fn insert_chunk(&self, chunk: &DbChunk) -> Result<(), sqlx::Error> {
         sqlx::query(
@@ -1223,17 +1083,14 @@ impl Database {
         .bind(chunk.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
-
         Ok(())
     }
-
     /// Get a chunk by ID
     pub async fn get_chunk_by_id(&self, chunk_id: &str) -> Result<Option<DbChunk>, sqlx::Error> {
         let row = sqlx::query("SELECT * FROM chunks WHERE id = ?")
             .bind(chunk_id)
             .fetch_optional(&self.pool)
             .await?;
-
         Ok(row.map(|row| DbChunk {
             id: row.get("id"),
             release_id: row.get("release_id"),
@@ -1250,7 +1107,6 @@ impl Database {
                 .with_timezone(&Utc),
         }))
     }
-
     /// Get all chunks for a release (for testing/verification)
     pub async fn get_chunks_for_release(
         &self,
@@ -1266,7 +1122,6 @@ impl Database {
         .bind(release_id)
         .fetch_all(&self.pool)
         .await?;
-
         let mut chunks = Vec::new();
         for row in rows {
             chunks.push(DbChunk {
@@ -1281,7 +1136,6 @@ impl Database {
         }
         Ok(chunks)
     }
-
     /// Get files for a release
     pub async fn get_files_for_release(
         &self,
@@ -1291,7 +1145,6 @@ impl Database {
             .bind(release_id)
             .fetch_all(&self.pool)
             .await?;
-
         let mut files = Vec::new();
         for row in rows {
             files.push(DbFile {
@@ -1306,17 +1159,14 @@ impl Database {
                     .with_timezone(&Utc),
             });
         }
-
         Ok(files)
     }
-
     /// Get a specific file by ID
     pub async fn get_file_by_id(&self, file_id: &str) -> Result<Option<DbFile>, sqlx::Error> {
         let row = sqlx::query("SELECT * FROM files WHERE id = ?")
             .bind(file_id)
             .fetch_optional(&self.pool)
             .await?;
-
         if let Some(row) = row {
             Ok(Some(DbFile {
                 id: row.get("id"),
@@ -1333,7 +1183,6 @@ impl Database {
             Ok(None)
         }
     }
-
     /// Insert audio format for a track
     pub async fn insert_audio_format(
         &self,
@@ -1355,10 +1204,8 @@ impl Database {
         .bind(audio_format.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
-
         Ok(())
     }
-
     /// Get audio format for a track
     pub async fn get_audio_format_by_track_id(
         &self,
@@ -1368,7 +1215,6 @@ impl Database {
             .bind(track_id)
             .fetch_optional(&self.pool)
             .await?;
-
         if let Some(row) = row {
             Ok(Some(DbAudioFormat {
                 id: row.get("id"),
@@ -1385,7 +1231,6 @@ impl Database {
             Ok(None)
         }
     }
-
     /// Insert track chunk coordinates
     pub async fn insert_track_chunk_coords(
         &self,
@@ -1411,10 +1256,8 @@ impl Database {
         .bind(coords.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
-
         Ok(())
     }
-
     /// Get track chunk coordinates for a track
     pub async fn get_track_chunk_coords(
         &self,
@@ -1424,7 +1267,6 @@ impl Database {
             .bind(track_id)
             .fetch_optional(&self.pool)
             .await?;
-
         if let Some(row) = row {
             Ok(Some(DbTrackChunkCoords {
                 id: row.get("id"),
@@ -1443,7 +1285,6 @@ impl Database {
             Ok(None)
         }
     }
-
     /// Get chunks in a specific range for a release (for CUE track streaming)
     pub async fn get_chunks_in_range(
         &self,
@@ -1451,14 +1292,13 @@ impl Database {
         chunk_range: std::ops::RangeInclusive<i32>,
     ) -> Result<Vec<DbChunk>, sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT * FROM chunks WHERE release_id = ? AND chunk_index >= ? AND chunk_index <= ? ORDER BY chunk_index"
-        )
-        .bind(release_id)
-        .bind(*chunk_range.start())
-        .bind(*chunk_range.end())
-        .fetch_all(&self.pool)
-        .await?;
-
+                "SELECT * FROM chunks WHERE release_id = ? AND chunk_index >= ? AND chunk_index <= ? ORDER BY chunk_index",
+            )
+            .bind(release_id)
+            .bind(*chunk_range.start())
+            .bind(*chunk_range.end())
+            .fetch_all(&self.pool)
+            .await?;
         let mut chunks = Vec::new();
         for row in rows {
             chunks.push(DbChunk {
@@ -1477,10 +1317,8 @@ impl Database {
                     .with_timezone(&Utc),
             });
         }
-
         Ok(chunks)
     }
-
     /// Insert a file chunk mapping
     pub async fn insert_file_chunk(&self, file_chunk: &DbFileChunk) -> Result<(), sqlx::Error> {
         sqlx::query(
@@ -1499,17 +1337,14 @@ impl Database {
         .bind(file_chunk.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
-
         Ok(())
     }
-
     /// Get all chunk mappings for a file, ordered by chunk_index
     pub async fn get_file_chunks(&self, file_id: &str) -> Result<Vec<DbFileChunk>, sqlx::Error> {
         let rows = sqlx::query("SELECT * FROM file_chunks WHERE file_id = ? ORDER BY chunk_index")
             .bind(file_id)
             .fetch_all(&self.pool)
             .await?;
-
         let mut file_chunks = Vec::new();
         for row in rows {
             file_chunks.push(DbFileChunk {
@@ -1524,10 +1359,8 @@ impl Database {
                     .with_timezone(&Utc),
             });
         }
-
         Ok(file_chunks)
     }
-
     /// Delete a release by ID
     ///
     /// This will cascade delete all related records:
@@ -1543,7 +1376,6 @@ impl Database {
             .await?;
         Ok(())
     }
-
     /// Delete an album by ID
     ///
     /// This will cascade delete all related records:
@@ -1553,22 +1385,18 @@ impl Database {
     /// - All tracks, files, chunks, etc. from releases (via cascading)
     /// - Import records referencing this album's releases (cleared before delete)
     pub async fn delete_album(&self, album_id: &str) -> Result<(), sqlx::Error> {
-        // Clear import records that reference this album's releases
-        // (imports table has FK to releases, need to clear before cascade delete)
         sqlx::query(
-            "UPDATE imports SET release_id = NULL WHERE release_id IN (SELECT id FROM releases WHERE album_id = ?)"
-        )
-        .bind(album_id)
-        .execute(&self.pool)
-        .await?;
-
+                "UPDATE imports SET release_id = NULL WHERE release_id IN (SELECT id FROM releases WHERE album_id = ?)",
+            )
+            .bind(album_id)
+            .execute(&self.pool)
+            .await?;
         sqlx::query("DELETE FROM albums WHERE id = ?")
             .bind(album_id)
             .execute(&self.pool)
             .await?;
         Ok(())
     }
-
     /// Find album by Discogs master_id or release_id
     ///
     /// Used for duplicate detection before import.
@@ -1620,7 +1448,6 @@ impl Database {
         } else {
             return Ok(None);
         };
-
         let row = if master_id.is_some() && release_id.is_some() {
             sqlx::query(query)
                 .bind(master_id.unwrap())
@@ -1638,7 +1465,6 @@ impl Database {
                 .fetch_optional(&self.pool)
                 .await?
         };
-
         Ok(row.map(|row| {
             let discogs_master_id: Option<String> = row.get("discogs_master_id");
             let discogs_release_id: Option<String> = row.get("discogs_release_id");
@@ -1649,7 +1475,6 @@ impl Database {
                 }),
                 _ => None,
             };
-
             let mb_release_group_id: Option<String> = row.get("musicbrainz_release_group_id");
             let mb_release_id: Option<String> = row.get("musicbrainz_release_id");
             let musicbrainz_release = match (mb_release_group_id, mb_release_id) {
@@ -1659,7 +1484,6 @@ impl Database {
                 }),
                 _ => None,
             };
-
             DbAlbum {
                 id: row.get("id"),
                 title: row.get("title"),
@@ -1679,7 +1503,6 @@ impl Database {
             }
         }))
     }
-
     /// Find album by MusicBrainz release_id or release_group_id
     ///
     /// Used for duplicate detection before import.
@@ -1731,7 +1554,6 @@ impl Database {
         } else {
             return Ok(None);
         };
-
         let row = if release_id.is_some() && release_group_id.is_some() {
             sqlx::query(query)
                 .bind(release_id.unwrap())
@@ -1749,7 +1571,6 @@ impl Database {
                 .fetch_optional(&self.pool)
                 .await?
         };
-
         Ok(row.map(|row| {
             let discogs_master_id: Option<String> = row.get("discogs_master_id");
             let discogs_release_id: Option<String> = row.get("discogs_release_id");
@@ -1760,7 +1581,6 @@ impl Database {
                 }),
                 _ => None,
             };
-
             let mb_release_group_id: Option<String> = row.get("musicbrainz_release_group_id");
             let mb_release_id: Option<String> = row.get("musicbrainz_release_id");
             let musicbrainz_release = match (mb_release_group_id, mb_release_id) {
@@ -1770,7 +1590,6 @@ impl Database {
                 }),
                 _ => None,
             };
-
             DbAlbum {
                 id: row.get("id"),
                 title: row.get("title"),
@@ -1790,7 +1609,6 @@ impl Database {
             }
         }))
     }
-
     /// Insert a torrent record
     pub async fn insert_torrent(&self, torrent: &DbTorrent) -> Result<(), sqlx::Error> {
         sqlx::query(
@@ -1815,7 +1633,6 @@ impl Database {
         .await?;
         Ok(())
     }
-
     /// Get torrent by release ID
     pub async fn get_torrent_by_release(
         &self,
@@ -1833,7 +1650,6 @@ impl Database {
         .bind(release_id)
         .fetch_optional(&self.pool)
         .await?;
-
         Ok(row.map(|row| DbTorrent {
             id: row.get("id"),
             release_id: row.get("release_id"),
@@ -1849,7 +1665,6 @@ impl Database {
                 .with_timezone(&Utc),
         }))
     }
-
     /// Insert a torrent piece mapping
     pub async fn insert_torrent_piece_mapping(
         &self,
@@ -1873,7 +1688,6 @@ impl Database {
         .await?;
         Ok(())
     }
-
     /// Get piece mappings for a torrent
     pub async fn get_torrent_piece_mappings(
         &self,
@@ -1891,7 +1705,6 @@ impl Database {
         .bind(torrent_id)
         .fetch_all(&self.pool)
         .await?;
-
         Ok(rows
             .into_iter()
             .map(|row| DbTorrentPieceMapping {
@@ -1904,7 +1717,6 @@ impl Database {
             })
             .collect())
     }
-
     /// Get a specific piece mapping
     pub async fn get_torrent_piece_mapping(
         &self,
@@ -1924,7 +1736,6 @@ impl Database {
         .bind(piece_index)
         .fetch_optional(&self.pool)
         .await?;
-
         Ok(row.map(|row| DbTorrentPieceMapping {
             id: row.get("id"),
             torrent_id: row.get("torrent_id"),
@@ -1934,7 +1745,6 @@ impl Database {
             end_byte_in_last_chunk: row.get("end_byte_in_last_chunk"),
         }))
     }
-
     /// Update torrent seeding status
     pub async fn update_torrent_seeding(
         &self,
@@ -1948,7 +1758,6 @@ impl Database {
             .await?;
         Ok(())
     }
-
     /// Get all torrents that are currently seeding
     pub async fn get_seeding_torrents(&self) -> Result<Vec<DbTorrent>, sqlx::Error> {
         let rows = sqlx::query(
@@ -1961,7 +1770,6 @@ impl Database {
         )
         .fetch_all(&self.pool)
         .await?;
-
         Ok(rows
             .into_iter()
             .map(|row| DbTorrent {
@@ -1980,9 +1788,6 @@ impl Database {
             })
             .collect())
     }
-
-    // ========== Image methods ==========
-
     /// Insert an image record
     pub async fn insert_image(&self, image: &DbImage) -> Result<(), sqlx::Error> {
         sqlx::query(
@@ -2002,10 +1807,8 @@ impl Database {
         .bind(image.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
-
         Ok(())
     }
-
     /// Get all images for a release
     pub async fn get_images_for_release(
         &self,
@@ -2017,7 +1820,6 @@ impl Database {
         .bind(release_id)
         .fetch_all(&self.pool)
         .await?;
-
         let mut images = Vec::new();
         for row in rows {
             images.push(DbImage {
@@ -2033,10 +1835,8 @@ impl Database {
                     .with_timezone(&Utc),
             });
         }
-
         Ok(images)
     }
-
     /// Get the cover image for a release
     pub async fn get_cover_image_for_release(
         &self,
@@ -2046,7 +1846,6 @@ impl Database {
             .bind(release_id)
             .fetch_optional(&self.pool)
             .await?;
-
         Ok(row.map(|row| DbImage {
             id: row.get("id"),
             release_id: row.get("release_id"),
@@ -2060,7 +1859,6 @@ impl Database {
                 .with_timezone(&Utc),
         }))
     }
-
     /// Set an image as the cover (and unset any previous cover)
     pub async fn set_cover_image(
         &self,
@@ -2068,23 +1866,17 @@ impl Database {
         image_id: &str,
     ) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-
-        // Unset any existing cover for this release
         sqlx::query("UPDATE images SET is_cover = FALSE WHERE release_id = ? AND is_cover = TRUE")
             .bind(release_id)
             .execute(&mut *tx)
             .await?;
-
-        // Set the new cover
         sqlx::query("UPDATE images SET is_cover = TRUE WHERE id = ?")
             .bind(image_id)
             .execute(&mut *tx)
             .await?;
-
         tx.commit().await?;
         Ok(())
     }
-
     /// Delete an image by ID
     pub async fn delete_image(&self, image_id: &str) -> Result<(), sqlx::Error> {
         sqlx::query("DELETE FROM images WHERE id = ?")
@@ -2093,14 +1885,12 @@ impl Database {
             .await?;
         Ok(())
     }
-
     /// Get an image by ID
     pub async fn get_image_by_id(&self, image_id: &str) -> Result<Option<DbImage>, sqlx::Error> {
         let row = sqlx::query("SELECT * FROM images WHERE id = ?")
             .bind(image_id)
             .fetch_optional(&self.pool)
             .await?;
-
         Ok(row.map(|row| DbImage {
             id: row.get("id"),
             release_id: row.get("release_id"),
@@ -2114,7 +1904,6 @@ impl Database {
                 .with_timezone(&Utc),
         }))
     }
-
     /// Get a file by release ID and filename
     pub async fn get_file_by_release_and_filename(
         &self,
@@ -2126,7 +1915,6 @@ impl Database {
             .bind(filename)
             .fetch_optional(&self.pool)
             .await?;
-
         Ok(row.map(|row| DbFile {
             id: row.get("id"),
             release_id: row.get("release_id"),
@@ -2139,7 +1927,6 @@ impl Database {
                 .with_timezone(&Utc),
         }))
     }
-
     /// Update album's cover_image_id
     pub async fn set_album_cover_image(
         &self,
@@ -2153,11 +1940,6 @@ impl Database {
             .await?;
         Ok(())
     }
-
-    // ========================================================================
-    // Storage Profile Methods
-    // ========================================================================
-
     /// Insert a new storage profile
     pub async fn insert_storage_profile(
         &self,
@@ -2188,10 +1970,8 @@ impl Database {
         .bind(profile.updated_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
-
         Ok(())
     }
-
     /// Get a storage profile by ID
     pub async fn get_storage_profile(
         &self,
@@ -2201,22 +1981,18 @@ impl Database {
             .bind(profile_id)
             .fetch_optional(&self.pool)
             .await?;
-
         Ok(row.map(|row| self.row_to_storage_profile(&row)))
     }
-
     /// Get all storage profiles
     pub async fn get_all_storage_profiles(&self) -> Result<Vec<DbStorageProfile>, sqlx::Error> {
         let rows = sqlx::query("SELECT * FROM storage_profiles ORDER BY name")
             .fetch_all(&self.pool)
             .await?;
-
         Ok(rows
             .iter()
             .map(|row| self.row_to_storage_profile(row))
             .collect())
     }
-
     /// Get the default storage profile
     pub async fn get_default_storage_profile(
         &self,
@@ -2224,10 +2000,8 @@ impl Database {
         let row = sqlx::query("SELECT * FROM storage_profiles WHERE is_default = TRUE")
             .fetch_optional(&self.pool)
             .await?;
-
         Ok(row.map(|row| self.row_to_storage_profile(&row)))
     }
-
     /// Update a storage profile
     pub async fn update_storage_profile(
         &self,
@@ -2259,43 +2033,33 @@ impl Database {
         .bind(&profile.id)
         .execute(&self.pool)
         .await?;
-
         Ok(())
     }
-
     /// Delete a storage profile
     pub async fn delete_storage_profile(&self, profile_id: &str) -> Result<(), sqlx::Error> {
         sqlx::query("DELETE FROM storage_profiles WHERE id = ?")
             .bind(profile_id)
             .execute(&self.pool)
             .await?;
-
         Ok(())
     }
-
     /// Set a profile as the default (clears other defaults)
     pub async fn set_default_storage_profile(&self, profile_id: &str) -> Result<(), sqlx::Error> {
-        // Clear existing default
         sqlx::query("UPDATE storage_profiles SET is_default = FALSE WHERE is_default = TRUE")
             .execute(&self.pool)
             .await?;
-
-        // Set new default
         sqlx::query("UPDATE storage_profiles SET is_default = TRUE WHERE id = ?")
             .bind(profile_id)
             .execute(&self.pool)
             .await?;
-
         Ok(())
     }
-
     fn row_to_storage_profile(&self, row: &sqlx::sqlite::SqliteRow) -> DbStorageProfile {
         let location_str: String = row.get("location");
         let location = match location_str.as_str() {
             "cloud" => StorageLocation::Cloud,
             _ => StorageLocation::Local,
         };
-
         DbStorageProfile {
             id: row.get("id"),
             name: row.get("name"),
@@ -2317,11 +2081,6 @@ impl Database {
                 .with_timezone(&Utc),
         }
     }
-
-    // ========================================================================
-    // Release Storage Methods
-    // ========================================================================
-
     /// Insert release storage configuration
     pub async fn insert_release_storage(
         &self,
@@ -2339,10 +2098,8 @@ impl Database {
         .bind(release_storage.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
-
         Ok(())
     }
-
     /// Get storage configuration for a release
     pub async fn get_release_storage(
         &self,
@@ -2352,7 +2109,6 @@ impl Database {
             .bind(release_id)
             .fetch_optional(&self.pool)
             .await?;
-
         Ok(row.map(|row| DbReleaseStorage {
             id: row.get("id"),
             release_id: row.get("release_id"),
@@ -2362,7 +2118,6 @@ impl Database {
                 .with_timezone(&Utc),
         }))
     }
-
     /// Get storage profile for a release (joins release_storage with storage_profiles)
     pub async fn get_storage_profile_for_release(
         &self,
@@ -2378,14 +2133,8 @@ impl Database {
         .bind(release_id)
         .fetch_optional(&self.pool)
         .await?;
-
         Ok(row.map(|row| self.row_to_storage_profile(&row)))
     }
-
-    // ========================================================================
-    // Import Operations Methods
-    // ========================================================================
-
     /// Insert a new import operation record
     pub async fn insert_import(&self, import: &DbImport) -> Result<(), sqlx::Error> {
         sqlx::query(
@@ -2407,31 +2156,25 @@ impl Database {
         .bind(&import.error_message)
         .execute(&self.pool)
         .await?;
-
         Ok(())
     }
-
     /// Get an import by ID
     pub async fn get_import(&self, id: &str) -> Result<Option<DbImport>, sqlx::Error> {
         let row = sqlx::query("SELECT * FROM imports WHERE id = ?")
             .bind(id)
             .fetch_optional(&self.pool)
             .await?;
-
         Ok(row.map(|row| self.row_to_import(&row)))
     }
-
     /// Get all active (non-complete, non-failed) imports
     pub async fn get_active_imports(&self) -> Result<Vec<DbImport>, sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT * FROM imports WHERE status IN ('preparing', 'importing') ORDER BY created_at DESC",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-
+                "SELECT * FROM imports WHERE status IN ('preparing', 'importing') ORDER BY created_at DESC",
+            )
+            .fetch_all(&self.pool)
+            .await?;
         Ok(rows.iter().map(|row| self.row_to_import(row)).collect())
     }
-
     /// Update import status
     pub async fn update_import_status(
         &self,
@@ -2445,10 +2188,8 @@ impl Database {
             .bind(id)
             .execute(&self.pool)
             .await?;
-
         Ok(())
     }
-
     /// Update import with error message and set status to Failed
     pub async fn update_import_error(&self, id: &str, error: &str) -> Result<(), sqlx::Error> {
         let now = Utc::now().timestamp();
@@ -2461,10 +2202,8 @@ impl Database {
         .bind(id)
         .execute(&self.pool)
         .await?;
-
         Ok(())
     }
-
     /// Link an import to a release (called after release is created in phase 0)
     pub async fn link_import_to_release(
         &self,
@@ -2478,10 +2217,8 @@ impl Database {
             .bind(import_id)
             .execute(&self.pool)
             .await?;
-
         Ok(())
     }
-
     fn row_to_import(&self, row: &sqlx::sqlite::SqliteRow) -> DbImport {
         let status_str: String = row.get("status");
         let status = match status_str.as_str() {
@@ -2491,7 +2228,6 @@ impl Database {
             "failed" => ImportOperationStatus::Failed,
             _ => ImportOperationStatus::Preparing,
         };
-
         DbImport {
             id: row.get("id"),
             status,

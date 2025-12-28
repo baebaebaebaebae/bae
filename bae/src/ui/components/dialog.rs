@@ -1,13 +1,11 @@
 use crate::ui::components::dialog_context::DialogContext;
 use dioxus::prelude::*;
-
 #[component]
 pub fn GlobalDialog() -> Element {
     let dialog = use_context::<DialogContext>();
     let dialog_for_cancel = dialog.clone();
     let dialog_for_confirm = dialog.clone();
     let dialog_for_overlay = dialog.clone();
-
     rsx! {
         if *dialog.is_open.read() {
             div {

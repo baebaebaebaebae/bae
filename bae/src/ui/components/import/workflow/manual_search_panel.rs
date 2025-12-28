@@ -6,7 +6,6 @@ use crate::ui::import_context::state::SearchTab;
 use crate::ui::import_context::ImportContext;
 use dioxus::prelude::*;
 use std::rc::Rc;
-
 #[component]
 fn ClearButton(value: Signal<String>, input_ref: Signal<Option<Rc<MountedData>>>) -> Element {
     rsx! {
@@ -22,7 +21,6 @@ fn ClearButton(value: Signal<String>, input_ref: Signal<Option<Rc<MountedData>>>
         }
     }
 }
-
 /// Which search field is currently focused (for pill insertion)
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum FocusedField {
@@ -33,7 +31,6 @@ enum FocusedField {
     CatalogNumber,
     Barcode,
 }
-
 #[component]
 pub fn ManualSearchPanel(
     detected_metadata: Signal<Option<crate::import::FolderMetadata>>,
@@ -42,8 +39,6 @@ pub fn ManualSearchPanel(
     selected_index: Signal<Option<usize>>,
 ) -> Element {
     let import_context = use_context::<Rc<ImportContext>>();
-
-    // Search fields from context
     let mut search_artist = import_context.search_artist();
     let mut search_album = import_context.search_album();
     let mut search_year = import_context.search_year();
@@ -51,24 +46,17 @@ pub fn ManualSearchPanel(
     let mut search_catalog_number = import_context.search_catalog_number();
     let mut search_barcode = import_context.search_barcode();
     let mut active_tab = import_context.search_tab();
-
     let search_source = import_context.search_source();
     let match_candidates = import_context.manual_match_candidates();
     let mut is_searching = use_signal(|| false);
     let error_message = import_context.error_message();
-
-    // Track which field is focused for pill insertion
     let mut focused_field = use_signal(|| None::<FocusedField>);
-
-    // Element references for focusing after clear
     let mut artist_input_ref: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
     let mut album_input_ref: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
     let mut year_input_ref: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
     let mut label_input_ref: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
     let catno_input_ref: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
     let barcode_input_ref: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
-
-    // Extract search tokens from detected metadata
     let search_tokens = use_memo(move || {
         detected_metadata
             .read()
@@ -76,8 +64,6 @@ pub fn ManualSearchPanel(
             .map(extract_search_tokens)
             .unwrap_or_default()
     });
-
-    // Search handlers for each section
     let mut perform_general_search = {
         let import_context = import_context.clone();
         move || {
@@ -85,7 +71,6 @@ pub fn ManualSearchPanel(
             let album = search_album.read().clone();
             let year = search_year.read().clone();
             let label = search_label.read().clone();
-
             if artist.trim().is_empty()
                 && album.trim().is_empty()
                 && year.trim().is_empty()
@@ -95,15 +80,12 @@ pub fn ManualSearchPanel(
                     .set_error_message(Some("Please fill in at least one field".to_string()));
                 return;
             }
-
             is_searching.set(true);
             import_context.set_error_message(None);
             import_context.set_manual_match_candidates(Vec::new());
-
             let import_context_clone = import_context.clone();
             let source = search_source.read().clone();
             let mut is_searching_clone = is_searching;
-
             spawn(async move {
                 match import_context_clone
                     .search_general(source, artist, album, year, label)
@@ -122,25 +104,20 @@ pub fn ManualSearchPanel(
             });
         }
     };
-
     let mut perform_catno_search = {
         let import_context = import_context.clone();
         move || {
             let catno = search_catalog_number.read().clone();
-
             if catno.trim().is_empty() {
                 import_context.set_error_message(Some("Please enter a catalog number".to_string()));
                 return;
             }
-
             is_searching.set(true);
             import_context.set_error_message(None);
             import_context.set_manual_match_candidates(Vec::new());
-
             let import_context_clone = import_context.clone();
             let source = search_source.read().clone();
             let mut is_searching_clone = is_searching;
-
             spawn(async move {
                 match import_context_clone
                     .search_by_catalog_number(source, catno)
@@ -159,25 +136,20 @@ pub fn ManualSearchPanel(
             });
         }
     };
-
     let mut perform_barcode_search = {
         let import_context = import_context.clone();
         move || {
             let barcode = search_barcode.read().clone();
-
             if barcode.trim().is_empty() {
                 import_context.set_error_message(Some("Please enter a barcode".to_string()));
                 return;
             }
-
             is_searching.set(true);
             import_context.set_error_message(None);
             import_context.set_manual_match_candidates(Vec::new());
-
             let import_context_clone = import_context.clone();
             let source = search_source.read().clone();
             let mut is_searching_clone = is_searching;
-
             spawn(async move {
                 match import_context_clone
                     .search_by_barcode(source, barcode)
@@ -196,12 +168,9 @@ pub fn ManualSearchPanel(
             });
         }
     };
-
     let has_searched = import_context.has_searched();
-
     rsx! {
         div { class: "bg-gray-800 rounded-lg shadow p-6 space-y-4",
-            // Header with title and source selector
             div { class: "flex justify-between items-center",
                 h3 { class: "text-lg font-semibold text-white", "Search for Release" }
                 SearchSourceSelector {
@@ -213,8 +182,6 @@ pub fn ManualSearchPanel(
                     },
                 }
             }
-
-            // Tabs
             div { class: "flex border-b border-gray-700",
                 button {
                     class: if *active_tab.read() == SearchTab::General { "px-4 py-2 text-sm font-medium text-white border-b-2 border-blue-500" } else { "px-4 py-2 text-sm font-medium text-gray-400 hover:text-white" },
@@ -238,8 +205,6 @@ pub fn ManualSearchPanel(
                     "Barcode"
                 }
             }
-
-            // Search tokens as clickable pills
             if !search_tokens.read().is_empty() {
                 div { class: "flex flex-wrap gap-2",
                     for token in search_tokens.read().iter() {
@@ -262,36 +227,30 @@ pub fn ManualSearchPanel(
                                             match field {
                                                 FocusedField::Artist => {
                                                     search_artist.set(token_clone.clone());
-                                                    // Advance to next field in general search
                                                     if let Some(input) = album_input_ref.read().as_ref() {
                                                         std::mem::drop(input.set_focus(true));
                                                     }
                                                 }
                                                 FocusedField::Album => {
                                                     search_album.set(token_clone.clone());
-                                                    // Advance to next field in general search
                                                     if let Some(input) = year_input_ref.read().as_ref() {
                                                         std::mem::drop(input.set_focus(true));
                                                     }
                                                 }
                                                 FocusedField::Year => {
                                                     search_year.set(token_clone.clone());
-                                                    // Advance to next field in general search
                                                     if let Some(input) = label_input_ref.read().as_ref() {
                                                         std::mem::drop(input.set_focus(true));
                                                     }
                                                 }
                                                 FocusedField::Label => {
                                                     search_label.set(token_clone.clone());
-                                                    // Stay on Label (last field)
                                                 }
                                                 FocusedField::CatalogNumber => {
                                                     search_catalog_number.set(token_clone.clone());
-                                                    // Stay on CatalogNumber (single field form)
                                                 }
                                                 FocusedField::Barcode => {
                                                     search_barcode.set(token_clone.clone());
-                                                    // Stay on Barcode (single field form)
                                                 }
                                             }
                                         }
@@ -303,13 +262,10 @@ pub fn ManualSearchPanel(
                     }
                 }
             }
-
-            // Tab content
             div { class: "space-y-3",
                 match *active_tab.read() {
                     SearchTab::General => rsx! {
                         div { class: "grid grid-cols-2 gap-3",
-                            // Artist field
                             div {
                                 label { class: "block text-sm font-medium text-gray-300 mb-1", "Artist" }
                                 div { class: "relative",
@@ -330,10 +286,6 @@ pub fn ManualSearchPanel(
                                     }
                                 }
                             }
-
-
-
-
                             div {
                                 label { class: "block text-sm font-medium text-gray-300 mb-1", "Album" }
                                 div { class: "relative",
@@ -464,15 +416,11 @@ pub fn ManualSearchPanel(
                     },
                 }
             }
-
-            // Error display
             if let Some(ref error) = error_message.read().as_ref() {
                 div { class: "bg-red-900/30 border border-red-700 rounded-lg p-4",
                     p { class: "text-sm text-red-300 select-text", "Error: {error}" }
                 }
             }
-
-            // Results display
             if *is_searching.read() {
                 div { class: "text-center py-8",
                     p { class: "text-gray-400", "Searching..." }

@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, warn};
-
 /// Subsonic API server state
 #[derive(Clone)]
 pub struct SubsonicState {
@@ -21,18 +20,15 @@ pub struct SubsonicState {
     pub cloud_storage: crate::cloud_storage::CloudStorageManager,
     pub chunk_size_bytes: usize,
 }
-
 /// Common query parameters for Subsonic API
 #[derive(Debug, Deserialize)]
 pub struct SubsonicQuery {}
-
 /// Standard Subsonic API response envelope
 #[derive(Debug, Serialize)]
 pub struct SubsonicResponse<T> {
     #[serde(rename = "subsonic-response")]
     pub subsonic_response: SubsonicResponseInner<T>,
 }
-
 #[derive(Debug, Serialize)]
 pub struct SubsonicResponseInner<T> {
     pub status: String,
@@ -40,14 +36,12 @@ pub struct SubsonicResponseInner<T> {
     #[serde(flatten)]
     pub data: T,
 }
-
 /// Error response for Subsonic API
 #[derive(Debug, Serialize)]
 pub struct SubsonicError {
     pub code: u32,
     pub message: String,
 }
-
 /// License info (always valid for open source)
 #[derive(Debug, Serialize)]
 pub struct License {
@@ -55,7 +49,6 @@ pub struct License {
     pub email: String,
     pub key: String,
 }
-
 /// Artist info for browsing
 #[derive(Debug, Serialize)]
 pub struct Artist {
@@ -64,7 +57,6 @@ pub struct Artist {
     #[serde(rename = "albumCount")]
     pub album_count: u32,
 }
-
 /// Album info for browsing
 #[derive(Debug, Serialize)]
 pub struct Album {
@@ -81,7 +73,6 @@ pub struct Album {
     #[serde(rename = "coverArt")]
     pub cover_art: Option<String>,
 }
-
 /// Song/track info for browsing
 #[derive(Debug, Serialize)]
 pub struct Song {
@@ -107,36 +98,30 @@ pub struct Song {
     pub bit_rate: Option<i32>,
     pub path: String,
 }
-
 /// Artists index response
 #[derive(Debug, Serialize)]
 pub struct ArtistsResponse {
     pub artists: ArtistsIndex,
 }
-
 #[derive(Debug, Serialize)]
 pub struct ArtistsIndex {
     pub index: Vec<ArtistIndex>,
 }
-
 #[derive(Debug, Serialize)]
 pub struct ArtistIndex {
     pub name: String,
     pub artist: Vec<Artist>,
 }
-
 /// Albums response
 #[derive(Debug, Serialize)]
 pub struct AlbumListResponse {
     #[serde(rename = "albumList")]
     pub album_list: AlbumList,
 }
-
 #[derive(Debug, Serialize)]
 pub struct AlbumList {
     pub album: Vec<Album>,
 }
-
 /// Create the Subsonic API router
 pub fn create_router(
     library_manager: SharedLibraryManager,
@@ -162,7 +147,6 @@ pub fn create_router(
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
-
 /// Ping endpoint - basic connectivity test
 /// Ping endpoint - params required by Subsonic API spec but not used for simple health check
 async fn ping(Query(_params): Query<SubsonicQuery>) -> impl IntoResponse {
@@ -173,10 +157,8 @@ async fn ping(Query(_params): Query<SubsonicQuery>) -> impl IntoResponse {
             data: serde_json::json!({}),
         },
     };
-
     Json(response)
 }
-
 /// Get license info - always return valid for open source
 /// params required by Subsonic API spec but not used in this endpoint
 async fn get_license(Query(_params): Query<SubsonicQuery>) -> impl IntoResponse {
@@ -185,18 +167,15 @@ async fn get_license(Query(_params): Query<SubsonicQuery>) -> impl IntoResponse 
         email: "opensource@bae.music".to_string(),
         key: "bae-open-source".to_string(),
     };
-
     let response = SubsonicResponse {
         subsonic_response: SubsonicResponseInner {
             status: "ok".to_string(),
             version: "1.16.1".to_string(),
-            data: serde_json::json!({ "license": license }),
+            data: serde_json::json!({ "license" : license }),
         },
     };
-
     Json(response)
 }
-
 /// Get artists index
 /// params required by Subsonic API spec but not currently validated
 async fn get_artists(
@@ -223,14 +202,13 @@ async fn get_artists(
                 subsonic_response: SubsonicResponseInner {
                     status: "failed".to_string(),
                     version: "1.16.1".to_string(),
-                    data: serde_json::json!({ "error": error }),
+                    data: serde_json::json!({ "error" : error }),
                 },
             };
             (StatusCode::INTERNAL_SERVER_ERROR, Json(response)).into_response()
         }
     }
 }
-
 /// Get album list
 /// params required by Subsonic API spec but not currently validated
 async fn get_album_list(
@@ -257,14 +235,13 @@ async fn get_album_list(
                 subsonic_response: SubsonicResponseInner {
                     status: "failed".to_string(),
                     version: "1.16.1".to_string(),
-                    data: serde_json::json!({ "error": error }),
+                    data: serde_json::json!({ "error" : error }),
                 },
             };
             (StatusCode::INTERNAL_SERVER_ERROR, Json(response)).into_response()
         }
     }
 }
-
 /// Get album with tracks
 async fn get_album(
     Query(params): Query<HashMap<String, String>>,
@@ -281,13 +258,12 @@ async fn get_album(
                 subsonic_response: SubsonicResponseInner {
                     status: "failed".to_string(),
                     version: "1.16.1".to_string(),
-                    data: serde_json::json!({ "error": error }),
+                    data: serde_json::json!({ "error" : error }),
                 },
             };
             return (StatusCode::BAD_REQUEST, Json(response)).into_response();
         }
     };
-
     match load_album_with_songs(&state.library_manager, &album_id).await {
         Ok(album_response) => {
             let response = SubsonicResponse {
@@ -308,14 +284,13 @@ async fn get_album(
                 subsonic_response: SubsonicResponseInner {
                     status: "failed".to_string(),
                     version: "1.16.1".to_string(),
-                    data: serde_json::json!({ "error": error }),
+                    data: serde_json::json!({ "error" : error }),
                 },
             };
             (StatusCode::NOT_FOUND, Json(response)).into_response()
         }
     }
 }
-
 /// Stream a song - reassemble encrypted chunks into audio stream
 async fn stream_song(
     Query(params): Query<HashMap<String, String>>,
@@ -327,18 +302,14 @@ async fn stream_song(
             return (StatusCode::BAD_REQUEST, "Missing song ID").into_response();
         }
     };
-
     info!("Streaming request for song ID: {}", song_id);
-
     match stream_track_chunks(&state, &song_id).await {
         Ok(audio_data) => {
-            // Return the reassembled audio with proper headers
             let headers = [
-                ("Content-Type", "audio/flac"), // TODO: Detect actual format
+                ("Content-Type", "audio/flac"),
                 ("Content-Length", &audio_data.len().to_string()),
                 ("Accept-Ranges", "bytes"),
             ];
-
             (StatusCode::OK, headers, audio_data).into_response()
         }
         Err(e) => {
@@ -351,23 +322,17 @@ async fn stream_song(
         }
     }
 }
-
 /// Load artists from database and group by first letter
 async fn load_artists(
     library_manager: &SharedLibraryManager,
 ) -> Result<ArtistsResponse, LibraryError> {
     let albums = library_manager.get().get_albums().await?;
-
-    // Group artists by first letter, counting album appearances
     let mut artist_map: HashMap<String, HashMap<String, u32>> = HashMap::new();
-
     for album in &albums {
-        // Get artists for this album
         let artists = library_manager
             .get()
             .get_artists_for_album(&album.id)
             .await?;
-
         for artist in artists {
             let first_letter = artist
                 .name
@@ -376,12 +341,10 @@ async fn load_artists(
                 .unwrap_or('A')
                 .to_uppercase()
                 .to_string();
-
             let artist_map_entry = artist_map.entry(first_letter).or_default();
             *artist_map_entry.entry(artist.name).or_insert(0) += 1;
         }
     }
-
     let mut indices = Vec::new();
     for (letter, artists) in artist_map {
         let artist_list: Vec<Artist> = artists
@@ -392,7 +355,6 @@ async fn load_artists(
                 album_count: count,
             })
             .collect();
-
         if !artist_list.is_empty() {
             indices.push(ArtistIndex {
                 name: letter,
@@ -400,26 +362,19 @@ async fn load_artists(
             });
         }
     }
-
-    // Sort indices by letter
     indices.sort_by(|a, b| a.name.cmp(&b.name));
-
     Ok(ArtistsResponse {
         artists: ArtistsIndex { index: indices },
     })
 }
-
 /// Load albums from database
 async fn load_albums(
     library_manager: &SharedLibraryManager,
 ) -> Result<AlbumListResponse, LibraryError> {
     let db_albums = library_manager.get().get_albums().await?;
-
     let mut albums = Vec::new();
     for db_album in db_albums {
         let tracks = library_manager.get().get_tracks(&db_album.id).await?;
-
-        // Get artists for this album
         let artists = library_manager
             .get()
             .get_artists_for_album(&db_album.id)
@@ -433,26 +388,22 @@ async fn load_albums(
                 .collect::<Vec<_>>()
                 .join(", ")
         };
-
         albums.push(Album {
             id: db_album.id.clone(),
             name: db_album.title,
             artist: artist_name.clone(),
             artist_id: format!("artist_{}", artist_name.replace(' ', "_")),
             song_count: tracks.len() as u32,
-            duration: 0, // TODO: Calculate from tracks
+            duration: 0,
             year: db_album.year,
-            genre: None, // TODO: Add genre support
-            // TODO: Implement getCoverArt endpoint to serve images from chunk storage
+            genre: None,
             cover_art: None,
         });
     }
-
     Ok(AlbumListResponse {
         album_list: AlbumList { album: albums },
     })
 }
-
 /// Load album with its songs
 async fn load_album_with_songs(
     library_manager: &SharedLibraryManager,
@@ -463,10 +414,7 @@ async fn load_album_with_songs(
         .into_iter()
         .find(|a| a.id == album_id)
         .ok_or_else(|| LibraryError::Import("Album not found".to_string()))?;
-
     let tracks = library_manager.get().get_tracks(album_id).await?;
-
-    // Get album artists
     let album_artists = library_manager
         .get()
         .get_artists_for_album(&db_album.id)
@@ -480,10 +428,8 @@ async fn load_album_with_songs(
             .collect::<Vec<_>>()
             .join(", ")
     };
-
     let mut songs = Vec::new();
     for track in tracks {
-        // Get track artists (for compilations/features)
         let track_artists = library_manager
             .get()
             .get_artists_for_track(&track.id)
@@ -497,7 +443,6 @@ async fn load_album_with_songs(
                 .collect::<Vec<_>>()
                 .join(", ")
         };
-
         songs.push(Song {
             id: track.id,
             title: track.title,
@@ -508,17 +453,15 @@ async fn load_album_with_songs(
             track: track.track_number,
             year: db_album.year,
             genre: None,
-            // TODO: Implement getCoverArt endpoint to serve images from chunk storage
             cover_art: None,
-            size: None,                             // TODO: Calculate from chunks
-            content_type: "audio/flac".to_string(), // TODO: Detect from files
+            size: None,
+            content_type: "audio/flac".to_string(),
             suffix: "flac".to_string(),
             duration: track.duration_ms.map(|ms| (ms / 1000) as i32),
             bit_rate: None,
             path: format!("{}/{}", album_artist_name, db_album.title),
         });
     }
-
     let album = Album {
         id: db_album.id.clone(),
         name: db_album.title,
@@ -528,25 +471,15 @@ async fn load_album_with_songs(
         duration: songs.iter().map(|s| s.duration.unwrap_or(0) as u32).sum(),
         year: db_album.year,
         genre: None,
-        // TODO: Implement getCoverArt endpoint to serve images from chunk storage
         cover_art: None,
     };
-
-    Ok(serde_json::json!({
-        "album": {
-            "id": album.id,
-            "name": album.name,
-            "artist": album.artist,
-            "artistId": album.artist_id,
-            "songCount": album.song_count,
-            "duration": album.duration,
-            "year": album.year,
-            "coverArt": album.cover_art,
-            "song": songs
-        }
-    }))
+    Ok(serde_json::json!(
+        { "album" : { "id" : album.id, "name" : album.name, "artist" : album.artist,
+        "artistId" : album.artist_id, "songCount" : album.song_count, "duration" :
+        album.duration, "year" : album.year, "coverArt" : album.cover_art, "song" :
+        songs } }
+    ))
 }
-
 /// Stream track chunks - reassemble encrypted chunks into audio data
 /// Optimized for CUE/FLAC tracks with chunk range queries and header prepending
 async fn stream_track_chunks(
@@ -555,68 +488,49 @@ async fn stream_track_chunks(
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
     let library_manager = &state.library_manager;
     info!("Starting chunk reassembly for track: {}", track_id);
-
-    // Get track chunk coordinates (has all location info)
     let coords = library_manager
         .get()
         .get_track_chunk_coords(track_id)
         .await
         .map_err(|e| format!("Database error: {}", e))?
         .ok_or_else(|| format!("No chunk coordinates found for track {}", track_id))?;
-
-    // Get audio format (has FLAC headers if needed)
     let audio_format = library_manager
         .get()
         .get_audio_format_by_track_id(track_id)
         .await
         .map_err(|e| format!("Database error: {}", e))?
         .ok_or_else(|| format!("No audio format found for track {}", track_id))?;
-
-    // Get track to find release_id
     let track = library_manager
         .get()
         .get_track(track_id)
         .await
         .map_err(|e| format!("Database error: {}", e))?
         .ok_or_else(|| format!("Track not found: {}", track_id))?;
-
-    // Get chunks in range
     let release_chunks = library_manager
         .get()
         .get_chunks_for_release(&track.release_id)
         .await
         .map_err(|e| format!("Database error: {}", e))?;
-
     let mut chunks: Vec<_> = release_chunks
         .into_iter()
         .filter(|c| {
             c.chunk_index >= coords.start_chunk_index && c.chunk_index <= coords.end_chunk_index
         })
         .collect();
-
     if chunks.is_empty() {
         return Err("No chunks found for track".into());
     }
-
     debug!("Found {} chunks to reassemble", chunks.len());
-
-    // Sort chunks by index to ensure correct order
     chunks.sort_by_key(|c| c.chunk_index);
-
-    // Download and decrypt chunks in parallel
     let mut chunk_data_vec: Vec<Vec<u8>> = Vec::new();
     for chunk in chunks {
         debug!(
             "Processing chunk {} (index {})",
             chunk.id, chunk.chunk_index
         );
-
-        // Download and decrypt chunk (with caching)
         let chunk_data = download_and_decrypt_chunk(state, &chunk).await?;
         chunk_data_vec.push(chunk_data);
     }
-
-    // Extract byte ranges from chunks
     let chunk_size = state.chunk_size_bytes;
     let mut audio_data = extract_bytes_from_chunks(
         &chunk_data_vec,
@@ -624,8 +538,6 @@ async fn stream_track_chunks(
         coords.end_byte_offset,
         chunk_size,
     );
-
-    // Prepend FLAC headers if needed (CUE/FLAC tracks)
     if audio_format.needs_headers {
         if let Some(ref headers) = audio_format.flac_headers {
             debug!("Prepending FLAC headers: {} bytes", headers.len());
@@ -634,59 +546,44 @@ async fn stream_track_chunks(
             audio_data = complete_audio;
         }
     }
-
     info!(
         "Successfully reassembled {} bytes of audio data",
         audio_data.len()
     );
     Ok(audio_data)
 }
-
 /// Download and decrypt a single chunk with caching
 async fn download_and_decrypt_chunk(
     state: &SubsonicState,
     chunk: &crate::db::DbChunk,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
     let cache_manager = &state.cache_manager;
-
-    // Check cache first (for both local and cloud chunks)
     if let Some(cached_encrypted_data) = cache_manager
         .get_chunk(&chunk.id)
         .await
         .map_err(|e| format!("Cache error: {}", e))?
     {
-        // Cache hit - decrypt and return (using injected encryption service)
         let decrypted_data = state
             .encryption_service
             .decrypt_chunk(&cached_encrypted_data)
             .map_err(|e| format!("Failed to decrypt cached chunk: {}", e))?;
-
         return Ok(decrypted_data);
     }
-
-    // Cache miss - download from cloud storage
     debug!("Downloading chunk from cloud: {}", chunk.storage_location);
-
     let encrypted_data = state
         .cloud_storage
         .download_chunk(&chunk.storage_location)
         .await
         .map_err(|e| format!("Failed to download chunk: {}", e))?;
-
-    // Store in cache for future requests
     if let Err(e) = cache_manager.put_chunk(&chunk.id, &encrypted_data).await {
         warn!("Failed to cache chunk {}: {}", chunk.id, e);
     }
-
-    // Decrypt and return (using injected encryption service)
     let decrypted_data = state
         .encryption_service
         .decrypt_chunk(&encrypted_data)
         .map_err(|e| format!("Failed to decrypt chunk: {}", e))?;
-
     Ok(decrypted_data)
 }
-
 /// Extract bytes from chunks using byte offsets
 fn extract_bytes_from_chunks(
     chunks: &[Vec<u8>],
@@ -697,29 +594,19 @@ fn extract_bytes_from_chunks(
     if chunks.is_empty() {
         return Vec::new();
     }
-
     let mut result = Vec::new();
-
     if chunks.len() == 1 {
-        // Track is entirely within a single chunk
         let start = start_byte_offset as usize;
-        let end = (end_byte_offset + 1) as usize; // end_byte_offset is inclusive
+        let end = (end_byte_offset + 1) as usize;
         result.extend_from_slice(&chunks[0][start..end]);
     } else {
-        // Track spans multiple chunks
-        // First chunk: from start_byte_offset to end of chunk
         let first_chunk_start = start_byte_offset as usize;
         result.extend_from_slice(&chunks[0][first_chunk_start..]);
-
-        // Middle chunks: use entirely
         for chunk in &chunks[1..chunks.len() - 1] {
             result.extend_from_slice(chunk);
         }
-
-        // Last chunk: from start to end_byte_offset
-        let last_chunk_end = (end_byte_offset + 1) as usize; // end_byte_offset is inclusive
+        let last_chunk_end = (end_byte_offset + 1) as usize;
         result.extend_from_slice(&chunks[chunks.len() - 1][0..last_chunk_end]);
     }
-
     result
 }

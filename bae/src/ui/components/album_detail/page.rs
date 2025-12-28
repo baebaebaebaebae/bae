@@ -1,32 +1,24 @@
-use crate::db::ImportStatus;
-use crate::import::ImportProgress;
-use crate::library::{use_import_service, use_library_manager};
-use crate::ui::Route;
-use dioxus::prelude::*;
-
 use super::back_button::BackButton;
 use super::error::AlbumDetailError;
 use super::loading::AlbumDetailLoading;
 use super::utils::{get_selected_release_id_from_params, load_album_and_releases, maybe_not_empty};
 use super::view::AlbumDetailView;
+use crate::db::ImportStatus;
 use crate::db::{DbAlbum, DbArtist, DbRelease, DbTrack};
+use crate::import::ImportProgress;
 use crate::library::LibraryError;
-
+use crate::library::{use_import_service, use_library_manager};
+use crate::ui::Route;
+use dioxus::prelude::*;
 /// Album detail page showing album info and tracklist
 #[component]
-pub fn AlbumDetail(
-    album_id: ReadSignal<String>,
-    release_id: ReadSignal<String>, // May be empty string, will default to first release
-) -> Element {
+pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>) -> Element {
     let maybe_release_id = use_memo(move || maybe_not_empty(release_id()));
     let data = use_album_detail_data(album_id, maybe_release_id);
     let import_state = use_release_import_state(data.album_resource, data.selected_release_id);
-
     let on_album_deleted = move |_| {
-        // Navigate back to library after deletion
         navigator().push(Route::Library {});
     };
-
     rsx! {
         PageContainer {
             BackButton {}
@@ -72,13 +64,10 @@ pub fn AlbumDetail(
                         .and_then(|r| r.as_ref().ok())
                         .cloned()
                         .unwrap_or_default();
-
-                    // Apply reactive cover_image_id override from import completion
                     let mut album_with_cover = album.clone();
                     if let Some(cover_id) = import_state.cover_image_id.read().as_ref() {
                         album_with_cover.cover_image_id = Some(cover_id.clone());
                     }
-
                     rsx! {
                         AlbumDetailView {
                             album: album_with_cover,
@@ -97,27 +86,23 @@ pub fn AlbumDetail(
         }
     }
 }
-
 #[component]
 fn PageContainer(children: Element) -> Element {
     rsx! {
         div { class: "container mx-auto p-6", {children} }
     }
 }
-
 struct AlbumDetailData {
     album_resource: Resource<Result<(DbAlbum, Vec<DbRelease>), LibraryError>>,
     tracks_resource: Resource<Result<Vec<DbTrack>, LibraryError>>,
     artists_resource: Resource<Result<Vec<DbArtist>, LibraryError>>,
     selected_release_id: Memo<Option<String>>,
 }
-
 fn use_album_detail_data(
     album_id: ReadSignal<String>,
     maybe_release_id_param: Memo<Option<String>>,
 ) -> AlbumDetailData {
     let library_manager = use_library_manager();
-
     let album_resource = {
         let library_manager = library_manager.clone();
         use_resource(move || {
@@ -126,15 +111,10 @@ fn use_album_detail_data(
             async move { load_album_and_releases(&library_manager, &album_id).await }
         })
     };
-
-    // The page params may or may not have a release ID, but there must always
-    // be some release in order for this page to be displayed (we don't expect
-    // to have albums without releases listed in the library).
     let selected_release_id = use_memo(move || {
         get_selected_release_id_from_params(&album_resource, maybe_release_id_param())
             .and_then(|r| r.ok())
     });
-
     let tracks_resource = {
         let library_manager = library_manager.clone();
         use_resource(move || {
@@ -148,7 +128,6 @@ fn use_album_detail_data(
             }
         })
     };
-
     let current_album_id = use_memo(move || {
         album_resource
             .value()
@@ -157,7 +136,6 @@ fn use_album_detail_data(
             .and_then(|result| result.as_ref().ok())
             .map(|(album, _)| album.id.clone())
     });
-
     let artists_resource = {
         let library_manager = library_manager.clone();
         use_resource(move || {
@@ -171,7 +149,6 @@ fn use_album_detail_data(
             }
         })
     };
-
     AlbumDetailData {
         album_resource,
         tracks_resource,
@@ -179,7 +156,6 @@ fn use_album_detail_data(
         selected_release_id,
     }
 }
-
 /// State returned by the release import hook
 struct ReleaseImportState {
     /// Current import progress percentage (None if not importing)
@@ -189,7 +165,6 @@ struct ReleaseImportState {
     /// Error message if import failed
     import_error: Signal<Option<String>>,
 }
-
 fn use_release_import_state(
     album_resource: Resource<Result<(DbAlbum, Vec<DbRelease>), LibraryError>>,
     selected_release_id: Memo<Option<String>>,
@@ -198,7 +173,6 @@ fn use_release_import_state(
     let mut cover_image_id = use_signal(|| None::<String>);
     let mut import_error = use_signal(|| None::<String>);
     let import_service = use_import_service();
-
     use_effect(move || {
         let releases_data = album_resource
             .value()
@@ -206,7 +180,6 @@ fn use_release_import_state(
             .as_ref()
             .and_then(|r| r.as_ref().ok())
             .map(|(_, releases)| releases.clone());
-
         let Some(releases) = releases_data else {
             return;
         };
@@ -216,17 +189,13 @@ fn use_release_import_state(
         let Some(release) = releases.iter().find(|r| &r.id == id) else {
             return;
         };
-
         let is_importing = release.import_status == ImportStatus::Importing
             || release.import_status == ImportStatus::Queued;
-
         if is_importing {
             let release_id = release.id.clone();
             let import_service = import_service.clone();
-
             spawn(async move {
                 let mut progress_rx = import_service.subscribe_release(release_id);
-
                 while let Some(progress_event) = progress_rx.recv().await {
                     match progress_event {
                         ImportProgress::Progress {
@@ -241,7 +210,6 @@ fn use_release_import_state(
                             release_id: rid,
                             ..
                         } => {
-                            // Only update cover for release completion (not track completion)
                             if rid.is_none() {
                                 if let Some(id) = cid {
                                     cover_image_id.set(Some(id));
@@ -263,7 +231,6 @@ fn use_release_import_state(
             progress.set(None);
         }
     });
-
     ReleaseImportState {
         progress,
         cover_image_id,

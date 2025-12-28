@@ -1,8 +1,3 @@
-// # Import Handle
-//
-// Handle for sending import requests and subscribing to progress updates.
-// Provides the public API for interacting with the import service.
-
 use crate::cue_flac::CueFlacProcessor;
 use crate::db::{Database, DbImport, DbTorrent, ImageSource, ImportOperationStatus};
 use crate::discogs::DiscogsRelease;
@@ -21,7 +16,6 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
-
 /// Handle for sending import requests and subscribing to progress updates
 #[derive(Clone)]
 pub struct ImportServiceHandle {
@@ -32,7 +26,6 @@ pub struct ImportServiceHandle {
     pub database: Arc<Database>,
     pub runtime_handle: tokio::runtime::Handle,
 }
-
 /// Torrent-specific metadata for import
 #[derive(Debug, Clone)]
 pub struct TorrentImportMetadata {
@@ -45,14 +38,12 @@ pub struct TorrentImportMetadata {
     pub seed_after_download: bool,
     pub file_list: Vec<TorrentFileMetadata>,
 }
-
 /// Metadata for a single file in a torrent
 #[derive(Debug, Clone)]
 pub struct TorrentFileMetadata {
     pub path: std::path::PathBuf,
     pub size: i64,
 }
-
 impl ImportServiceHandle {
     /// Create a new ImportHandle with the given dependencies
     pub fn new(
@@ -64,7 +55,6 @@ impl ImportServiceHandle {
         runtime_handle: tokio::runtime::Handle,
     ) -> Self {
         let progress_handle = ImportProgressHandle::new(progress_rx, runtime_handle.clone());
-
         Self {
             requests_tx,
             progress_tx,
@@ -74,13 +64,12 @@ impl ImportServiceHandle {
             runtime_handle,
         }
     }
-
     /// Validate and queue an import request.
     ///
     /// Performs validation (track-to-file mapping) and DB insertion synchronously.
     /// If validation fails, returns error immediately with no side effects.
     /// If successful, album is inserted with status='queued' and an import
-    /// request is sent to the import worker.  
+    /// request is sent to the import worker.
     ///
     /// Returns (album_id, release_id) for navigation and progress subscription.
     pub async fn send_request(&self, request: ImportRequest) -> Result<(String, String), String> {
@@ -153,7 +142,6 @@ impl ImportServiceHandle {
             }
         }
     }
-
     async fn send_folder_request(
         &self,
         import_id: String,
@@ -165,16 +153,10 @@ impl ImportServiceHandle {
         storage_profile_id: Option<String>,
         selected_cover_filename: Option<String>,
     ) -> Result<(String, String), String> {
-        // Validate that at least one release is provided
         if discogs_release.is_none() && mb_release.is_none() {
             return Err("Either discogs_release or mb_release must be provided".to_string());
         }
-
         let library_manager = self.library_manager.get();
-
-        // ========== PHASE 0: PREPARATION WITH PROGRESS TRACKING ==========
-
-        // Extract album title and artist name for DbImport (before parsing)
         let (album_title, artist_name) = if let Some(ref discogs_rel) = discogs_release {
             let artist = discogs_rel
                 .artists
@@ -188,8 +170,6 @@ impl ImportServiceHandle {
         } else {
             return Err("No release provided".to_string());
         };
-
-        // Create DbImport record at start
         let db_import = DbImport::new(
             &import_id,
             &album_title,
@@ -200,8 +180,6 @@ impl ImportServiceHandle {
             .insert_import(&db_import)
             .await
             .map_err(|e| format!("Failed to create import record: {}", e))?;
-
-        // Helper to emit preparing events
         let emit_preparing = {
             let import_id = import_id.clone();
             let album_title = album_title.clone();
@@ -218,10 +196,7 @@ impl ImportServiceHandle {
                 });
             }
         };
-
-        // 1. Parse release into database models (Discogs or MusicBrainz)
         emit_preparing(PrepareStep::ParsingMetadata);
-
         let (db_album, db_release, db_tracks, artists, album_artists) =
             if let Some(ref discogs_rel) = discogs_release {
                 use crate::import::discogs_parser::parse_discogs_release;
@@ -233,50 +208,32 @@ impl ImportServiceHandle {
             } else {
                 return Err("No release provided".to_string());
             };
-
-        // 2. Download cover art to .bae/ folder if we have a URL
-        // This happens before file discovery so the downloaded image is included
         if let Some(ref url) = cover_art_url {
             emit_preparing(PrepareStep::DownloadingCoverArt);
-
-            // Determine source based on which release we're importing
             let source = if mb_release.is_some() {
                 ImageSource::MusicBrainz
             } else {
                 ImageSource::Discogs
             };
-
             match download_cover_art_to_bae_folder(url, &folder, source).await {
                 Ok(downloaded) => {
                     info!("Downloaded cover art to {:?}", downloaded.path);
                 }
                 Err(e) => {
-                    // Non-fatal - continue import without cover art
                     warn!("Failed to download cover art: {}", e);
                 }
             }
         }
-
-        // 3. Discover files (will now include downloaded cover art from .bae/)
         emit_preparing(PrepareStep::DiscoveringFiles);
         let discovered_files = discover_folder_files(&folder)?;
-
-        // 4. Build track-to-file mapping (validates and parses CUE sheets if present)
         emit_preparing(PrepareStep::ValidatingTracks);
         let mapping_result = map_tracks_to_files(&db_tracks, &discovered_files).await?;
         let tracks_to_files = mapping_result.track_files.clone();
         let cue_flac_metadata = mapping_result.cue_flac_metadata.clone();
-
-        // 5. Save to database
         emit_preparing(PrepareStep::SavingToDatabase);
-
-        // Insert or lookup artists (deduplicate across imports)
-        // Build a map from parsed artist ID to actual database artist ID
         let mut artist_id_map = std::collections::HashMap::new();
         for artist in &artists {
             let parsed_id = artist.id.clone();
-
-            // Check if artist already exists by Discogs ID
             let existing = if let Some(ref discogs_id) = artist.discogs_artist_id {
                 library_manager
                     .get_artist_by_discogs_id(discogs_id)
@@ -285,8 +242,6 @@ impl ImportServiceHandle {
             } else {
                 None
             };
-
-            // Insert only if artist doesn't exist
             let actual_id = if let Some(existing_artist) = existing {
                 existing_artist.id
             } else {
@@ -296,62 +251,44 @@ impl ImportServiceHandle {
                     .map_err(|e| format!("Failed to insert artist: {}", e))?;
                 artist.id.clone()
             };
-
             artist_id_map.insert(parsed_id, actual_id);
         }
-
-        // Insert album + release + tracks with status='queued'
         library_manager
             .insert_album_with_release_and_tracks(&db_album, &db_release, &db_tracks)
             .await
             .map_err(|e| format!("Database error: {}", e))?;
-
-        // Link import to release now that release exists
         self.database
             .link_import_to_release(&import_id, &db_release.id)
             .await
             .map_err(|e| format!("Failed to link import to release: {}", e))?;
-
-        // Insert album-artist relationships (using actual database artist IDs)
         for album_artist in &album_artists {
             let actual_artist_id = artist_id_map.get(&album_artist.artist_id).ok_or_else(|| {
                 format!(
                     "Artist ID {} not found in artist map",
-                    album_artist.artist_id
+                    album_artist.artist_id,
                 )
             })?;
-
             let mut updated_album_artist = album_artist.clone();
             updated_album_artist.artist_id = actual_artist_id.clone();
-
             library_manager
                 .insert_album_artist(&updated_album_artist)
                 .await
                 .map_err(|e| format!("Failed to insert album-artist relationship: {}", e))?;
         }
-
-        // 6. Extract and store durations
         emit_preparing(PrepareStep::ExtractingDurations);
         extract_and_store_durations(library_manager, &tracks_to_files).await?;
-
         tracing::info!(
             "Validated and queued album '{}' (release: {}) with {} tracks",
             db_album.title,
             db_release.id,
             db_tracks.len()
         );
-
-        // ========== QUEUE FOR PIPELINE ==========
-
-        // Update import status to Importing before queueing
         self.database
             .update_import_status(&import_id, ImportOperationStatus::Importing)
             .await
             .map_err(|e| format!("Failed to update import status: {}", e))?;
-
         let album_id = db_album.id.clone();
         let release_id = db_release.id.clone();
-
         self.requests_tx
             .send(ImportCommand::Folder {
                 db_album,
@@ -364,10 +301,8 @@ impl ImportServiceHandle {
                 import_id,
             })
             .map_err(|_| "Failed to queue validated album for import".to_string())?;
-
         Ok((album_id, release_id))
     }
-
     async fn send_torrent_request(
         &self,
         torrent_source: TorrentSource,
@@ -380,25 +315,17 @@ impl ImportServiceHandle {
         storage_profile_id: Option<String>,
         selected_cover_filename: Option<String>,
     ) -> Result<(String, String), String> {
-        // Validate that at least one release is provided
         if discogs_release.is_none() && mb_release.is_none() {
             return Err("Either discogs_release or mb_release must be provided".to_string());
         }
-
         let library_manager = self.library_manager.get();
-
-        // Clone torrent_source for storing in ImportCommand
         let torrent_source_for_request = torrent_source.clone();
-
         info!(
             "Torrent import: {} ({} pieces, {} bytes)",
             torrent_metadata.torrent_name,
             torrent_metadata.num_pieces,
             torrent_metadata.total_size_bytes
         );
-
-        // ========== PARSE RELEASE INTO DATABASE MODELS ==========
-
         let (db_album, db_release, db_tracks, artists, album_artists) =
             if let Some(ref discogs_rel) = discogs_release {
                 use crate::import::discogs_parser::parse_discogs_release;
@@ -410,37 +337,20 @@ impl ImportServiceHandle {
             } else {
                 return Err("No release provided".to_string());
             };
-
-        // ========== MAP TRACKS TO TORRENT FILES ==========
-
-        // Convert torrent metadata file list to DiscoveredFile format
-        // Torrent file paths from libtorrent already include the torrent name directory,
-        // so we just need to prepend the temp directory
         let temp_dir = std::env::temp_dir();
         let discovered_files: Vec<DiscoveredFile> = torrent_metadata
             .file_list
             .iter()
             .map(|tf| DiscoveredFile {
-                // libtorrent's file_path() returns paths that already include the torrent name,
-                // so we only need to prepend the temp directory
                 path: temp_dir.join(&tf.path),
                 size: tf.size as u64,
             })
             .collect();
-
-        // Build track-to-file mapping
-        // Note: For torrents, we'll need to wait for files to download or map based on filenames
-        // For now, this is a simplified version that assumes files match by name
         let mapping_result = map_tracks_to_files(&db_tracks, &discovered_files).await?;
         let tracks_to_files = mapping_result.track_files.clone();
-        // Note: cue_flac_metadata will be re-parsed after torrent download completes
-
-        // ========== INSERT ARTISTS ==========
-
         let mut artist_id_map = std::collections::HashMap::new();
         for artist in &artists {
             let parsed_id = artist.id.clone();
-
             let existing = if let Some(ref discogs_id) = artist.discogs_artist_id {
                 library_manager
                     .get_artist_by_discogs_id(discogs_id)
@@ -449,7 +359,6 @@ impl ImportServiceHandle {
             } else {
                 None
             };
-
             let actual_id = if let Some(existing_artist) = existing {
                 existing_artist.id
             } else {
@@ -459,41 +368,27 @@ impl ImportServiceHandle {
                     .map_err(|e| format!("Failed to insert artist: {}", e))?;
                 artist.id.clone()
             };
-
             artist_id_map.insert(parsed_id, actual_id);
         }
-
-        // ========== INSERT ALBUM + RELEASE + TRACKS ==========
-
         library_manager
             .insert_album_with_release_and_tracks(&db_album, &db_release, &db_tracks)
             .await
             .map_err(|e| format!("Database error: {}", e))?;
-
-        // Extract and store durations
         extract_and_store_durations(library_manager, &tracks_to_files).await?;
-
-        // Insert album-artist relationships
         for album_artist in &album_artists {
             let actual_artist_id = artist_id_map.get(&album_artist.artist_id).ok_or_else(|| {
                 format!(
                     "Artist ID {} not found in artist map",
-                    album_artist.artist_id
+                    album_artist.artist_id,
                 )
             })?;
-
             let mut updated_album_artist = album_artist.clone();
             updated_album_artist.artist_id = actual_artist_id.clone();
-
             library_manager
                 .insert_album_artist(&updated_album_artist)
                 .await
                 .map_err(|e| format!("Failed to insert album-artist relationship: {}", e))?;
         }
-
-        // ========== SAVE TORRENT METADATA TO DATABASE ==========
-
-        // Save torrent record (will be used for seeding later)
         let db_torrent = DbTorrent::new(
             &db_release.id,
             &torrent_metadata.info_hash,
@@ -503,25 +398,18 @@ impl ImportServiceHandle {
             torrent_metadata.piece_length,
             torrent_metadata.num_pieces,
         );
-
-        // Save torrent metadata to database
         library_manager
             .insert_torrent(&db_torrent)
             .await
             .map_err(|e| format!("Failed to save torrent metadata: {}", e))?;
-
         tracing::info!(
             "Validated and queued torrent import '{}' (release: {}) with {} tracks",
             db_album.title,
             db_release.id,
             db_tracks.len()
         );
-
-        // ========== QUEUE FOR PIPELINE ==========
-
         let album_id = db_album.id.clone();
         let release_id = db_release.id.clone();
-
         self.requests_tx
             .send(ImportCommand::Torrent {
                 db_album,
@@ -535,10 +423,8 @@ impl ImportServiceHandle {
                 selected_cover_filename,
             })
             .map_err(|_| "Failed to queue validated torrent for import".to_string())?;
-
         Ok((album_id, release_id))
     }
-
     async fn send_cd_request(
         &self,
         discogs_release: Option<DiscogsRelease>,
@@ -549,31 +435,18 @@ impl ImportServiceHandle {
         storage_profile_id: Option<String>,
         selected_cover_filename: Option<String>,
     ) -> Result<(String, String), String> {
-        // Validate that at least one release is provided
         if discogs_release.is_none() && mb_release.is_none() {
             return Err("Either discogs_release or mb_release must be provided".to_string());
         }
-
         let library_manager = self.library_manager.get();
-
-        // ========== READ CD TOC ==========
-
         use crate::cd::CdDrive;
-
-        // Create CD drive instance
         let drive = CdDrive {
             device_path: drive_path.clone(),
             name: drive_path.to_str().unwrap_or("Unknown").to_string(),
         };
-
-        // Read TOC from CD
         let toc = drive
             .read_toc()
             .map_err(|e| format!("Failed to read CD TOC: {}", e))?;
-
-        // ========== PARSE RELEASE INTO DATABASE MODELS ==========
-        // Parse release BEFORE ripping so we have release_id for progress updates
-
         let (db_album, db_release, db_tracks, artists, album_artists) =
             if let Some(ref discogs_rel) = discogs_release {
                 parse_discogs_release(discogs_rel, master_year, cover_art_url.clone())?
@@ -583,16 +456,9 @@ impl ImportServiceHandle {
             } else {
                 return Err("No release provided".to_string());
             };
-
-        // ========== INSERT ARTISTS, ALBUM, RELEASE, TRACKS ==========
-        // Insert into database BEFORE ripping so UI can navigate and show progress
-
-        // Insert or lookup artists (deduplicate across imports)
         let mut artist_id_map = std::collections::HashMap::new();
         for artist in &artists {
             let parsed_id = artist.id.clone();
-
-            // Check if artist already exists by Discogs ID
             let existing = if let Some(ref discogs_id) = artist.discogs_artist_id {
                 library_manager
                     .get_artist_by_discogs_id(discogs_id)
@@ -601,8 +467,6 @@ impl ImportServiceHandle {
             } else {
                 None
             };
-
-            // Insert only if artist doesn't exist
             let actual_id = if let Some(existing_artist) = existing {
                 existing_artist.id
             } else {
@@ -612,40 +476,28 @@ impl ImportServiceHandle {
                     .map_err(|e| format!("Failed to insert artist: {}", e))?;
                 artist.id.clone()
             };
-
             artist_id_map.insert(parsed_id, actual_id);
         }
-
-        // Insert album + release + tracks with status='queued'
         library_manager
             .insert_album_with_release_and_tracks(&db_album, &db_release, &db_tracks)
             .await
             .map_err(|e| format!("Database error: {}", e))?;
-
-        // Insert album-artist relationships (using actual database artist IDs)
         for album_artist in &album_artists {
             let actual_artist_id = artist_id_map.get(&album_artist.artist_id).ok_or_else(|| {
                 format!(
                     "Artist ID {} not found in artist map",
-                    album_artist.artist_id
+                    album_artist.artist_id,
                 )
             })?;
-
             let mut updated_album_artist = album_artist.clone();
             updated_album_artist.artist_id = actual_artist_id.clone();
-
             library_manager
                 .insert_album_artist(&updated_album_artist)
                 .await
                 .map_err(|e| format!("Failed to insert album-artist relationship: {}", e))?;
         }
-
-        // ========== QUEUE FOR PIPELINE ==========
-        // Service will handle CD ripping (acquire phase) and chunk upload
-
         let album_id = db_album.id.clone();
         let release_id = db_release.id.clone();
-
         self.requests_tx
             .send(ImportCommand::CD {
                 db_album,
@@ -657,10 +509,8 @@ impl ImportServiceHandle {
                 selected_cover_filename,
             })
             .map_err(|_| "Failed to queue validated CD import".to_string())?;
-
         Ok((album_id, release_id))
     }
-
     /// Subscribe to progress updates for a specific release
     /// Returns a filtered receiver that yields only updates for the specified release
     pub fn subscribe_release(
@@ -669,7 +519,6 @@ impl ImportServiceHandle {
     ) -> tokio::sync::mpsc::UnboundedReceiver<ImportProgress> {
         self.progress_handle.subscribe_release(release_id)
     }
-
     /// Subscribe to progress updates for a specific track
     /// Returns a filtered receiver that yields only updates for the specified track
     pub fn subscribe_track(
@@ -678,7 +527,6 @@ impl ImportServiceHandle {
     ) -> tokio::sync::mpsc::UnboundedReceiver<ImportProgress> {
         self.progress_handle.subscribe_track(track_id)
     }
-
     /// Subscribe to progress updates for a specific import operation
     /// Returns Preparing events and any event with matching import_id
     pub fn subscribe_import(
@@ -687,14 +535,12 @@ impl ImportServiceHandle {
     ) -> tokio::sync::mpsc::UnboundedReceiver<ImportProgress> {
         self.progress_handle.subscribe_import(import_id)
     }
-
     /// Subscribe to progress updates for ALL import operations
     /// Returns any event that has an import_id (for toolbar dropdown)
     pub fn subscribe_all_imports(&self) -> tokio::sync::mpsc::UnboundedReceiver<ImportProgress> {
         self.progress_handle.subscribe_all_imports()
     }
 }
-
 /// Extract durations from audio files and update database immediately
 pub async fn extract_and_store_durations(
     library_manager: &LibraryManager,
@@ -702,8 +548,6 @@ pub async fn extract_and_store_durations(
 ) -> Result<(), String> {
     use std::collections::HashMap;
     use std::path::Path;
-
-    // Group tracks by file path for CUE/FLAC handling
     let mut file_groups: HashMap<&Path, Vec<&TrackFile>> = HashMap::new();
     for mapping in tracks_to_files {
         file_groups
@@ -711,7 +555,6 @@ pub async fn extract_and_store_durations(
             .or_default()
             .push(mapping);
     }
-
     for (file_path, mappings) in file_groups {
         let is_cue_flac = mappings.len() > 1
             && file_path
@@ -719,9 +562,7 @@ pub async fn extract_and_store_durations(
                 .and_then(|e| e.to_str())
                 .map(|s| s.to_lowercase())
                 == Some("flac".to_string());
-
         if is_cue_flac {
-            // CUE/FLAC: extract durations from CUE sheet
             let cue_path = file_path.with_extension("cue");
             if cue_path.exists() {
                 match CueFlacProcessor::parse_cue_sheet(&cue_path) {
@@ -730,12 +571,10 @@ pub async fn extract_and_store_durations(
                             let duration_ms = if let Some(end_time) = cue_track.end_time_ms {
                                 Some((end_time - cue_track.start_time_ms) as i64)
                             } else {
-                                // Last track - extract from file
                                 extract_duration_from_file(file_path).map(|file_duration_ms| {
                                     file_duration_ms - cue_track.start_time_ms as i64
                                 })
                             };
-
                             library_manager
                                 .update_track_duration(&mapping.db_track_id, duration_ms)
                                 .await
@@ -748,7 +587,6 @@ pub async fn extract_and_store_durations(
                 }
             }
         } else {
-            // Individual files: extract duration from each file
             for mapping in mappings {
                 let duration_ms = extract_duration_from_file(&mapping.file_path);
                 library_manager
@@ -758,31 +596,24 @@ pub async fn extract_and_store_durations(
             }
         }
     }
-
     Ok(())
 }
-
 /// Extract duration from an audio file (FLAC only)
 fn extract_duration_from_file(file_path: &Path) -> Option<i64> {
     debug!("Extracting duration from file: {}", file_path.display());
-
     let extension = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if extension.eq_ignore_ascii_case("flac") {
         return extract_flac_duration(file_path);
     }
-
-    // Non-FLAC formats not currently supported
     warn!(
         "Duration extraction not supported for non-FLAC file: {}",
         file_path.display()
     );
     None
 }
-
 /// Extract duration from a FLAC file using libFLAC
 fn extract_flac_duration(file_path: &Path) -> Option<i64> {
     use crate::import::album_chunk_layout::build_seektable;
-
     match build_seektable(file_path) {
         Ok(flac_info) => {
             let duration_ms = flac_info.duration_ms() as i64;
@@ -803,7 +634,6 @@ fn extract_flac_duration(file_path: &Path) -> Option<i64> {
         }
     }
 }
-
 /// Discover all files in folder with metadata.
 ///
 /// Recursively scans the folder using the folder_scanner module to support:
@@ -814,15 +644,8 @@ fn extract_flac_duration(file_path: &Path) -> Option<i64> {
 /// Files are sorted by path for consistent ordering across runs.
 fn discover_folder_files(folder: &Path) -> Result<Vec<DiscoveredFile>, String> {
     use crate::import::folder_scanner::{self, AudioContent};
-
-    // Use the folder scanner to collect files recursively (already categorized)
     let categorized = folder_scanner::collect_release_files(folder)?;
-
-    // Convert all categories to DiscoveredFile format
-    // For import purposes, we need all files (tracks are the important ones)
     let mut files: Vec<DiscoveredFile> = Vec::new();
-
-    // Add audio files based on content type
     match categorized.audio {
         AudioContent::CueFlacPairs(pairs) => {
             for pair in pairs {
@@ -845,7 +668,6 @@ fn discover_folder_files(folder: &Path) -> Result<Vec<DiscoveredFile>, String> {
             }
         }
     }
-
     for f in categorized.artwork {
         files.push(DiscoveredFile {
             path: f.path,
@@ -864,6 +686,5 @@ fn discover_folder_files(folder: &Path) -> Result<Vec<DiscoveredFile>, String> {
             size: f.size,
         });
     }
-
     Ok(files)
 }

@@ -1,9 +1,7 @@
 //! FLAC encoding using libflac-sys FFI bindings.
 //!
 //! Provides a safe wrapper around libFLAC's streaming encoder.
-
 extern crate libflac_sys;
-
 /// Encode PCM samples to FLAC format.
 ///
 /// Takes interleaved i32 samples and returns the encoded FLAC data as bytes.
@@ -17,7 +15,6 @@ pub fn encode_to_flac(
     struct EncoderState {
         output: Vec<u8>,
     }
-
     extern "C" fn write_callback(
         _encoder: *const libflac_sys::FLAC__StreamEncoder,
         buffer: *const libflac_sys::FLAC__byte,
@@ -27,19 +24,14 @@ pub fn encode_to_flac(
         client_data: *mut libc::c_void,
     ) -> libflac_sys::FLAC__StreamEncoderWriteStatus {
         let state = unsafe { &mut *(client_data as *mut EncoderState) };
-
         let slice = unsafe { std::slice::from_raw_parts(buffer, bytes) };
         state.output.extend_from_slice(slice);
-
         libflac_sys::FLAC__STREAM_ENCODER_WRITE_STATUS_OK
     }
-
     let encoder = unsafe { libflac_sys::FLAC__stream_encoder_new() };
     if encoder.is_null() {
         return Err("Failed to create FLAC encoder".to_string());
     }
-
-    // Configure encoder
     unsafe {
         if libflac_sys::FLAC__stream_encoder_set_channels(encoder, channels) == 0 {
             libflac_sys::FLAC__stream_encoder_delete(encoder);
@@ -57,14 +49,10 @@ pub fn encode_to_flac(
             libflac_sys::FLAC__stream_encoder_delete(encoder);
             return Err("Failed to set block size".to_string());
         }
-
-        // Set compression level (5 is default, good balance)
         if libflac_sys::FLAC__stream_encoder_set_compression_level(encoder, 5) == 0 {
             libflac_sys::FLAC__stream_encoder_delete(encoder);
             return Err("Failed to set compression level".to_string());
         }
-
-        // Calculate total samples
         let total_samples = (samples.len() / channels as usize) as u64;
         if libflac_sys::FLAC__stream_encoder_set_total_samples_estimate(encoder, total_samples) == 0
         {
@@ -72,22 +60,18 @@ pub fn encode_to_flac(
             return Err("Failed to set total samples estimate".to_string());
         }
     }
-
     let mut state = Box::new(EncoderState { output: Vec::new() });
     let state_ptr = state.as_mut() as *mut EncoderState as *mut libc::c_void;
-
-    // Initialize encoder with write callback only (no seek/tell/metadata for simple in-memory encoding)
     let init_status = unsafe {
         libflac_sys::FLAC__stream_encoder_init_stream(
             encoder,
             Some(write_callback),
-            None, // seek_callback
-            None, // tell_callback
-            None, // metadata_callback
+            None,
+            None,
+            None,
             state_ptr,
         )
     };
-
     if init_status != libflac_sys::FLAC__STREAM_ENCODER_INIT_STATUS_OK {
         let error_msg = match init_status {
             libflac_sys::FLAC__STREAM_ENCODER_INIT_STATUS_ENCODER_ERROR => "Encoder error",
@@ -126,8 +110,6 @@ pub fn encode_to_flac(
         unsafe { libflac_sys::FLAC__stream_encoder_delete(encoder) };
         return Err(format!("Failed to initialize encoder: {}", error_msg));
     }
-
-    // Process samples (interleaved format)
     let num_samples = samples.len() / channels as usize;
     let ok = unsafe {
         libflac_sys::FLAC__stream_encoder_process_interleaved(
@@ -136,7 +118,6 @@ pub fn encode_to_flac(
             num_samples as u32,
         )
     };
-
     if ok == 0 {
         let encoder_state = unsafe { libflac_sys::FLAC__stream_encoder_get_state(encoder) };
         let error_msg = match encoder_state {
@@ -159,35 +140,25 @@ pub fn encode_to_flac(
         }
         return Err(format!("Failed to encode samples: {}", error_msg));
     }
-
-    // Finish encoding
     let finish_ok = unsafe { libflac_sys::FLAC__stream_encoder_finish(encoder) };
     unsafe { libflac_sys::FLAC__stream_encoder_delete(encoder) };
-
     if finish_ok == 0 {
         return Err("Failed to finish encoding".to_string());
     }
-
     Ok(state.output)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_encode_silence() {
-        // 1 second of silence at 44100Hz stereo 16-bit
         let samples = vec![0i32; 44100 * 2];
         let result = encode_to_flac(&samples, 44100, 2, 16);
         assert!(result.is_ok());
-
         let flac_data = result.unwrap();
-        // Should have valid FLAC header
-        assert!(flac_data.len() > 42); // Minimum FLAC header size
-        assert_eq!(&flac_data[0..4], b"fLaC"); // FLAC magic number
+        assert!(flac_data.len() > 42);
+        assert_eq!(&flac_data[0..4], b"fLaC");
     }
-
     #[test]
     fn test_encode_mono() {
         let samples = vec![0i32; 44100];

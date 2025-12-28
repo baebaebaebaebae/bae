@@ -5,7 +5,6 @@ use dioxus::prelude::*;
 use rfd::AsyncFileDialog;
 use std::path::PathBuf;
 use std::rc::Rc;
-
 #[component]
 pub fn TorrentInput(
     on_file_select: EventHandler<(PathBuf, bool)>,
@@ -17,7 +16,6 @@ pub fn TorrentInput(
     let magnet_link = import_context.magnet_link();
     let input_mode = import_context.torrent_input_mode();
     let seed_after_download = import_context.seed_after_download();
-
     let on_file_button_click = {
         let import_context = import_context.clone();
         let on_file_select = on_file_select;
@@ -35,7 +33,6 @@ pub fn TorrentInput(
             });
         }
     };
-
     let on_magnet_submit = {
         let import_context = import_context.clone();
         let on_error = on_error;
@@ -54,25 +51,21 @@ pub fn TorrentInput(
             on_magnet_link.call((link, seed_flag));
         }
     };
-
     let on_file_mode_click = {
         let import_context = import_context.clone();
         move |_| {
             import_context.try_switch_torrent_input_mode(TorrentInputMode::File);
         }
     };
-
     let on_magnet_mode_click = {
         let import_context = import_context.clone();
         move |_| {
-            // Always allow switching to Magnet mode, but clear magnet link when switching from File
             if *input_mode.read() == TorrentInputMode::File {
                 import_context.set_magnet_link(String::new());
             }
             import_context.set_torrent_input_mode(TorrentInputMode::Magnet);
         }
     };
-
     let import_context_for_input = import_context.clone();
     let import_context_for_seed = import_context.clone();
     let on_magnet_submit_for_keydown = on_magnet_submit.clone();
@@ -83,10 +76,8 @@ pub fn TorrentInput(
             }
         }
     };
-
     rsx! {
         div { class: "space-y-4",
-            // Mode selector
             div { class: "mb-3",
                 div { class: "flex space-x-1 border-b border-gray-600",
                     button {
@@ -101,8 +92,6 @@ pub fn TorrentInput(
                     }
                 }
             }
-
-            // File input mode
             if *input_mode.read() == TorrentInputMode::File {
                 div { class: "border-2 border-dashed border-gray-600 rounded-lg p-10 text-center",
                     div { class: "space-y-4",
@@ -135,8 +124,6 @@ pub fn TorrentInput(
                     }
                 }
             }
-
-            // Magnet link input mode
             if *input_mode.read() == TorrentInputMode::Magnet {
                 div { class: "space-y-3",
                     div {
@@ -164,8 +151,6 @@ pub fn TorrentInput(
                     p { class: "text-xs text-gray-400", "Paste a magnet link to start downloading" }
                 }
             }
-
-            // Seed after download option (only show when a torrent is selected)
             if show_seed_checkbox {
                 div { class: "mt-4 flex items-center space-x-2",
                     input {

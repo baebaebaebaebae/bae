@@ -8,18 +8,14 @@ use dioxus::prelude::*;
 use dioxus::router::Navigator;
 use std::path::PathBuf;
 use tracing::{error, info};
-
 pub async fn import_release(
     ctx: &ImportContext,
     release_id: String,
     master_id: String,
 ) -> Result<DiscogsRelease, String> {
     ctx.set_error_message(None);
-
     match ctx.discogs_client.get_release(&release_id).await {
         Ok(release) => {
-            // The release from API already has master_id, but we use the one passed to us
-            // (which might differ if we're importing via master vs specific release)
             let mut release = release;
             release.master_id = master_id;
             Ok(release)
@@ -31,7 +27,6 @@ pub async fn import_release(
         }
     }
 }
-
 /// Confirm a match candidate and start the import workflow.
 pub async fn confirm_and_start_import(
     ctx: &ImportContext,
@@ -41,16 +36,10 @@ pub async fn confirm_and_start_import(
 ) -> Result<(), String> {
     ctx.set_is_importing(true);
     ctx.set_preparing_step(None);
-
-    // Generate import_id for progress tracking (for folder imports)
     let import_id = uuid::Uuid::new_v4().to_string();
-
-    // Subscribe to import progress to show phase 0 steps
     let import_service = ctx.import_service.clone();
     let mut progress_rx = import_service.subscribe_import(import_id.clone());
     let mut preparing_step_signal = ctx.preparing_step();
-
-    // Spawn task to listen for Preparing events and update UI
     spawn(async move {
         while let Some(progress) = progress_rx.recv().await {
             if let ImportProgress::Preparing { step, .. } = progress {
@@ -58,13 +47,10 @@ pub async fn confirm_and_start_import(
             }
         }
     });
-
-    // Check for duplicates before importing
     match &candidate.source {
         MatchSource::Discogs(discogs_result) => {
             let master_id = discogs_result.master_id.map(|id| id.to_string());
             let release_id = Some(discogs_result.id.to_string());
-
             if let Ok(Some(duplicate)) = ctx
                 .library_manager
                 .get()
@@ -75,7 +61,7 @@ pub async fn confirm_and_start_import(
                 ctx.set_duplicate_album_id(Some(duplicate.id));
                 ctx.set_import_error_message(Some(format!(
                     "This release already exists in your library: {}",
-                    duplicate.title
+                    duplicate.title,
                 )));
                 return Err("Duplicate album found".to_string());
             }
@@ -83,7 +69,6 @@ pub async fn confirm_and_start_import(
         MatchSource::MusicBrainz(mb_release) => {
             let release_id = Some(mb_release.release_id.clone());
             let release_group_id = Some(mb_release.release_group_id.clone());
-
             if let Ok(Some(duplicate)) = ctx
                 .library_manager
                 .get()
@@ -94,21 +79,15 @@ pub async fn confirm_and_start_import(
                 ctx.set_duplicate_album_id(Some(duplicate.id));
                 ctx.set_import_error_message(Some(format!(
                     "This release already exists in your library: {}",
-                    duplicate.title
+                    duplicate.title,
                 )));
                 return Err("Duplicate album found".to_string());
             }
         }
     }
-
-    // Get storage profile (optional - None means files stay in place)
     let storage_profile_id = ctx.storage_profile_id().read().clone();
-
-    // Extract master_year from metadata or release date
     let metadata = ctx.detected_metadata().read().clone();
     let master_year = metadata.as_ref().and_then(|m| m.year).unwrap_or(1970);
-
-    // Get cover selection directly from state - filename is already computed
     let folder_path_for_cover = ctx.folder_path().read().clone();
     let (cover_art_url, selected_cover_filename) = match ctx.selected_cover().read().clone() {
         Some(SelectedCover::Remote {
@@ -121,8 +100,6 @@ pub async fn confirm_and_start_import(
         }
         None => (None, None),
     };
-
-    // Build import request based on source
     let request = match import_source {
         ImportSource::Folder => {
             let folder_path = ctx.folder_path().read().clone();
@@ -135,9 +112,7 @@ pub async fn confirm_and_start_import(
                         }
                     };
                     let release_id = discogs_result.id.to_string();
-
                     let discogs_release = import_release(ctx, release_id, master_id).await?;
-
                     ImportRequest::Folder {
                         import_id: import_id.clone(),
                         discogs_release: Some(discogs_release),
@@ -154,7 +129,6 @@ pub async fn confirm_and_start_import(
                         "Starting import for MusicBrainz release: {}",
                         mb_release.title
                     );
-
                     ImportRequest::Folder {
                         import_id: import_id.clone(),
                         discogs_release: None,
@@ -180,7 +154,6 @@ pub async fn confirm_and_start_import(
                 .read()
                 .clone()
                 .ok_or_else(|| "No torrent metadata available".to_string())?;
-
             match candidate.source.clone() {
                 MatchSource::Discogs(discogs_result) => {
                     let master_id = match discogs_result.master_id {
@@ -190,9 +163,7 @@ pub async fn confirm_and_start_import(
                         }
                     };
                     let release_id = discogs_result.id.to_string();
-
                     let discogs_release = import_release(ctx, release_id, master_id).await?;
-
                     ImportRequest::Torrent {
                         torrent_source,
                         discogs_release: Some(discogs_release),
@@ -210,7 +181,6 @@ pub async fn confirm_and_start_import(
                         "Starting torrent import for MusicBrainz release: {}",
                         mb_release.title
                     );
-
                     ImportRequest::Torrent {
                         torrent_source,
                         discogs_release: None,
@@ -236,7 +206,6 @@ pub async fn confirm_and_start_import(
                         "Starting CD import for MusicBrainz release: {}",
                         mb_release.title
                     );
-
                     ImportRequest::CD {
                         discogs_release: None,
                         mb_release: Some(mb_release.clone()),
@@ -250,21 +219,14 @@ pub async fn confirm_and_start_import(
             }
         }
     };
-
-    // Submit import request
     match ctx.import_service.send_request(request).await {
         Ok((album_id, _release_id)) => {
             info!("Import started successfully: {}", album_id);
-
             ctx.set_is_importing(false);
             ctx.set_preparing_step(None);
-
-            // Check if there are more releases to import in the batch
             if ctx.has_more_releases() {
                 info!("More releases to import, advancing to next release");
                 ctx.advance_to_next_release();
-
-                // Load the next release
                 let current_idx = *ctx.current_release_index().read();
                 let selected_indices = ctx.selected_release_indices().read().clone();
                 if let Some(&release_idx) = selected_indices.get(current_idx) {
@@ -280,7 +242,6 @@ pub async fn confirm_and_start_import(
                 }
                 Ok(())
             } else {
-                // No more releases, navigate to the imported album
                 info!(
                     "No more releases to import, navigating to album: {}",
                     album_id
@@ -296,7 +257,6 @@ pub async fn confirm_and_start_import(
         Err(e) => {
             let error_msg = format!("Failed to start import: {}", e);
             error!("{}", error_msg);
-
             ctx.set_is_importing(false);
             ctx.set_preparing_step(None);
             ctx.set_import_error_message(Some(error_msg.clone()));
@@ -304,5 +264,3 @@ pub async fn confirm_and_start_import(
         }
     }
 }
-
-// Tests for cover selection are in state.rs where compute_expected_cover_filename is defined

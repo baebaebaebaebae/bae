@@ -6,7 +6,6 @@ use crate::import;
 use crate::library::SharedLibraryManager;
 use crate::playback;
 use crate::torrent;
-
 #[derive(Clone)]
 pub struct AppContext {
     pub library_manager: SharedLibraryManager,

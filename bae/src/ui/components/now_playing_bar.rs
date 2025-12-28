@@ -1,12 +1,10 @@
+use super::queue_sidebar::QueueSidebarState;
+use super::use_playback_service;
 use crate::db::DbTrack;
 use crate::library::use_library_manager;
 use crate::playback::{PlaybackProgress, PlaybackState};
 use crate::ui::{image_url, Route};
 use dioxus::prelude::*;
-
-use super::queue_sidebar::QueueSidebarState;
-use super::use_playback_service;
-
 #[component]
 fn PlaybackControlsZone(
     on_previous: EventHandler<()>,
@@ -70,14 +68,12 @@ fn PlaybackControlsZone(
         }
     }
 }
-
 #[component]
 fn AlbumCoverThumbnail(
     cover_url: ReadSignal<Option<String>>,
     track: ReadSignal<Option<DbTrack>>,
 ) -> Element {
     let library_manager = use_library_manager();
-
     rsx! {
         div {
             class: "w-10 h-10 bg-gray-700 rounded-sm flex items-center justify-center overflow-hidden flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity",
@@ -117,7 +113,6 @@ fn AlbumCoverThumbnail(
         }
     }
 }
-
 #[component]
 fn TrackInfoZone(
     track: ReadSignal<Option<DbTrack>>,
@@ -125,8 +120,6 @@ fn TrackInfoZone(
     is_loading: ReadSignal<bool>,
 ) -> Element {
     let library_manager = use_library_manager();
-    // let navigator = navigator();
-
     rsx! {
         div { class: "flex-1",
             if let Some(track) = track() {
@@ -167,14 +160,12 @@ fn TrackInfoZone(
         }
     }
 }
-
 fn format_duration(duration: std::time::Duration) -> String {
     let total_secs = duration.as_secs();
     let mins = total_secs / 60;
     let secs = total_secs % 60;
     format!("{:02}:{:02}", mins, secs)
 }
-
 #[component]
 fn PositionZone(
     position: ReadSignal<Option<std::time::Duration>>,
@@ -184,15 +175,11 @@ fn PositionZone(
     is_seeking: Signal<bool>,
 ) -> Element {
     let mut local_position = use_signal(|| *position.read());
-
-    // Sync local_position with position when not seeking
-    // Don't read local_position in the effect to avoid reactive loop
     use_effect(move || {
         if !is_seeking() {
             local_position.set(*position.read());
         }
     });
-
     rsx! {
         if let Some(pos) = local_position() {
             div { class: "flex items-center gap-2 text-sm text-gray-400",
@@ -245,7 +232,6 @@ fn PositionZone(
         }
     }
 }
-
 #[component]
 pub fn NowPlayingBar() -> Element {
     let playback = use_playback_service();
@@ -255,8 +241,6 @@ pub fn NowPlayingBar() -> Element {
     let mut cover_art_url = use_signal(|| Option::<String>::None);
     let mut is_seeking = use_signal(|| false);
     let mut playback_error = use_signal(|| Option::<String>::None);
-
-    // Subscribe to playback progress updates
     use_effect({
         let playback = playback.clone();
         let library_manager = library_manager.clone();
@@ -271,7 +255,6 @@ pub fn NowPlayingBar() -> Element {
                             requested_position: _,
                             track_duration: _,
                         } => {
-                            // Seek error - could show user notification, but for now just ignore
                             tracing::warn!("Seek failed: requested position past track end");
                         }
                         PlaybackProgress::Seeked {
@@ -279,12 +262,9 @@ pub fn NowPlayingBar() -> Element {
                             track_id: _,
                             was_paused,
                         } => {
-                            // Seek completed - update position in current state
                             if is_seeking() {
                                 is_seeking.set(false);
                             }
-
-                            // Update position in state, preserving track and duration
                             match state() {
                                 PlaybackState::Playing {
                                     ref track,
@@ -322,23 +302,15 @@ pub fn NowPlayingBar() -> Element {
                             requested_position: _,
                             current_position: _,
                         } => {
-                            // Seek was skipped (position difference < 100ms)
-                            // Clear is_seeking flag so position updates resume
                             if is_seeking() {
                                 is_seeking.set(false);
                             }
                         }
                         PlaybackProgress::StateChanged { state: new_state } => {
-                            // Update state first
                             state.set(new_state.clone());
-
-                            // If we were seeking, clear it now that state changed
-                            // The position in new_state should match where we seeked to
                             if is_seeking() {
                                 is_seeking.set(false);
                             }
-
-                            // Fetch artist for current track
                             if let PlaybackState::Playing { ref track, .. }
                             | PlaybackState::Paused { ref track, .. } = new_state
                             {
@@ -370,8 +342,7 @@ pub fn NowPlayingBar() -> Element {
                                                 }
                                                 Err(e) => {
                                                     tracing::error!(
-                                                        "Failed to fetch album artists for album {}: {}",
-                                                        album_id,
+                                                        "Failed to fetch album artists for album {}: {}", album_id,
                                                         e
                                                     );
                                                     current_artist
@@ -392,12 +363,9 @@ pub fn NowPlayingBar() -> Element {
                             }
                         }
                         PlaybackProgress::PositionUpdate { position, .. } => {
-                            // Ignore position updates while user is seeking
                             if is_seeking() {
                                 continue;
                             }
-
-                            // Update position in state, preserving duration
                             if let PlaybackState::Playing {
                                 ref track,
                                 duration,
@@ -425,19 +393,11 @@ pub fn NowPlayingBar() -> Element {
                                     decoded_duration,
                                 });
                             }
-
-                            // After a seek completes, the first PositionUpdate will sync local_position
-                            // via the use_effect that watches position()
                         }
-                        PlaybackProgress::TrackCompleted { .. } => {
-                            // Track finished - could auto-advance here if needed
-                        }
-                        PlaybackProgress::QueueUpdated { .. } => {
-                            // Queue updates are handled by the queue hook, ignore here
-                        }
+                        PlaybackProgress::TrackCompleted { .. } => {}
+                        PlaybackProgress::QueueUpdated { .. } => {}
                         PlaybackProgress::PlaybackError { message } => {
                             playback_error.set(Some(message.clone()));
-
                             spawn(async move {
                                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                                 playback_error.set(None);
@@ -448,8 +408,6 @@ pub fn NowPlayingBar() -> Element {
             });
         }
     });
-
-    // Derive reactive signals from state
     let track = use_memo(move || match state() {
         PlaybackState::Playing { ref track, .. } | PlaybackState::Paused { ref track, .. } => {
             Some(track.clone())
@@ -472,8 +430,6 @@ pub fn NowPlayingBar() -> Element {
     let is_paused = use_memo(move || matches!(state(), PlaybackState::Paused { .. }));
     let is_loading = use_memo(move || matches!(state(), PlaybackState::Loading { .. }));
     let is_stopped = use_memo(move || matches!(state(), PlaybackState::Stopped));
-
-    // Fetch artist whenever track changes
     use_effect({
         let library_manager = library_manager.clone();
         move || {
@@ -519,10 +475,7 @@ pub fn NowPlayingBar() -> Element {
             }
         }
     });
-
     let artist_name = use_memo(move || current_artist.read().clone());
-
-    // Fetch cover art whenever track changes
     use_effect({
         let library_manager = library_manager.clone();
         move || {
@@ -539,7 +492,6 @@ pub fn NowPlayingBar() -> Element {
                         Ok(album_id) => {
                             match library_manager.get().get_album_by_id(&album_id).await {
                                 Ok(Some(album)) => {
-                                    // Use cover_image_id first, fallback to cover_art_url
                                     let url = album
                                         .cover_image_id
                                         .as_ref()
@@ -567,18 +519,13 @@ pub fn NowPlayingBar() -> Element {
             }
         }
     });
-
     let cover_url = use_memo(move || cover_art_url.read().clone());
-
     let playback_prev = playback.clone();
     let playback_pause = playback.clone();
     let playback_resume = playback.clone();
     let playback_next = playback.clone();
     let playback_seek = playback.clone();
-
-    // Get queue sidebar state from context
     let mut queue_sidebar_open = use_context::<QueueSidebarState>();
-
     rsx! {
         div { class: "fixed bottom-0 left-0 right-0 bg-gray-800 text-white p-4 border-t border-gray-700",
             div { class: "flex items-center gap-4",
@@ -601,7 +548,6 @@ pub fn NowPlayingBar() -> Element {
                     on_seek: move |duration| playback_seek.seek(duration),
                     is_seeking,
                 }
-                // Queue toggle button
                 button {
                     class: "px-3 py-2 bg-gray-700 rounded hover:bg-gray-600",
                     onclick: move |_| {
@@ -612,7 +558,6 @@ pub fn NowPlayingBar() -> Element {
                 }
             }
         }
-
         if let Some(error) = playback_error() {
             div { class: "fixed bottom-20 right-4 bg-red-600 text-white px-6 py-4 rounded-lg shadow-lg z-50 max-w-md",
                 div { class: "flex items-center justify-between gap-4",

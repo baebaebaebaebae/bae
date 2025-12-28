@@ -1,13 +1,10 @@
 //! Log file generation (EAC-style)
-
 use crate::cd::drive::CdToc;
 use crate::cd::ripper::RipResult;
 use std::io::Write;
 use std::path::PathBuf;
-
 /// Generates EAC-style log files documenting the ripping process
 pub struct LogGenerator;
-
 impl LogGenerator {
     /// Generate and write a log file
     pub fn write_log_file(
@@ -17,15 +14,13 @@ impl LogGenerator {
         output_path: &PathBuf,
     ) -> Result<(), std::io::Error> {
         use std::fs::File;
-
         let mut file = File::create(output_path)?;
-
         writeln!(file, "Exact Audio Copy V1.0 beta 3 from 29. August 2011")?;
         writeln!(file)?;
         writeln!(
             file,
             "EAC extraction logfile from {}",
-            chrono::Local::now().format("%d. %B %Y, %H:%M:%S")
+            chrono::Local::now().format("%d. %B %Y, %H:%M:%S"),
         )?;
         writeln!(file)?;
         writeln!(file, "Used drive  : {}", drive_name)?;
@@ -41,7 +36,10 @@ impl LogGenerator {
         writeln!(file, "Fill up missing offset samples with silence : Yes")?;
         writeln!(file, "Delete leading and trailing silent blocks    : No")?;
         writeln!(file, "Null samples used in CRC calculations       : Yes")?;
-        writeln!(file, "Used interface                              : Native Win32 interface for Win NT & 2000")?;
+        writeln!(
+            file,
+            "Used interface                              : Native Win32 interface for Win NT & 2000",
+        )?;
         writeln!(file)?;
         writeln!(
             file,
@@ -63,7 +61,6 @@ impl LogGenerator {
             file,
             "    ---------------------------------------------------------"
         )?;
-
         for (idx, result) in rip_results.iter().enumerate() {
             let start_sector = if idx < toc.track_offsets.len() {
                 toc.track_offsets[idx]
@@ -72,15 +69,12 @@ impl LogGenerator {
             };
             let length_sectors = (result.duration_ms as u32 * 75) / 1000;
             let end_sector = start_sector + length_sectors;
-
             let start_min = start_sector / (75 * 60);
             let start_sec = (start_sector / 75) % 60;
             let start_frame = start_sector % 75;
-
             let length_min = length_sectors / (75 * 60);
             let length_sec = (length_sectors / 75) % 60;
             let length_frame = length_sectors % 75;
-
             writeln!(
                 file,
                 "     {:2}  | {:02}:{:02}:{:02} | {:02}:{:02}:{:02} |     {:6} |   {:6}",
@@ -92,14 +86,11 @@ impl LogGenerator {
                 length_sec,
                 length_frame,
                 start_sector,
-                end_sector
+                end_sector,
             )?;
         }
-
         writeln!(file)?;
         writeln!(file)?;
-
-        // Track extraction details
         for result in rip_results {
             writeln!(file, "Track {}", result.track_number)?;
             writeln!(file)?;
@@ -111,17 +102,13 @@ impl LogGenerator {
             writeln!(file, "         Test CRC : {:08X}", result.crc32)?;
             writeln!(file, "         Copy CRC : {:08X}", result.crc32)?;
             writeln!(file)?;
-
             if result.errors > 0 {
                 writeln!(file, "     There were errors")?;
                 writeln!(file, "     Errors: {}", result.errors)?;
                 writeln!(file)?;
             }
         }
-
         writeln!(file)?;
-
-        // Check if any errors occurred
         let total_errors: u32 = rip_results.iter().map(|r| r.errors).sum();
         if total_errors > 0 {
             writeln!(file, "There were errors during extraction")?;
@@ -131,7 +118,6 @@ impl LogGenerator {
         }
         writeln!(file)?;
         writeln!(file, "End of status report")?;
-
         Ok(())
     }
 }

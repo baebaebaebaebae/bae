@@ -2,36 +2,29 @@ use crate::config::use_config;
 use crate::AppContext;
 use dioxus::prelude::*;
 use tracing::{error, info};
-
 /// Network section - torrent bind interface
 #[component]
 pub fn NetworkSection() -> Element {
     let config = use_config();
     let app_context = use_context::<AppContext>();
-
     let mut bind_interface =
         use_signal(|| config.torrent_bind_interface.clone().unwrap_or_default());
     let mut is_editing = use_signal(|| false);
     let mut is_saving = use_signal(|| false);
     let mut save_error = use_signal(|| Option::<String>::None);
-
     let original_value = config.torrent_bind_interface.clone().unwrap_or_default();
     let has_changes = *bind_interface.read() != original_value;
-
     let save_changes = move |_| {
         let new_interface = bind_interface.read().clone();
         let mut config = app_context.config.clone();
-
         spawn(async move {
             is_saving.set(true);
             save_error.set(None);
-
             config.torrent_bind_interface = if new_interface.is_empty() {
                 None
             } else {
                 Some(new_interface)
             };
-
             match config.save() {
                 Ok(()) => {
                     info!("Saved network settings");
@@ -42,23 +35,18 @@ pub fn NetworkSection() -> Element {
                     save_error.set(Some(e.to_string()));
                 }
             }
-
             is_saving.set(false);
         });
     };
-
     let cancel_edit = move |_| {
         bind_interface.set(original_value.clone());
         is_editing.set(false);
         save_error.set(None);
     };
-
     rsx! {
         div { class: "max-w-2xl",
             h2 { class: "text-xl font-semibold text-white mb-6", "Network" }
-
             div { class: "bg-gray-800 rounded-lg p-6",
-                // Torrent bind interface
                 div { class: "space-y-4",
                     div { class: "flex items-center justify-between",
                         div {
@@ -75,7 +63,6 @@ pub fn NetworkSection() -> Element {
                             }
                         }
                     }
-
                     if *is_editing.read() {
                         div { class: "space-y-4",
                             div {
@@ -93,13 +80,11 @@ pub fn NetworkSection() -> Element {
                                     "Leave empty to use the system default"
                                 }
                             }
-
                             if let Some(error) = save_error.read().as_ref() {
                                 div { class: "p-3 bg-red-900/30 border border-red-700 rounded-lg text-sm text-red-300",
                                     "{error}"
                                 }
                             }
-
                             div { class: "flex gap-3",
                                 button {
                                     class: "px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
@@ -132,8 +117,6 @@ pub fn NetworkSection() -> Element {
                         }
                     }
                 }
-
-                // Help text
                 div { class: "mt-6 p-4 bg-gray-700/50 rounded-lg",
                     p { class: "text-sm text-gray-400",
                         "Use this to route torrent traffic through a specific network interface, such as a VPN tunnel. "

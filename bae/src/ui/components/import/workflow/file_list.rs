@@ -1,13 +1,11 @@
 use crate::import::folder_scanner::{AudioContent, ScannedCueFlacPair, ScannedFile};
 use dioxus::prelude::*;
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileInfo {
     pub name: String,
     pub size: u64,
     pub format: String,
 }
-
 /// A CUE/FLAC pair for UI display
 #[derive(Debug, Clone, PartialEq)]
 pub struct CueFlacPairInfo {
@@ -16,7 +14,6 @@ pub struct CueFlacPairInfo {
     pub total_size: u64,
     pub track_count: usize,
 }
-
 /// Audio content type for UI display
 #[derive(Debug, Clone, PartialEq)]
 pub enum AudioContentInfo {
@@ -25,13 +22,11 @@ pub enum AudioContentInfo {
     /// Individual track files
     TrackFiles(Vec<FileInfo>),
 }
-
 impl Default for AudioContentInfo {
     fn default() -> Self {
         AudioContentInfo::TrackFiles(Vec::new())
     }
 }
-
 /// Pre-categorized files for UI display
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct CategorizedFileInfo {
@@ -44,7 +39,6 @@ pub struct CategorizedFileInfo {
     /// Everything else
     pub other: Vec<FileInfo>,
 }
-
 impl CategorizedFileInfo {
     /// Convert from backend CategorizedFiles
     pub fn from_scanned(categorized: &crate::import::CategorizedFiles) -> Self {
@@ -65,7 +59,6 @@ impl CategorizedFileInfo {
                 })
                 .collect()
         };
-
         let convert_pair = |pair: &ScannedCueFlacPair| -> CueFlacPairInfo {
             CueFlacPairInfo {
                 cue_name: pair.cue_file.relative_path.clone(),
@@ -74,14 +67,12 @@ impl CategorizedFileInfo {
                 track_count: pair.track_count,
             }
         };
-
         let audio = match &categorized.audio {
             AudioContent::CueFlacPairs(pairs) => {
                 AudioContentInfo::CueFlacPairs(pairs.iter().map(convert_pair).collect())
             }
             AudioContent::TrackFiles(tracks) => AudioContentInfo::TrackFiles(convert(tracks)),
         };
-
         Self {
             audio,
             artwork: convert(&categorized.artwork),
@@ -89,22 +80,19 @@ impl CategorizedFileInfo {
             other: convert(&categorized.other),
         }
     }
-
     /// Total number of files across all categories
     pub fn total_count(&self) -> usize {
         let audio_count = match &self.audio {
-            AudioContentInfo::CueFlacPairs(pairs) => pairs.len() * 2, // CUE + FLAC
+            AudioContentInfo::CueFlacPairs(pairs) => pairs.len() * 2,
             AudioContentInfo::TrackFiles(tracks) => tracks.len(),
         };
         audio_count + self.artwork.len() + self.documents.len() + self.other.len()
     }
-
     /// Check if empty
     pub fn is_empty(&self) -> bool {
         self.total_count() == 0
     }
 }
-
 #[component]
 pub fn FileList(files: Vec<FileInfo>) -> Element {
     rsx! {
@@ -126,7 +114,6 @@ pub fn FileList(files: Vec<FileInfo>) -> Element {
         }
     }
 }
-
 fn format_file_size(bytes: i64) -> String {
     if bytes < 1024 {
         format!("{} B", bytes)

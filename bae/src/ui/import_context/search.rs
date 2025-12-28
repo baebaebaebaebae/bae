@@ -6,7 +6,6 @@ use crate::musicbrainz::{search_releases_with_params, ReleaseSearchParams};
 use crate::ui::components::import::SearchSource;
 use dioxus::prelude::*;
 use tracing::{debug, info, warn};
-
 impl ImportContext {
     /// General search by artist, album, year, label
     pub async fn search_general(
@@ -18,7 +17,6 @@ impl ImportContext {
         label: String,
     ) -> Result<Vec<MatchCandidate>, String> {
         let metadata = self.detected_metadata().read().clone();
-
         match source {
             SearchSource::MusicBrainz => {
                 let params = ReleaseSearchParams {
@@ -31,7 +29,6 @@ impl ImportContext {
                     format: None,
                     country: None,
                 };
-
                 info!("🎵 MusicBrainz general search: {:?}", params);
                 search_mb_and_rank(params, metadata).await
             }
@@ -46,13 +43,11 @@ impl ImportContext {
                     format: None,
                     country: None,
                 };
-
                 info!("🔍 Discogs general search: {:?}", params);
                 search_discogs_and_rank(&self.discogs_client, params, metadata).await
             }
         }
     }
-
     /// Search by catalog number only
     pub async fn search_by_catalog_number(
         &self,
@@ -60,7 +55,6 @@ impl ImportContext {
         catalog_number: String,
     ) -> Result<Vec<MatchCandidate>, String> {
         let metadata = self.detected_metadata().read().clone();
-
         match source {
             SearchSource::MusicBrainz => {
                 let params = ReleaseSearchParams {
@@ -73,7 +67,6 @@ impl ImportContext {
                     format: None,
                     country: None,
                 };
-
                 info!("🎵 MusicBrainz catalog number search: {:?}", params);
                 search_mb_and_rank(params, metadata).await
             }
@@ -88,13 +81,11 @@ impl ImportContext {
                     format: None,
                     country: None,
                 };
-
                 info!("🔍 Discogs catalog number search: {:?}", params);
                 search_discogs_and_rank(&self.discogs_client, params, metadata).await
             }
         }
     }
-
     /// Search by barcode only
     pub async fn search_by_barcode(
         &self,
@@ -102,7 +93,6 @@ impl ImportContext {
         barcode: String,
     ) -> Result<Vec<MatchCandidate>, String> {
         let metadata = self.detected_metadata().read().clone();
-
         match source {
             SearchSource::MusicBrainz => {
                 let params = ReleaseSearchParams {
@@ -115,7 +105,6 @@ impl ImportContext {
                     format: None,
                     country: None,
                 };
-
                 info!("🎵 MusicBrainz barcode search: {:?}", params);
                 search_mb_and_rank(params, metadata).await
             }
@@ -130,14 +119,12 @@ impl ImportContext {
                     format: None,
                     country: None,
                 };
-
                 info!("🔍 Discogs barcode search: {:?}", params);
                 search_discogs_and_rank(&self.discogs_client, params, metadata).await
             }
         }
     }
 }
-
 /// Convert empty string to None
 fn non_empty(s: String) -> Option<String> {
     if s.trim().is_empty() {
@@ -146,7 +133,6 @@ fn non_empty(s: String) -> Option<String> {
         Some(s)
     }
 }
-
 /// Search MusicBrainz and rank results
 async fn search_mb_and_rank(
     params: ReleaseSearchParams,
@@ -164,7 +150,6 @@ async fn search_mb_and_rank(
                     release.release_id
                 );
             }
-
             let mut candidates = if let Some(ref meta) = metadata {
                 use crate::import::rank_mb_matches;
                 rank_mb_matches(meta, releases)
@@ -179,8 +164,6 @@ async fn search_mb_and_rank(
                     })
                     .collect()
             };
-
-            // Fetch cover art in parallel
             let cover_art_futures: Vec<_> = candidates
                 .iter()
                 .map(|candidate| {
@@ -200,15 +183,12 @@ async fn search_mb_and_rank(
                     }
                 })
                 .collect();
-
             let cover_art_results = futures::future::join_all(cover_art_futures).await;
-
             for (candidate, cover_url) in candidates.iter_mut().zip(cover_art_results.into_iter()) {
                 if candidate.cover_art_url.is_none() {
                     candidate.cover_art_url = cover_url;
                 }
             }
-
             Ok(candidates)
         }
         Err(e) => {
@@ -217,7 +197,6 @@ async fn search_mb_and_rank(
         }
     }
 }
-
 /// Search Discogs and rank results
 async fn search_discogs_and_rank(
     client: &crate::discogs::client::DiscogsClient,
@@ -227,7 +206,6 @@ async fn search_discogs_and_rank(
     match client.search_with_params(&params).await {
         Ok(results) => {
             info!("✓ Discogs search returned {} result(s)", results.len());
-
             let candidates = if let Some(ref meta) = metadata {
                 use crate::import::rank_discogs_matches;
                 rank_discogs_matches(meta, results)
@@ -242,7 +220,6 @@ async fn search_discogs_and_rank(
                     })
                     .collect()
             };
-
             Ok(candidates)
         }
         Err(e) => {

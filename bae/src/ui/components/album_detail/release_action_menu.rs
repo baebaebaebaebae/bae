@@ -1,12 +1,10 @@
+use super::super::use_torrent_manager;
 use crate::db::DbTorrent;
 use crate::library::use_library_manager;
 use crate::AppContext;
 use dioxus::prelude::*;
 use rfd::AsyncFileDialog;
 use tracing::error;
-
-use super::super::use_torrent_manager;
-
 #[component]
 pub fn ReleaseActionMenu(
     release_id: String,
@@ -24,7 +22,6 @@ pub fn ReleaseActionMenu(
     let library_manager = use_library_manager();
     let app_context = use_context::<AppContext>();
     let torrent_manager = use_torrent_manager();
-
     rsx! {
         div { class: "absolute right-0 top-full mt-1 bg-gray-700 rounded-lg shadow-lg overflow-hidden z-10 border border-gray-600 min-w-[160px]",
             button {
@@ -109,14 +106,12 @@ pub fn ReleaseActionMenu(
                             spawn(async move {
                                 is_exporting.set(true);
                                 export_error.set(None);
-
                                 if let Some(folder_handle) = AsyncFileDialog::new()
                                     .set_title("Select Export Directory")
                                     .pick_folder()
                                     .await
                                 {
                                     let target_dir = folder_handle.path().to_path_buf();
-
                                     match library_manager
                                         .get()
                                         .export_release(

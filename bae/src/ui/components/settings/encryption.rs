@@ -1,12 +1,9 @@
 use crate::config::use_config;
 use dioxus::prelude::*;
-
 /// Encryption section - read-only key status
 #[component]
 pub fn EncryptionSection() -> Element {
     let config = use_config();
-
-    // Show first 8 and last 8 chars of key
     let key_preview = {
         let key = &config.encryption_key;
         if key.len() > 16 {
@@ -15,16 +12,12 @@ pub fn EncryptionSection() -> Element {
             "***".to_string()
         }
     };
-
-    let key_length = config.encryption_key.len() / 2; // hex encoded, so divide by 2
-
+    let key_length = config.encryption_key.len() / 2;
     rsx! {
         div { class: "max-w-2xl",
             h2 { class: "text-xl font-semibold text-white mb-6", "Encryption" }
-
             div { class: "bg-gray-800 rounded-lg p-6",
                 div { class: "space-y-4",
-                    // Key status
                     div { class: "flex items-center justify-between py-3 border-b border-gray-700",
                         div {
                             div { class: "text-sm font-medium text-gray-400", "Encryption Key" }
@@ -34,20 +27,15 @@ pub fn EncryptionSection() -> Element {
                             "Active"
                         }
                     }
-
-                    // Key info
                     div { class: "flex items-center justify-between py-3 border-b border-gray-700",
                         span { class: "text-sm text-gray-400", "Key Length" }
                         span { class: "text-white", "{key_length} bytes (256-bit AES)" }
                     }
-
                     div { class: "flex items-center justify-between py-3",
                         span { class: "text-sm text-gray-400", "Algorithm" }
                         span { class: "text-white", "AES-256-GCM" }
                     }
                 }
-
-                // Warning
                 div { class: "mt-6 p-4 bg-yellow-900/30 border border-yellow-700 rounded-lg",
                     div { class: "flex items-start gap-3",
                         svg {

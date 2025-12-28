@@ -2,34 +2,28 @@ use crate::config::use_config;
 use crate::AppContext;
 use dioxus::prelude::*;
 use tracing::{error, info};
-
 /// Import settings section - worker pools and chunk size
 #[component]
 pub fn ImportSettingsSection() -> Element {
     let config = use_config();
     let app_context = use_context::<AppContext>();
-
     let mut encrypt_workers = use_signal(|| config.max_import_encrypt_workers.to_string());
     let mut upload_workers = use_signal(|| config.max_import_upload_workers.to_string());
     let mut db_write_workers = use_signal(|| config.max_import_db_write_workers.to_string());
-    let mut chunk_size = use_signal(|| (config.chunk_size_bytes / 1024).to_string()); // Show in KB
-
+    let mut chunk_size = use_signal(|| (config.chunk_size_bytes / 1024).to_string());
     let mut is_editing = use_signal(|| false);
     let mut is_saving = use_signal(|| false);
     let mut save_error = use_signal(|| Option::<String>::None);
-
     let has_changes = {
         let ew = encrypt_workers.read().parse::<usize>().unwrap_or(0);
         let uw = upload_workers.read().parse::<usize>().unwrap_or(0);
         let dw = db_write_workers.read().parse::<usize>().unwrap_or(0);
         let cs = chunk_size.read().parse::<usize>().unwrap_or(0) * 1024;
-
         ew != config.max_import_encrypt_workers
             || uw != config.max_import_upload_workers
             || dw != config.max_import_db_write_workers
             || cs != config.chunk_size_bytes
     };
-
     let save_changes = move |_| {
         let ew = encrypt_workers
             .read()
@@ -44,18 +38,14 @@ pub fn ImportSettingsSection() -> Element {
             .parse::<usize>()
             .unwrap_or(config.max_import_db_write_workers);
         let cs = chunk_size.read().parse::<usize>().unwrap_or(1024) * 1024;
-
         let mut config = app_context.config.clone();
-
         spawn(async move {
             is_saving.set(true);
             save_error.set(None);
-
             config.max_import_encrypt_workers = ew;
             config.max_import_upload_workers = uw;
             config.max_import_db_write_workers = dw;
             config.chunk_size_bytes = cs;
-
             match config.save() {
                 Ok(()) => {
                     info!("Saved import settings");
@@ -66,11 +56,9 @@ pub fn ImportSettingsSection() -> Element {
                     save_error.set(Some(e.to_string()));
                 }
             }
-
             is_saving.set(false);
         });
     };
-
     let cancel_edit = move |_| {
         encrypt_workers.set(config.max_import_encrypt_workers.to_string());
         upload_workers.set(config.max_import_upload_workers.to_string());
@@ -79,11 +67,9 @@ pub fn ImportSettingsSection() -> Element {
         is_editing.set(false);
         save_error.set(None);
     };
-
     rsx! {
         div { class: "max-w-2xl",
             h2 { class: "text-xl font-semibold text-white mb-6", "Import Settings" }
-
             div { class: "bg-gray-800 rounded-lg p-6",
                 div { class: "flex items-center justify-between mb-6",
                     div {
@@ -100,10 +86,8 @@ pub fn ImportSettingsSection() -> Element {
                         }
                     }
                 }
-
                 if *is_editing.read() {
                     div { class: "space-y-4",
-                        // Encrypt workers
                         div {
                             label { class: "block text-sm font-medium text-gray-400 mb-2",
                                 "Encryption Workers"
@@ -120,8 +104,6 @@ pub fn ImportSettingsSection() -> Element {
                                 "CPU-bound tasks (recommended: 2x CPU cores)"
                             }
                         }
-
-                        // Upload workers
                         div {
                             label { class: "block text-sm font-medium text-gray-400 mb-2",
                                 "Upload Workers"
@@ -138,8 +120,6 @@ pub fn ImportSettingsSection() -> Element {
                                 "I/O-bound tasks (recommended: 20)"
                             }
                         }
-
-                        // DB write workers
                         div {
                             label { class: "block text-sm font-medium text-gray-400 mb-2",
                                 "Database Writers"
@@ -156,8 +136,6 @@ pub fn ImportSettingsSection() -> Element {
                                 "I/O-bound tasks (recommended: 10)"
                             }
                         }
-
-                        // Chunk size
                         div {
                             label { class: "block text-sm font-medium text-gray-400 mb-2",
                                 "Chunk Size (KB)"
@@ -175,13 +153,11 @@ pub fn ImportSettingsSection() -> Element {
                                 "Size of encrypted chunks (recommended: 1024 KB = 1 MB)"
                             }
                         }
-
                         if let Some(error) = save_error.read().as_ref() {
                             div { class: "p-3 bg-red-900/30 border border-red-700 rounded-lg text-sm text-red-300",
                                 "{error}"
                             }
                         }
-
                         div { class: "flex gap-3 pt-2",
                             button {
                                 class: "px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
@@ -220,8 +196,6 @@ pub fn ImportSettingsSection() -> Element {
                         }
                     }
                 }
-
-                // Note
                 div { class: "mt-6 p-4 bg-gray-700/50 rounded-lg",
                     p { class: "text-sm text-gray-400",
                         "Changes take effect on the next import. Higher worker counts may improve speed but use more resources."

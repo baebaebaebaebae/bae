@@ -9,13 +9,10 @@ use dioxus::prelude::*;
 use std::path::PathBuf;
 use std::rc::Rc;
 use tracing::{info, warn};
-
 #[component]
 pub fn CdImport() -> Element {
     let import_context = use_context::<Rc<ImportContext>>();
     let navigator = use_navigator();
-
-    // Get signals via getters (signals are Copy)
     let folder_path = import_context.folder_path();
     let detected_metadata = import_context.detected_metadata();
     let import_phase = import_context.import_phase();
@@ -26,31 +23,24 @@ pub fn CdImport() -> Element {
     let import_error_message = import_context.import_error_message();
     let duplicate_album_id = import_context.duplicate_album_id();
     let cd_toc_info = import_context.cd_toc_info();
-
     let on_drive_select = {
         let import_context = import_context.clone();
         move |drive_path: PathBuf| {
             let import_context = import_context.clone();
             let drive_path_str = drive_path.to_string_lossy().to_string();
-
             spawn(async move {
                 use crate::cd::CdDrive;
-
                 let drive = CdDrive {
                     device_path: drive_path.clone(),
                     name: drive_path_str.clone(),
                 };
-
                 match drive.read_toc() {
                     Ok(toc) => {
-                        // Store CD info for display
                         import_context.set_cd_toc_info(Some((
                             toc.disc_id.clone(),
                             toc.first_track,
                             toc.last_track,
                         )));
-
-                        // Load CD for import using high-level method
                         if let Err(e) = import_context
                             .load_cd_for_import(drive_path_str, toc.disc_id)
                             .await
@@ -69,7 +59,6 @@ pub fn CdImport() -> Element {
             });
         }
     };
-
     let on_confirm_from_manual = {
         let import_context = import_context.clone();
         move |candidate: MatchCandidate| {
@@ -85,17 +74,14 @@ pub fn CdImport() -> Element {
             });
         }
     };
-
     let on_change_folder = {
         let import_context_clone = import_context.clone();
         EventHandler::new(move |()| {
             import_context_clone.reset();
         })
     };
-
     rsx! {
         div { class: "space-y-6",
-            // Phase 1: CD Drive Selection
             if *import_phase.read() == ImportPhase::FolderSelection {
                 CdRipper {
                     on_drive_select,
@@ -108,7 +94,6 @@ pub fn CdImport() -> Element {
                 }
             } else {
                 div { class: "space-y-6",
-                    // Show selected CD
                     SelectedSource {
                         title: "Selected CD".to_string(),
                         path: folder_path,
@@ -134,8 +119,6 @@ pub fn CdImport() -> Element {
                             }
                         }) } else { None },
                     }
-
-                    // Phase 2: Exact Lookup
                     if *import_phase.read() == ImportPhase::ExactLookup {
                         ExactLookup {
                             is_looking_up,
@@ -149,10 +132,7 @@ pub fn CdImport() -> Element {
                             },
                         }
                     }
-
-                    // Phase 3: Manual Search
                     if *import_phase.read() == ImportPhase::ManualSearch {
-                        // Show DiscID lookup error with retry button if applicable
                         if import_context.discid_lookup_error().read().is_some() {
                             DiscIdLookupError {
                                 error_message: import_context.discid_lookup_error(),
@@ -169,7 +149,6 @@ pub fn CdImport() -> Element {
                                 },
                             }
                         }
-
                         ManualSearch {
                             detected_metadata,
                             selected_match_index,
@@ -187,8 +166,6 @@ pub fn CdImport() -> Element {
                             },
                         }
                     }
-
-                    // Phase 4: Confirmation
                     if *import_phase.read() == ImportPhase::Confirmation {
                         Confirmation {
                             confirmed_candidate,
@@ -208,8 +185,6 @@ pub fn CdImport() -> Element {
                             },
                         }
                     }
-
-                    // Error messages
                     ErrorDisplay {
                         error_message: import_error_message,
                         duplicate_album_id,

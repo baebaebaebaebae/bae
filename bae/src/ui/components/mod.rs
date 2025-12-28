@@ -17,7 +17,6 @@ pub mod queue_sidebar;
 pub mod settings;
 pub mod title_bar;
 pub mod torrent_hooks;
-
 pub use album_detail::AlbumDetail;
 pub use app::App;
 pub use import_hooks::use_track_progress;

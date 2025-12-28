@@ -1,3 +1,5 @@
+use super::super::dialog_context::DialogContext;
+use super::album_art::AlbumArt;
 use crate::db::DbAlbum;
 use crate::library::use_library_manager;
 use crate::ui::image_url;
@@ -5,10 +7,6 @@ use crate::AppContext;
 use dioxus::prelude::*;
 use rfd::AsyncFileDialog;
 use tracing::error;
-
-use super::super::dialog_context::DialogContext;
-use super::album_art::AlbumArt;
-
 #[component]
 pub fn AlbumCoverSection(
     album: DbAlbum,
@@ -26,15 +24,12 @@ pub fn AlbumCoverSection(
     let mut show_dropdown = use_signal(|| false);
     let mut hover_cover = use_signal(|| false);
     let mut show_release_info_modal = use_signal(|| None::<String>);
-
-    // Determine cover URL with fallback to cover_art_url
     let cover_url = album
         .cover_image_id
         .as_ref()
         .map(|id| image_url(id))
         .or_else(|| album.cover_art_url.clone());
     let is_ephemeral_cover = album.cover_image_id.is_none() && album.cover_art_url.is_some();
-
     rsx! {
         div {
             class: "mb-6 relative",
@@ -46,8 +41,6 @@ pub fn AlbumCoverSection(
                 import_progress,
                 is_ephemeral: is_ephemeral_cover,
             }
-
-            // Three dot menu button
             if hover_cover() || show_dropdown() {
                 div { class: "absolute top-2 right-2 z-10",
                     button {
@@ -66,12 +59,8 @@ pub fn AlbumCoverSection(
                             div { class: "w-1 h-1 bg-white rounded-full" }
                         }
                     }
-
-                    // Dropdown menu
                     if show_dropdown() {
                         div { class: "absolute top-full right-0 mt-2 bg-gray-700 rounded-lg shadow-lg overflow-hidden z-20 border border-gray-600 min-w-[160px]",
-
-                            // Show release actions if there's only one release
                             if has_single_release {
                                 if let Some(ref release_id) = first_release_id {
                                     button {
@@ -111,14 +100,12 @@ pub fn AlbumCoverSection(
                                                     spawn(async move {
                                                         is_exporting.set(true);
                                                         export_error.set(None);
-
                                                         if let Some(folder_handle) = AsyncFileDialog::new()
                                                             .set_title("Select Export Directory")
                                                             .pick_folder()
                                                             .await
                                                         {
                                                             let target_dir = folder_handle.path().to_path_buf();
-
                                                             match library_manager
                                                                 .get()
                                                                 .export_release(
@@ -207,16 +194,12 @@ pub fn AlbumCoverSection(
                 }
             }
         }
-
-        // Click outside to close dropdown
         if show_dropdown() {
             div {
                 class: "fixed inset-0 z-[5]",
                 onclick: move |_| show_dropdown.set(false),
             }
         }
-
-        // Release Info Modal
         if let Some(release_id) = show_release_info_modal() {
             super::ReleaseInfoModal {
                 album: album.clone(),

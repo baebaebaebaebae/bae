@@ -1,6 +1,5 @@
 use crate::ui::Route;
 use dioxus::prelude::*;
-
 /// Display DiscID lookup error with retry button
 #[component]
 pub fn DiscIdLookupError(
@@ -12,7 +11,6 @@ pub fn DiscIdLookupError(
         rsx! {
             div { class: "bg-amber-900/30 border border-amber-700/50 rounded-lg p-4 mb-4",
                 div { class: "flex items-start gap-3",
-                    // Warning icon
                     svg {
                         class: "w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5",
                         fill: "none",
@@ -47,14 +45,12 @@ pub fn DiscIdLookupError(
         rsx! {}
     }
 }
-
 #[component]
 pub fn ErrorDisplay(
     error_message: ReadSignal<Option<String>>,
     duplicate_album_id: ReadSignal<Option<String>>,
 ) -> Element {
     let navigator = use_navigator();
-
     if let Some(ref error) = error_message.read().as_ref() {
         rsx! {
             div { class: "bg-red-50 border border-red-200 rounded-lg p-4",

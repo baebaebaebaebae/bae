@@ -4,7 +4,6 @@ mod error_display;
 mod exact_lookup;
 mod manual_search;
 mod selected_source;
-
 pub use confirmation::Confirmation;
 pub use detecting_metadata::DetectingMetadata;
 pub use error_display::{DiscIdLookupError, ErrorDisplay};

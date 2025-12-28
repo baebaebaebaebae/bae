@@ -2,21 +2,17 @@ use crate::db::{DbAlbum, DbFile, DbImage, DbRelease};
 use crate::library::use_library_manager;
 use dioxus::prelude::*;
 use tracing::error;
-
 #[derive(Clone, Copy, PartialEq)]
 enum Tab {
     Details,
     Files,
     Gallery,
 }
-
 /// Modal component with tabs for release details and files
 #[component]
 pub fn ReleaseInfoModal(album: DbAlbum, release_id: String, on_close: EventHandler<()>) -> Element {
     let mut active_tab = use_signal(|| Tab::Details);
     let library_manager = use_library_manager();
-
-    // Fetch release data
     let release = use_signal(|| None::<DbRelease>);
     let files = use_signal(Vec::<DbFile>::new);
     let images = use_signal(Vec::<DbImage>::new);
@@ -24,14 +20,11 @@ pub fn ReleaseInfoModal(album: DbAlbum, release_id: String, on_close: EventHandl
     let is_loading_images = use_signal(|| false);
     let error_message = use_signal(|| None::<String>);
     let images_error = use_signal(|| None::<String>);
-
-    // Fetch release details
     use_effect({
         let release_id_clone = release_id.clone();
         let library_manager_clone = library_manager.clone();
         let mut release_signal = release;
         let album_id = album.id.clone();
-
         move || {
             let release_id = release_id_clone.clone();
             let library_manager = library_manager_clone.clone();
@@ -54,8 +47,6 @@ pub fn ReleaseInfoModal(album: DbAlbum, release_id: String, on_close: EventHandl
             });
         }
     });
-
-    // Fetch files when Files tab is active
     use_effect({
         let release_id_clone = release_id.clone();
         let library_manager_clone = library_manager.clone();
@@ -63,7 +54,6 @@ pub fn ReleaseInfoModal(album: DbAlbum, release_id: String, on_close: EventHandl
         let mut is_loading_signal = is_loading_files;
         let mut error_message_signal = error_message;
         let tab = *active_tab.read();
-
         move || {
             if tab == Tab::Files {
                 let release_id = release_id_clone.clone();
@@ -71,7 +61,6 @@ pub fn ReleaseInfoModal(album: DbAlbum, release_id: String, on_close: EventHandl
                 spawn(async move {
                     is_loading_signal.set(true);
                     error_message_signal.set(None);
-
                     match library_manager
                         .get()
                         .get_files_for_release(&release_id)
@@ -93,8 +82,6 @@ pub fn ReleaseInfoModal(album: DbAlbum, release_id: String, on_close: EventHandl
             }
         }
     });
-
-    // Fetch images when Gallery tab is active
     use_effect({
         let release_id_clone = release_id.clone();
         let library_manager_clone = library_manager.clone();
@@ -102,7 +89,6 @@ pub fn ReleaseInfoModal(album: DbAlbum, release_id: String, on_close: EventHandl
         let mut is_loading_signal = is_loading_images;
         let mut error_signal = images_error;
         let tab = *active_tab.read();
-
         move || {
             if tab == Tab::Gallery {
                 let release_id = release_id_clone.clone();
@@ -110,7 +96,6 @@ pub fn ReleaseInfoModal(album: DbAlbum, release_id: String, on_close: EventHandl
                 spawn(async move {
                     is_loading_signal.set(true);
                     error_signal.set(None);
-
                     match library_manager
                         .get()
                         .get_images_for_release(&release_id)
@@ -130,21 +115,14 @@ pub fn ReleaseInfoModal(album: DbAlbum, release_id: String, on_close: EventHandl
             }
         }
     });
-
     let current_tab = *active_tab.read();
-
     rsx! {
-        // Modal overlay
         div {
             class: "fixed inset-0 bg-black/50 flex items-center justify-center z-50",
             onclick: move |_| on_close.call(()),
-
-            // Modal content
             div {
                 class: "bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col",
                 onclick: move |e| e.stop_propagation(),
-
-                // Header with tabs
                 div { class: "border-b border-gray-700",
                     div { class: "flex items-center justify-between px-6 pt-6 pb-4",
                         h2 { class: "text-xl font-bold text-white", "Release Info" }
@@ -154,8 +132,6 @@ pub fn ReleaseInfoModal(album: DbAlbum, release_id: String, on_close: EventHandl
                             "✕"
                         }
                     }
-
-                    // Tabs
                     div { class: "flex px-6",
                         button {
                             class: if current_tab == Tab::Details { "px-4 py-2 text-sm font-medium text-white border-b-2 border-blue-500" } else { "px-4 py-2 text-sm font-medium text-gray-400 hover:text-white border-b-2 border-transparent" },
@@ -174,8 +150,6 @@ pub fn ReleaseInfoModal(album: DbAlbum, release_id: String, on_close: EventHandl
                         }
                     }
                 }
-
-                // Tab content
                 div { class: "p-6 overflow-y-auto flex-1",
                     match current_tab {
                         Tab::Details => rsx! {
@@ -193,14 +167,11 @@ pub fn ReleaseInfoModal(album: DbAlbum, release_id: String, on_close: EventHandl
         }
     }
 }
-
 #[component]
 fn DetailsTab(album: DbAlbum, release: Option<DbRelease>) -> Element {
     if let Some(release) = release {
         rsx! {
             div { class: "space-y-4",
-
-                // Release year and format
                 if release.year.is_some() || release.format.is_some() {
                     div {
                         if let Some(year) = release.year {
@@ -214,8 +185,6 @@ fn DetailsTab(album: DbAlbum, release: Option<DbRelease>) -> Element {
                         }
                     }
                 }
-
-                // Label and catalog number
                 if release.label.is_some() || release.catalog_number.is_some() {
                     div { class: "text-sm text-gray-400",
                         if let Some(ref label) = release.label {
@@ -229,25 +198,18 @@ fn DetailsTab(album: DbAlbum, release: Option<DbRelease>) -> Element {
                         }
                     }
                 }
-
-                // Country
                 if let Some(ref country) = release.country {
                     div { class: "text-sm text-gray-400",
                         span { "{country}" }
                     }
                 }
-
-                // Barcode
                 if let Some(ref barcode) = release.barcode {
                     div { class: "text-sm text-gray-400",
                         span { class: "font-medium", "Barcode: " }
                         span { class: "font-mono", "{barcode}" }
                     }
                 }
-
-                // External links
                 div { class: "pt-4 border-t border-gray-700 space-y-2",
-                    // MusicBrainz link
                     if let Some(ref mb_release) = album.musicbrainz_release {
                         a {
                             href: "https://musicbrainz.org/release/{mb_release.release_id}",
@@ -257,8 +219,6 @@ fn DetailsTab(album: DbAlbum, release: Option<DbRelease>) -> Element {
                             span { "View on MusicBrainz" }
                         }
                     }
-
-                    // Discogs link
                     if let Some(ref discogs) = album.discogs_release {
                         a {
                             href: "https://www.discogs.com/release/{discogs.release_id}",
@@ -277,7 +237,6 @@ fn DetailsTab(album: DbAlbum, release: Option<DbRelease>) -> Element {
         }
     }
 }
-
 #[component]
 fn FilesTab(
     files: ReadSignal<Vec<DbFile>>,
@@ -312,7 +271,6 @@ fn FilesTab(
         }
     }
 }
-
 fn format_file_size(bytes: i64) -> String {
     if bytes < 1024 {
         format!("{} B", bytes)
@@ -324,7 +282,6 @@ fn format_file_size(bytes: i64) -> String {
         format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
     }
 }
-
 #[component]
 fn GalleryTab(
     images: ReadSignal<Vec<DbImage>>,
@@ -334,7 +291,6 @@ fn GalleryTab(
     let images = images();
     let is_loading = is_loading();
     let error_message = error_message();
-
     rsx! {
         if is_loading {
             div { class: "text-gray-400 text-center py-8", "Loading images..." }
@@ -351,12 +307,7 @@ fn GalleryTab(
         }
     }
 }
-
 fn render_gallery_image(image: &DbImage) -> Element {
-    // For now, we don't have the full path context, so we'll need to construct
-    // a URL that works. Since DbImage stores relative filenames, we'd need
-    // the release's source path to construct the full URL.
-    // TODO: Store full path or add a way to resolve image paths
     let is_cover = image.is_cover;
     let filename = image.filename.clone();
     let source_label = match image.source {
@@ -364,17 +315,13 @@ fn render_gallery_image(image: &DbImage) -> Element {
         crate::db::ImageSource::MusicBrainz => "MusicBrainz",
         crate::db::ImageSource::Discogs => "Discogs",
     };
-
     rsx! {
         div { class: "relative group",
             div { class: if is_cover { "aspect-square bg-gray-700 rounded-lg overflow-hidden ring-2 ring-blue-500" } else { "aspect-square bg-gray-700 rounded-lg overflow-hidden" },
-                // Placeholder - actual image serving will be implemented when we have
-                // chunk-based image retrieval or local path resolution
                 div { class: "w-full h-full flex items-center justify-center text-gray-500",
                     "🖼️"
                 }
             }
-            // Overlay with info
             div { class: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2",
                 div { class: "text-xs text-white truncate", {filename} }
                 div { class: "flex items-center gap-2 mt-1",

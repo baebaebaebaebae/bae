@@ -1,7 +1,6 @@
 use crate::library::use_library_manager;
 use dioxus::prelude::*;
 use tracing::error;
-
 #[component]
 pub fn DeleteReleaseDialog(
     release_id: String,
@@ -11,7 +10,6 @@ pub fn DeleteReleaseDialog(
     on_cancel: EventHandler<()>,
 ) -> Element {
     let library_manager = use_library_manager();
-
     rsx! {
         div {
             class: "fixed inset-0 bg-black/50 flex items-center justify-center z-50",

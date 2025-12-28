@@ -1,32 +1,24 @@
-// Internal modules needed for compilation (hidden from docs)
 #[doc(hidden)]
 pub mod config;
 #[doc(hidden)]
 pub mod ui;
-
-// Re-export UIContext at crate root for easier access
 pub use ui::AppContext;
-
 pub mod cache;
 pub mod cd;
 pub mod cloud_storage;
+pub mod cue_flac;
 pub mod db;
 pub mod discogs;
 pub mod encryption;
+pub mod flac_decoder;
+pub mod flac_encoder;
 pub mod import;
 pub mod library;
 pub mod musicbrainz;
 pub mod network;
-pub mod storage;
-pub mod torrent;
-
-// Optional modules
-pub mod cue_flac;
-pub mod flac_decoder;
-pub mod flac_encoder;
 pub mod playback;
+pub mod storage;
 pub mod subsonic;
-
-// Test support (only available with test-utils feature)
 #[cfg(feature = "test-utils")]
 pub mod test_support;
+pub mod torrent;

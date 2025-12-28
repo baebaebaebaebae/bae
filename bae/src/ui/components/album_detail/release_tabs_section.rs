@@ -1,8 +1,6 @@
+use super::release_action_menu::ReleaseActionMenu;
 use crate::db::{DbRelease, DbTorrent};
 use dioxus::prelude::*;
-
-use super::release_action_menu::ReleaseActionMenu;
-
 #[component]
 pub fn ReleaseTabsSection(
     releases: Vec<DbRelease>,
@@ -18,7 +16,6 @@ pub fn ReleaseTabsSection(
     >,
 ) -> Element {
     let mut show_release_dropdown = use_signal(|| None::<String>);
-
     rsx! {
         div { class: "mb-6 border-b border-gray-700",
             div { class: "flex gap-2 overflow-x-auto",
@@ -28,15 +25,6 @@ pub fn ReleaseTabsSection(
                         let release_id = release.id.clone();
                         let release_id_for_menu = release.id.clone();
                         rsx! {
-
-                            // Release dropdown menu
-
-
-
-
-
-
-
                             div { key: "{release.id}", class: "flex items-center gap-2 relative",
                                 button {
                                     class: if is_selected { "px-4 py-2 text-sm font-medium text-blue-400 border-b-2 border-blue-400 whitespace-nowrap" } else { "px-4 py-2 text-sm font-medium text-gray-400 hover:text-gray-300 border-b-2 border-transparent whitespace-nowrap" },
@@ -114,8 +102,6 @@ pub fn ReleaseTabsSection(
                 }
             }
         }
-
-        // Click outside to close dropdown
         if show_release_dropdown().is_some() {
             div {
                 class: "fixed inset-0 z-[5]",

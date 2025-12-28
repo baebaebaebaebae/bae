@@ -10,13 +10,10 @@ use crate::ui::import_context::{detection, ImportContext, ImportPhase};
 use dioxus::prelude::*;
 use std::rc::Rc;
 use tracing::{info, warn};
-
 #[component]
 pub fn FolderImport() -> Element {
     let import_context = use_context::<Rc<ImportContext>>();
     let navigator = use_navigator();
-
-    // Get signals via getters (signals are Copy)
     let folder_path = import_context.folder_path();
     let detected_metadata = import_context.detected_metadata();
     let import_phase = import_context.import_phase();
@@ -28,7 +25,6 @@ pub fn FolderImport() -> Element {
     let discid_lookup_error = import_context.discid_lookup_error();
     let duplicate_album_id = import_context.duplicate_album_id();
     let folder_files = import_context.folder_files();
-
     let on_folder_select = {
         let import_context = import_context.clone();
         move |path: String| {
@@ -40,7 +36,6 @@ pub fn FolderImport() -> Element {
             });
         }
     };
-
     let on_confirm_from_manual = {
         let import_context = import_context.clone();
         move |candidate: MatchCandidate| {
@@ -56,17 +51,14 @@ pub fn FolderImport() -> Element {
             });
         }
     };
-
     let on_change_folder = {
         let import_context = import_context.clone();
         EventHandler::new(move |()| {
             import_context.reset();
         })
     };
-
     rsx! {
         div { class: "space-y-6",
-            // Phase 1: Folder Selection
             if *import_phase.read() == ImportPhase::FolderSelection {
                 FolderSelector {
                     on_select: on_folder_select,
@@ -81,7 +73,6 @@ pub fn FolderImport() -> Element {
                 ReleaseSelector {}
             } else {
                 div { class: "space-y-6",
-                    // Show selected folder
                     SelectedSource {
                         title: "Selected Folder".to_string(),
                         path: folder_path,
@@ -98,13 +89,9 @@ pub fn FolderImport() -> Element {
                             }
                         }) } else { None },
                     }
-
-                    // Show detecting message during MusicBrainz lookup
                     if *is_looking_up.read() && *import_phase.read() == ImportPhase::MetadataDetection {
                         DetectingMetadata { message: "Looking up release...".to_string() }
                     }
-
-                    // Show DiscID lookup error with retry button (when in ManualSearch after a failed lookup)
                     if *import_phase.read() == ImportPhase::ManualSearch
                         && discid_lookup_error.read().is_some()
                     {
@@ -123,8 +110,6 @@ pub fn FolderImport() -> Element {
                             },
                         }
                     }
-
-                    // Phase 2: Exact Lookup
                     if *import_phase.read() == ImportPhase::ExactLookup {
                         ExactLookup {
                             is_looking_up,
@@ -138,8 +123,6 @@ pub fn FolderImport() -> Element {
                             },
                         }
                     }
-
-                    // Phase 3: Manual Search
                     if *import_phase.read() == ImportPhase::ManualSearch {
                         ManualSearch {
                             detected_metadata,
@@ -158,8 +141,6 @@ pub fn FolderImport() -> Element {
                             },
                         }
                     }
-
-                    // Phase 4: Confirmation
                     if *import_phase.read() == ImportPhase::Confirmation {
                         Confirmation {
                             confirmed_candidate,
@@ -179,8 +160,6 @@ pub fn FolderImport() -> Element {
                             },
                         }
                     }
-
-                    // Error messages
                     ErrorDisplay {
                         error_message: import_error_message,
                         duplicate_album_id,

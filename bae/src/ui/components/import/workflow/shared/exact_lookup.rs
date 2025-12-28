@@ -1,7 +1,6 @@
 use super::super::match_list::MatchList;
 use crate::import::MatchCandidate;
 use dioxus::prelude::*;
-
 #[component]
 pub fn ExactLookup(
     is_looking_up: ReadSignal<bool>,

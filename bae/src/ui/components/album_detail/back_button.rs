@@ -1,6 +1,5 @@
 use crate::ui::Route;
 use dioxus::prelude::*;
-
 /// Back to library navigation button
 #[component]
 pub fn BackButton() -> Element {

@@ -1,36 +1,27 @@
 //! Storage trait and implementation
-
+use crate::cloud_storage::CloudStorageManager;
+use crate::db::{Database, DbChunk, DbFile, DbFileChunk, DbStorageProfile, StorageLocation};
+use crate::encryption::EncryptionService;
 use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
-
-use crate::cloud_storage::CloudStorageManager;
-use crate::db::{Database, DbChunk, DbFile, DbFileChunk, DbStorageProfile, StorageLocation};
-use crate::encryption::EncryptionService;
-
 #[derive(Error, Debug)]
 pub enum StorageError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-
     #[error("Storage not configured")]
     NotConfigured,
-
     #[error("Encryption error: {0}")]
     Encryption(String),
-
     #[error("Cloud storage error: {0}")]
     Cloud(String),
-
     #[error("Database error: {0}")]
     Database(String),
 }
-
 /// Progress callback type: (bytes_written, total_bytes)
 pub type ProgressCallback = Box<dyn Fn(usize, usize) + Send + Sync>;
-
 /// Trait for writing release files to storage during import
 ///
 /// Abstracts over different storage configurations (local/cloud, encrypted/plain, chunked/raw).
@@ -53,7 +44,6 @@ pub trait ReleaseStorage: Send + Sync {
         on_progress: ProgressCallback,
     ) -> Result<i32, StorageError>;
 }
-
 /// Storage implementation that applies transforms based on StorageProfile flags
 ///
 /// Handles all 8 combinations of (local/cloud) × (encrypted/plain) × (chunked/raw).
@@ -66,7 +56,6 @@ pub struct ReleaseStorageImpl {
     database: Option<Arc<Database>>,
     chunk_size_bytes: usize,
 }
-
 impl ReleaseStorageImpl {
     /// Create fully configured storage (all features)
     pub fn new_full(
@@ -84,43 +73,34 @@ impl ReleaseStorageImpl {
             chunk_size_bytes,
         }
     }
-
     /// Get the local path for a release's files
     fn release_path(&self, release_id: &str) -> PathBuf {
         PathBuf::from(&self.profile.location_path).join(release_id)
     }
-
     /// Get the full path for a specific file
     fn file_path(&self, release_id: &str, filename: &str) -> PathBuf {
         self.release_path(release_id).join(filename)
     }
-
     /// Encrypt data if encryption is enabled
     fn encrypt_if_needed(&self, data: &[u8]) -> Result<Vec<u8>, StorageError> {
         if !self.profile.encrypted {
             return Ok(data.to_vec());
         }
-
         let encryption = self
             .encryption
             .as_ref()
             .ok_or(StorageError::NotConfigured)?;
-
         let (ciphertext, nonce) = encryption
             .encrypt(data)
             .map_err(|e| StorageError::Encryption(e.to_string()))?;
-
-        // Prepend nonce to ciphertext (12 bytes nonce + ciphertext)
         let mut result = nonce;
         result.extend(ciphertext);
         Ok(result)
     }
-
     /// Generate a storage key for cloud storage
     fn cloud_key(&self, release_id: &str, filename: &str) -> String {
         format!("{}/{}", release_id, filename)
     }
-
     /// Write chunked file data with progress reporting (internal helper).
     async fn write_chunked<F>(
         &self,
@@ -134,10 +114,7 @@ impl ReleaseStorageImpl {
         F: Fn(usize, usize) + Send + Sync + ?Sized,
     {
         use futures::stream::{self, StreamExt};
-
         let db = self.database.clone().ok_or(StorageError::NotConfigured)?;
-
-        // Create file record
         let format = std::path::Path::new(filename)
             .extension()
             .and_then(|e| e.to_str())
@@ -145,39 +122,26 @@ impl ReleaseStorageImpl {
             .to_lowercase();
         let db_file = DbFile::new(release_id, filename, data.len() as i64, &format);
         let file_id = db_file.id.clone();
-
         db.insert_file(&db_file)
             .await
             .map_err(|e| StorageError::Database(e.to_string()))?;
-
         let num_chunks = data.len().div_ceil(self.chunk_size_bytes);
         let total_bytes = data.len();
-
-        // Report initial progress
         on_progress(0, total_bytes);
-
-        // Phase 1: Prepare all chunks (encrypt if needed)
         let mut prepared_chunks: Vec<(String, i32, Vec<u8>, usize, usize)> =
             Vec::with_capacity(num_chunks);
         let mut offset = 0usize;
         let mut chunk_index = start_chunk_index;
-
         while offset < data.len() {
             let end = std::cmp::min(offset + self.chunk_size_bytes, data.len());
             let chunk_data = &data[offset..end];
             let original_len = chunk_data.len();
-
             let chunk_to_store = self.encrypt_if_needed(chunk_data)?;
             let chunk_id = Uuid::new_v4().to_string();
-
-            // Track cumulative bytes for progress (end position of this chunk)
             prepared_chunks.push((chunk_id, chunk_index, chunk_to_store, original_len, end));
-
             offset = end;
             chunk_index += 1;
         }
-
-        // Create directory once for local storage
         let chunks_dir = match self.profile.location {
             StorageLocation::Local => {
                 let dir = self.release_path(release_id).join("chunks");
@@ -186,14 +150,9 @@ impl ReleaseStorageImpl {
             }
             StorageLocation::Cloud => None,
         };
-
         let cloud = self.cloud.clone();
         let release_id_owned = release_id.to_string();
-
-        // Phase 2: Write chunks in parallel with per-chunk progress reporting
-        // Use atomic counter to track progress across concurrent chunk completions
         let bytes_written = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-
         let results: Vec<Result<(), StorageError>> = stream::iter(prepared_chunks.into_iter().map(
             |(chunk_id, idx, encrypted_data, original_len, cumulative_bytes)| {
                 let chunks_dir = chunks_dir.clone();
@@ -202,9 +161,7 @@ impl ReleaseStorageImpl {
                 let release_id = release_id_owned.clone();
                 let file_id = file_id.clone();
                 let bytes_written = bytes_written.clone();
-
                 async move {
-                    // Write to storage
                     let storage_location = if let Some(dir) = chunks_dir {
                         let chunk_path = dir.join(&chunk_id);
                         tokio::fs::write(&chunk_path, &encrypted_data).await?;
@@ -217,8 +174,6 @@ impl ReleaseStorageImpl {
                             .await
                             .map_err(|e| StorageError::Cloud(e.to_string()))?
                     };
-
-                    // Insert chunk record
                     let db_chunk = DbChunk::from_release_chunk(
                         &release_id,
                         &chunk_id,
@@ -229,24 +184,18 @@ impl ReleaseStorageImpl {
                     db.insert_chunk(&db_chunk)
                         .await
                         .map_err(|e| StorageError::Database(e.to_string()))?;
-
-                    // Insert file-chunk mapping
                     let file_chunk =
                         DbFileChunk::new(&file_id, &chunk_id, idx, 0, original_len as i64);
                     db.insert_file_chunk(&file_chunk)
                         .await
                         .map_err(|e| StorageError::Database(e.to_string()))?;
-
-                    // Update progress (chunks complete out of order, so use max)
                     bytes_written.fetch_max(cumulative_bytes, std::sync::atomic::Ordering::SeqCst);
-
                     Ok(())
                 }
             },
         ))
         .buffer_unordered(16)
         .inspect(|result| {
-            // Report progress after each chunk completes (success or failure)
             if result.is_ok() {
                 let current = bytes_written.load(std::sync::atomic::Ordering::SeqCst);
                 on_progress(current, total_bytes);
@@ -254,15 +203,11 @@ impl ReleaseStorageImpl {
         })
         .collect()
         .await;
-
-        // Check for errors
         for result in results {
             result?;
         }
-
         Ok(chunk_index)
     }
-
     /// Write non-chunked file with progress reporting (internal helper).
     async fn write_non_chunked<F>(
         &self,
@@ -275,34 +220,22 @@ impl ReleaseStorageImpl {
         F: Fn(usize, usize) + Send + Sync + ?Sized,
     {
         use tokio::io::AsyncWriteExt;
-
         let total_bytes = data.len();
-
-        // Report initial progress
         on_progress(0, total_bytes);
-
-        // Encrypt whole file if needed
         let data_to_store = self.encrypt_if_needed(data)?;
-
         let storage_path = match self.profile.location {
             StorageLocation::Local => {
                 let path = self.file_path(release_id, filename);
                 if let Some(parent) = path.parent() {
                     tokio::fs::create_dir_all(parent).await?;
                 }
-
-                // Stream write in 1MB batches for progress reporting
-                let batch_size = 1_048_576; // 1MB
+                let batch_size = 1_048_576;
                 let file = tokio::fs::File::create(&path).await?;
                 let mut writer = tokio::io::BufWriter::new(file);
-
                 let mut bytes_written = 0usize;
                 for chunk in data_to_store.chunks(batch_size) {
                     writer.write_all(chunk).await?;
                     bytes_written += chunk.len();
-
-                    // Report progress based on original data size (pre-encryption)
-                    // Scale from encrypted size back to original size
                     let progress_bytes = if data_to_store.len() != data.len() {
                         (bytes_written as f64 * data.len() as f64 / data_to_store.len() as f64)
                             as usize
@@ -312,25 +245,19 @@ impl ReleaseStorageImpl {
                     on_progress(progress_bytes.min(total_bytes), total_bytes);
                 }
                 writer.flush().await?;
-
                 path.display().to_string()
             }
             StorageLocation::Cloud => {
-                // For cloud, we upload atomically (no streaming progress within upload)
-                // But we report 0% then 100%
                 let cloud = self.cloud.as_ref().ok_or(StorageError::NotConfigured)?;
                 let key = self.cloud_key(release_id, filename);
                 let storage_location = cloud
                     .upload_chunk_data(&key, &data_to_store)
                     .await
                     .map_err(|e| StorageError::Cloud(e.to_string()))?;
-
                 on_progress(total_bytes, total_bytes);
                 storage_location
             }
         };
-
-        // Create DbFile record
         if let Some(db) = &self.database {
             let format = std::path::Path::new(filename)
                 .extension()
@@ -339,16 +266,13 @@ impl ReleaseStorageImpl {
                 .to_lowercase();
             let mut db_file = DbFile::new(release_id, filename, data.len() as i64, &format);
             db_file.source_path = Some(storage_path);
-
             db.insert_file(&db_file)
                 .await
                 .map_err(|e| StorageError::Database(e.to_string()))?;
         }
-
         Ok(())
     }
 }
-
 #[async_trait]
 impl ReleaseStorage for ReleaseStorageImpl {
     async fn write_file(

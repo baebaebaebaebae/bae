@@ -5,7 +5,6 @@ use crate::ui::Route;
 use dioxus::prelude::*;
 use std::collections::HashMap;
 use tracing::debug;
-
 /// Library browser page
 #[component]
 pub fn Library() -> Element {
@@ -15,8 +14,6 @@ pub fn Library() -> Element {
     let mut album_artists = use_signal(HashMap::<String, Vec<DbArtist>>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
-
-    // Load albums and their artists on component mount
     use_effect(move || {
         debug!("Starting load_albums effect");
         let library_manager = library_manager.clone();
@@ -24,10 +21,8 @@ pub fn Library() -> Element {
             debug!("Inside async spawn, fetching albums");
             loading.set(true);
             error.set(None);
-
             match library_manager.get().get_albums().await {
                 Ok(album_list) => {
-                    // Load artists for each album
                     let mut artists_map = HashMap::new();
                     for album in &album_list {
                         if let Ok(artists) =
@@ -36,7 +31,6 @@ pub fn Library() -> Element {
                             artists_map.insert(album.id.clone(), artists);
                         }
                     }
-
                     album_artists.set(artists_map);
                     albums.set(album_list);
                     loading.set(false);
@@ -48,11 +42,9 @@ pub fn Library() -> Element {
             }
         });
     });
-
     rsx! {
         div { class: "container mx-auto p-6",
             h1 { class: "text-3xl font-bold text-white mb-6", "Music Library" }
-
             if loading() {
                 div { class: "flex justify-center items-center py-12",
                     div { class: "animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500" }
@@ -82,7 +74,6 @@ pub fn Library() -> Element {
         }
     }
 }
-
 /// Grid component to display albums
 #[component]
 fn AlbumGrid(albums: Vec<DbAlbum>, album_artists: HashMap<String, Vec<DbArtist>>) -> Element {

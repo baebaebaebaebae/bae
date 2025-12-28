@@ -4,7 +4,6 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use thiserror::Error;
 use tracing::{error, warn};
-
 #[derive(Error, Debug)]
 pub enum DiscogsError {
     #[error("HTTP request failed: {0}")]
@@ -18,13 +17,11 @@ pub enum DiscogsError {
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 }
-
 /// Discogs search response wrapper
 #[derive(Debug, Deserialize)]
 struct SearchResponse {
     results: Vec<DiscogsSearchResult>,
 }
-
 /// Search parameters for flexible Discogs queries
 #[derive(Debug, Clone, Default)]
 pub struct DiscogsSearchParams {
@@ -37,7 +34,6 @@ pub struct DiscogsSearchParams {
     pub format: Option<String>,
     pub country: Option<String>,
 }
-
 /// Individual search result
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct DiscogsSearchResult {
@@ -55,14 +51,12 @@ pub struct DiscogsSearchResult {
     #[serde(rename = "type")]
     pub result_type: String,
 }
-
 /// Artist credit in Discogs API responses
 #[derive(Debug, Deserialize, Clone)]
 struct ArtistCredit {
     id: u64,
     name: String,
 }
-
 /// Detailed release response from Discogs
 #[derive(Debug, Deserialize)]
 struct ReleaseResponse {
@@ -78,12 +72,10 @@ struct ReleaseResponse {
     tracklist: Option<Vec<TrackResponse>>,
     master_id: Option<u64>,
 }
-
 #[derive(Debug, Deserialize)]
 struct Format {
     name: String,
 }
-
 #[derive(Debug, Deserialize)]
 struct Image {
     #[serde(rename = "type")]
@@ -91,21 +83,18 @@ struct Image {
     uri: String,
     uri150: Option<String>,
 }
-
 #[derive(Debug, Deserialize)]
 struct TrackResponse {
     position: String,
     title: String,
     duration: Option<String>,
 }
-
 #[derive(Clone)]
 pub struct DiscogsClient {
     client: Client,
     api_key: String,
     base_url: String,
 }
-
 impl DiscogsClient {
     pub fn new(api_key: String) -> Self {
         Self {
@@ -114,19 +103,15 @@ impl DiscogsClient {
             base_url: "https://api.discogs.com".to_string(),
         }
     }
-
     /// Flexible search using any combination of supported parameters
     pub async fn search_with_params(
         &self,
         params: &DiscogsSearchParams,
     ) -> Result<Vec<DiscogsSearchResult>, DiscogsError> {
         use tracing::{debug, info, warn};
-
         let url = format!("{}/database/search", self.base_url);
-
         let mut query_params: Vec<(&str, &str)> =
             vec![("type", "release"), ("token", &self.api_key)];
-
         if let Some(ref artist) = params.artist {
             query_params.push(("artist", artist));
         }
@@ -151,9 +136,7 @@ impl DiscogsClient {
         if let Some(ref country) = params.country {
             query_params.push(("country", country));
         }
-
         info!("📡 Discogs API: GET {} with params: {:?}", url, params);
-
         let response = self
             .client
             .get(&url)
@@ -161,13 +144,10 @@ impl DiscogsClient {
             .header("User-Agent", "bae/1.0 +https://github.com/hideselfview/bae")
             .send()
             .await?;
-
         let status = response.status();
         debug!("Response status: {}", status);
-
         if response.status().is_success() {
             let search_response: SearchResponse = response.json().await?;
-
             info!(
                 "✓ Discogs search returned {} total result(s)",
                 search_response.results.len()
@@ -181,13 +161,11 @@ impl DiscogsClient {
                     result.master_id
                 );
             }
-
             let releases: Vec<_> = search_response
                 .results
                 .into_iter()
                 .filter(|r| r.result_type == "release")
                 .collect();
-
             info!("  → {} release(s) after filtering", releases.len());
             Ok(releases)
         } else if response.status() == 429 {
@@ -203,14 +181,11 @@ impl DiscogsClient {
             ))
         }
     }
-
     /// Get detailed information about a specific release
     pub async fn get_release(&self, id: &str) -> Result<DiscogsRelease, DiscogsError> {
         let url = format!("{}/releases/{}", self.base_url, id);
-
         let mut params = HashMap::new();
         params.insert("token", &self.api_key);
-
         let response = self
             .client
             .get(&url)
@@ -218,10 +193,8 @@ impl DiscogsClient {
             .header("User-Agent", "bae/1.0 +https://github.com/yourusername/bae")
             .send()
             .await?;
-
         if response.status().is_success() {
             let release: ReleaseResponse = response.json().await?;
-
             let tracklist = release
                 .tracklist
                 .unwrap_or_default()
@@ -232,7 +205,6 @@ impl DiscogsClient {
                     duration: t.duration,
                 })
                 .collect();
-
             let artists = release
                 .artists
                 .unwrap_or_default()
@@ -242,25 +214,19 @@ impl DiscogsClient {
                     name: a.name,
                 })
                 .collect();
-
             let primary_image = release.images.as_ref().and_then(|images| {
                 images
                     .iter()
                     .find(|img| img.image_type == "primary")
                     .or_else(|| images.first())
             });
-
             let cover_image = primary_image.map(|img| img.uri.clone());
             let thumb =
                 primary_image.and_then(|img| img.uri150.clone().or_else(|| Some(img.uri.clone())));
-
-            // Some releases don't have a master_id (standalone releases)
-            // The caller (import_release) will override this with the correct value anyway
             let master_id = release
                 .master_id
                 .map(|id| id.to_string())
                 .unwrap_or_default();
-
             Ok(DiscogsRelease {
                 id: release.id.to_string(),
                 title: release.title,
@@ -274,7 +240,7 @@ impl DiscogsClient {
                     .map(|f| f.name)
                     .collect(),
                 country: release.country,
-                label: Vec::new(), // Not available in detailed release
+                label: Vec::new(),
                 cover_image,
                 thumb,
                 artists,

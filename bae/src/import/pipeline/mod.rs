@@ -1,21 +1,4 @@
-// Streaming Import Pipeline
-//
-// Five-stage pipeline for album import: Read → Encrypt → Upload → Persist → Track
-//
-// Each stage runs with bounded parallelism via channels:
-// - Reader: Sequential file reading, streaming chunks to encryption
-// - Encryption: Parallel CPU-bound work via spawn_blocking
-// - Upload: Parallel I/O-bound S3 uploads
-// - Persistence: DB writes for chunk metadata
-// - Progress Tracking: Track completion and emit progress events
-//
-// The pipeline ensures bounded memory usage and fail-fast error handling.
-
 pub(super) mod chunk_producer;
-
-use std::collections::HashMap;
-use std::path::PathBuf;
-
 use crate::cloud_storage::CloudStorageManager;
 use crate::db::DbChunk;
 use crate::encryption::{EncryptedChunk, EncryptionService};
@@ -24,14 +7,11 @@ use crate::import::service::ImportConfig;
 use crate::import::types::{CueFlacLayoutData, FileToChunks, TrackFile};
 use crate::library::LibraryManager;
 use futures::stream::{Stream, StreamExt};
+use std::collections::HashMap;
+use std::path::PathBuf;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::error;
-
-// ============================================================================
-// Public API
-// ============================================================================
-
 /// Build the complete streaming pipeline: read → encrypt → upload → persist → track.
 ///
 /// Returns a tuple of (chunk_tx, stream) where:
@@ -58,18 +38,11 @@ pub(super) fn build_import_pipeline(
     impl Stream<Item = Result<(), String>>,
     mpsc::Sender<Result<ChunkData, String>>,
 ) {
-    // Clone library_manager for both persistence and progress tracking stages
     let library_manager_persist = library_manager.clone();
     let library_manager_track = library_manager;
-
-    // Clone release_id for both persistence and progress tracking stages
     let release_id_persist = release_id.clone();
     let release_id_track = release_id.clone();
-
-    // Stage 1: Read files and stream chunks (bounded channel for backpressure)
     let (chunk_tx, chunk_rx) = mpsc::channel::<Result<ChunkData, String>>(10);
-
-    // Stage 2: Consume chunks from channel and encrypt (bounded CPU via spawn_blocking)
     let stream = ReceiverStream::new(chunk_rx)
         .map(move |chunk_data_result| {
             let encryption_service = encryption_service.clone();
@@ -84,7 +57,6 @@ pub(super) fn build_import_pipeline(
             }
         })
         .buffer_unordered(config.max_encrypt_workers)
-        // Stage 3: Upload chunks (bounded I/O)
         .map(move |encrypted_result| {
             let cloud_storage = cloud_storage.clone();
             async move {
@@ -93,11 +65,9 @@ pub(super) fn build_import_pipeline(
             }
         })
         .buffer_unordered(config.max_upload_workers)
-        // Stage 4: Persist chunk metadata to database
         .map(move |upload_result| {
             let release_id = release_id_persist.clone();
             let library_manager = library_manager_persist.clone();
-
             async move {
                 match upload_result {
                     Ok(uploaded_chunk) => {
@@ -111,8 +81,7 @@ pub(super) fn build_import_pipeline(
                 }
             }
         })
-        .buffer_unordered(config.max_db_write_workers) // Allow some parallelism for DB writes
-        // Stage 5: Track progress and emit events
+        .buffer_unordered(config.max_db_write_workers)
         .map(move |persist_result| {
             let library_manager = library_manager_track.clone();
             let progress_tracker = progress_tracker.clone();
@@ -121,7 +90,6 @@ pub(super) fn build_import_pipeline(
             let files_to_chunks_clone = files_to_chunks.clone();
             let chunk_size_bytes_clone = chunk_size_bytes;
             let cue_flac_data_clone = cue_flac_data.clone();
-
             async move {
                 match persist_result {
                     Ok(uploaded_chunk) => {
@@ -141,15 +109,9 @@ pub(super) fn build_import_pipeline(
                 }
             }
         })
-        .buffer_unordered(config.max_db_write_workers); // Controlled parallelism for progress tracking DB writes
-
+        .buffer_unordered(config.max_db_write_workers);
     (stream, chunk_tx)
 }
-
-// ============================================================================
-// Pipeline Data Structures
-// ============================================================================
-
 /// Raw chunk data read from disk.
 ///
 /// Stage 1 output: Reader task produces these by reading files sequentially
@@ -161,7 +123,6 @@ pub(super) struct ChunkData {
     pub(super) chunk_index: i32,
     pub(super) data: Vec<u8>,
 }
-
 /// Encrypted chunk data ready for upload.
 ///
 /// Stage 2 output: Encryption workers produce these by encrypting ChunkData
@@ -174,7 +135,6 @@ pub(super) struct EncryptedChunkData {
     pub(super) chunk_index: i32,
     pub(super) encrypted_data: Vec<u8>,
 }
-
 /// Chunk successfully uploaded to cloud storage.
 ///
 /// Stage 3 output: Upload workers produce these after successfully uploading
@@ -188,11 +148,6 @@ pub(super) struct UploadedChunk {
     pub(super) encrypted_size: usize,
     pub(super) cloud_location: String,
 }
-
-// ============================================================================
-// Pipeline Stage Functions
-// ============================================================================
-
 /// Encrypt a chunk using AES-256-GCM.
 ///
 /// CPU-bound operation called from spawn_blocking to avoid starving async I/O.
@@ -204,18 +159,14 @@ pub(super) fn encrypt_chunk_blocking(
     let (ciphertext, nonce) = encryption_service
         .encrypt(&chunk_data.data)
         .map_err(|e| format!("Encryption failed: {}", e))?;
-
-    // Create EncryptedChunk and serialize to bytes (includes nonce and authentication tag)
     let encrypted_chunk = EncryptedChunk::new(ciphertext, nonce, "master".to_string());
     let encrypted_bytes = encrypted_chunk.to_bytes();
-
     Ok(EncryptedChunkData {
         chunk_id: chunk_data.chunk_id,
         chunk_index: chunk_data.chunk_index,
         encrypted_data: encrypted_bytes,
     })
 }
-
 /// Upload encrypted chunk to cloud storage.
 ///
 /// I/O-bound operation that sends encrypted data to S3 or equivalent.
@@ -228,7 +179,6 @@ pub(super) async fn upload_chunk(
         .upload_chunk_data(&encrypted_chunk.chunk_id, &encrypted_chunk.encrypted_data)
         .await
         .map_err(|e| format!("Upload failed: {}", e))?;
-
     Ok(UploadedChunk {
         chunk_id: encrypted_chunk.chunk_id,
         chunk_index: encrypted_chunk.chunk_index,
@@ -236,7 +186,6 @@ pub(super) async fn upload_chunk(
         cloud_location,
     })
 }
-
 /// Persist chunk metadata to database.
 ///
 /// Stores chunk ID, encrypted size, and cloud location for later retrieval.
@@ -254,17 +203,11 @@ async fn persist_chunk(
         chunk.encrypted_size,
         &chunk.cloud_location,
     );
-
     library_manager
         .add_chunk(&db_chunk)
         .await
         .map_err(|e| format!("Failed to add chunk: {}", e))
 }
-
-// ============================================================================
-// Progress Tracking
-// ============================================================================
-
 /// Stage 5: Track progress and mark completed tracks.
 ///
 /// Final stage of the pipeline. Checks if this chunk completes any tracks,
@@ -279,13 +222,9 @@ async fn track_progress(
     chunk_size_bytes: usize,
     cue_flac_data: &HashMap<PathBuf, CueFlacLayoutData>,
 ) -> Result<(), String> {
-    // Track progress and get newly completed tracks
     let newly_completed_tracks = progress_tracker.on_chunk_complete(uploaded_chunk.chunk_index);
-
-    // Persist metadata and mark newly completed tracks in the database
     let persister = crate::import::metadata_persister::MetadataPersister::new(library_manager);
     for track_id in &newly_completed_tracks {
-        // Persist track metadata before marking complete
         persister
             .persist_track_metadata(
                 release_id,
@@ -297,13 +236,10 @@ async fn track_progress(
             )
             .await
             .map_err(|e| format!("Failed to persist track metadata: {}", e))?;
-
-        // Mark track complete
         library_manager
             .mark_track_complete(track_id)
             .await
             .map_err(|e| format!("Failed to mark track complete: {}", e))?;
     }
-
     Ok(())
 }

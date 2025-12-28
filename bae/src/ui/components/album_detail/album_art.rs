@@ -1,6 +1,5 @@
 use crate::ui::local_file_url;
 use dioxus::prelude::*;
-
 /// Album art with import progress spinner overlay
 /// is_ephemeral: true when showing cover_art_url (temporary) instead of stored cover_image_id
 #[component]
@@ -10,24 +9,18 @@ pub fn AlbumArt(
     import_progress: ReadSignal<Option<u8>>,
     #[props(default = false)] is_ephemeral: bool,
 ) -> Element {
-    // Convert local file paths to bae:// URLs
     let display_url = cover_url.as_ref().map(|url| {
         if url.starts_with('/') {
-            // Local file path - convert to bae:// URL
             local_file_url(url)
         } else {
-            // Already a URL (http://, https://, bae://, etc.)
             url.clone()
         }
     });
-
-    // Ephemeral cover has a soft pulsing glow to indicate "importing"
     let container_class = if is_ephemeral {
         "aspect-square bg-gray-700 rounded-lg flex items-center justify-center overflow-hidden relative animate-pulse-glow"
     } else {
         "aspect-square bg-gray-700 rounded-lg flex items-center justify-center overflow-hidden relative"
     };
-
     rsx! {
         div { class: "{container_class}",
             if let Some(ref url) = display_url {
@@ -39,7 +32,6 @@ pub fn AlbumArt(
             } else {
                 div { class: "text-gray-500 text-6xl", "🎵" }
             }
-
             if let Some(percent) = import_progress() {
                 div { class: "absolute inset-0 bg-black/50 flex items-center justify-center",
                     div { class: "w-[30%] aspect-square",

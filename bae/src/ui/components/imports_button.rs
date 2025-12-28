@@ -1,27 +1,21 @@
 use super::active_imports_context::use_active_imports;
 use crate::db::ImportOperationStatus;
 use dioxus::prelude::*;
-
 /// Button in title bar that shows active imports count and toggles dropdown
 #[component]
 pub fn ImportsButton(mut is_open: Signal<bool>) -> Element {
     let active_imports = use_active_imports();
     let imports = active_imports.imports.read();
     let count = imports.len();
-
-    // Don't render if no active imports
     if count == 0 {
         return rsx! {};
     }
-
     let has_in_progress = imports.iter().any(|i| {
         i.status == ImportOperationStatus::Preparing || i.status == ImportOperationStatus::Importing
     });
-
     let has_failed = imports
         .iter()
         .any(|i| i.status == ImportOperationStatus::Failed);
-
     let badge_color = if has_failed {
         "bg-red-500"
     } else if has_in_progress {
@@ -29,7 +23,6 @@ pub fn ImportsButton(mut is_open: Signal<bool>) -> Element {
     } else {
         "bg-green-500"
     };
-
     rsx! {
         button {
             class: "relative flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700/50 rounded-lg transition-colors",
@@ -37,10 +30,7 @@ pub fn ImportsButton(mut is_open: Signal<bool>) -> Element {
                 let current = *is_open.read();
                 is_open.set(!current);
             },
-
-            // Icon
             if has_in_progress {
-                // Animated spinner
                 svg {
                     class: "h-4 w-4 text-indigo-400 animate-spin",
                     fill: "none",
@@ -60,7 +50,6 @@ pub fn ImportsButton(mut is_open: Signal<bool>) -> Element {
                     }
                 }
             } else {
-                // Download icon
                 svg {
                     class: "h-4 w-4",
                     fill: "none",
@@ -74,10 +63,7 @@ pub fn ImportsButton(mut is_open: Signal<bool>) -> Element {
                     }
                 }
             }
-
             span { "Imports" }
-
-            // Count badge
             span { class: "{badge_color} text-white text-xs font-bold rounded-full h-5 min-w-5 flex items-center justify-center px-1.5",
                 "{count}"
             }

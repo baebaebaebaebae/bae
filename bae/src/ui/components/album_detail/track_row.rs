@@ -1,3 +1,7 @@
+use super::super::import_hooks::TrackImportState;
+use super::super::use_track_progress;
+use super::super::{use_playback_service, use_playback_state};
+use super::utils::format_duration;
 use crate::db::{DbArtist, DbTrack};
 use crate::library::use_library_manager;
 use crate::playback::{PlaybackProgress, PlaybackState};
@@ -5,18 +9,10 @@ use crate::AppContext;
 use dioxus::prelude::*;
 use rfd::AsyncFileDialog;
 use tracing::error;
-
-use super::super::import_hooks::TrackImportState;
-use super::super::use_track_progress;
-use super::super::{use_playback_service, use_playback_state};
-use super::utils::format_duration;
-
 /// Individual track row component
 #[component]
 pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
-    // Clone track.id once at the start to avoid borrow conflicts
     let track_id = track.id.clone();
-
     let library_manager = use_library_manager();
     let playback = use_playback_service();
     let playback_state = use_playback_state();
@@ -25,41 +21,30 @@ pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
     let track_progress = use_track_progress(track_id.clone(), track.import_status);
     let mut show_menu = use_signal(|| false);
     let is_exporting = use_signal(|| false);
-    // let track_progress = use_signal(|| TrackImportState::Importing { percent: 12 });
-
-    // Track playback state for this track
-    // Initialize synchronously from shared playback state
     let track_id_for_playing = track_id.clone();
     let is_currently_playing = use_signal(move || {
         matches!(
             playback_state(),
-            PlaybackState::Playing {
-                track: ref playing_track,
-                ..
-            } if playing_track.id == track_id_for_playing
+            PlaybackState::Playing { track: ref playing_track, .. }
+            if playing_track.id == track_id_for_playing
         )
     });
     let track_id_for_paused = track_id.clone();
     let is_currently_paused = use_signal(move || {
         matches!(
             playback_state(),
-            PlaybackState::Paused {
-                track: ref paused_track,
-                ..
-            } if paused_track.id == track_id_for_paused
+            PlaybackState::Paused { track: ref paused_track, .. }
+            if paused_track.id == track_id_for_paused
         )
     });
     let track_id_for_loading = track_id.clone();
     let is_loading = use_signal(move || {
         matches!(
             playback_state(),
-            PlaybackState::Loading {
-                track_id: ref loading_track_id,
-            } if loading_track_id == &track_id_for_loading
+            PlaybackState::Loading { track_id: ref loading_track_id }
+            if loading_track_id == &track_id_for_loading
         )
     });
-
-    // Subscribe to playback progress to track if this track is playing
     use_effect({
         let track_id_for_effect = track_id.clone();
         let playback = playback.clone();
@@ -105,8 +90,6 @@ pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
             });
         }
     });
-
-    // Load artists for this track (for compilations/features)
     use_effect({
         let track_id_for_artists = track_id.clone();
         let library_manager_clone = library_manager.clone();
@@ -124,7 +107,6 @@ pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
             });
         }
     });
-
     let progress_state = track_progress();
     let is_importing = matches!(
         progress_state,
@@ -132,15 +114,12 @@ pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
     );
     let is_complete = matches!(progress_state, TrackImportState::Complete);
     let is_failed = matches!(progress_state, TrackImportState::Failed);
-
     let progress_percent = if let TrackImportState::Importing { percent } = progress_state {
         percent
     } else {
         0
     };
-
     let is_active = is_currently_playing() || is_currently_paused();
-
     let row_class = if is_complete {
         if is_active {
             "relative flex items-center py-3 px-4 rounded-lg group overflow-hidden bg-blue-500/10 hover:bg-blue-500/15 transition-colors"
@@ -150,26 +129,18 @@ pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
     } else {
         "relative flex items-center py-3 px-4 rounded-lg group overflow-hidden"
     };
-
     rsx! {
         div { class: "{row_class}",
-            // Progress bar background (only when importing/queued)
             if is_importing {
                 div {
                     class: "absolute inset-0 bg-blue-500 opacity-10 transition-all duration-300",
                     style: "width: {progress_percent}%",
                 }
             }
-
-            // Failed state background
             if is_failed {
                 div { class: "absolute inset-0 bg-red-500 opacity-10" }
             }
-
-            // Content (with relative positioning to stay above progress bar)
             div { class: "relative flex items-center w-full",
-
-                // Play/Pause button (only show when complete)
                 if is_complete {
                     if is_loading() {
                         div { class: "w-6 flex items-center justify-center",
@@ -217,8 +188,6 @@ pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
                 } else {
                     div { class: "w-6" }
                 }
-
-                // Track number
                 div {
                     class: "w-12 text-right text-sm font-mono",
                     class: if is_failed { "text-red-400" } else if is_importing { "text-gray-600" } else { "text-gray-400" },
@@ -228,8 +197,6 @@ pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
                         "—"
                     }
                 }
-
-                // Track info
                 div { class: "flex-1 ml-4",
                     h3 {
                         class: "font-medium transition-colors",
@@ -251,8 +218,6 @@ pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
                         }
                     }
                 }
-
-                // Duration (if available)
                 div {
                     class: "text-sm font-mono",
                     class: if is_failed { "text-red-400" } else if is_importing { "text-gray-600" } else { "text-gray-400" },
@@ -262,8 +227,6 @@ pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
                         "—:—"
                     }
                 }
-
-                // Queue actions menu (only show when complete)
                 if is_complete {
                     div { class: "relative",
                         button {
@@ -296,7 +259,6 @@ pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
                                                 let chunk_size_bytes = chunk_size_bytes;
                                                 spawn(async move {
                                                     is_exporting_clone.set(true);
-
                                                     if let Some(file_handle) = AsyncFileDialog::new()
                                                         .set_title("Export Track")
                                                         .set_file_name(format!("{}.flac", track_id))
@@ -305,7 +267,6 @@ pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
                                                         .await
                                                     {
                                                         let output_path = file_handle.path().to_path_buf();
-
                                                         match library_manager_clone
                                                             .get()
                                                             .export_track(

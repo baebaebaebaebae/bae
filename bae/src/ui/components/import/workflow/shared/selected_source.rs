@@ -1,6 +1,5 @@
 use dioxus::prelude::*;
 use std::path::PathBuf;
-
 #[component]
 pub fn SelectedSource(
     title: String,
@@ -10,14 +9,11 @@ pub fn SelectedSource(
 ) -> Element {
     let full_path = path.read().clone();
     let path_buf = PathBuf::from(&full_path);
-
     let display_name = path_buf
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or(&full_path)
         .to_string();
-
-    // Extract breadcrumb segments (parent directories), skipping the first component (root)
     let mut breadcrumbs = Vec::new();
     if let Some(parent) = path_buf.parent() {
         for component in parent.components().skip(1) {
@@ -26,7 +22,6 @@ pub fn SelectedSource(
             }
         }
     }
-
     rsx! {
         div { class: "bg-gray-800 rounded-lg shadow p-6",
             div { class: "mb-0 pb-4 border-b border-gray-700",
@@ -40,8 +35,6 @@ pub fn SelectedSource(
                         "Clear"
                     }
                 }
-
-                // Breadcrumb path
                 if !breadcrumbs.is_empty() {
                     div { class: "mb-2 flex flex-wrap items-center gap-1 text-xs text-gray-400",
                         span { class: "text-gray-500", "/" }
@@ -51,10 +44,7 @@ pub fn SelectedSource(
                         }
                     }
                 }
-
-                // Filename badge
                 div { class: "flex items-center gap-2 px-3 py-2 bg-gray-900/30 border border-gray-700/40 rounded",
-                    // Folder icon
                     svg {
                         xmlns: "http://www.w3.org/2000/svg",
                         fill: "none",

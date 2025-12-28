@@ -1,9 +1,6 @@
-// Test support utilities for both unit and integration tests
-
 use crate::cloud_storage::{CloudStorage, CloudStorageError};
 use std::collections::HashMap;
 use std::sync::Mutex;
-
 /// Mock cloud storage for testing
 ///
 /// Stores chunks in memory instead of uploading to S3.
@@ -12,7 +9,6 @@ pub struct MockCloudStorage {
     /// Public for test assertions
     pub chunks: Mutex<HashMap<String, Vec<u8>>>,
 }
-
 impl Default for MockCloudStorage {
     fn default() -> Self {
         MockCloudStorage {
@@ -20,15 +16,13 @@ impl Default for MockCloudStorage {
         }
     }
 }
-
 impl MockCloudStorage {
     /// Create a new mock cloud storage instance
-    #[allow(unused)] // Used in tests
+    #[allow(unused)]
     pub fn new() -> Self {
         Self::default()
     }
 }
-
 #[async_trait::async_trait]
 impl CloudStorage for MockCloudStorage {
     async fn upload_chunk(&self, chunk_id: &str, data: &[u8]) -> Result<String, CloudStorageError> {
@@ -36,17 +30,14 @@ impl CloudStorage for MockCloudStorage {
             "s3://test-bucket/chunks/{}/{}/{}.enc",
             &chunk_id[0..2],
             &chunk_id[2..4],
-            chunk_id
+            chunk_id,
         );
-
         self.chunks
             .lock()
             .unwrap()
             .insert(location.clone(), data.to_vec());
-
         Ok(location)
     }
-
     async fn download_chunk(&self, storage_location: &str) -> Result<Vec<u8>, CloudStorageError> {
         self.chunks
             .lock()
@@ -57,7 +48,6 @@ impl CloudStorage for MockCloudStorage {
                 CloudStorageError::Download(format!("Chunk not found: {}", storage_location))
             })
     }
-
     async fn delete_chunk(&self, storage_location: &str) -> Result<(), CloudStorageError> {
         self.chunks.lock().unwrap().remove(storage_location);
         Ok(())

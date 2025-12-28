@@ -32,7 +32,6 @@
 //!
 //! The key insight: Both import types use identical data structures. The only difference
 //! is how we calculate the byte positions and chunk ranges for each track.
-
 use crate::{
     cd::drive::CdToc,
     cue_flac::{CueSheet, FlacHeaders},
@@ -42,7 +41,6 @@ use crate::{
     musicbrainz::MbRelease,
 };
 use std::{collections::HashMap, path::PathBuf};
-
 /// Request to import an album
 #[derive(Debug)]
 pub enum ImportRequest {
@@ -85,14 +83,12 @@ pub enum ImportRequest {
         selected_cover_filename: Option<String>,
     },
 }
-
 /// Source for torrent import
 #[derive(Debug, Clone)]
 pub enum TorrentSource {
     File(PathBuf),
     MagnetLink(String),
 }
-
 /// Progress updates during import
 #[derive(Debug, Clone)]
 pub enum ImportProgress {
@@ -133,7 +129,6 @@ pub enum ImportProgress {
         import_id: Option<String>,
     },
 }
-
 /// Phase of import process (applies to all import types)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportPhase {
@@ -146,7 +141,6 @@ pub enum ImportPhase {
     /// Same for all import types: stream files → encrypt → upload chunks
     Chunk,
 }
-
 /// Steps during phase 0 preparation (in ImportHandle, before pipeline starts)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrepareStep {
@@ -157,7 +151,6 @@ pub enum PrepareStep {
     SavingToDatabase,
     ExtractingDurations,
 }
-
 impl PrepareStep {
     /// Human-readable display text for UI
     pub fn display_text(&self) -> &'static str {
@@ -171,7 +164,6 @@ impl PrepareStep {
         }
     }
 }
-
 /// Maps a logical track to its physical audio file.
 ///
 /// Links a track from album metadata (e.g., Discogs) to an audio file provided by the user.
@@ -189,7 +181,6 @@ pub struct TrackFile {
     /// Path to the physical audio file containing this track's audio data
     pub file_path: PathBuf,
 }
-
 /// Output of Phase 1: Validated mapping of logical tracks to physical files.
 ///
 /// Links logical tracks (from album metadata) to physical files (from user's folder).
@@ -204,7 +195,6 @@ pub struct TrackToFileMappingResult {
     /// None for one-file-per-track imports
     pub cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
 }
-
 /// Pre-parsed CUE/FLAC metadata from the track mapping phase.
 /// Parsed once during validation, then passed through to avoid re-parsing.
 #[derive(Debug, Clone)]
@@ -216,7 +206,6 @@ pub struct CueFlacMetadata {
     /// Path to the FLAC file
     pub flac_path: PathBuf,
 }
-
 /// A file discovered during folder scan (Phase 1).
 ///
 /// All files in the album folder are discovered and their sizes recorded.
@@ -229,7 +218,6 @@ pub struct DiscoveredFile {
     pub path: PathBuf,
     pub size: u64,
 }
-
 /// Maps a file to its position in the chunked album stream (Phase 2 output).
 ///
 /// When all album files are concatenated into a single byte stream and divided into
@@ -249,7 +237,6 @@ pub struct FileToChunks {
     /// Byte offset within end_chunk where this file ends
     pub end_byte_offset: i64,
 }
-
 /// CUE/FLAC-specific layout data calculated during Phase 2.
 ///
 /// For CUE/FLAC imports, Phase 2 calculates per-track chunk ranges by converting
@@ -269,7 +256,6 @@ pub struct CueFlacLayoutData {
     /// Used for accurate seeking during playback
     pub seektable: Option<HashMap<u64, u64>>,
 }
-
 /// Validated import command ready for pipeline execution.
 ///
 /// All imports follow a two-phase model:

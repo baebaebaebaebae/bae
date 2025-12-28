@@ -1,5 +1,4 @@
 use dioxus::prelude::*;
-
 #[component]
 pub fn ExportErrorToast(error: String, on_dismiss: EventHandler<()>) -> Element {
     rsx! {

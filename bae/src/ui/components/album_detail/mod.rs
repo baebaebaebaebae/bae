@@ -14,6 +14,5 @@ mod release_tabs_section;
 mod track_row;
 pub mod utils;
 mod view;
-
 pub use page::AlbumDetail;
 pub use release_info_modal::ReleaseInfoModal;

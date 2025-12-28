@@ -1,11 +1,5 @@
-// FFI bindings for custom libtorrent storage backend
-//
-// This module provides CXX bindings to extend libtorrent-rs with session_params
-// support and custom storage integration.
-
 #[cxx::bridge]
 #[allow(clippy::module_inception)]
-// Safety docs are present but clippy doesn't recognize them in CXX bridge context
 #[allow(clippy::missing_safety_doc)]
 mod ffi {
     unsafe extern "C++" {
@@ -13,14 +7,11 @@ mod ffi {
         include!("bae_storage_helpers.h");
         include!("libtorrent/session.hpp");
         include!("libtorrent/session_params.hpp");
-
-        // Opaque types
         type BaeStorageConstructor;
         type SessionParams;
         type Session;
         type AddTorrentParams;
         type TorrentHandle;
-
         /// Create a custom storage constructor that libtorrent can use
         ///
         /// The callbacks are Rust functions that will be called from C++:
@@ -43,24 +34,19 @@ mod ffi {
             ) -> bool,
             hash_callback: fn(storage_index: i32, piece_index: i32, hash: &[u8]) -> bool,
         ) -> UniquePtr<BaeStorageConstructor>;
-
         /// Create session_params with custom disk I/O constructor
         fn create_session_params_with_storage(
             disk_io: UniquePtr<BaeStorageConstructor>,
         ) -> UniquePtr<SessionParams>;
-
         /// Create session_params with default disk storage (no custom storage)
         fn create_session_params_default() -> UniquePtr<SessionParams>;
-
         /// Set listen_interfaces on session_params
         ///
         /// # Safety
         /// `params` must be a valid pointer to SessionParams that outlives the call.
         unsafe fn set_listen_interfaces(params: *mut SessionParams, interfaces: &str);
-
         /// Create a session from session_params (extends libtorrent-rs)
         fn create_session_with_params(params: UniquePtr<SessionParams>) -> UniquePtr<Session>;
-
         /// Get raw session pointer from Session unique_ptr
         /// Returns a raw pointer that can be used with libtorrent-rs API
         ///
@@ -68,25 +54,20 @@ mod ffi {
         /// The returned pointer is only valid while `sess` is alive and not moved.
         /// The caller must ensure the pointer is not used after `sess` is dropped.
         fn get_session_ptr(sess: &mut UniquePtr<Session>) -> *mut Session;
-
         /// Parse a magnet URI and return add_torrent_params
         fn parse_magnet_uri(magnet: &str, save_path: &str) -> UniquePtr<AddTorrentParams>;
-
         /// Load a torrent file and return add_torrent_params
         fn load_torrent_file(file_path: &str, save_path: &str) -> UniquePtr<AddTorrentParams>;
-
         /// Set seed_mode flag on add_torrent_params to skip hash verification
         ///
         /// # Safety
         /// `params` must be a valid pointer to AddTorrentParams that outlives the call.
         unsafe fn set_seed_mode(params: *mut AddTorrentParams, seed_mode: bool);
-
         /// Set paused flag on add_torrent_params to add torrent in paused state
         ///
         /// # Safety
         /// `params` must be a valid pointer to AddTorrentParams that outlives the call.
         unsafe fn set_paused(params: *mut AddTorrentParams, paused: bool);
-
         /// Add a torrent to a session using our Session type
         ///
         /// # Safety
@@ -96,26 +77,22 @@ mod ffi {
             sess: *mut Session,
             params: &mut UniquePtr<AddTorrentParams>,
         ) -> *mut TorrentHandle;
-
         /// Get the name of a torrent from its handle
         ///
         /// # Safety
         /// `handle` must be a valid pointer to a TorrentHandle that outlives the call.
         unsafe fn torrent_get_name(handle: *mut TorrentHandle) -> String;
-
         /// Check if a torrent has metadata available
         ///
         /// # Safety
         /// `handle` must be a valid pointer to a TorrentHandle that outlives the call.
         unsafe fn torrent_has_metadata(handle: *mut TorrentHandle) -> bool;
-
         /// Get the storage index for a torrent handle
         /// Returns the storage_index_t assigned by libtorrent for this torrent
         ///
         /// # Safety
         /// `handle` must be a valid pointer to a TorrentHandle that outlives the call.
         unsafe fn torrent_get_storage_index(handle: *mut TorrentHandle) -> i32;
-
         /// Get torrent metadata for piece mapper
         ///
         /// # Safety
@@ -131,13 +108,11 @@ mod ffi {
         /// # Safety
         /// `handle` must be a valid pointer to a TorrentHandle that outlives the call.
         unsafe fn torrent_get_num_pieces(handle: *mut TorrentHandle) -> i32;
-
         /// Get the list of files in the torrent
         ///
         /// # Safety
         /// `handle` must be a valid pointer to a TorrentHandle that outlives the call.
         unsafe fn torrent_get_file_list(handle: *mut TorrentHandle) -> Vec<TorrentFileInfo>;
-
         /// Set file priorities for a torrent
         ///
         /// # Safety
@@ -146,43 +121,36 @@ mod ffi {
             handle: *mut TorrentHandle,
             priorities: Vec<u8>,
         ) -> bool;
-
         /// Get download progress (0.0 to 1.0) for a torrent
         ///
         /// # Safety
         /// `handle` must be a valid pointer to a TorrentHandle that outlives the call.
         unsafe fn torrent_get_progress(handle: *mut TorrentHandle) -> f32;
-
         /// Get number of connected peers
         ///
         /// # Safety
         /// `handle` must be a valid pointer to a TorrentHandle that outlives the call.
         unsafe fn torrent_get_num_peers(handle: *mut TorrentHandle) -> i32;
-
         /// Get number of seeders
         ///
         /// # Safety
         /// `handle` must be a valid pointer to a TorrentHandle that outlives the call.
         unsafe fn torrent_get_num_seeds(handle: *mut TorrentHandle) -> i32;
-
         /// Get tracker status as a formatted string
         ///
         /// # Safety
         /// `handle` must be a valid pointer to a TorrentHandle that outlives the call.
         unsafe fn torrent_get_tracker_status(handle: *mut TorrentHandle) -> String;
-
         /// Pause a torrent
         ///
         /// # Safety
         /// `handle` must be a valid pointer to a TorrentHandle that outlives the call.
         unsafe fn torrent_pause(handle: *mut TorrentHandle);
-
         /// Resume a torrent
         ///
         /// # Safety
         /// `handle` must be a valid pointer to a TorrentHandle that outlives the call.
         unsafe fn torrent_resume(handle: *mut TorrentHandle);
-
         /// Remove a torrent from a session
         ///
         /// If `delete_files` is true, also deletes the downloaded files from disk.
@@ -195,27 +163,23 @@ mod ffi {
             handle: *mut TorrentHandle,
             delete_files: bool,
         );
-
         /// Pop all pending alerts from session
         ///
         /// # Safety
         /// `sess` must be a valid pointer to a Session that outlives the call.
         unsafe fn session_pop_alerts(sess: *mut Session) -> Vec<AlertData>;
-
         /// Get all torrent info from a torrent file path
         ///
         /// Parses the torrent file and returns all available metadata.
         /// Returns an empty struct if the file cannot be parsed.
         fn get_torrent_info(file_path: &str) -> TorrentInfo;
     }
-
     /// File info from torrent (shared between Rust and C++)
     struct TorrentFileInfo {
         index: i32,
         path: String,
         size: i64,
     }
-
     /// Complete torrent info from a torrent file (shared between Rust and C++)
     struct TorrentInfo {
         name: String,
@@ -229,10 +193,9 @@ mod ffi {
         num_pieces: i32,
         files: Vec<TorrentFileInfo>,
     }
-
     /// Alert data from libtorrent (shared between Rust and C++)
     struct AlertData {
-        alert_type: i32, // AlertType enum value
+        alert_type: i32,
         info_hash: String,
         tracker_url: String,
         tracker_message: String,
@@ -243,7 +206,6 @@ mod ffi {
         error_message: String,
     }
 }
-
 pub use ffi::{
     create_bae_storage_constructor, create_session_params_default,
     create_session_params_with_storage, create_session_with_params, get_session_ptr,

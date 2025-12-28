@@ -1,9 +1,7 @@
 use dioxus::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
-
 type ConfirmCallback = Box<dyn Fn()>;
-
 #[derive(Clone)]
 pub struct DialogContext {
     pub is_open: Signal<bool>,
@@ -13,13 +11,11 @@ pub struct DialogContext {
     cancel_label: Rc<RefCell<String>>,
     on_confirm: Rc<RefCell<Option<Rc<ConfirmCallback>>>>,
 }
-
 impl Default for DialogContext {
     fn default() -> Self {
         Self::new()
     }
 }
-
 impl DialogContext {
     pub fn new() -> Self {
         Self {
@@ -31,27 +27,21 @@ impl DialogContext {
             on_confirm: Rc::new(RefCell::new(None)),
         }
     }
-
     pub fn title(&self) -> String {
         self.title.borrow().clone()
     }
-
     pub fn message(&self) -> String {
         self.message.borrow().clone()
     }
-
     pub fn confirm_label(&self) -> String {
         self.confirm_label.borrow().clone()
     }
-
     pub fn cancel_label(&self) -> String {
         self.cancel_label.borrow().clone()
     }
-
     pub fn on_confirm(&self) -> Option<Rc<ConfirmCallback>> {
         self.on_confirm.borrow().clone()
     }
-
     pub fn show_with_callback(
         &self,
         title: String,
@@ -68,7 +58,6 @@ impl DialogContext {
         let mut is_open = self.is_open;
         is_open.set(true);
     }
-
     pub fn hide(&self) {
         let mut is_open = self.is_open;
         is_open.set(false);

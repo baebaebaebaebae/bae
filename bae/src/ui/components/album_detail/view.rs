@@ -1,7 +1,3 @@
-use crate::db::{DbAlbum, DbArtist, DbRelease, DbTrack};
-use crate::library::use_library_manager;
-use dioxus::prelude::*;
-
 use super::album_cover_section::AlbumCoverSection;
 use super::album_metadata::AlbumMetadata;
 use super::delete_release_dialog::DeleteReleaseDialog;
@@ -10,7 +6,9 @@ use super::play_album_button::PlayAlbumButton;
 use super::release_tabs_section::ReleaseTabsSection;
 use super::track_row::TrackRow;
 use super::ReleaseInfoModal;
-
+use crate::db::{DbAlbum, DbArtist, DbRelease, DbTrack};
+use crate::library::use_library_manager;
+use dioxus::prelude::*;
 /// Album detail view component
 #[component]
 pub fn AlbumDetailView(
@@ -30,8 +28,6 @@ pub fn AlbumDetailView(
     let mut show_release_info_modal = use_signal(|| None::<String>);
     let is_exporting = use_signal(|| false);
     let mut export_error = use_signal(|| None::<String>);
-
-    // Load torrent info for all releases
     let library_manager_for_torrents = library_manager.clone();
     let releases_for_torrents = releases.clone();
     let torrents_resource = use_resource(move || {
@@ -52,14 +48,10 @@ pub fn AlbumDetailView(
             Ok::<_, crate::library::LibraryError>(torrents)
         }
     });
-
     rsx! {
         div { class: "grid grid-cols-1 lg:grid-cols-3 gap-8",
-
-            // Album artwork and info
             div { class: "lg:col-span-1",
                 div { class: "bg-gray-800 rounded-lg p-6",
-
                     AlbumCoverSection {
                         album: album.clone(),
                         import_progress,
@@ -70,14 +62,12 @@ pub fn AlbumDetailView(
                         first_release_id: releases.first().map(|r| r.id.clone()),
                         has_single_release: releases.len() == 1,
                     }
-
                     AlbumMetadata {
                         album: album.clone(),
                         artists: artists.clone(),
                         track_count: tracks.len(),
                         selected_release: releases.iter().find(|r| Some(r.id.clone()) == selected_release_id).cloned(),
                     }
-
                     PlayAlbumButton {
                         album_id: album.id.clone(),
                         tracks: tracks.clone(),
@@ -87,12 +77,8 @@ pub fn AlbumDetailView(
                     }
                 }
             }
-
-            // Tracklist
             div { class: "lg:col-span-2",
                 div { class: "bg-gray-800 rounded-lg p-6",
-
-                    // Release tabs (show only if multiple releases)
                     if releases.len() > 1 {
                         ReleaseTabsSection {
                             releases: releases.clone(),
@@ -106,21 +92,14 @@ pub fn AlbumDetailView(
                             torrents_resource,
                         }
                     }
-
                     h2 { class: "text-xl font-bold text-white mb-4", "Tracklist" }
-
                     if tracks.is_empty() {
                         div { class: "text-center py-8 text-gray-400",
                             p { "No tracks found for this album." }
                         }
                     } else {
-                        // Check if this is a multi-disc release
                         {
                             let has_multiple_discs = tracks
-
-                                // Group tracks by disc number
-                                // Show disc header when disc changes
-                                // Single disc - no headers needed
                                 .iter()
                                 .filter_map(|t| t.disc_number)
                                 .collect::<std::collections::HashSet<_>>()
@@ -168,8 +147,6 @@ pub fn AlbumDetailView(
                 }
             }
         }
-
-        // Release delete confirmation dialog
         if let Some(release_id_to_delete) = show_release_delete_confirm() {
             if releases.iter().any(|r| r.id == release_id_to_delete) {
                 DeleteReleaseDialog {
@@ -184,8 +161,6 @@ pub fn AlbumDetailView(
                 }
             }
         }
-
-        // Release Info Modal
         if let Some(release_id) = show_release_info_modal() {
             ReleaseInfoModal {
                 album: album.clone(),
@@ -193,8 +168,6 @@ pub fn AlbumDetailView(
                 on_close: move |_| show_release_info_modal.set(None),
             }
         }
-
-        // Export Error Display
         if let Some(ref error) = export_error() {
             ExportErrorToast {
                 error: error.clone(),

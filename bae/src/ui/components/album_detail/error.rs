@@ -1,5 +1,4 @@
 use dioxus::prelude::*;
-
 /// Error display for album detail page
 #[component]
 pub fn AlbumDetailError(message: String) -> Element {

@@ -1,35 +1,10 @@
-// Album Layout Analyzer (Phase 2 of Import)
-//
-// Calculates the chunk layout for an album by treating all files as a single concatenated
-// byte stream divided into fixed-size chunks.
-//
-// ## Unified Approach for All Import Types
-//
-// Both one-file-per-track and CUE/FLAC imports follow the same process:
-// 1. Concatenate all files into a virtual byte stream
-// 2. Divide the stream into fixed-size chunks
-// 3. Calculate chunk ranges for each track
-//
-// The only difference is HOW we calculate track boundaries:
-// - **One-file-per-track**: Track boundaries = file boundaries in the stream
-// - **CUE/FLAC**: Track boundaries = time-based byte positions from CUE sheet
-//
-// Both produce identical data structures (chunk→track mappings, track chunk counts).
-//
-// ## Output
-// - `AlbumFileLayout`: file→chunk mappings, chunk→track mappings, track chunk counts
-// - `CueFlacLayoutData`: Additional CUE/FLAC metadata (only for CUE/FLAC imports)
-
 use crate::cue_flac::CueFlacProcessor;
 use crate::import::types::FileToChunks;
 use crate::import::types::{CueFlacLayoutData, CueFlacMetadata, DiscoveredFile, TrackFile};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::debug;
-
-// FFI bindings for libFLAC seektable generation
 extern crate libflac_sys;
-
 /// FLAC file metadata extracted via libFLAC
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FlacInfo {
@@ -40,7 +15,6 @@ pub struct FlacInfo {
     /// Total number of samples in the file
     pub total_samples: u64,
 }
-
 impl FlacInfo {
     /// Calculate duration in milliseconds
     pub fn duration_ms(&self) -> u64 {
@@ -50,29 +24,21 @@ impl FlacInfo {
         (self.total_samples * 1000) / self.sample_rate as u64
     }
 }
-
 /// Build a seektable and extract metadata from a FLAC file using libFLAC
 pub fn build_seektable(flac_path: &Path) -> Result<FlacInfo, String> {
     use tracing::debug;
-
     debug!("Building seektable for: {:?}", flac_path);
-
-    // Read entire file into memory for callbacks
     let file_data =
         std::fs::read(flac_path).map_err(|e| format!("Failed to read FLAC file: {}", e))?;
-
     debug!("Read {} bytes from FLAC file", file_data.len());
-
-    // State for callbacks
     struct DecoderState {
         file_data: Vec<u8>,
         file_pos: usize,
         seektable: HashMap<u64, u64>,
-        cumulative_samples: u64, // Track cumulative samples for frame_number mode
+        cumulative_samples: u64,
         sample_rate: u32,
         total_samples: u64,
     }
-
     let state = DecoderState {
         file_data,
         file_pos: 0,
@@ -81,8 +47,6 @@ pub fn build_seektable(flac_path: &Path) -> Result<FlacInfo, String> {
         sample_rate: 0,
         total_samples: 0,
     };
-
-    // Read callback
     extern "C" fn read_callback(
         _decoder: *const libflac_sys::FLAC__StreamDecoder,
         buffer: *mut u8,
@@ -90,15 +54,12 @@ pub fn build_seektable(flac_path: &Path) -> Result<FlacInfo, String> {
         client_data: *mut libc::c_void,
     ) -> libflac_sys::FLAC__StreamDecoderReadStatus {
         let state = unsafe { &mut *(client_data as *mut DecoderState) };
-
         let bytes_needed = unsafe { *bytes };
         let remaining = state.file_data.len().saturating_sub(state.file_pos);
-
         if remaining == 0 {
             unsafe { *bytes = 0 };
             return libflac_sys::FLAC__STREAM_DECODER_READ_STATUS_END_OF_STREAM;
         }
-
         let to_read = bytes_needed.min(remaining);
         unsafe {
             std::ptr::copy_nonoverlapping(
@@ -109,51 +70,38 @@ pub fn build_seektable(flac_path: &Path) -> Result<FlacInfo, String> {
         }
         state.file_pos += to_read;
         unsafe { *bytes = to_read as libc::size_t };
-
         libflac_sys::FLAC__STREAM_DECODER_READ_STATUS_CONTINUE
     }
-
-    // Seek callback
     extern "C" fn seek_callback(
         _decoder: *const libflac_sys::FLAC__StreamDecoder,
         absolute_byte_offset: u64,
         client_data: *mut libc::c_void,
     ) -> libflac_sys::FLAC__StreamDecoderSeekStatus {
         let state = unsafe { &mut *(client_data as *mut DecoderState) };
-
         if absolute_byte_offset as usize > state.file_data.len() {
             return libflac_sys::FLAC__STREAM_DECODER_SEEK_STATUS_ERROR;
         }
-
         state.file_pos = absolute_byte_offset as usize;
         libflac_sys::FLAC__STREAM_DECODER_SEEK_STATUS_OK
     }
-
-    // Tell callback
     extern "C" fn tell_callback(
         _decoder: *const libflac_sys::FLAC__StreamDecoder,
         absolute_byte_offset: *mut u64,
         client_data: *mut libc::c_void,
     ) -> libflac_sys::FLAC__StreamDecoderTellStatus {
         let state = unsafe { &*(client_data as *const DecoderState) };
-
         unsafe { *absolute_byte_offset = state.file_pos as u64 };
         libflac_sys::FLAC__STREAM_DECODER_TELL_STATUS_OK
     }
-
-    // Length callback - required if seek_callback is provided
     extern "C" fn length_callback(
         _decoder: *const libflac_sys::FLAC__StreamDecoder,
         stream_length: *mut u64,
         client_data: *mut libc::c_void,
     ) -> libflac_sys::FLAC__StreamDecoderLengthStatus {
         let state = unsafe { &*(client_data as *const DecoderState) };
-
         unsafe { *stream_length = state.file_data.len() as u64 };
         libflac_sys::FLAC__STREAM_DECODER_LENGTH_STATUS_OK
     }
-
-    // EOF callback
     extern "C" fn eof_callback(
         _decoder: *const libflac_sys::FLAC__StreamDecoder,
         client_data: *mut libc::c_void,
@@ -161,8 +109,6 @@ pub fn build_seektable(flac_path: &Path) -> Result<FlacInfo, String> {
         let state = unsafe { &*(client_data as *const DecoderState) };
         (state.file_pos >= state.file_data.len()) as libflac_sys::FLAC__bool
     }
-
-    // Write callback - record sample number and byte position
     extern "C" fn write_callback(
         decoder: *const libflac_sys::FLAC__StreamDecoder,
         frame: *const libflac_sys::FLAC__Frame,
@@ -170,61 +116,32 @@ pub fn build_seektable(flac_path: &Path) -> Result<FlacInfo, String> {
         client_data: *mut libc::c_void,
     ) -> libflac_sys::FLAC__StreamDecoderWriteStatus {
         let state = unsafe { &mut *(client_data as *mut DecoderState) };
-
         let frame_ref = unsafe { &*frame };
-        // Extract sample number from frame header
-        // FLAC frame header has sample_number - need to access it correctly
-        // The frame structure is: FLAC__Frame { header: FLAC__FrameHeader { number: ... } }
-        // Extract sample number from frame header
-        // FLAC frame header can have either frame_number or sample_number
-        // We need sample_number for the seektable
         let sample_number = match frame_ref.header.number_type {
-            libflac_sys::FLAC__FRAME_NUMBER_TYPE_FRAME_NUMBER => {
-                // Frame number (not sample number) - use cumulative samples
-                // We'll add the blocksize after storing
-                state.cumulative_samples
-            }
-            libflac_sys::FLAC__FRAME_NUMBER_TYPE_SAMPLE_NUMBER => {
-                // Sample number - this is what we want
-                unsafe {
-                    let sample_num = frame_ref.header.number.sample_number;
-                    state.cumulative_samples = sample_num; // Update for consistency
-                    sample_num
-                }
-            }
+            libflac_sys::FLAC__FRAME_NUMBER_TYPE_FRAME_NUMBER => state.cumulative_samples,
+            libflac_sys::FLAC__FRAME_NUMBER_TYPE_SAMPLE_NUMBER => unsafe {
+                let sample_num = frame_ref.header.number.sample_number;
+                state.cumulative_samples = sample_num;
+                sample_num
+            },
             _ => {
-                // Unknown type, skip this frame
                 return libflac_sys::FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
             }
         };
-
-        // Get current byte position
         let mut byte_pos: u64 = 0;
         unsafe {
             libflac_sys::FLAC__stream_decoder_get_decode_position(decoder as *mut _, &mut byte_pos);
         }
-
-        // If decode_position is not available, use file_pos from state
         if byte_pos == 0 {
             byte_pos = state.file_pos as u64;
         }
-
-        // Store in seektable
         state.seektable.insert(sample_number, byte_pos);
-
-        // Update cumulative samples for next frame (if using frame_number mode)
         if frame_ref.header.number_type == libflac_sys::FLAC__FRAME_NUMBER_TYPE_FRAME_NUMBER {
-            // Add blocksize to cumulative
-            // Default estimate for blocksize - this is a fallback
-            // Since we're using sample_number when available, this is less critical
-            let blocksize: u64 = 1152; // Default estimate
+            let blocksize: u64 = 1152;
             state.cumulative_samples += blocksize;
         }
-
         libflac_sys::FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE
     }
-
-    // Metadata callback - capture STREAMINFO
     extern "C" fn metadata_callback(
         _decoder: *const libflac_sys::FLAC__StreamDecoder,
         metadata: *const libflac_sys::FLAC__StreamMetadata,
@@ -232,38 +149,27 @@ pub fn build_seektable(flac_path: &Path) -> Result<FlacInfo, String> {
     ) {
         let state = unsafe { &mut *(client_data as *mut DecoderState) };
         let metadata_ref = unsafe { &*metadata };
-
-        // Check if this is STREAMINFO (type 0)
         if metadata_ref.type_ == libflac_sys::FLAC__METADATA_TYPE_STREAMINFO {
             let streaminfo = unsafe { &metadata_ref.data.stream_info };
             state.sample_rate = streaminfo.sample_rate;
             state.total_samples = streaminfo.total_samples;
         }
     }
-
-    // Error callback
     extern "C" fn error_callback(
         _decoder: *const libflac_sys::FLAC__StreamDecoder,
         _status: libflac_sys::FLAC__StreamDecoderErrorStatus,
         _client_data: *mut libc::c_void,
     ) {
-        // Log errors but continue
         let _ = _status;
         let _ = _client_data;
     }
-
-    // Create decoder
     let decoder = unsafe { libflac_sys::FLAC__stream_decoder_new() };
     if decoder.is_null() {
         return Err("Failed to create FLAC decoder".to_string());
     }
-
     debug!("Created FLAC decoder");
-
-    // Box the state and pass to callbacks
     let mut state = Box::new(state);
     let state_ptr = state.as_mut() as *mut DecoderState as *mut libc::c_void;
-
     unsafe {
         debug!("Initializing FLAC stream decoder...");
         let result = libflac_sys::FLAC__stream_decoder_init_stream(
@@ -271,14 +177,13 @@ pub fn build_seektable(flac_path: &Path) -> Result<FlacInfo, String> {
             Some(read_callback),
             Some(seek_callback),
             Some(tell_callback),
-            Some(length_callback), // Required if seek_callback is provided
+            Some(length_callback),
             Some(eof_callback),
             Some(write_callback),
             Some(metadata_callback),
             Some(error_callback),
             state_ptr,
         );
-
         if result != libflac_sys::FLAC__STREAM_DECODER_INIT_STATUS_OK {
             let error_msg = match result {
                 libflac_sys::FLAC__STREAM_DECODER_INIT_STATUS_OK => "OK (unexpected)",
@@ -305,11 +210,7 @@ pub fn build_seektable(flac_path: &Path) -> Result<FlacInfo, String> {
                 error_msg, result
             ));
         }
-
         debug!("FLAC decoder initialized, starting to process...");
-
-        // Process everything (metadata + frames) using process_single
-        // This avoids the potential hang in process_until_end_of_metadata
         let mut frames_processed = 0;
         let mut consecutive_zeros = 0;
         let mut iterations = 0;
@@ -321,66 +222,47 @@ pub fn build_seektable(flac_path: &Path) -> Result<FlacInfo, String> {
                     iterations, frames_processed
                 );
             }
-
             let result = libflac_sys::FLAC__stream_decoder_process_single(decoder);
-
-            // Check decoder state first (this is the authoritative check)
             let state_enum = libflac_sys::FLAC__stream_decoder_get_state(decoder);
-
             if state_enum == libflac_sys::FLAC__STREAM_DECODER_END_OF_STREAM {
                 break;
             }
-
             if state_enum == libflac_sys::FLAC__STREAM_DECODER_ABORTED {
                 libflac_sys::FLAC__stream_decoder_delete(decoder);
                 return Err("FLAC decoder aborted".to_string());
             }
-
-            // If process_single returned false (0), check if we're at end
             if result == 0 {
                 consecutive_zeros += 1;
-                // If we get multiple zeros in a row and state isn't END_OF_STREAM, likely stuck
                 if consecutive_zeros > 3 {
-                    // Double-check state one more time
                     let final_state = libflac_sys::FLAC__stream_decoder_get_state(decoder);
                     if final_state != libflac_sys::FLAC__STREAM_DECODER_END_OF_STREAM {
                         libflac_sys::FLAC__stream_decoder_delete(decoder);
                         return Err(format!(
                             "FLAC decoder stuck: process_single returned 0 {} times, state: {}",
-                            consecutive_zeros, final_state
+                            consecutive_zeros, final_state,
                         ));
                     }
                     break;
                 }
             } else {
-                consecutive_zeros = 0; // Reset on success
+                consecutive_zeros = 0;
                 frames_processed += 1;
             }
-
-            // Safety: limit to prevent infinite loops (10 million frames = ~200 hours at 44.1kHz with 1152 samples/frame)
-            // This is well beyond any reasonable audio file
             if frames_processed > 10_000_000 {
                 libflac_sys::FLAC__stream_decoder_delete(decoder);
                 return Err(format!(
                     "FLAC decoder processed too many frames ({}), possible infinite loop",
-                    frames_processed
+                    frames_processed,
                 ));
             }
         }
-
         debug!(
             "Finished processing, frames: {}, seektable entries: {}, sample_rate: {}, total_samples: {}",
-            frames_processed,
-            state.seektable.len(),
-            state.sample_rate,
-            state.total_samples
+            frames_processed, state.seektable.len(), state.sample_rate, state
+            .total_samples
         );
-
-        // Finish decoder
         libflac_sys::FLAC__stream_decoder_finish(decoder);
         libflac_sys::FLAC__stream_decoder_delete(decoder);
-
-        // Return FlacInfo with seektable and metadata
         Ok(FlacInfo {
             seektable: state.seektable,
             sample_rate: state.sample_rate,
@@ -388,7 +270,6 @@ pub fn build_seektable(flac_path: &Path) -> Result<FlacInfo, String> {
         })
     }
 }
-
 /// Find exact byte range for a track using seektable and sample rate
 ///
 /// Converts time positions to sample positions, then looks up byte positions in the seektable.
@@ -401,61 +282,38 @@ pub fn find_track_byte_range(
     seektable: &HashMap<u64, u64>,
     sample_rate: u32,
 ) -> Result<(i64, i64), String> {
-    // Get file size for end position
     let file_size = std::fs::metadata(flac_path)
         .map_err(|e| format!("Failed to get file metadata: {}", e))?
         .len() as i64;
-
-    // Calculate sample position from time
     let start_sample = (start_time_ms * sample_rate as u64) / 1000;
-
-    // Look up sample position in seektable (find nearest)
     let start_byte = lookup_seektable(seektable, start_sample)? as i64;
-
-    // Find end byte position
     let end_byte = if let Some(end_ms) = end_time_ms {
         let end_sample = (end_ms * sample_rate as u64) / 1000;
         lookup_seektable(seektable, end_sample)? as i64
     } else {
         file_size
     };
-
     Ok((start_byte, end_byte))
 }
-
 /// Look up a sample position in the seektable, finding the nearest entry
 fn lookup_seektable(seektable: &HashMap<u64, u64>, sample: u64) -> Result<u64, String> {
-    // If exact match, return it
     if let Some(&byte_pos) = seektable.get(&sample) {
         return Ok(byte_pos);
     }
-
-    // Find nearest sample position (binary search on sorted keys)
     let mut sorted_samples: Vec<u64> = seektable.keys().copied().collect();
     sorted_samples.sort_unstable();
-
-    // Binary search for nearest
     match sorted_samples.binary_search(&sample) {
-        Ok(idx) => {
-            // Exact match
-            Ok(seektable[&sorted_samples[idx]])
-        }
+        Ok(idx) => Ok(seektable[&sorted_samples[idx]]),
         Err(idx) => {
-            // No exact match, find nearest
             let (before, after) = if idx == 0 {
-                // Before first entry
                 (None, Some(sorted_samples[0]))
             } else if idx >= sorted_samples.len() {
-                // After last entry
                 (Some(sorted_samples[sorted_samples.len() - 1]), None)
             } else {
-                // Between two entries
                 (Some(sorted_samples[idx - 1]), Some(sorted_samples[idx]))
             };
-
             match (before, after) {
                 (Some(b), Some(a)) => {
-                    // Choose closer one
                     let dist_b = sample.abs_diff(b);
                     let dist_a = sample.abs_diff(a);
                     if dist_b <= dist_a {
@@ -471,7 +329,6 @@ fn lookup_seektable(seektable: &HashMap<u64, u64>, sample: u64) -> Result<u64, S
         }
     }
 }
-
 /// Return type for `build_chunk_track_mappings`.
 ///
 /// Contains:
@@ -483,7 +340,6 @@ type ChunkTrackMappings = (
     HashMap<String, usize>,
     HashMap<PathBuf, CueFlacLayoutData>,
 );
-
 /// Analysis of album's physical layout for chunking and progress tracking during import.
 ///
 /// Built before pipeline starts from discovered files and track mappings.
@@ -492,29 +348,24 @@ pub struct AlbumChunkLayout {
     /// Total number of chunks across all files.
     /// Used to calculate overall import progress percentage.
     pub total_chunks: usize,
-
     /// Maps each file to its chunk range and byte offsets within those chunks.
     /// Used by the chunk producer to stream chunks in sequence.
     /// A file can represent either a single track or a complete disc image containing multiple tracks.
     pub files_to_chunks: Vec<FileToChunks>,
-
     /// Maps chunk indices to track IDs.
     /// A chunk can contain data from multiple tracks (when small files share a chunk).
     /// Only chunks containing track audio data have entries; chunks with only non-track
     /// files (cover.jpg, .cue) are omitted.
     /// Used by progress emitter to attribute chunk completion to specific tracks.
     pub chunk_to_track: HashMap<i32, Vec<String>>,
-
     /// Maps track IDs to their total chunk counts.
     /// Used by progress emitter to calculate per-track progress percentages.
     pub track_chunk_counts: HashMap<String, usize>,
-
     /// Pre-calculated CUE/FLAC layout data for each CUE/FLAC file.
     /// Contains parsed CUE sheets, FLAC headers, and per-track chunk ranges.
     /// This is calculated once during layout analysis and passed to metadata persistence.
     pub cue_flac_data: HashMap<PathBuf, CueFlacLayoutData>,
 }
-
 impl AlbumChunkLayout {
     /// Analyze discovered files and build complete chunk/track layout.
     ///
@@ -524,31 +375,22 @@ impl AlbumChunkLayout {
     /// For CUE/FLAC imports, uses pre-parsed CUE metadata from the validation phase
     /// to avoid redundant parsing.
     pub fn build(
-        // All files discovered while scanning the provided folder that should contain the album
         discovered_files: Vec<DiscoveredFile>,
         tracks_to_files: &[TrackFile],
         chunk_size: usize,
-        // Pre-parsed CUE/FLAC metadata from validation phase (None for non-CUE/FLAC imports)
         cue_flac_metadata: Option<std::collections::HashMap<PathBuf, CueFlacMetadata>>,
     ) -> Result<Self, String> {
-        // Calculate how files map to chunks
         let files_to_chunks = calculate_files_to_chunks(&discovered_files, chunk_size);
-
-        // Total chunks = last chunk index + 1 (chunks are 0-indexed)
         let total_chunks = files_to_chunks
             .last()
             .map(|mapping| (mapping.end_chunk_index + 1) as usize)
             .unwrap_or(0);
-
-        // Calculate how chunks map to tracks (for progress)
-        // Uses pre-parsed CUE/FLAC metadata to calculate per-track chunk ranges
         let (chunk_to_track, track_chunk_counts, cue_flac_data) = build_chunk_track_mappings(
             &files_to_chunks,
             tracks_to_files,
             chunk_size,
             cue_flac_metadata,
         )?;
-
         Ok(AlbumChunkLayout {
             total_chunks,
             files_to_chunks,
@@ -558,7 +400,6 @@ impl AlbumChunkLayout {
         })
     }
 }
-
 /// Calculate file-to-chunk mappings from files discovered during import validation.
 ///
 /// Treats all files as a single concatenated byte stream, divided into fixed-size chunks.
@@ -567,14 +408,11 @@ impl AlbumChunkLayout {
 fn calculate_files_to_chunks(files: &[DiscoveredFile], chunk_size: usize) -> Vec<FileToChunks> {
     let mut total_bytes_processed = 0u64;
     let mut files_to_chunks = Vec::new();
-
     for file in files {
         let start_byte = total_bytes_processed;
         let end_byte = total_bytes_processed + file.size;
-
         let start_chunk_index = (start_byte / chunk_size as u64) as i32;
         let end_chunk_index = ((end_byte - 1) / chunk_size as u64) as i32;
-
         files_to_chunks.push(FileToChunks {
             file_path: file.path.clone(),
             start_chunk_index,
@@ -582,13 +420,10 @@ fn calculate_files_to_chunks(files: &[DiscoveredFile], chunk_size: usize) -> Vec
             start_byte_offset: (start_byte % chunk_size as u64) as i64,
             end_byte_offset: ((end_byte - 1) % chunk_size as u64) as i64,
         });
-
         total_bytes_processed = end_byte;
     }
-
     files_to_chunks
 }
-
 /// Build chunk→track mappings for progress tracking during import.
 ///
 /// Creates reverse mappings from chunks to tracks so we can:
@@ -603,13 +438,10 @@ fn build_chunk_track_mappings(
     files_to_chunks: &[FileToChunks],
     track_files: &[TrackFile],
     chunk_size: usize,
-    // Pre-parsed CUE/FLAC metadata from validation phase (None for non-CUE/FLAC imports)
     cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
 ) -> Result<ChunkTrackMappings, String> {
-    // Build reverse lookup: file path → track IDs and TrackFile references
     let mut file_to_tracks: HashMap<PathBuf, Vec<String>> = HashMap::new();
     let mut file_to_track_files: HashMap<PathBuf, Vec<&TrackFile>> = HashMap::new();
-
     for track_file in track_files {
         file_to_tracks
             .entry(track_file.file_path.clone())
@@ -620,38 +452,26 @@ fn build_chunk_track_mappings(
             .or_default()
             .push(track_file);
     }
-
-    // Accumulate mappings as we process files
     let mut chunk_to_track: HashMap<i32, Vec<String>> = HashMap::new();
     let mut track_chunk_counts: HashMap<String, usize> = HashMap::new();
     let mut cue_flac_data: HashMap<PathBuf, CueFlacLayoutData> = HashMap::new();
-
     for file_to_chunks in files_to_chunks.iter() {
-        // Skip files not associated with tracks (cover.jpg, .cue, etc.)
         let Some(track_ids) = file_to_tracks.get(&file_to_chunks.file_path) else {
             continue;
         };
-
-        // Check if this file has pre-parsed CUE metadata (indicates CUE/FLAC file)
         if let Some(cue_metadata) = cue_flac_metadata
             .as_ref()
             .and_then(|map| map.get(&file_to_chunks.file_path))
         {
-            // CUE/FLAC file: calculate precise per-track chunk ranges using pre-parsed data
             let track_files_for_file = file_to_track_files
                 .get(&file_to_chunks.file_path)
                 .ok_or("Track files not found")?;
-
             debug!(
                 "Processing CUE/FLAC file: {}",
                 file_to_chunks.file_path.display()
             );
-
-            // Extract FLAC headers (needed for playback decode/re-encode)
             let flac_headers = CueFlacProcessor::extract_flac_headers(&cue_metadata.flac_path)
                 .map_err(|e| format!("Failed to extract FLAC headers: {}", e))?;
-
-            // Build seektable once for this FLAC file (reused for all tracks)
             debug!(
                 "Building seektable for FLAC file: {}",
                 cue_metadata.flac_path.display()
@@ -659,17 +479,12 @@ fn build_chunk_track_mappings(
             let flac_info = build_seektable(&cue_metadata.flac_path)
                 .map_err(|e| format!("Failed to build seektable: {}", e))?;
             debug!("Seektable built with {} entries", flac_info.seektable.len());
-
-            // For CUE/FLAC, calculate exact byte ranges using seektable
             let mut track_byte_ranges = HashMap::new();
             let chunk_size_i64 = chunk_size as i64;
-
             for (cue_track_idx, cue_track) in cue_metadata.cue_sheet.tracks.iter().enumerate() {
                 let Some(track_file) = track_files_for_file.get(cue_track_idx) else {
                     continue;
                 };
-
-                // Find exact byte positions using seektable and sample rate from libFLAC
                 let (start_byte, end_byte) = find_track_byte_range(
                     &cue_metadata.flac_path,
                     cue_track.start_time_ms,
@@ -677,7 +492,6 @@ fn build_chunk_track_mappings(
                     &flac_info.seektable,
                     flac_info.sample_rate,
                 )?;
-
                 debug!(
                     "Track {}: time {}ms-{}ms → bytes {}-{} ({}MB)",
                     cue_track.number,
@@ -687,16 +501,12 @@ fn build_chunk_track_mappings(
                     end_byte,
                     (end_byte - start_byte) / 1_000_000
                 );
-
-                // Convert file byte positions to chunk indices
                 let file_start_byte = file_to_chunks.start_byte_offset
                     + (file_to_chunks.start_chunk_index as i64 * chunk_size_i64);
                 let absolute_start_byte = file_start_byte + start_byte;
                 let absolute_end_byte = file_start_byte + end_byte;
-
                 let start_chunk_index = (absolute_start_byte / chunk_size_i64) as i32;
                 let end_chunk_index = ((absolute_end_byte - 1) / chunk_size_i64) as i32;
-
                 debug!(
                     "Track {}: chunks {}-{} ({} chunks)",
                     cue_track.number,
@@ -704,14 +514,10 @@ fn build_chunk_track_mappings(
                     end_chunk_index,
                     end_chunk_index - start_chunk_index + 1
                 );
-
-                // Store byte range for this track
                 track_byte_ranges.insert(
                     track_file.db_track_id.clone(),
                     (absolute_start_byte, absolute_end_byte),
                 );
-
-                // Map each chunk in range to this track
                 let chunk_count = (end_chunk_index - start_chunk_index + 1) as usize;
                 for chunk_idx in start_chunk_index..=end_chunk_index {
                     let entry = chunk_to_track.entry(chunk_idx).or_default();
@@ -719,13 +525,10 @@ fn build_chunk_track_mappings(
                         entry.push(track_file.db_track_id.clone());
                     }
                 }
-
                 *track_chunk_counts
                     .entry(track_file.db_track_id.clone())
                     .or_insert(0) += chunk_count;
             }
-
-            // Store parsed CUE/FLAC data for metadata persistence
             cue_flac_data.insert(
                 file_to_chunks.file_path.clone(),
                 CueFlacLayoutData {
@@ -736,10 +539,8 @@ fn build_chunk_track_mappings(
                 },
             );
         } else {
-            // Regular file: all tracks share all chunks
             let chunk_count =
                 (file_to_chunks.end_chunk_index - file_to_chunks.start_chunk_index + 1) as usize;
-
             for chunk_idx in file_to_chunks.start_chunk_index..=file_to_chunks.end_chunk_index {
                 let entry = chunk_to_track.entry(chunk_idx).or_default();
                 for track_id in track_ids {
@@ -748,40 +549,33 @@ fn build_chunk_track_mappings(
                     }
                 }
             }
-
             for track_id in track_ids {
                 *track_chunk_counts.entry(track_id.clone()).or_insert(0) += chunk_count;
             }
         }
     }
-
     Ok((chunk_to_track, track_chunk_counts, cue_flac_data))
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_calculate_file_mappings_integration_test_sizes() {
-        let chunk_size = 1024 * 1024; // 1MB
-
-        // Three files with exact sizes from integration test
+        let chunk_size = 1024 * 1024;
         let files = vec![
             DiscoveredFile {
                 path: PathBuf::from("file1.flac"),
-                size: 2_097_152, // 2MB
+                size: 2_097_152,
             },
             DiscoveredFile {
                 path: PathBuf::from("file2.flac"),
-                size: 3_145_728, // 3MB
+                size: 3_145_728,
             },
             DiscoveredFile {
                 path: PathBuf::from("file3.flac"),
-                size: 1_572_864, // 1.5MB
+                size: 1_572_864,
             },
         ];
-
         let tracks = vec![
             TrackFile {
                 db_track_id: "track-1".to_string(),
@@ -796,13 +590,8 @@ mod tests {
                 file_path: PathBuf::from("file3.flac"),
             },
         ];
-
         let layout = AlbumChunkLayout::build(files, &tracks, chunk_size, None).unwrap();
-
-        // Verify we got 3 mappings
         assert_eq!(layout.files_to_chunks.len(), 3);
-
-        // File 1: 2MB = 2 chunks (0-1)
         assert_eq!(
             layout.files_to_chunks[0].file_path,
             PathBuf::from("file1.flac")
@@ -810,90 +599,72 @@ mod tests {
         assert_eq!(layout.files_to_chunks[0].start_chunk_index, 0);
         assert_eq!(layout.files_to_chunks[0].end_chunk_index, 1);
         assert_eq!(layout.files_to_chunks[0].start_byte_offset, 0);
-
-        // File 2: 3MB = 3 chunks (2-4)
         assert_eq!(
             layout.files_to_chunks[1].file_path,
             PathBuf::from("file2.flac")
         );
         assert_eq!(layout.files_to_chunks[1].start_chunk_index, 2);
         assert_eq!(layout.files_to_chunks[1].end_chunk_index, 4);
-
-        // File 3: 1.5MB = 2 chunks (5-6)
         assert_eq!(
             layout.files_to_chunks[2].file_path,
             PathBuf::from("file3.flac")
         );
         assert_eq!(layout.files_to_chunks[2].start_chunk_index, 5);
         assert_eq!(layout.files_to_chunks[2].end_chunk_index, 6);
-
-        // Verify ranges are consecutive with no gaps or overlaps
         assert_eq!(
             layout.files_to_chunks[0].end_chunk_index + 1,
-            layout.files_to_chunks[1].start_chunk_index
+            layout.files_to_chunks[1].start_chunk_index,
         );
         assert_eq!(
             layout.files_to_chunks[1].end_chunk_index + 1,
-            layout.files_to_chunks[2].start_chunk_index
+            layout.files_to_chunks[2].start_chunk_index,
         );
-
-        // Total should be 7 chunks (0-6)
         assert_eq!(layout.total_chunks, 7);
     }
-
     #[test]
     fn test_chunk_boundaries_with_partial_final_chunk() {
-        let chunk_size = 1024 * 1024; // 1MB
-
+        let chunk_size = 1024 * 1024;
         let files = vec![
             DiscoveredFile {
                 path: PathBuf::from("file1.flac"),
-                size: 2_097_152, // 2MB = chunks 0, 1
+                size: 2_097_152,
             },
             DiscoveredFile {
                 path: PathBuf::from("file2.flac"),
-                size: 3_145_728, // 3MB = chunks 2, 3, 4
+                size: 3_145_728,
             },
             DiscoveredFile {
                 path: PathBuf::from("file3.flac"),
-                size: 1_572_864, // 1.5MB = chunks 5, 6 (chunk 6 is partial)
+                size: 1_572_864,
             },
         ];
-
         let _mappings = calculate_files_to_chunks(&files, chunk_size);
-
-        // Verify file 3 uses only 0.5MB of chunk 6
-        let file3_start_byte = 2_097_152u64 + 3_145_728; // 5_242_880
-        let file3_end_byte = file3_start_byte + 1_572_864; // 6_815_744
-        let chunk_6_start_byte = 6 * chunk_size as u64; // 6_291_456
-        let file3_bytes_in_chunk_6 = file3_end_byte - chunk_6_start_byte; // 524_288
-
+        let file3_start_byte = 2_097_152u64 + 3_145_728;
+        let file3_end_byte = file3_start_byte + 1_572_864;
+        let chunk_6_start_byte = 6 * chunk_size as u64;
+        let file3_bytes_in_chunk_6 = file3_end_byte - chunk_6_start_byte;
         assert_eq!(
             file3_bytes_in_chunk_6, 524_288,
-            "File 3 should only use 0.5MB of chunk 6"
+            "File 3 should only use 0.5MB of chunk 6",
         );
     }
-
     #[test]
     fn test_multiple_small_files_share_chunks() {
-        let chunk_size = 1024 * 1024; // 1MB
-
-        // Three small files that should all fit in chunks 0-1
+        let chunk_size = 1024 * 1024;
         let files = vec![
             DiscoveredFile {
                 path: PathBuf::from("track1.flac"),
-                size: 500_000, // 500KB
+                size: 500_000,
             },
             DiscoveredFile {
                 path: PathBuf::from("track2.flac"),
-                size: 300_000, // 300KB
+                size: 300_000,
             },
             DiscoveredFile {
                 path: PathBuf::from("track3.flac"),
-                size: 400_000, // 400KB
+                size: 400_000,
             },
         ];
-
         let tracks = vec![
             TrackFile {
                 db_track_id: "track-1".to_string(),
@@ -908,91 +679,58 @@ mod tests {
                 file_path: PathBuf::from("track3.flac"),
             },
         ];
-
         let layout = AlbumChunkLayout::build(files, &tracks, chunk_size, None).unwrap();
-
-        // All three files together = 1.2MB = 2 chunks (0 and 1)
         assert_eq!(layout.total_chunks, 2);
-
-        // Byte layout:
-        // track1: 0-499,999 (500KB) → chunk 0
-        // track2: 500,000-799,999 (300KB) → chunk 0
-        // track3: 800,000-1,199,999 (400KB) → chunks 0 (200KB) and 1 (200KB)
-
-        // Chunk 0 should contain parts of tracks 1, 2, and 3
         let chunk_0_tracks = layout.chunk_to_track.get(&0).unwrap();
         assert_eq!(chunk_0_tracks.len(), 3);
         assert!(chunk_0_tracks.contains(&"track-1".to_string()));
         assert!(chunk_0_tracks.contains(&"track-2".to_string()));
         assert!(chunk_0_tracks.contains(&"track-3".to_string()));
-
-        // Chunk 1 should contain only track 3
         let chunk_1_tracks = layout.chunk_to_track.get(&1).unwrap();
         assert_eq!(chunk_1_tracks.len(), 1);
         assert!(chunk_1_tracks.contains(&"track-3".to_string()));
-
-        // Each track should be counted correctly
-        assert_eq!(layout.track_chunk_counts.get("track-1"), Some(&1)); // Only in chunk 0
-        assert_eq!(layout.track_chunk_counts.get("track-2"), Some(&1)); // Only in chunk 0
-        assert_eq!(layout.track_chunk_counts.get("track-3"), Some(&2)); // In chunks 0 and 1
+        assert_eq!(layout.track_chunk_counts.get("track-1"), Some(&1));
+        assert_eq!(layout.track_chunk_counts.get("track-2"), Some(&1));
+        assert_eq!(layout.track_chunk_counts.get("track-3"), Some(&2));
     }
-
     #[test]
     fn test_non_track_files_excluded_from_mappings() {
-        let chunk_size = 1024 * 1024; // 1MB
-
+        let chunk_size = 1024 * 1024;
         let files = vec![
             DiscoveredFile {
                 path: PathBuf::from("cover.jpg"),
-                size: 200_000, // 200KB
+                size: 200_000,
             },
             DiscoveredFile {
                 path: PathBuf::from("track1.flac"),
-                size: 900_000, // 900KB
+                size: 900_000,
             },
             DiscoveredFile {
                 path: PathBuf::from("album.cue"),
-                size: 5_000, // 5KB
+                size: 5_000,
             },
         ];
-
-        // Only track1.flac is mapped to a track
         let tracks = vec![TrackFile {
             db_track_id: "track-1".to_string(),
             file_path: PathBuf::from("track1.flac"),
         }];
-
         let layout = AlbumChunkLayout::build(files, &tracks, chunk_size, None).unwrap();
-
-        // cover.jpg (200KB) + track1.flac (900KB) = 1.1MB = 2 chunks
-        // album.cue (5KB) continues in chunk 1
         assert_eq!(layout.total_chunks, 2);
-
-        // Chunk 0 should only include track-1 (not cover.jpg)
         let chunk_0_tracks = layout.chunk_to_track.get(&0).unwrap();
         assert_eq!(chunk_0_tracks.len(), 1);
         assert_eq!(chunk_0_tracks[0], "track-1");
-
-        // Chunk 1 should only include track-1 (not album.cue)
         let chunk_1_tracks = layout.chunk_to_track.get(&1).unwrap();
         assert_eq!(chunk_1_tracks.len(), 1);
         assert_eq!(chunk_1_tracks[0], "track-1");
-
-        // track-1 spans 2 chunks
         assert_eq!(layout.track_chunk_counts.get("track-1"), Some(&2));
     }
-
     #[test]
     fn test_cue_flac_multiple_tracks_same_file() {
-        let chunk_size = 1024 * 1024; // 1MB
-
-        // Single FLAC file with CUE sheet
+        let chunk_size = 1024 * 1024;
         let files = vec![DiscoveredFile {
             path: PathBuf::from("album.flac"),
-            size: 3_000_000, // ~3MB
+            size: 3_000_000,
         }];
-
-        // All tracks map to the same file (CUE/FLAC format)
         let tracks = vec![
             TrackFile {
                 db_track_id: "track-1".to_string(),
@@ -1007,13 +745,8 @@ mod tests {
                 file_path: PathBuf::from("album.flac"),
             },
         ];
-
         let layout = AlbumChunkLayout::build(files, &tracks, chunk_size, None).unwrap();
-
-        // 3MB = 3 chunks
         assert_eq!(layout.total_chunks, 3);
-
-        // All chunks should contain all three tracks
         for chunk_idx in 0..3 {
             let chunk_tracks = layout.chunk_to_track.get(&chunk_idx).unwrap();
             assert_eq!(chunk_tracks.len(), 3);
@@ -1021,36 +754,31 @@ mod tests {
             assert!(chunk_tracks.contains(&"track-2".to_string()));
             assert!(chunk_tracks.contains(&"track-3".to_string()));
         }
-
-        // Each track should count all 3 chunks
         assert_eq!(layout.track_chunk_counts.get("track-1"), Some(&3));
         assert_eq!(layout.track_chunk_counts.get("track-2"), Some(&3));
         assert_eq!(layout.track_chunk_counts.get("track-3"), Some(&3));
     }
-
     #[test]
     fn test_mixed_scenario_with_edge_cases() {
-        let chunk_size = 1024 * 1024; // 1MB
-
+        let chunk_size = 1024 * 1024;
         let files = vec![
             DiscoveredFile {
                 path: PathBuf::from("cover.jpg"),
-                size: 100_000, // 100KB - non-track
+                size: 100_000,
             },
             DiscoveredFile {
                 path: PathBuf::from("track1.flac"),
-                size: 200_000, // 200KB - tiny track
+                size: 200_000,
             },
             DiscoveredFile {
                 path: PathBuf::from("track2.flac"),
-                size: 800_000, // 800KB - small track
+                size: 800_000,
             },
             DiscoveredFile {
                 path: PathBuf::from("track3.flac"),
-                size: 2_000_000, // 2MB - normal track
+                size: 2_000_000,
             },
         ];
-
         let tracks = vec![
             TrackFile {
                 db_track_id: "track-1".to_string(),
@@ -1065,26 +793,16 @@ mod tests {
                 file_path: PathBuf::from("track3.flac"),
             },
         ];
-
         let layout = AlbumChunkLayout::build(files, &tracks, chunk_size, None).unwrap();
-
-        // Total: 100KB + 200KB + 800KB + 2MB = 3.1MB = 3 chunks
         assert_eq!(layout.total_chunks, 3);
-
-        // Chunk 0: cover.jpg + track1.flac + track2.flac (partial) = 1MB
-        // Should only show track-1 and track-2
         let chunk_0 = layout.chunk_to_track.get(&0).unwrap();
         assert_eq!(chunk_0.len(), 2);
         assert!(chunk_0.contains(&"track-1".to_string()));
         assert!(chunk_0.contains(&"track-2".to_string()));
-
-        // Chunk 1: track2.flac (end) + track3.flac (partial) = 1MB
         let chunk_1 = layout.chunk_to_track.get(&1).unwrap();
         assert_eq!(chunk_1.len(), 2);
         assert!(chunk_1.contains(&"track-2".to_string()));
         assert!(chunk_1.contains(&"track-3".to_string()));
-
-        // Chunk 2: track3.flac (end) = 1.1MB
         let chunk_2 = layout.chunk_to_track.get(&2).unwrap();
         assert_eq!(chunk_2.len(), 1);
         assert_eq!(chunk_2[0], "track-3");

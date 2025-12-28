@@ -2,7 +2,6 @@ use crate::db::{DbImport, ImportOperationStatus};
 use crate::import::{ImportProgress, PrepareStep};
 use crate::ui::AppContext;
 use dioxus::prelude::*;
-
 /// Represents a single import operation being tracked in the UI
 #[derive(Clone, Debug, PartialEq)]
 pub struct ActiveImport {
@@ -18,7 +17,6 @@ pub struct ActiveImport {
     /// Stored cover image ID (shown after import complete)
     pub cover_image_id: Option<String>,
 }
-
 impl From<DbImport> for ActiveImport {
     fn from(db_import: DbImport) -> Self {
         Self {
@@ -34,14 +32,12 @@ impl From<DbImport> for ActiveImport {
         }
     }
 }
-
 /// Shared state for active imports across the app
 #[derive(Clone, Copy)]
 pub struct ActiveImportsState {
     pub imports: Signal<Vec<ActiveImport>>,
     pub is_loading: Signal<bool>,
 }
-
 impl ActiveImportsState {
     /// Dismiss/remove an import from the list
     pub fn dismiss(&self, import_id: &str) {
@@ -51,25 +47,19 @@ impl ActiveImportsState {
         });
     }
 }
-
 /// Provider component for active imports state
 #[component]
 pub fn ActiveImportsProvider(children: Element) -> Element {
     let imports = use_signal(Vec::new);
     let is_loading = use_signal(|| true);
-
     let state = ActiveImportsState {
         imports,
         is_loading,
     };
-
     use_context_provider(|| state);
-
     let app_context = use_context::<AppContext>();
     let library_manager = app_context.library_manager.clone();
     let import_handle = app_context.import_handle.clone();
-
-    // Load active imports from database on mount
     use_effect({
         let library_manager = library_manager.clone();
         let mut imports = state.imports;
@@ -91,8 +81,6 @@ pub fn ActiveImportsProvider(children: Element) -> Element {
             });
         }
     });
-
-    // Subscribe to all import progress events
     use_effect({
         let import_handle = import_handle.clone();
         let imports = state.imports;
@@ -100,19 +88,16 @@ pub fn ActiveImportsProvider(children: Element) -> Element {
             let import_handle = import_handle.clone();
             spawn(async move {
                 let mut progress_rx = import_handle.subscribe_all_imports();
-
                 while let Some(event) = progress_rx.recv().await {
                     handle_progress_event(imports, event);
                 }
             });
         }
     });
-
     rsx! {
         {children}
     }
 }
-
 /// Handle a progress event and update the imports state
 fn handle_progress_event(imports: Signal<Vec<ActiveImport>>, event: ImportProgress) {
     let mut imports = imports;
@@ -129,7 +114,6 @@ fn handle_progress_event(imports: Signal<Vec<ActiveImport>>, event: ImportProgre
                     import.current_step = Some(step);
                     import.status = ImportOperationStatus::Preparing;
                 } else {
-                    // New import - add it to the list
                     list.push(ActiveImport {
                         import_id,
                         album_title,
@@ -144,7 +128,6 @@ fn handle_progress_event(imports: Signal<Vec<ActiveImport>>, event: ImportProgre
                 }
             });
         }
-
         ImportProgress::Started { id, import_id, .. } => {
             if let Some(ref iid) = import_id {
                 imports.with_mut(|list| {
@@ -152,7 +135,6 @@ fn handle_progress_event(imports: Signal<Vec<ActiveImport>>, event: ImportProgre
                         import.status = ImportOperationStatus::Importing;
                         import.current_step = None;
                         import.progress_percent = Some(0);
-                        // Update release_id if we have it
                         if import.release_id.is_none() {
                             import.release_id = Some(id.clone());
                         }
@@ -160,7 +142,6 @@ fn handle_progress_event(imports: Signal<Vec<ActiveImport>>, event: ImportProgre
                 });
             }
         }
-
         ImportProgress::Progress {
             percent, import_id, ..
         } => {
@@ -172,7 +153,6 @@ fn handle_progress_event(imports: Signal<Vec<ActiveImport>>, event: ImportProgre
                 });
             }
         }
-
         ImportProgress::Complete {
             import_id,
             release_id,
@@ -192,10 +172,8 @@ fn handle_progress_event(imports: Signal<Vec<ActiveImport>>, event: ImportProgre
                         }
                     }
                 });
-                // Don't auto-remove - user will dismiss manually
             }
         }
-
         ImportProgress::Failed { import_id, .. } => {
             if let Some(ref iid) = import_id {
                 imports.with_mut(|list| {
@@ -203,12 +181,10 @@ fn handle_progress_event(imports: Signal<Vec<ActiveImport>>, event: ImportProgre
                         import.status = ImportOperationStatus::Failed;
                     }
                 });
-                // Don't auto-remove - user will dismiss manually
             }
         }
     }
 }
-
 /// Hook to access active imports state
 pub fn use_active_imports() -> ActiveImportsState {
     use_context::<ActiveImportsState>()

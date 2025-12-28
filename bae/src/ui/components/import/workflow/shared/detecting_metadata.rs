@@ -1,5 +1,4 @@
 use dioxus::prelude::*;
-
 #[component]
 pub fn DetectingMetadata(message: String, on_skip: Option<EventHandler<()>>) -> Element {
     rsx! {

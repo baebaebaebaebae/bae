@@ -1,15 +1,12 @@
 //! CD ripper component for selecting drive and ripping CD
-
 use crate::cd::CdDrive;
 use dioxus::prelude::*;
 use std::path::PathBuf;
-
 #[component]
 pub fn CdRipper(on_drive_select: EventHandler<PathBuf>, on_error: EventHandler<String>) -> Element {
     let mut drives = use_signal(Vec::<CdDrive>::new);
     let mut selected_drive = use_signal(|| None::<PathBuf>);
     let mut is_scanning = use_signal(|| false);
-
     use_effect(move || {
         spawn(async move {
             is_scanning.set(true);
@@ -28,7 +25,10 @@ pub fn CdRipper(on_drive_select: EventHandler<PathBuf>, on_error: EventHandler<S
                         let error_msg = if e.to_string().contains("Permission denied")
                             || e.to_string().contains("Operation not permitted")
                         {
-                            format!("Failed to access CD drive: {}\n\nOn macOS, you may need to grant Full Disk Access permission:\n1. Open System Settings → Privacy & Security → Full Disk Access\n2. Add this application to the list", e)
+                            format!(
+                                "Failed to access CD drive: {}\n\nOn macOS, you may need to grant Full Disk Access permission:\n1. Open System Settings → Privacy & Security → Full Disk Access\n2. Add this application to the list",
+                                e,
+                            )
                         } else {
                             format!("Failed to detect CD drives: {}", e)
                         };
@@ -43,7 +43,6 @@ pub fn CdRipper(on_drive_select: EventHandler<PathBuf>, on_error: EventHandler<S
             is_scanning.set(false);
         });
     });
-
     rsx! {
         div { class: "space-y-4",
             if *is_scanning.read() {

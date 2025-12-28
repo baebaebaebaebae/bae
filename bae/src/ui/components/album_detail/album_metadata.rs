@@ -1,6 +1,5 @@
 use crate::db::{DbAlbum, DbArtist, DbRelease};
 use dioxus::prelude::*;
-
 #[component]
 pub fn AlbumMetadata(
     album: DbAlbum,
@@ -19,10 +18,8 @@ pub fn AlbumMetadata(
             .collect::<Vec<_>>()
             .join(", ")
     };
-
     rsx! {
         div {
-            // Simple top section
             h1 { class: "text-2xl font-bold text-white mb-2", "{album.title}" }
             p { class: "text-lg text-gray-300 mb-2", "{artist_name}" }
             if let Some(year) = album.year {

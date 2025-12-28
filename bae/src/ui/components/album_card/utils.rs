@@ -1,5 +1,4 @@
 use crate::db::DbRelease;
-
 /// Format a release name for display in menus
 pub fn format_release_display(release: &DbRelease) -> String {
     if let Some(name) = &release.release_name {
