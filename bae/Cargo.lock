@@ -812,6 +812,7 @@ name = "bae"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "ashpd",
  "async-trait",
  "aws-config",
  "aws-credential-types",
