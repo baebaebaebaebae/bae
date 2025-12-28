@@ -1,108 +1,90 @@
 # bae
 
-**bae** is an album-oriented music library that starts with metadata as the source of truth:
+A desktop music library app. Album-oriented, metadata-first: you pick releases from Discogs or MusicBrainz, point bae at your files, and it handles storage, playback, and streaming.
 
-- Search the [Discogs database](https://www.discogs.com/developers) for albums
-- Pick a master or specific release
-- Point bae to your music files
-- bae handles the rest:
-  - Chunking and encrypting your music
-  - Uploading to S3
-  - Making everything streamable through a Subsonic-compatible API
+## Features
 
-Your music is encrypted and stored in S3-compatible cloud storage with a local cache for fast streaming. The SQLite database also lives in S3, so your library is fully cloud-backed. Any Subsonic client (DSub, play:Sub, Clementine, Jamstash) can connect to the local API for browsing and playback.
+**Import sources**
+- Local folders (file-per-track or CUE/FLAC)
+- Torrents (.torrent files)
+- CD ripping (libcdio-paranoia with error correction)
 
-## How it works
+**Storage**
+- Cloud: S3-compatible storage (AWS, MinIO, etc.) with AES-GCM encryption and chunking
+- Local: filesystem path, optional encryption/chunking
+- Storage profiles let you configure different destinations
 
-### Setup 
+**Playback**
+- Native audio via cpal
+- Subsonic 1.16.1 API on localhost:4533 for external clients (DSub, play:Sub, etc.)
+- macOS media key support
 
-On first launch, configure S3 storage and Discogs API key. The system detects existing libraries or initializes a new one. Configuration is stored in `~/.bae/config.yaml` with credentials in the system keyring.
+**Metadata**
+- MusicBrainz with DiscID exact matching (from CUE sheets or rip logs)
+- Discogs search and matching
+- Cover art from local files, MusicBrainz, or Discogs
 
-### Import
-
-bae uses a folder-first import flow that prioritizes exact lookups:
-
-1. **Select folder** - Point bae to a folder containing one release's audio files
-2. **Metadata detection** - bae extracts metadata from CUE files, audio tags, and folder names
-3. **Exact lookup** - If a MusicBrainz DiscID is found (from CUE files), bae performs an exact lookup:
-   - Single match → auto-proceeds to confirmation
-   - Multiple matches → user selects desired release
-   - No match → proceeds to manual search
-4. **Manual search** (if needed) - User chooses between MusicBrainz or Discogs search, selects release
-5. **Confirmation** - bae checks for duplicates, then starts import
-
-bae scans the folder, matches files to the tracklist, chunks and encrypts everything, then uploads to S3. The local SQLite database syncs to S3 after each import. See [BAE_IMPORT_WORKFLOW.md](BAE_IMPORT_WORKFLOW.md) for details.
-
-### Streaming
-
-bae runs a Subsonic 1.16.1 API server on localhost:4533. The streaming system downloads chunks from S3 (or local cache), decrypts them, and reassembles audio in real-time. Works with any Subsonic client.
-
-### Format support
-
-Handles traditional file-per-track albums and CUE/FLAC releases (single FLAC file with CUE sheet for track boundaries). For CUE/FLAC albums, bae parses timing information and streams individual tracks without extraction.
+**Other**
+- Torrent seeding: imported releases can be seeded back via libtorrent
+- CUE/FLAC: streams individual tracks from single-file albums without splitting
 
 ## Development setup
 
+macOS only for now. Requires Homebrew.
+
 **Prerequisites:**
+
 ```bash
+# Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Dioxus CLI
 cargo install dioxus-cli --locked
-# Install cmake (required for libflac-sys to build libFLAC from source)
-# macOS: brew install cmake
-# Linux: apt-get install cmake (or equivalent)
-# Windows: Download from https://cmake.org/download/
-# macOS: Install libdiscid for MusicBrainz DiscID support
-# macOS: brew install libdiscid pkg-config
-# Note: .cargo/config.toml is included in the repo to configure libdiscid linking on macOS
+
+# System libraries
+brew install cmake pkg-config libdiscid libcdio libtorrent-rasterbar boost
 ```
 
 **Quick start:**
+
 ```bash
-# Start MinIO for dev
-docker run -p 9000:9000 -p 9001:9001 \
+# Start MinIO for local S3
+docker run -d -p 9000:9000 -p 9001:9001 \
   -e MINIO_ROOT_USER=minioadmin \
   -e MINIO_ROOT_PASSWORD=minioadmin \
   quay.io/minio/minio server /data --console-address ":9001"
 
-# Setup bae
+# Clone and setup
 git clone <repository-url>
 cd bae
-./scripts/install-hooks.sh  # Install git hooks for formatting checks
-npm install  # Tailwind CSS setup
+./scripts/install-hooks.sh
+npm install
+
+# Configure
 cp .env.example .env
-# Edit .env: 
-#   - Add encryption key from: openssl rand -hex 32
-#   - Add Discogs API key from: https://www.discogs.com/settings/developers
+# Edit .env:
+#   BAE_ENCRYPTION_KEY=<run: openssl rand -hex 32>
+#   BAE_DISCOGS_API_KEY=<from https://www.discogs.com/settings/developers>
+
+# Run
 cd bae && dx serve
 ```
 
-Dev mode activates automatically in debug builds when `.env` exists. Requires MinIO running locally and a valid Discogs API key. See [BAE_LIBRARY_CONFIGURATION.md](BAE_LIBRARY_CONFIGURATION.md) for details.
+Dev mode activates automatically when `.env` exists.
+
+## Configuration
+
+**Dev mode** (debug builds with `.env`): loads from `.env` file in repo root.
+
+**Production mode** (release builds without `.env`): loads secrets from system keyring, settings from `~/.bae/config.yaml`.
 
 ## Logging
 
-bae uses structured logging with the `tracing` crate. Log levels can be controlled via the `RUST_LOG` environment variable:
+Log levels via `RUST_LOG`:
 
 ```bash
-# Show general information (default)
-RUST_LOG=info cargo run
-
-# Show detailed debugging information
-RUST_LOG=debug cargo run
-
-# Show debug logs only for the bae module
-RUST_LOG=bae=debug cargo run
-
-# Show debug logs only for specific modules
-RUST_LOG=bae::cache=debug,bae::import=info cargo run
-
-# Show all logs from all dependencies
-RUST_LOG=trace cargo run
+RUST_LOG=info dx serve              # General info (default)
+RUST_LOG=debug dx serve             # Detailed debugging
+RUST_LOG=bae=debug dx serve         # Debug only bae module
+RUST_LOG=bae::import=debug dx serve # Debug specific submodule
 ```
-
-## Documentation
-
-- [TASKS.md](TASKS.md) - Implementation progress and task breakdown
-- [BAE_LIBRARY_CONFIGURATION.md](BAE_LIBRARY_CONFIGURATION.md) - Library setup, configuration, and multi-device access
-- [BAE_IMPORT_WORKFLOW.md](BAE_IMPORT_WORKFLOW.md) - Album import process and Discogs integration
-- [BAE_STREAMING_ARCHITECTURE.md](BAE_STREAMING_ARCHITECTURE.md) - Streaming system and Subsonic API
-- [BAE_CUE_FLAC_SPEC.md](BAE_CUE_FLAC_SPEC.md) - CUE sheet and FLAC album support
