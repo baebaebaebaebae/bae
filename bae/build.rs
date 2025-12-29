@@ -10,8 +10,9 @@ fn main() {
         "cargo:rerun-if-changed={}",
         Path::new(manifest_dir).join("tailwind.config.js").display(),
     );
-    let output = Command::new("npx")
-        .arg("tailwindcss")
+    // Use node_modules/.bin/tailwindcss directly - more reliable than npx in CI
+    let tailwind_bin = Path::new(manifest_dir).join("node_modules/.bin/tailwindcss");
+    let output = Command::new(&tailwind_bin)
         .args([
             "-i",
             tailwind_input.to_str().unwrap(),
