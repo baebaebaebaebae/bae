@@ -10,8 +10,9 @@
 ///
 /// # Example
 /// ```
+/// # use bae::ui::local_file_url::local_file_url;
 /// let url = local_file_url("/Users/me/Music/cover.jpg");
-/// // Returns: bae://local/Users/me/Music/cover.jpg
+/// assert_eq!(url, "bae://local/Users/me/Music/cover.jpg");
 /// ```
 pub fn local_file_url(path: &str) -> String {
     let encoded_path: String = path
@@ -27,8 +28,9 @@ pub fn local_file_url(path: &str) -> String {
 ///
 /// # Example
 /// ```
+/// # use bae::ui::local_file_url::image_url;
 /// let url = image_url("abc123-def456");
-/// // Returns: bae://image/abc123-def456
+/// assert_eq!(url, "bae://image/abc123-def456");
 /// ```
 pub fn image_url(image_id: &str) -> String {
     format!("bae://image/{}", image_id)
