@@ -5,19 +5,6 @@ pub struct DiscogsArtist {
     pub id: String,
     pub name: String,
 }
-/// Represents a Discogs master (full data from master detail API)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct DiscogsMaster {
-    pub id: String,
-    pub title: String,
-    pub year: u32,
-    pub thumb: Option<String>,
-    pub label: Vec<String>,
-    pub country: Option<String>,
-    pub artists: Vec<DiscogsArtist>,
-    pub tracklist: Vec<DiscogsTrack>,
-    pub main_release: String,
-}
 /// Represents a Discogs release search result
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DiscogsRelease {
@@ -35,30 +22,10 @@ pub struct DiscogsRelease {
     pub tracklist: Vec<DiscogsTrack>,
     pub master_id: String,
 }
-/// Represents a release version from master versions API
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct DiscogsMasterReleaseVersion {
-    pub id: u64,
-    pub title: String,
-    pub format: String,
-    pub label: String,
-    pub catno: String,
-    pub country: String,
-    pub released: Option<String>,
-    pub thumb: Option<String>,
-}
 /// Represents a track from Discogs
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DiscogsTrack {
     pub position: String,
     pub title: String,
     pub duration: Option<String>,
-}
-/// Pagination information from Discogs API
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct PaginationInfo {
-    pub page: u32,
-    pub pages: u32,
-    pub per_page: u32,
-    pub items: u32,
 }

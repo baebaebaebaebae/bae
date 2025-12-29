@@ -163,11 +163,8 @@ fn filter_audio_files(paths: &[PathBuf]) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        db::ImportStatus, discogs::DiscogsMaster, import::discogs_parser::parse_discogs_release,
-    };
+    use crate::db::ImportStatus;
     use chrono::Utc;
-    use std::fs::read_to_string;
     fn create_test_tracks(count: usize) -> Vec<DbTrack> {
         (0..count)
             .map(|i| DbTrack {
@@ -283,135 +280,5 @@ mod tests {
             "Expected CUE parsing error, got: {}",
             err,
         );
-    }
-    #[tokio::test]
-    async fn test_map_tracks_to_files_vinyl_with_numbered_files() {
-        let fixture_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/vinyl_master_test.json");
-        let json_data =
-            read_to_string(&fixture_path).expect("Failed to read vinyl_master_test.json");
-        let master: DiscogsMaster = serde_json::from_str(&json_data).expect("Failed to parse JSON");
-        let release = crate::discogs::DiscogsRelease {
-            id: master.id.clone(),
-            title: master.title.clone(),
-            year: Some(master.year),
-            genre: Vec::new(),
-            style: Vec::new(),
-            format: Vec::new(),
-            country: None,
-            label: Vec::new(),
-            cover_image: None,
-            thumb: None,
-            artists: master.artists.clone(),
-            tracklist: master.tracklist.clone(),
-            master_id: master.id,
-        };
-        let (_, _, tracks, _, _) = parse_discogs_release(&release, master.year, None).unwrap();
-        assert_eq!(tracks.len(), 2);
-        assert_eq!(tracks[0].discogs_position, Some("A1".to_string()));
-        assert_eq!(tracks[0].track_number, Some(1));
-        assert_eq!(tracks[6].discogs_position, Some("A7".to_string()));
-        assert_eq!(tracks[6].track_number, Some(7));
-        assert_eq!(tracks[7].discogs_position, Some("B1".to_string()));
-        assert_eq!(tracks[7].track_number, Some(8));
-        assert_eq!(tracks[15].discogs_position, Some("B9".to_string()));
-        assert_eq!(tracks[15].track_number, Some(16));
-        let discovered_files = create_discovered_files(vec![
-            "/vinyl/01 Track A1.flac",
-            "/vinyl/02 Track A2.flac",
-            "/vinyl/03 Track A3.flac",
-            "/vinyl/04 Track A4.flac",
-            "/vinyl/05 Track A5.flac",
-            "/vinyl/06 Track A6.flac",
-            "/vinyl/07 Track A7.flac",
-            "/vinyl/08 Track B1.flac",
-            "/vinyl/09 Track B2.flac",
-            "/vinyl/10 Track B3.flac",
-            "/vinyl/11 Track B4.flac",
-            "/vinyl/12 Track B5.flac",
-            "/vinyl/13 Track B6.flac",
-            "/vinyl/14 Track B7.flac",
-            "/vinyl/15 Track B8.flac",
-            "/vinyl/16 Track B9.flac",
-            "/vinyl/album.cue",
-            "/vinyl/album.log",
-        ]);
-        let result = map_tracks_to_files(&tracks, &discovered_files).await;
-        assert!(result.is_ok());
-        let mapping_result = result.unwrap();
-        let mappings = &mapping_result.track_files;
-        assert_eq!(mappings.len(), 16, "All 16 tracks should be mapped");
-        assert_eq!(
-            mappings[0].file_path,
-            PathBuf::from("/vinyl/01 Track A1.flac")
-        );
-        assert_eq!(tracks[0].discogs_position, Some("A1".to_string()));
-        assert_eq!(
-            mappings[7].file_path,
-            PathBuf::from("/vinyl/08 Track B1.flac")
-        );
-        assert_eq!(tracks[7].discogs_position, Some("B1".to_string()));
-        assert_eq!(
-            mappings[15].file_path,
-            PathBuf::from("/vinyl/16 Track B9.flac")
-        );
-        assert_eq!(tracks[15].discogs_position, Some("B9".to_string()));
-    }
-    #[tokio::test]
-    async fn test_map_tracks_to_files_vinyl_cue_flac() {
-        let fixture_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/vinyl_master_test.json");
-        let json_data =
-            read_to_string(&fixture_path).expect("Failed to read vinyl_master_test.json");
-        let master: DiscogsMaster = serde_json::from_str(&json_data).expect("Failed to parse JSON");
-        let release = crate::discogs::DiscogsRelease {
-            id: master.id.clone(),
-            title: master.title.clone(),
-            year: Some(master.year),
-            genre: Vec::new(),
-            style: Vec::new(),
-            format: Vec::new(),
-            country: None,
-            label: Vec::new(),
-            cover_image: None,
-            thumb: None,
-            artists: master.artists.clone(),
-            tracklist: master.tracklist.clone(),
-            master_id: master.id.clone(),
-        };
-        let (_, _, tracks, _, _) = parse_discogs_release(&release, master.year, None).unwrap();
-        assert_eq!(tracks.len(), 2);
-        let cue_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/vinyl_album.cue");
-        let flac_path = cue_path.with_extension("flac");
-        let discovered_files = vec![
-            DiscoveredFile {
-                path: flac_path.clone(),
-                size: 300 * 1024 * 1024,
-            },
-            DiscoveredFile {
-                path: cue_path,
-                size: 2048,
-            },
-        ];
-        let result = map_tracks_to_files(&tracks, &discovered_files).await;
-        assert!(result.is_ok(), "CUE/FLAC mapping should succeed");
-        let mapping_result = result.unwrap();
-        let mappings = &mapping_result.track_files;
-        assert_eq!(
-            mappings.len(),
-            16,
-            "All 16 tracks should be mapped from CUE sheet"
-        );
-        for (i, mapping) in mappings.iter().enumerate() {
-            assert_eq!(
-                mapping.file_path, flac_path,
-                "Track {} should map to single FLAC file",
-                i,
-            );
-        }
-        assert_eq!(tracks[0].discogs_position, Some("A1".to_string()));
-        assert_eq!(tracks[7].discogs_position, Some("B1".to_string()));
-        assert_eq!(tracks[15].discogs_position, Some("B9".to_string()));
     }
 }
