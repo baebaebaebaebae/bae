@@ -41,27 +41,11 @@ jobs:
     - name: Install Rust (uses rust-toolchain.toml)
       run: rustup show
 
-    - name: Cache cargo registry
-      uses: actions/cache@v4
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@v2
       with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-registry-
-
-    - name: Cache cargo target directory
-      uses: actions/cache@v4
-      with:
-        path: bae/target
-        key: ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-target-
-
-    - name: Fetch dependencies
-      working-directory: ./bae
-      run: cargo fetch
+        workspaces: bae -> target
+        shared-key: rust-cache
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -172,6 +156,12 @@ jobs:
     - name: Install Rust (uses rust-toolchain.toml)
       run: rustup show
 
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: bae -> target
+        shared-key: rust-cache
+
     - name: Install cargo-audit
       run: cargo install cargo-audit
 
@@ -209,27 +199,11 @@ jobs:
     - name: Install Rust (uses rust-toolchain.toml)
       run: rustup show
 
-    - name: Cache cargo registry
-      uses: actions/cache@v4
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@v2
       with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-registry-
-
-    - name: Cache cargo target directory
-      uses: actions/cache@v4
-      with:
-        path: bae/target
-        key: ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-target-
-
-    - name: Fetch dependencies
-      working-directory: ./bae
-      run: cargo fetch
+        workspaces: bae -> target
+        shared-key: rust-cache
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
