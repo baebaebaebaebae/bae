@@ -118,13 +118,6 @@ jobs:
       working-directory: ./bae
       run: cargo test --verbose
 
-    - name: Build application
-      working-directory: ./bae
-      env:
-        PKG_CONFIG_PATH: ${{ runner.os == 'macOS' && '/opt/homebrew/lib/pkgconfig' || '' }}
-        LIBRARY_PATH: ${{ runner.os == 'macOS' && '/opt/homebrew/lib' || '' }}
-      run: cargo build --verbose --release
-
     - name: Debug with SSH (on failure)
       if: failure() && runner.os == 'Linux'
       uses: mxschmitt/action-tmate@v3
