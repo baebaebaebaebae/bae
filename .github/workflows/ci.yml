@@ -42,7 +42,7 @@ jobs:
     - name: Install macOS dependencies
       if: runner.os == 'macOS'
       run: |
-        brew install libdiscid libcdio pkg-config
+        brew install libdiscid libcdio pkg-config libtorrent-rasterbar boost
 
     - name: Install Rust
       uses: dtolnay/rust-toolchain@master
@@ -201,7 +201,7 @@ jobs:
     - name: Install macOS dependencies
       if: runner.os == 'macOS'
       run: |
-        brew install libdiscid libcdio pkg-config
+        brew install libdiscid libcdio pkg-config libtorrent-rasterbar boost
 
     - name: Install Rust
       uses: dtolnay/rust-toolchain@master

@@ -59,15 +59,39 @@ fn compile_cpp_storage() {
         return;
     }
     let wrappers_source = cpp_dir.join("bae_storage_cxx_wrappers.cpp");
-    cxx_build::bridge(&ffi_rs)
+    // Collect include paths from pkg-config for libtorrent
+    let mut include_paths = vec![
+        cpp_dir.to_str().unwrap().to_string(),
+        "/opt/homebrew/include".to_string(),
+        "/usr/local/include".to_string(),
+    ];
+    if let Ok(output) = Command::new("pkg-config")
+        .args(["--cflags", "libtorrent-rasterbar"])
+        .output()
+    {
+        if output.status.success() {
+            let flags = String::from_utf8_lossy(&output.stdout);
+            for flag in flags.split_whitespace() {
+                if let Some(path) = flag.strip_prefix("-I") {
+                    let path = path.to_string();
+                    if !include_paths.contains(&path) {
+                        include_paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    // Build with all include paths - fold over include paths
+    let mut binding = cxx_build::bridge(&ffi_rs);
+    let base_build = binding
         .file(&source)
         .file(&helpers_source)
         .file(&wrappers_source)
-        .include(&cpp_dir)
-        .include("/opt/homebrew/include")
-        .include("/usr/local/include")
-        .flag("-std=c++17")
-        .compile("bae_storage");
+        .flag("-std=c++17");
+    let build = include_paths
+        .iter()
+        .fold(base_build, |acc, path| acc.include(path));
+    build.compile("bae_storage");
     println!("cargo:rerun-if-changed={}", ffi_rs.display());
     println!("cargo:rerun-if-changed={}", source.display());
     println!("cargo:rerun-if-changed={}", helpers_source.display());
