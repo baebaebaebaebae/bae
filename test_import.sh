@@ -20,6 +20,8 @@ echo ""
 echo "Press Ctrl+C when done"
 echo ""
 
-cd /Users/dima/dev/bae/bae
+# Get the directory where this script lives
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/bae"
 cargo run --release
 
