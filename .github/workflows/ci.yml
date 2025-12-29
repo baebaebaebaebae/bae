@@ -87,12 +87,18 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.cargo/bin
-        key: ${{ runner.os }}-cargo-bin-${{ hashFiles('**/Cargo.toml') }}
+        key: ${{ runner.os }}-cargo-bin-dioxus-0.7
         restore-keys: |
-          ${{ runner.os }}-cargo-bin-
+          ${{ runner.os }}-cargo-bin-dioxus-
 
     - name: Install Dioxus CLI
-      run: cargo install dioxus-cli
+      run: |
+        if ! command -v dx &> /dev/null; then
+          cargo install dioxus-cli
+        else
+          echo "Dioxus CLI already installed, skipping"
+        fi
+      shell: bash
 
     - name: Check Rust formatting
       working-directory: ./bae
