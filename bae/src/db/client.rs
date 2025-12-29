@@ -1448,22 +1448,27 @@ impl Database {
         } else {
             return Ok(None);
         };
-        let row = if master_id.is_some() && release_id.is_some() {
-            sqlx::query(query)
-                .bind(master_id.unwrap())
-                .bind(release_id.unwrap())
-                .fetch_optional(&self.pool)
-                .await?
-        } else if master_id.is_some() {
-            sqlx::query(query)
-                .bind(master_id.unwrap())
-                .fetch_optional(&self.pool)
-                .await?
-        } else {
-            sqlx::query(query)
-                .bind(release_id.unwrap())
-                .fetch_optional(&self.pool)
-                .await?
+        let row = match (master_id, release_id) {
+            (Some(mid), Some(rid)) => {
+                sqlx::query(query)
+                    .bind(mid)
+                    .bind(rid)
+                    .fetch_optional(&self.pool)
+                    .await?
+            }
+            (Some(mid), None) => {
+                sqlx::query(query)
+                    .bind(mid)
+                    .fetch_optional(&self.pool)
+                    .await?
+            }
+            (None, Some(rid)) => {
+                sqlx::query(query)
+                    .bind(rid)
+                    .fetch_optional(&self.pool)
+                    .await?
+            }
+            (None, None) => unreachable!(), // Already handled above with return Ok(None)
         };
         Ok(row.map(|row| {
             let discogs_master_id: Option<String> = row.get("discogs_master_id");
@@ -1554,22 +1559,27 @@ impl Database {
         } else {
             return Ok(None);
         };
-        let row = if release_id.is_some() && release_group_id.is_some() {
-            sqlx::query(query)
-                .bind(release_id.unwrap())
-                .bind(release_group_id.unwrap())
-                .fetch_optional(&self.pool)
-                .await?
-        } else if release_id.is_some() {
-            sqlx::query(query)
-                .bind(release_id.unwrap())
-                .fetch_optional(&self.pool)
-                .await?
-        } else {
-            sqlx::query(query)
-                .bind(release_group_id.unwrap())
-                .fetch_optional(&self.pool)
-                .await?
+        let row = match (release_id, release_group_id) {
+            (Some(rid), Some(rgid)) => {
+                sqlx::query(query)
+                    .bind(rid)
+                    .bind(rgid)
+                    .fetch_optional(&self.pool)
+                    .await?
+            }
+            (Some(rid), None) => {
+                sqlx::query(query)
+                    .bind(rid)
+                    .fetch_optional(&self.pool)
+                    .await?
+            }
+            (None, Some(rgid)) => {
+                sqlx::query(query)
+                    .bind(rgid)
+                    .fetch_optional(&self.pool)
+                    .await?
+            }
+            (None, None) => unreachable!(), // Already handled above with return Ok(None)
         };
         Ok(row.map(|row| {
             let discogs_master_id: Option<String> = row.get("discogs_master_id");

@@ -3,7 +3,6 @@ use reqwest::{Client, Error as ReqwestError};
 use serde::Deserialize;
 use std::collections::HashMap;
 use thiserror::Error;
-use tracing::warn;
 #[derive(Error, Debug)]
 pub enum DiscogsError {
     #[error("HTTP request failed: {0}")]
