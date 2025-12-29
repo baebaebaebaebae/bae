@@ -23,21 +23,16 @@ fn main() {
     match output {
         Ok(output) => {
             if !output.status.success() {
-                println!("cargo:error=Failed to generate Tailwind CSS");
-                println!(
-                    "cargo:error=STDERR: {}",
-                    String::from_utf8_lossy(&output.stderr),
-                );
-                println!(
-                    "cargo:error=STDOUT: {}",
-                    String::from_utf8_lossy(&output.stdout),
-                );
+                eprintln!("Failed to generate Tailwind CSS");
+                eprintln!("STDERR: {}", String::from_utf8_lossy(&output.stderr));
+                eprintln!("STDOUT: {}", String::from_utf8_lossy(&output.stdout));
+                panic!("Tailwind CSS generation failed");
             } else {
                 println!("cargo:warning=Tailwind CSS generated successfully");
             }
         }
         Err(e) => {
-            println!("cargo:error=Failed to run tailwindcss: {}", e);
+            panic!("Failed to run tailwindcss: {}", e);
         }
     }
 }

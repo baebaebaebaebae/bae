@@ -6,7 +6,7 @@ use crate::torrent::progress::{TorrentProgress, TorrentProgressHandle};
 use crate::torrent::{BaeStorage, TorrentPieceMapper};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 #[derive(Error, Debug)]
 pub enum SeederError {
     #[error("Database error: {0}")]

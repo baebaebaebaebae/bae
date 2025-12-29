@@ -92,6 +92,12 @@ test-utils = []  # Feature for test helper APIs
 [lints.clippy]
 too_many_arguments = "allow"
 
+[lints.rust]
+# objc crate uses cfg(feature = "cargo-clippy") internally which triggers this warning
+unexpected_cfgs = "allow"
+# generic-array 0.14 deprecation warnings from aes-gcm/sha2 - will be fixed when they update
+deprecated = "allow"
+
 [profile]
 
 [profile.wasm-dev]

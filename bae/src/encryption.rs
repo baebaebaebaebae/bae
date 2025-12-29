@@ -3,7 +3,7 @@ use aes_gcm::{
     Aes256Gcm, Key, Nonce,
 };
 use thiserror::Error;
-use tracing::{error, info};
+use tracing::info;
 #[derive(Error, Debug)]
 pub enum EncryptionError {
     #[error("Encryption failed: {0}")]
