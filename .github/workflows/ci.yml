@@ -22,14 +22,6 @@ jobs:
       matrix:
         # TODO: Re-enable ubuntu-latest, windows-latest once caches are populated
         os: [macos-latest]
-        rust: [stable]
-        # rust: [stable, beta]
-        # exclude:
-        #   # Only test beta on one OS to save CI time
-        #   - os: macos-latest
-        #     rust: beta
-        #   - os: windows-latest
-        #     rust: beta
 
     steps:
     - name: Checkout code
@@ -46,10 +38,9 @@ jobs:
       run: |
         brew install libdiscid libcdio pkg-config libtorrent-rasterbar boost
 
-    - name: Install Rust
+    - name: Install Rust (uses rust-toolchain.toml)
       uses: dtolnay/rust-toolchain@master
       with:
-        toolchain: ${{ matrix.rust }}
         components: rustfmt, clippy
 
     - name: Cache cargo registry
@@ -58,17 +49,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-        key: ${{ runner.os }}-cargo-registry-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-cargo-registry-${{ matrix.rust }}-
+          ${{ runner.os }}-cargo-registry-
 
     - name: Cache cargo target directory
       uses: actions/cache@v4
       with:
         path: bae/target
-        key: ${{ runner.os }}-cargo-target-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-cargo-target-${{ matrix.rust }}-
+          ${{ runner.os }}-cargo-target-
 
     - name: Fetch dependencies
       working-directory: ./bae
@@ -183,7 +174,6 @@ jobs:
     - name: Install Rust
       uses: dtolnay/rust-toolchain@master
       with:
-        toolchain: stable
         components: rustfmt, clippy
 
     - name: Install cargo-audit
@@ -220,10 +210,9 @@ jobs:
       run: |
         brew install libdiscid libcdio pkg-config libtorrent-rasterbar boost
 
-    - name: Install Rust
+    - name: Install Rust (uses rust-toolchain.toml)
       uses: dtolnay/rust-toolchain@master
       with:
-        toolchain: stable
         components: rustfmt, clippy
 
     - name: Cache cargo registry
@@ -232,17 +221,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-        key: ${{ runner.os }}-cargo-registry-stable-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-cargo-registry-stable-
+          ${{ runner.os }}-cargo-registry-
 
     - name: Cache cargo target directory
       uses: actions/cache@v4
       with:
         path: bae/target
-        key: ${{ runner.os }}-cargo-target-stable-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-cargo-target-stable-
+          ${{ runner.os }}-cargo-target-
 
     - name: Fetch dependencies
       working-directory: ./bae
