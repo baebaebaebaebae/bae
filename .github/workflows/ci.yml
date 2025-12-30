@@ -153,25 +153,14 @@ jobs:
   build-artifacts:
     name: Build Artifacts
     if: github.ref == 'refs/heads/release'
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
     needs: [test, security]
-    strategy:
-      matrix:
-        # TODO: Re-enable ubuntu-latest, windows-latest once caches are populated
-        os: [macos-latest]
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Install Linux dependencies
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libxdo-dev libasound2-dev libdiscid-dev libcdio-dev pkg-config
-
     - name: Install macOS dependencies
-      if: runner.os == 'macOS'
       run: |
         brew install libdiscid libcdio pkg-config libtorrent-rasterbar boost
 
@@ -183,6 +172,7 @@ jobs:
       with:
         workspaces: bae -> target
         shared-key: rust-cache
+        cache-directories: ~/.cargo/bin
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -195,18 +185,94 @@ jobs:
       working-directory: ./bae
       run: npm ci
 
-    - name: Build release binary
+    - name: Install Dioxus CLI
+      run: |
+        if ! command -v dx &> /dev/null; then
+          cargo install dioxus-cli
+        fi
+
+    - name: Build app bundle
       working-directory: ./bae
       env:
-        PKG_CONFIG_PATH: ${{ runner.os == 'macOS' && '/opt/homebrew/lib/pkgconfig' || '' }}
-        LIBRARY_PATH: ${{ runner.os == 'macOS' && '/opt/homebrew/lib' || '' }}
-      run: cargo build --release --verbose
+        PKG_CONFIG_PATH: /opt/homebrew/lib/pkgconfig
+        LIBRARY_PATH: /opt/homebrew/lib
+      run: dx bundle --release
 
-    - name: Upload artifacts
+    - name: Import Apple certificate
+      env:
+        APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+        APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      run: |
+        # Create temporary keychain
+        KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+        KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+        
+        security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+        security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+        security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+        
+        # Import certificate
+        echo "$APPLE_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
+        security import $RUNNER_TEMP/certificate.p12 -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+        security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+        security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+    - name: Sign app bundle
+      env:
+        APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      run: |
+        APP_PATH="bae/target/dx/bae/bundle/macos/bundle/macos/Bae.app"
+        
+        # Find the signing identity by team ID
+        IDENTITY=$(security find-identity -v -p codesigning | grep "$APPLE_TEAM_ID" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+        echo "Using signing identity: $IDENTITY"
+        
+        # Sign with hardened runtime (required for notarization)
+        codesign --deep --force --verify --verbose \
+          --sign "$IDENTITY" \
+          --options runtime \
+          "$APP_PATH"
+        
+        # Verify signature
+        codesign --verify --verbose "$APP_PATH"
+
+    - name: Create signed DMG
+      env:
+        APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      run: |
+        APP_PATH="bae/target/dx/bae/bundle/macos/bundle/macos/Bae.app"
+        DMG_PATH="bae/target/Bae.dmg"
+        
+        # Find the signing identity by team ID
+        IDENTITY=$(security find-identity -v -p codesigning | grep "$APPLE_TEAM_ID" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+        
+        # Create DMG
+        hdiutil create -volname "Bae" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_PATH"
+        
+        # Sign DMG
+        codesign --force --sign "$IDENTITY" "$DMG_PATH"
+
+    - name: Notarize DMG
+      env:
+        APPLE_ID: ${{ secrets.APPLE_ID }}
+        APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      run: |
+        DMG_PATH="bae/target/Bae.dmg"
+        
+        # Submit for notarization and wait
+        xcrun notarytool submit "$DMG_PATH" \
+          --apple-id "$APPLE_ID" \
+          --password "$APPLE_APP_PASSWORD" \
+          --team-id "$APPLE_TEAM_ID" \
+          --wait
+        
+        # Staple the notarization ticket
+        xcrun stapler staple "$DMG_PATH"
+
+    - name: Upload signed DMG
       uses: actions/upload-artifact@v4
       with:
-        name: bae-${{ matrix.os }}
-        path: |
-          bae/target/release/bae*
-          bae/target/release/bae.exe
+        name: Bae-macOS-signed
+        path: bae/target/Bae.dmg
         retention-days: 30
