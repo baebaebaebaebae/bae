@@ -96,6 +96,9 @@ fn main() {
 
 #[cfg(target_os = "macos")]
 fn capture_screenshots(output_dir: &std::path::Path, _app: &mut Child) {
+    // Find the Bae window ID using AppleScript
+    let window_id = get_bae_window_id();
+
     let screenshots = [
         ("library-grid.png", "Library view"),
         // Add more screenshot definitions as needed
@@ -105,20 +108,28 @@ fn capture_screenshots(output_dir: &std::path::Path, _app: &mut Child) {
         println!("Capturing: {}", description);
         let output_path = output_dir.join(filename);
 
-        // Use screencapture to capture the frontmost window
-        // -l flag captures a specific window, -w captures interactively
-        // For automation, we capture the whole screen and can crop later
-        // Or use -l with window ID (would need to find it)
-        let status = Command::new("screencapture")
-            .args([
-                "-x", // No sound
-                "-o", // No shadow
-                "-t",
-                "png",
-                output_path.to_str().unwrap(),
-            ])
-            .status()
-            .expect("Failed to run screencapture");
+        let status = if let Some(wid) = &window_id {
+            // Capture specific window by ID
+            Command::new("screencapture")
+                .args([
+                    "-x", // No sound
+                    "-o", // No shadow
+                    "-l",
+                    wid, // Window ID
+                    "-t",
+                    "png",
+                    output_path.to_str().unwrap(),
+                ])
+                .status()
+                .expect("Failed to run screencapture")
+        } else {
+            // Fallback: capture entire screen
+            println!("  Warning: Could not find Bae window, capturing full screen");
+            Command::new("screencapture")
+                .args(["-x", "-o", "-t", "png", output_path.to_str().unwrap()])
+                .status()
+                .expect("Failed to run screencapture")
+        };
 
         if status.success() {
             println!("  Saved: {:?}", output_path);
@@ -128,6 +139,39 @@ fn capture_screenshots(output_dir: &std::path::Path, _app: &mut Child) {
 
         thread::sleep(Duration::from_millis(500));
     }
+}
+
+#[cfg(target_os = "macos")]
+fn get_bae_window_id() -> Option<String> {
+    // Use AppleScript to get the window ID of the Bae app
+    let script = r#"
+        tell application "System Events"
+            set baePID to unix id of (first process whose name is "bae" or name is "Bae")
+            set windowList to windows of (first process whose unix id is baePID)
+            if (count of windowList) > 0 then
+                return id of item 1 of windowList
+            end if
+        end tell
+    "#;
+
+    let output = Command::new("osascript")
+        .args(["-e", script])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let wid = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !wid.is_empty() {
+            println!("Found Bae window ID: {}", wid);
+            return Some(wid);
+        }
+    }
+
+    eprintln!(
+        "Warning: Could not get Bae window ID: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    None
 }
 
 #[cfg(not(target_os = "macos"))]
