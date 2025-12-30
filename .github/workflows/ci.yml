@@ -331,10 +331,11 @@ jobs:
         PKG_CONFIG_PATH: /opt/homebrew/lib/pkgconfig
         LIBRARY_PATH: /opt/homebrew/lib
       run: |
-        # Build the screenshot generator
-        cargo build --release --bin generate_screenshots
+        # Ensure release binary exists (dx bundle should have built it, but be explicit)
+        cargo build --release --bin bae
         
-        # Run it (launches app and captures screenshots)
+        # Build and run the screenshot generator
+        cargo build --release --bin generate_screenshots
         ./target/release/generate_screenshots
 
     - name: Upload signed DMG
