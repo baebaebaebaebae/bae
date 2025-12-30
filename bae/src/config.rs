@@ -197,6 +197,9 @@ impl Config {
     }
     /// Get the library storage path
     pub fn get_library_path(&self) -> PathBuf {
+        if let Ok(path) = std::env::var("BAE_LIBRARY_PATH") {
+            return PathBuf::from(path);
+        }
         let home_dir = dirs::home_dir().expect("Failed to get home directory");
         home_dir.join(".bae")
     }
