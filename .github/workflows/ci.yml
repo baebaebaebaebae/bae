@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [ main, develop, release ]
+    tags:
+      - 'v*'  # Trigger on version tags like v0.1.0
   pull_request:
     branches: [ main, develop ]
 
@@ -152,7 +154,7 @@ jobs:
 
   build-artifacts:
     name: Build Artifacts
-    if: github.ref == 'refs/heads/release'
+    if: github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-latest
     needs: [test, security]
 
@@ -276,3 +278,12 @@ jobs:
         name: Bae-macOS-signed
         path: bae/target/Bae.dmg
         retention-days: 30
+
+    - name: Create GitHub Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: bae/target/Bae.dmg
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
