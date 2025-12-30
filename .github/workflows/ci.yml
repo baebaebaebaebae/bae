@@ -329,10 +329,8 @@ jobs:
         # Build the screenshot generator
         cargo build --release --bin generate_screenshots
         
-        # Run it (will launch app and capture screenshots)
-        # Note: This may fail on CI due to GUI limitations, that's okay for now
-        ./target/release/generate_screenshots || echo "Screenshot generation skipped"
-      continue-on-error: true
+        # Run it (launches app and captures screenshots)
+        ./target/release/generate_screenshots
 
     - name: Upload signed DMG
       uses: actions/upload-artifact@v4
