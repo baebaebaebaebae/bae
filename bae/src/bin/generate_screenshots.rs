@@ -14,7 +14,7 @@ use std::process::{Child, Command};
 use std::thread;
 use std::time::Duration;
 
-const SCREENSHOT_DELAY_MS: u64 = 3000;
+const SCREENSHOT_DELAY_MS: u64 = 8000; // Give app time to fully load library
 
 fn main() {
     // Set up temp directory for screenshot database
