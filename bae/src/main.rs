@@ -64,12 +64,27 @@ fn create_library_manager(database: Database) -> SharedLibraryManager {
 }
 
 fn configure_logging() {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+    use tracing_subscriber::prelude::*;
+
+    let env_filter = tracing_subscriber::EnvFilter::from_default_env();
+    let fmt_layer = tracing_subscriber::fmt::layer()
         .with_line_number(true)
         .with_target(false)
-        .with_file(true)
-        .init();
+        .with_file(true);
+
+    if config::Config::is_dev_mode() {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(fmt_layer)
+            .init();
+    } else {
+        let oslog_layer = tracing_oslog::OsLogger::new("com.bae.app", "default");
+
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(oslog_layer)
+            .init();
+    }
 }
 
 fn main() {
