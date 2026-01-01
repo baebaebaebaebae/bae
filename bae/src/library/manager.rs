@@ -1,9 +1,9 @@
 use crate::cache::CacheManager;
 use crate::cloud_storage::CloudStorageError;
 use crate::db::{
-    Database, DbAlbum, DbAlbumArtist, DbArtist, DbAudioFormat, DbChunk, DbFile, DbFileChunk,
-    DbImage, DbImport, DbRelease, DbStorageProfile, DbTorrent, DbTrack, DbTrackArtist,
-    DbTrackChunkCoords, ImportOperationStatus, ImportStatus,
+    Database, DbAlbum, DbAlbumArtist, DbArtist, DbAudioFormat, DbFile, DbImage, DbImport,
+    DbRelease, DbStorageProfile, DbTorrent, DbTrack, DbTrackArtist, ImportOperationStatus,
+    ImportStatus,
 };
 use crate::encryption::EncryptionService;
 use crate::library::export::ExportService;
@@ -101,32 +101,15 @@ impl LibraryManager {
             .await?;
         Ok(())
     }
-    /// Add a chunk to the library
-    pub async fn add_chunk(&self, chunk: &DbChunk) -> Result<(), LibraryError> {
-        self.database.insert_chunk(chunk).await?;
-        Ok(())
-    }
     /// Add a file to the library
     pub async fn add_file(&self, file: &DbFile) -> Result<(), LibraryError> {
         self.database.insert_file(file).await?;
         Ok(())
     }
-    /// Add a file chunk mapping
-    pub async fn add_file_chunk(&self, file_chunk: &DbFileChunk) -> Result<(), LibraryError> {
-        self.database.insert_file_chunk(file_chunk).await?;
-        Ok(())
-    }
+
     /// Add audio format for a track
     pub async fn add_audio_format(&self, audio_format: &DbAudioFormat) -> Result<(), LibraryError> {
         self.database.insert_audio_format(audio_format).await?;
-        Ok(())
-    }
-    /// Add track chunk coordinates
-    pub async fn add_track_chunk_coords(
-        &self,
-        coords: &DbTrackChunkCoords,
-    ) -> Result<(), LibraryError> {
-        self.database.insert_track_chunk_coords(coords).await?;
         Ok(())
     }
     /// Insert torrent metadata
@@ -211,39 +194,6 @@ impl LibraryManager {
         track_id: &str,
     ) -> Result<Option<DbAudioFormat>, LibraryError> {
         Ok(self.database.get_audio_format_by_track_id(track_id).await?)
-    }
-    /// Get all chunks for a release (for testing/verification)
-    pub async fn get_chunks_for_release(
-        &self,
-        release_id: &str,
-    ) -> Result<Vec<DbChunk>, LibraryError> {
-        Ok(self.database.get_chunks_for_release(release_id).await?)
-    }
-    /// Get track chunk coordinates for a track
-    pub async fn get_track_chunk_coords(
-        &self,
-        track_id: &str,
-    ) -> Result<Option<DbTrackChunkCoords>, LibraryError> {
-        Ok(self.database.get_track_chunk_coords(track_id).await?)
-    }
-    /// Get chunks in a specific range for CUE/FLAC streaming
-    pub async fn get_chunks_in_range(
-        &self,
-        release_id: &str,
-        chunk_range: std::ops::RangeInclusive<i32>,
-    ) -> Result<Vec<DbChunk>, LibraryError> {
-        Ok(self
-            .database
-            .get_chunks_in_range(release_id, chunk_range)
-            .await?)
-    }
-    /// Get a chunk by ID
-    pub async fn get_chunk_by_id(&self, chunk_id: &str) -> Result<Option<DbChunk>, LibraryError> {
-        Ok(self.database.get_chunk_by_id(chunk_id).await?)
-    }
-    /// Get file chunk mappings for a file
-    pub async fn get_file_chunks(&self, file_id: &str) -> Result<Vec<DbFileChunk>, LibraryError> {
-        Ok(self.database.get_file_chunks(file_id).await?)
     }
     /// Get release ID for a track
     pub async fn get_release_id_for_track(&self, track_id: &str) -> Result<String, LibraryError> {
@@ -382,27 +332,28 @@ impl LibraryManager {
     /// Delete a release and its associated data
     ///
     /// This will:
-    /// 1. Get all chunks for the release
-    /// 2. Delete chunks from cloud storage (errors are logged but don't stop deletion)
-    /// 3. Delete the release from database (cascades to tracks, files, chunks, etc.)
-    /// 4. If this was the last release for the album, also delete the album
+    /// 1. Delete files from storage (errors are logged but don't stop deletion)
+    /// 2. Delete the release from database (cascades to tracks, files, etc.)
+    /// 3. If this was the last release for the album, also delete the album
     pub async fn delete_release(&self, release_id: &str) -> Result<(), LibraryError> {
         let album_id = self.get_album_id_for_release(release_id).await?;
 
-        // Try to get storage reader for chunk cleanup
+        // Try to get storage reader for file cleanup
         if let Ok(Some(profile)) = self
             .database
             .get_storage_profile_for_release(release_id)
             .await
         {
             if let Ok(storage) = crate::storage::create_storage_reader(&profile).await {
-                let chunks = self.get_chunks_for_release(release_id).await?;
-                for chunk in &chunks {
-                    if let Err(e) = storage.delete_chunk(&chunk.storage_location).await {
-                        warn!(
-                            "Failed to delete chunk {} from storage: {}. Continuing with database deletion.",
-                            chunk.id, e
-                        );
+                let files = self.get_files_for_release(release_id).await?;
+                for file in &files {
+                    if let Some(ref source_path) = file.source_path {
+                        if let Err(e) = storage.delete_chunk(source_path).await {
+                            warn!(
+                                "Failed to delete file {} from storage: {}. Continuing with database deletion.",
+                                file.id, e
+                            );
+                        }
                     }
                 }
             }
@@ -415,29 +366,32 @@ impl LibraryManager {
         }
         Ok(())
     }
+
     /// Delete an album and all its associated data
     ///
     /// This will:
     /// 1. Get all releases for the album
-    /// 2. For each release, get chunks and delete from cloud storage
+    /// 2. For each release, delete files from storage
     /// 3. Delete the album from database (cascades to releases and all related data)
     pub async fn delete_album(&self, album_id: &str) -> Result<(), LibraryError> {
         let releases = self.get_releases_for_album(album_id).await?;
         for release in &releases {
-            // Try to get storage reader for chunk cleanup
+            // Try to get storage reader for file cleanup
             if let Ok(Some(profile)) = self
                 .database
                 .get_storage_profile_for_release(&release.id)
                 .await
             {
                 if let Ok(storage) = crate::storage::create_storage_reader(&profile).await {
-                    let chunks = self.get_chunks_for_release(&release.id).await?;
-                    for chunk in &chunks {
-                        if let Err(e) = storage.delete_chunk(&chunk.storage_location).await {
-                            warn!(
-                                "Failed to delete chunk {} from storage: {}. Continuing with database deletion.",
-                                chunk.id, e
-                            );
+                    let files = self.get_files_for_release(&release.id).await?;
+                    for file in &files {
+                        if let Some(ref source_path) = file.source_path {
+                            if let Err(e) = storage.delete_chunk(source_path).await {
+                                warn!(
+                                    "Failed to delete file {} from storage: {}. Continuing with database deletion.",
+                                    file.id, e
+                                );
+                            }
                         }
                     }
                 }
@@ -448,26 +402,18 @@ impl LibraryManager {
     }
     /// Export all files for a release to a directory
     ///
-    /// Reconstructs files sequentially from chunks in the order they were imported.
-    /// Files are written with their original filenames to the target directory.
+    /// Copies files from storage to the target directory.
+    /// Files are written with their original filenames.
     pub async fn export_release(
         &self,
         release_id: &str,
         target_dir: &Path,
         cache: &CacheManager,
         encryption_service: &EncryptionService,
-        chunk_size_bytes: usize,
     ) -> Result<(), LibraryError> {
-        ExportService::export_release(
-            release_id,
-            target_dir,
-            self,
-            cache,
-            encryption_service,
-            chunk_size_bytes,
-        )
-        .await
-        .map_err(LibraryError::Import)
+        ExportService::export_release(release_id, target_dir, self, cache, encryption_service)
+            .await
+            .map_err(LibraryError::Import)
     }
     /// Export a single track as a FLAC file
     ///
@@ -479,7 +425,6 @@ impl LibraryManager {
         output_path: &Path,
         cache: &CacheManager,
         encryption_service: &EncryptionService,
-        chunk_size_bytes: usize,
     ) -> Result<(), LibraryError> {
         // Get storage profile for track's release
         let track = self
@@ -502,7 +447,6 @@ impl LibraryManager {
             storage,
             cache,
             encryption_service,
-            chunk_size_bytes,
         )
         .await
         .map_err(LibraryError::Import)
@@ -615,7 +559,7 @@ impl LibraryManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{DbAlbum, DbChunk, DbRelease, ImportStatus};
+    use crate::db::{DbAlbum, DbRelease, ImportStatus};
     use chrono::Utc;
     use tempfile::TempDir;
     use uuid::Uuid;
@@ -663,28 +607,14 @@ mod tests {
         }
     }
 
-    fn create_test_chunk(release_id: &str, chunk_index: i32) -> DbChunk {
-        DbChunk {
-            id: Uuid::new_v4().to_string(),
-            release_id: release_id.to_string(),
-            chunk_index,
-            encrypted_size: 1024,
-            storage_location: format!("/tmp/test_chunk_{}.bin", Uuid::new_v4()),
-            last_accessed: None,
-            created_at: Utc::now(),
-        }
-    }
-
     #[tokio::test]
     async fn test_delete_release_with_single_release_deletes_album() {
         let (manager, _temp_dir) = setup_test_manager().await;
         let album = create_test_album();
         let release = create_test_release(&album.id);
-        let chunk = create_test_chunk(&release.id, 0);
 
         manager.database.insert_album(&album).await.unwrap();
         manager.database.insert_release(&release).await.unwrap();
-        manager.database.insert_chunk(&chunk).await.unwrap();
 
         manager.delete_release(&release.id).await.unwrap();
 
@@ -704,14 +634,10 @@ mod tests {
         let album = create_test_album();
         let release1 = create_test_release(&album.id);
         let release2 = create_test_release(&album.id);
-        let chunk1 = create_test_chunk(&release1.id, 0);
-        let chunk2 = create_test_chunk(&release2.id, 0);
 
         manager.database.insert_album(&album).await.unwrap();
         manager.database.insert_release(&release1).await.unwrap();
         manager.database.insert_release(&release2).await.unwrap();
-        manager.database.insert_chunk(&chunk1).await.unwrap();
-        manager.database.insert_chunk(&chunk2).await.unwrap();
 
         manager.delete_release(&release1.id).await.unwrap();
 
@@ -732,14 +658,10 @@ mod tests {
         let album = create_test_album();
         let release1 = create_test_release(&album.id);
         let release2 = create_test_release(&album.id);
-        let chunk1 = create_test_chunk(&release1.id, 0);
-        let chunk2 = create_test_chunk(&release2.id, 0);
 
         manager.database.insert_album(&album).await.unwrap();
         manager.database.insert_release(&release1).await.unwrap();
         manager.database.insert_release(&release2).await.unwrap();
-        manager.database.insert_chunk(&chunk1).await.unwrap();
-        manager.database.insert_chunk(&chunk2).await.unwrap();
 
         manager.delete_album(&album.id).await.unwrap();
 

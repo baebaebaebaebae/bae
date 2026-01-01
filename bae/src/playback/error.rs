@@ -44,4 +44,7 @@ impl PlaybackError {
     pub fn task(e: impl std::fmt::Display) -> Self {
         Self::TaskFailed(e.to_string())
     }
+    pub fn io(msg: impl Into<String>) -> Self {
+        Self::Io(std::io::Error::other(msg.into()))
+    }
 }

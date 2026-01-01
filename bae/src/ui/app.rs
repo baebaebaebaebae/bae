@@ -1,4 +1,3 @@
-use crate::cache::CacheManager;
 use crate::encryption::EncryptionService;
 use crate::library::SharedLibraryManager;
 use crate::storage::create_storage_reader;
@@ -42,17 +41,15 @@ fn mime_type_for_extension(ext: &str) -> &'static str {
         _ => "application/octet-stream",
     }
 }
-/// Services needed for image reconstruction from chunks
+/// Services needed for image retrieval
 #[derive(Clone)]
 struct ImageServices {
     library_manager: SharedLibraryManager,
-    cache: CacheManager,
     encryption_service: EncryptionService,
 }
 pub fn make_config(context: &AppContext) -> DioxusConfig {
     let services = ImageServices {
         library_manager: context.library_manager.clone(),
-        cache: context.cache.clone(),
         encryption_service: context.encryption_service.clone(),
     };
     DioxusConfig::default()
@@ -194,83 +191,12 @@ async fn serve_image_from_chunks(
         };
         return Ok((data, mime_type));
     }
-    let file_chunks = services
-        .library_manager
-        .get()
-        .get_file_chunks(&file.id)
-        .await
-        .map_err(|e| format!("Database error: {}", e))?;
-    if file_chunks.is_empty() {
-        return Err("No file chunk mappings found for image".to_string());
-    }
-    debug!(
-        "Image {} has {} chunk mappings",
-        image_id,
-        file_chunks.len()
-    );
 
-    // Get storage profile and create reader for chunk downloads
-    let storage_profile = services
-        .library_manager
-        .get()
-        .get_storage_profile_for_release(&image.release_id)
-        .await
-        .map_err(|e| format!("Database error: {}", e))?
-        .ok_or_else(|| "No storage profile for chunked image".to_string())?;
-    let storage = create_storage_reader(&storage_profile)
-        .await
-        .map_err(|e| format!("Failed to create storage reader: {}", e))?;
-
-    let mut chunk_data_map: std::collections::HashMap<String, Vec<u8>> =
-        std::collections::HashMap::new();
-    for fc in &file_chunks {
-        if chunk_data_map.contains_key(&fc.chunk_id) {
-            continue;
-        }
-        let chunk = services
-            .library_manager
-            .get()
-            .get_chunk_by_id(&fc.chunk_id)
-            .await
-            .map_err(|e| format!("Database error: {}", e))?
-            .ok_or_else(|| format!("Chunk not found: {}", fc.chunk_id))?;
-        let encrypted_data = match services.cache.get_chunk(&chunk.id).await {
-            Ok(Some(data)) => data,
-            Ok(None) => storage
-                .download_chunk(&chunk.storage_location)
-                .await
-                .map_err(|e| format!("Failed to download chunk: {}", e))?,
-            Err(e) => {
-                warn!("Cache error: {}", e);
-                storage
-                    .download_chunk(&chunk.storage_location)
-                    .await
-                    .map_err(|e| format!("Failed to download chunk: {}", e))?
-            }
-        };
-        let decrypted = services
-            .encryption_service
-            .decrypt_simple(&encrypted_data)
-            .map_err(|e| format!("Failed to decrypt chunk: {}", e))?;
-        chunk_data_map.insert(fc.chunk_id.clone(), decrypted);
-    }
-    let file_size = file.file_size as usize;
-    let mut file_data = Vec::with_capacity(file_size);
-    for fc in &file_chunks {
-        let chunk_data = chunk_data_map
-            .get(&fc.chunk_id)
-            .ok_or_else(|| format!("Missing chunk data: {}", fc.chunk_id))?;
-        let start = fc.byte_offset as usize;
-        let end = start + fc.byte_length as usize;
-        file_data.extend_from_slice(&chunk_data[start..end]);
-    }
-    let mime_type = std::path::Path::new(&image.filename)
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(mime_type_for_extension)
-        .unwrap_or("application/octet-stream");
-    debug!("Served image {} ({} bytes)", image_id, file_data.len());
-    Ok((file_data, mime_type))
+    // File has no source_path, which shouldn't happen
+    Err(format!(
+        "File {} has no source_path",
+        file.original_filename
+    ))
 }
 fn make_window() -> WindowBuilder {
     WindowBuilder::new()

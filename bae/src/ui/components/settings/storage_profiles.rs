@@ -152,11 +152,6 @@ fn ProfileCard(
                                 "Encrypted"
                             }
                         }
-                        if profile.chunked {
-                            span { class: "px-2 py-1 bg-blue-900 text-blue-300 rounded text-xs",
-                                "Chunked"
-                            }
-                        }
                     }
                     p { class: "text-sm text-gray-500 mt-2 font-mono", "{profile.location_path}" }
                 }
@@ -334,7 +329,6 @@ fn ProfileEditor(
     });
     let mut show_secrets = use_signal(|| false);
     let mut encrypted = use_signal(|| profile.as_ref().map(|p| p.encrypted).unwrap_or(true));
-    let mut chunked = use_signal(|| profile.as_ref().map(|p| p.chunked).unwrap_or(true));
     let mut is_default = use_signal(|| profile.as_ref().map(|p| p.is_default).unwrap_or(false));
     let mut is_saving = use_signal(|| false);
     let mut save_error = use_signal(|| Option::<String>::None);
@@ -497,20 +491,6 @@ fn ProfileEditor(
                             }
                         }
                     }
-                    label { class: "flex items-start gap-3 cursor-pointer",
-                        input {
-                            r#type: "checkbox",
-                            class: "rounded text-indigo-600 focus:ring-indigo-500 bg-gray-700 border-gray-600 mt-0.5",
-                            checked: *chunked.read(),
-                            onchange: move |e| chunked.set(e.checked()),
-                        }
-                        div {
-                            span { class: "text-white block", "Chunked" }
-                            span { class: "text-xs text-gray-500",
-                                "Split files so they can't be identified by size or hash on public cloud."
-                            }
-                        }
-                    }
                 }
                 div {
                     label { class: "flex items-center gap-2 cursor-pointer",
@@ -545,7 +525,6 @@ fn ProfileEditor(
                                 let new_cloud_access_key = cloud_access_key.read().clone();
                                 let new_cloud_secret_key = cloud_secret_key.read().clone();
                                 let new_encrypted = *encrypted.read();
-                                let new_chunked = *chunked.read();
                                 let new_is_default = *is_default.read();
                                 let existing = existing_profile.clone();
                                 let lm = lm.clone();
@@ -590,7 +569,6 @@ fn ProfileEditor(
                                         profile.location = new_location;
                                         profile.location_path = new_location_path;
                                         profile.encrypted = new_encrypted;
-                                        profile.chunked = new_chunked;
                                         profile.is_default = new_is_default;
                                         if new_location == StorageLocation::Cloud {
                                             profile.cloud_bucket = Some(new_cloud_bucket);
@@ -617,7 +595,6 @@ fn ProfileEditor(
                                                 &new_name,
                                                 &new_location_path,
                                                 new_encrypted,
-                                                new_chunked,
                                             )
                                         } else {
                                             let endpoint = if new_cloud_endpoint.trim().is_empty() {
@@ -633,7 +610,6 @@ fn ProfileEditor(
                                                 &new_cloud_access_key,
                                                 &new_cloud_secret_key,
                                                 new_encrypted,
-                                                new_chunked,
                                             )
                                         }
                                             .with_default(new_is_default);

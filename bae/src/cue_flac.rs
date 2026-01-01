@@ -41,6 +41,33 @@ pub struct CueSheet {
 pub struct FlacHeaders {
     pub headers: Vec<u8>,
 }
+
+/// FLAC file analysis results including seektable
+#[derive(Debug, Clone)]
+pub struct FlacInfo {
+    pub sample_rate: u32,
+    pub total_samples: u64,
+    pub audio_data_start: u64,
+    pub audio_data_end: u64,
+    pub seektable: Vec<SeekPoint>,
+}
+
+impl FlacInfo {
+    /// Calculate duration in milliseconds
+    pub fn duration_ms(&self) -> u64 {
+        if self.sample_rate == 0 {
+            return 0;
+        }
+        (self.total_samples * 1000) / self.sample_rate as u64
+    }
+}
+
+/// A single seek point in FLAC seektable
+#[derive(Debug, Clone, Copy)]
+pub struct SeekPoint {
+    pub sample_number: u64,
+    pub stream_offset: u64,
+}
 /// Represents a CUE/FLAC pair found during import
 #[derive(Debug, Clone)]
 pub struct CueFlacPair {
@@ -88,6 +115,177 @@ impl CueFlacProcessor {
         let headers = file_data[..audio_start_byte as usize].to_vec();
         Ok(FlacHeaders { headers })
     }
+    /// Analyze a FLAC file and extract metadata including seektable
+    pub fn analyze_flac(flac_path: &Path) -> Result<FlacInfo, CueFlacError> {
+        let file_data = fs::read(flac_path)?;
+        Self::analyze_flac_data(&file_data)
+    }
+
+    /// Analyze FLAC data and extract metadata
+    fn analyze_flac_data(file_data: &[u8]) -> Result<FlacInfo, CueFlacError> {
+        if file_data.len() < 4 || &file_data[0..4] != b"fLaC" {
+            return Err(CueFlacError::Flac("Invalid FLAC signature".to_string()));
+        }
+
+        let mut pos = 4;
+        let mut sample_rate = 0u32;
+        let mut total_samples = 0u64;
+        let mut seektable = Vec::new();
+        let audio_data_start: u64;
+
+        loop {
+            if pos + 4 > file_data.len() {
+                return Err(CueFlacError::Flac("Unexpected end of file".to_string()));
+            }
+
+            let header = u32::from_be_bytes([
+                file_data[pos],
+                file_data[pos + 1],
+                file_data[pos + 2],
+                file_data[pos + 3],
+            ]);
+
+            let is_last = (header & 0x80000000) != 0;
+            let block_type = ((header >> 24) & 0x7F) as u8;
+            let block_size = (header & 0x00FFFFFF) as usize;
+            pos += 4;
+
+            if pos + block_size > file_data.len() {
+                return Err(CueFlacError::Flac("Block extends beyond file".to_string()));
+            }
+
+            match block_type {
+                0 => {
+                    // STREAMINFO block
+                    if block_size >= 18 {
+                        let block = &file_data[pos..pos + block_size];
+                        // Sample rate: bits 80-99 (20 bits)
+                        sample_rate = ((block[10] as u32) << 12)
+                            | ((block[11] as u32) << 4)
+                            | ((block[12] as u32) >> 4);
+                        // Total samples: bits 108-143 (36 bits)
+                        total_samples = (((block[13] & 0x0F) as u64) << 32)
+                            | ((block[14] as u64) << 24)
+                            | ((block[15] as u64) << 16)
+                            | ((block[16] as u64) << 8)
+                            | (block[17] as u64);
+                    }
+                }
+                3 => {
+                    // SEEKTABLE block
+                    let num_entries = block_size / 18;
+                    for i in 0..num_entries {
+                        let entry_offset = pos + i * 18;
+                        if entry_offset + 18 > file_data.len() {
+                            break;
+                        }
+                        let sample_number = u64::from_be_bytes([
+                            file_data[entry_offset],
+                            file_data[entry_offset + 1],
+                            file_data[entry_offset + 2],
+                            file_data[entry_offset + 3],
+                            file_data[entry_offset + 4],
+                            file_data[entry_offset + 5],
+                            file_data[entry_offset + 6],
+                            file_data[entry_offset + 7],
+                        ]);
+                        // Skip placeholder entries (0xFFFFFFFFFFFFFFFF)
+                        if sample_number == 0xFFFFFFFFFFFFFFFF {
+                            continue;
+                        }
+                        let stream_offset = u64::from_be_bytes([
+                            file_data[entry_offset + 8],
+                            file_data[entry_offset + 9],
+                            file_data[entry_offset + 10],
+                            file_data[entry_offset + 11],
+                            file_data[entry_offset + 12],
+                            file_data[entry_offset + 13],
+                            file_data[entry_offset + 14],
+                            file_data[entry_offset + 15],
+                        ]);
+                        // Skip frame_samples (2 bytes) - not needed for playback
+                        seektable.push(SeekPoint {
+                            sample_number,
+                            stream_offset,
+                        });
+                    }
+                }
+                _ => {}
+            }
+
+            pos += block_size;
+            if is_last {
+                audio_data_start = pos as u64;
+                break;
+            }
+        }
+
+        Ok(FlacInfo {
+            sample_rate,
+            total_samples,
+            audio_data_start,
+            audio_data_end: file_data.len() as u64,
+            seektable,
+        })
+    }
+
+    /// Find the byte range for a track in a CUE/FLAC file
+    pub fn find_track_byte_range(
+        start_time_ms: u64,
+        end_time_ms: Option<u64>,
+        seektable: &[SeekPoint],
+        sample_rate: u32,
+        total_samples: u64,
+        audio_data_start: u64,
+        audio_data_end: u64,
+    ) -> (i64, i64) {
+        if sample_rate == 0 {
+            return (audio_data_start as i64, audio_data_end as i64);
+        }
+
+        let start_sample = (start_time_ms * sample_rate as u64) / 1000;
+        let end_sample = end_time_ms
+            .map(|ms| (ms * sample_rate as u64) / 1000)
+            .unwrap_or(total_samples);
+
+        // Find start byte using seektable
+        let start_byte = if seektable.is_empty() {
+            // Linear interpolation without seektable
+            let audio_size = audio_data_end - audio_data_start;
+            audio_data_start + (start_sample * audio_size) / total_samples
+        } else {
+            // Find the seek point at or before start_sample
+            let mut best_offset = 0u64;
+            for sp in seektable.iter() {
+                if sp.sample_number <= start_sample {
+                    best_offset = sp.stream_offset;
+                } else {
+                    break;
+                }
+            }
+            audio_data_start + best_offset
+        };
+
+        // Find end byte using seektable
+        let end_byte = if seektable.is_empty() {
+            let audio_size = audio_data_end - audio_data_start;
+            audio_data_start + (end_sample * audio_size) / total_samples
+        } else {
+            // Find the seek point at or after end_sample
+            let mut best_offset = audio_data_end - audio_data_start;
+            for sp in seektable.iter().rev() {
+                if sp.sample_number >= end_sample {
+                    best_offset = sp.stream_offset;
+                } else {
+                    break;
+                }
+            }
+            audio_data_start + best_offset
+        };
+
+        (start_byte as i64, end_byte as i64)
+    }
+
     /// Find where audio frames start in a FLAC file
     fn find_audio_start(file_data: &[u8]) -> Result<u64, CueFlacError> {
         if file_data.len() < 4 || &file_data[0..4] != b"fLaC" {

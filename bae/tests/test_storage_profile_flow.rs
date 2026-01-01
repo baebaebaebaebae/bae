@@ -35,7 +35,6 @@ async fn test_storage_reader_uses_profile_credentials() {
         "Test Profile",
         storage_path.to_str().unwrap(),
         false, // not encrypted
-        true,  // chunked
     );
 
     // Create storage reader from profile
@@ -81,7 +80,6 @@ async fn test_release_storage_profile_linkage() {
         "AKIAIOSFODNN7EXAMPLE",
         "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
         true, // encrypted
-        true, // chunked
     );
     let profile_id = profile.id.clone();
 
@@ -134,7 +132,6 @@ async fn test_release_storage_profile_linkage() {
         Some("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string())
     );
     assert!(retrieved_profile.encrypted);
-    assert!(retrieved_profile.chunked);
 
     // Verify to_s3_config returns the correct config
     let s3_config = retrieved_profile
@@ -172,7 +169,6 @@ async fn test_multiple_releases_different_profiles() {
         "KEY_A",
         "SECRET_A",
         true,
-        true,
     );
     let profile_a_id = profile_a.id.clone();
 
@@ -184,7 +180,6 @@ async fn test_multiple_releases_different_profiles() {
         "KEY_B",
         "SECRET_B",
         false,
-        true,
     );
     let profile_b_id = profile_b.id.clone();
 

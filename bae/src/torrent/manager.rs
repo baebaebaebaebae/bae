@@ -171,7 +171,6 @@ struct TorrentManager {
     seeding_client: TorrentClient,
     cache_manager: CacheManager,
     database: Database,
-    chunk_size_bytes: usize,
     progress_tx: mpsc::UnboundedSender<TorrentProgress>,
 }
 /// Start the torrent manager service
@@ -179,7 +178,6 @@ struct TorrentManager {
 pub fn start_torrent_manager(
     cache_manager: CacheManager,
     database: Database,
-    chunk_size_bytes: usize,
     options: TorrentClientOptions,
 ) -> TorrentManagerHandle {
     let (command_tx, command_rx) = mpsc::unbounded_channel();
@@ -220,7 +218,6 @@ pub fn start_torrent_manager(
                 seeding_client,
                 cache_manager: cache_manager_for_worker,
                 database: database_for_worker,
-                chunk_size_bytes,
                 progress_tx: progress_tx_for_worker,
             };
             service.run_manager_worker().await;
@@ -380,9 +377,11 @@ impl TorrentManager {
             .storage_index()
             .await
             .map_err(SeederError::Torrent)?;
+        // TODO: Seeding functionality needs rework after chunking removal
+        let default_chunk_size = 1024 * 1024; // 1MB default for piece mapper
         let piece_mapper = TorrentPieceMapper::new(
             torrent.piece_length as usize,
-            self.chunk_size_bytes,
+            default_chunk_size,
             torrent.num_pieces as usize,
             torrent.total_size_bytes as usize,
         );

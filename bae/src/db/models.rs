@@ -10,9 +10,7 @@ const IMPORT_STATUS_FAILED: &str = "failed";
 ///
 /// This implements the storage strategy described in the README:
 /// - Albums and tracks stored as metadata
-/// - Files split into encrypted chunks
-/// - Chunks uploaded to cloud storage
-/// - Local cache management for recently used chunks
+/// - Files stored encrypted in cloud or local storage
 ///
 /// Import status for albums and tracks
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -226,33 +224,12 @@ pub struct DbFile {
     pub source_path: Option<String>,
     pub created_at: DateTime<Utc>,
 }
-/// Encrypted chunk of a release's data
-///
-/// Releases are split into encrypted chunks for cloud storage.
-/// Each chunk is stored separately and can be cached/streamed independently.
-/// The storage_location points to the encrypted chunk in cloud storage.
-///
-/// Chunks belong to releases (not logical albums) because each release has
-/// its own set of files and therefore its own chunks.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DbChunk {
-    pub id: String,
-    /// Release this chunk belongs to
-    pub release_id: String,
-    pub chunk_index: i32,
-    pub encrypted_size: i64,
-    /// Cloud storage URI (e.g., s3://bucket/chunks/{shard}/{chunk_id}.enc)
-    pub storage_location: String,
-    /// Last time this chunk was accessed (for cache management)
-    pub last_accessed: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-}
 /// Audio format metadata for a track
 ///
 /// Stores format information needed for playback. One record per track (1:1 with track).
 ///
 /// **FLAC headers are only needed for CUE/FLAC:**
-/// - One-file-per-track: Headers are already in the track's first chunk, no prepending needed
+/// - One-file-per-track: Headers are already in the file, no prepending needed
 /// - CUE/FLAC: Headers are at file start, but track audio starts mid-file. Must prepend headers during playback.
 ///
 /// **Seektables are only needed for CUE/FLAC tracks:**
@@ -266,25 +243,10 @@ pub struct DbAudioFormat {
     pub flac_headers: Option<Vec<u8>>,
     pub flac_seektable: Option<Vec<u8>>,
     pub needs_headers: bool,
-    pub created_at: DateTime<Utc>,
-}
-/// Track chunk coordinates - precise location of track audio in chunked album stream
-///
-/// This IS the TrackChunkCoords concept. Stores the coordinates that locate a track's
-/// audio data within the chunked album stream, regardless of whether the source was
-/// one-file-per-track or CUE/FLAC. Both import types produce identical records here.
-///
-/// The key insight: post-import, we only need these coordinates + audio format to play any track.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DbTrackChunkCoords {
-    pub id: String,
-    pub track_id: String,
-    pub start_chunk_index: i32,
-    pub end_chunk_index: i32,
-    pub start_byte_offset: i64,
-    pub end_byte_offset: i64,
-    pub start_time_ms: i64,
-    pub end_time_ms: i64,
+    /// Start byte offset within the source file (for CUE/FLAC tracks)
+    pub start_byte_offset: Option<i64>,
+    /// End byte offset within the source file (for CUE/FLAC tracks)
+    pub end_byte_offset: Option<i64>,
     pub created_at: DateTime<Utc>,
 }
 impl DbArtist {
@@ -529,61 +491,6 @@ impl DbFile {
         self
     }
 }
-/// Maps a file to its chunks with byte offsets
-///
-/// Similar to DbTrackChunkCoords but for files instead of tracks.
-/// Enables reconstructing files from chunks without fragile offset calculations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DbFileChunk {
-    pub id: String,
-    pub file_id: String,
-    pub chunk_id: String,
-    /// Order of this chunk within the file (0-indexed)
-    pub chunk_index: i32,
-    /// Byte offset where this file's data starts within the chunk
-    pub byte_offset: i64,
-    /// Number of bytes from this file in this chunk
-    pub byte_length: i64,
-    pub created_at: DateTime<Utc>,
-}
-impl DbFileChunk {
-    pub fn new(
-        file_id: &str,
-        chunk_id: &str,
-        chunk_index: i32,
-        byte_offset: i64,
-        byte_length: i64,
-    ) -> Self {
-        DbFileChunk {
-            id: Uuid::new_v4().to_string(),
-            file_id: file_id.to_string(),
-            chunk_id: chunk_id.to_string(),
-            chunk_index,
-            byte_offset,
-            byte_length,
-            created_at: Utc::now(),
-        }
-    }
-}
-impl DbChunk {
-    pub fn from_release_chunk(
-        release_id: &str,
-        chunk_id: &str,
-        chunk_index: i32,
-        encrypted_size: usize,
-        storage_location: &str,
-    ) -> Self {
-        DbChunk {
-            id: chunk_id.to_string(),
-            release_id: release_id.to_string(),
-            chunk_index,
-            encrypted_size: encrypted_size as i64,
-            storage_location: storage_location.to_string(),
-            last_accessed: None,
-            created_at: Utc::now(),
-        }
-    }
-}
 impl DbAudioFormat {
     pub fn new(
         track_id: &str,
@@ -591,14 +498,63 @@ impl DbAudioFormat {
         flac_headers: Option<Vec<u8>>,
         needs_headers: bool,
     ) -> Self {
-        Self::new_with_seektable(track_id, format, flac_headers, None, needs_headers)
+        Self::new_full(
+            track_id,
+            format,
+            flac_headers,
+            None,
+            needs_headers,
+            None,
+            None,
+        )
     }
+
     pub fn new_with_seektable(
         track_id: &str,
         format: &str,
         flac_headers: Option<Vec<u8>>,
         flac_seektable: Option<Vec<u8>>,
         needs_headers: bool,
+    ) -> Self {
+        Self::new_full(
+            track_id,
+            format,
+            flac_headers,
+            flac_seektable,
+            needs_headers,
+            None,
+            None,
+        )
+    }
+
+    pub fn new_with_byte_offsets(
+        track_id: &str,
+        format: &str,
+        flac_headers: Option<Vec<u8>>,
+        flac_seektable: Option<Vec<u8>>,
+        needs_headers: bool,
+        start_byte_offset: i64,
+        end_byte_offset: i64,
+    ) -> Self {
+        Self::new_full(
+            track_id,
+            format,
+            flac_headers,
+            flac_seektable,
+            needs_headers,
+            Some(start_byte_offset),
+            Some(end_byte_offset),
+        )
+    }
+
+    fn new_full(
+        track_id: &str,
+        format: &str,
+        flac_headers: Option<Vec<u8>>,
+        flac_seektable: Option<Vec<u8>>,
+        needs_headers: bool,
+        start_byte_offset: Option<i64>,
+        end_byte_offset: Option<i64>,
     ) -> Self {
         DbAudioFormat {
             id: Uuid::new_v4().to_string(),
@@ -607,29 +563,8 @@ impl DbAudioFormat {
             flac_headers,
             flac_seektable,
             needs_headers,
-            created_at: Utc::now(),
-        }
-    }
-}
-impl DbTrackChunkCoords {
-    pub fn new(
-        track_id: &str,
-        start_chunk_index: i32,
-        end_chunk_index: i32,
-        start_byte_offset: i64,
-        end_byte_offset: i64,
-        start_time_ms: i64,
-        end_time_ms: i64,
-    ) -> Self {
-        DbTrackChunkCoords {
-            id: Uuid::new_v4().to_string(),
-            track_id: track_id.to_string(),
-            start_chunk_index,
-            end_chunk_index,
             start_byte_offset,
             end_byte_offset,
-            start_time_ms,
-            end_time_ms,
             created_at: Utc::now(),
         }
     }
@@ -864,8 +799,6 @@ pub struct DbStorageProfile {
     pub location_path: String,
     /// Whether to encrypt data
     pub encrypted: bool,
-    /// Whether to split into chunks
-    pub chunked: bool,
     /// True if this is the default profile for new imports
     pub is_default: bool,
     /// S3 bucket name
@@ -883,7 +816,7 @@ pub struct DbStorageProfile {
 }
 impl DbStorageProfile {
     /// Create a new local storage profile
-    pub fn new_local(name: &str, path: &str, encrypted: bool, chunked: bool) -> Self {
+    pub fn new_local(name: &str, path: &str, encrypted: bool) -> Self {
         let now = Utc::now();
         DbStorageProfile {
             id: Uuid::new_v4().to_string(),
@@ -891,7 +824,6 @@ impl DbStorageProfile {
             location: StorageLocation::Local,
             location_path: path.to_string(),
             encrypted,
-            chunked,
             is_default: false,
             cloud_bucket: None,
             cloud_region: None,
@@ -911,7 +843,6 @@ impl DbStorageProfile {
         access_key: &str,
         secret_key: &str,
         encrypted: bool,
-        chunked: bool,
     ) -> Self {
         let now = Utc::now();
         DbStorageProfile {
@@ -920,7 +851,6 @@ impl DbStorageProfile {
             location: StorageLocation::Cloud,
             location_path: String::new(),
             encrypted,
-            chunked,
             is_default: false,
             cloud_bucket: Some(bucket.to_string()),
             cloud_region: Some(region.to_string()),

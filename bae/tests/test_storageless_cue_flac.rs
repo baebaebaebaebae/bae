@@ -9,7 +9,7 @@ use crate::support::tracing_init;
 use bae::db::{Database, ImportStatus};
 use bae::discogs::models::{DiscogsRelease, DiscogsTrack};
 use bae::encryption::EncryptionService;
-use bae::import::{ImportConfig, ImportProgress, ImportRequest, ImportService};
+use bae::import::{ImportProgress, ImportRequest, ImportService};
 use bae::library::{LibraryManager, SharedLibraryManager};
 use bae::torrent::TorrentManagerHandle;
 use std::path::Path;
@@ -31,7 +31,6 @@ async fn test_storageless_cue_flac_records_track_positions() {
     std::fs::create_dir_all(&album_dir).expect("album dir");
     std::fs::create_dir_all(&db_dir).expect("db dir");
     generate_cue_flac_files(&album_dir);
-    let chunk_size_bytes = 1024 * 1024;
     let db_file = db_dir.join("test.db");
     let database = Database::new(db_file.to_str().unwrap())
         .await
@@ -41,16 +40,9 @@ async fn test_storageless_cue_flac_records_track_positions() {
     let shared_library_manager = SharedLibraryManager::new(library_manager.clone());
     let library_manager = Arc::new(library_manager);
     let runtime_handle = tokio::runtime::Handle::current();
-    let import_config = ImportConfig {
-        chunk_size_bytes,
-        max_encrypt_workers: 4,
-        max_upload_workers: 20,
-        max_db_write_workers: 10,
-    };
     let torrent_handle = TorrentManagerHandle::new_dummy();
     let database_arc = Arc::new(database.clone());
     let import_handle = ImportService::start(
-        import_config,
         runtime_handle,
         shared_library_manager,
         encryption_service,
@@ -101,50 +93,50 @@ async fn test_storageless_cue_flac_records_track_positions() {
             track.title,
         );
     }
+    // Check that each track has audio format with byte offsets recorded
     for (i, track) in tracks.iter().enumerate() {
-        let coords = library_manager
-            .get_track_chunk_coords(&track.id)
+        let audio_format = library_manager
+            .get_audio_format_by_track_id(&track.id)
             .await
-            .expect("get coords");
-        let coords = coords.unwrap_or_else(|| {
-            panic!(
-                "Track {} '{}' should have chunk coords recorded",
-                i + 1,
-                track.title,
-            )
-        });
-        assert_eq!(
-            coords.start_chunk_index, -1,
-            "Storage-less track should have chunk_index=-1 (non-chunked sentinel)",
+            .expect("get audio format")
+            .unwrap_or_else(|| {
+                panic!(
+                    "Track {} '{}' should have audio format recorded",
+                    i + 1,
+                    track.title,
+                )
+            });
+        assert!(
+            audio_format.start_byte_offset.is_some(),
+            "CUE/FLAC track {} should have start_byte_offset",
+            i + 1,
         );
         assert!(
-            coords.start_time_ms >= 0,
-            "Track {} should have valid start_time_ms",
+            audio_format.end_byte_offset.is_some(),
+            "CUE/FLAC track {} should have end_byte_offset",
             i + 1,
         );
         if i > 0 {
-            let prev_coords = library_manager
-                .get_track_chunk_coords(&tracks[i - 1].id)
+            let prev_format = library_manager
+                .get_audio_format_by_track_id(&tracks[i - 1].id)
                 .await
-                .expect("get prev coords")
-                .expect("prev coords exist");
+                .expect("get prev format")
+                .expect("prev format exists");
             assert!(
-                coords.start_time_ms >= prev_coords.start_time_ms,
-                "Track {} start_time ({}) should be >= track {} start_time ({})",
+                audio_format.start_byte_offset.unwrap() >= prev_format.start_byte_offset.unwrap(),
+                "Track {} start_byte ({}) should be >= track {} start_byte ({})",
                 i + 1,
-                coords.start_time_ms,
+                audio_format.start_byte_offset.unwrap(),
                 i,
-                prev_coords.start_time_ms,
+                prev_format.start_byte_offset.unwrap(),
             );
         }
         info!(
-            "Track {} '{}': bytes {}..{}, time {}..{}ms",
+            "Track {} '{}': bytes {}..{}",
             i + 1,
             track.title,
-            coords.start_byte_offset,
-            coords.end_byte_offset,
-            coords.start_time_ms,
-            coords.end_time_ms
+            audio_format.start_byte_offset.unwrap_or(-1),
+            audio_format.end_byte_offset.unwrap_or(-1),
         );
     }
     for track in &tracks {
@@ -186,7 +178,6 @@ async fn test_storageless_cue_flac_playback_uses_track_positions() {
     std::fs::create_dir_all(&db_dir).expect("db dir");
     std::fs::create_dir_all(&cache_dir).expect("cache dir");
     generate_cue_flac_files_with_two_tracks(&album_dir);
-    let chunk_size_bytes = 1024 * 1024;
     let db_file = db_dir.join("test.db");
     let database = Database::new(db_file.to_str().unwrap())
         .await
@@ -197,23 +188,16 @@ async fn test_storageless_cue_flac_playback_uses_track_positions() {
         max_size_bytes: 1024 * 1024 * 1024,
         max_chunks: 10000,
     };
-    let cache_manager = bae::cache::CacheManager::with_config(cache_config)
+    let _cache_manager = bae::cache::CacheManager::with_config(cache_config)
         .await
         .expect("cache");
     let library_manager = LibraryManager::new(database.clone());
     let shared_library_manager = SharedLibraryManager::new(library_manager.clone());
     let library_manager = Arc::new(library_manager);
     let runtime_handle = tokio::runtime::Handle::current();
-    let import_config = ImportConfig {
-        chunk_size_bytes,
-        max_encrypt_workers: 4,
-        max_upload_workers: 20,
-        max_db_write_workers: 10,
-    };
     let torrent_handle = TorrentManagerHandle::new_dummy();
     let database_arc = Arc::new(database.clone());
     let import_handle = ImportService::start(
-        import_config,
         runtime_handle.clone(),
         shared_library_manager,
         encryption_service.clone(),
@@ -252,44 +236,49 @@ async fn test_storageless_cue_flac_playback_uses_track_positions() {
     assert_eq!(tracks.len(), 2, "Should have exactly 2 tracks");
     let track1 = &tracks[0];
     let track2 = &tracks[1];
-    let track1_coords = library_manager
-        .get_track_chunk_coords(&track1.id)
+    let track1_format = library_manager
+        .get_audio_format_by_track_id(&track1.id)
         .await
-        .expect("get track1 coords")
-        .expect("track1 should have coords");
-    let track2_coords = library_manager
-        .get_track_chunk_coords(&track2.id)
+        .expect("get track1 format")
+        .expect("track1 should have audio format");
+    let track2_format = library_manager
+        .get_audio_format_by_track_id(&track2.id)
         .await
-        .expect("get track2 coords")
-        .expect("track2 should have coords");
+        .expect("get track2 format")
+        .expect("track2 should have audio format");
+    let track1_start = track1_format
+        .start_byte_offset
+        .expect("track1 should have start offset");
+    let track1_end = track1_format
+        .end_byte_offset
+        .expect("track1 should have end offset");
+    let track2_start = track2_format
+        .start_byte_offset
+        .expect("track2 should have start offset");
+    let track2_end = track2_format
+        .end_byte_offset
+        .expect("track2 should have end offset");
     info!(
-        "Track 1 '{}': bytes {}..{}, time {}..{}ms",
-        track1.title,
-        track1_coords.start_byte_offset,
-        track1_coords.end_byte_offset,
-        track1_coords.start_time_ms,
-        track1_coords.end_time_ms
+        "Track 1 '{}': bytes {}..{}",
+        track1.title, track1_start, track1_end,
     );
     info!(
-        "Track 2 '{}': bytes {}..{}, time {}..{}ms",
-        track2.title,
-        track2_coords.start_byte_offset,
-        track2_coords.end_byte_offset,
-        track2_coords.start_time_ms,
-        track2_coords.end_time_ms
+        "Track 2 '{}': bytes {}..{}",
+        track2.title, track2_start, track2_end,
     );
     assert!(
-        track2_coords.end_byte_offset > track2_coords.start_byte_offset,
+        track2_end > track2_start,
         "Track 2 must have a valid (non-empty) byte range. \
          Got {}..{}. The test FLAC file may be too short.",
-        track2_coords.start_byte_offset,
-        track2_coords.end_byte_offset,
+        track2_start,
+        track2_end,
     );
     assert!(
-        track2_coords.start_byte_offset > track1_coords.start_byte_offset,
+        track2_start > track1_start,
         "Track 2 should start after track 1",
     );
-    let track2_format = library_manager
+    // track2_format already fetched above
+    let _track2_format = library_manager
         .get_audio_format_by_track_id(&track2.id)
         .await
         .expect("get track2 format")
@@ -301,9 +290,7 @@ async fn test_storageless_cue_flac_playback_uses_track_positions() {
     std::env::set_var("MUTE_TEST_AUDIO", "1");
     let playback_handle = bae::playback::PlaybackService::start(
         library_manager.as_ref().clone(),
-        cache_manager,
         encryption_service,
-        chunk_size_bytes,
         runtime_handle,
     );
     playback_handle.set_volume(0.0);

@@ -86,7 +86,6 @@ pub fn AlbumCoverSection(
                                             let library_manager = library_manager.clone();
                                             let cache = app_context.cache.clone();
                                             let encryption_service = app_context.encryption_service.clone();
-                                            let chunk_size_bytes = app_context.config.chunk_size_bytes;
                                             move |evt| {
                                                 evt.stop_propagation();
                                                 show_dropdown.set(false);
@@ -111,7 +110,6 @@ pub fn AlbumCoverSection(
                                                                     &target_dir,
                                                                     &cache,
                                                                     &encryption_service,
-                                                                    chunk_size_bytes,
                                                                 )
                                                                 .await
                                                             {

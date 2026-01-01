@@ -91,27 +91,14 @@ fn main() {
         "Failed to initialize encryption service. Check your encryption key configuration.",
     );
 
-    let import_config = import::ImportConfig {
-        max_encrypt_workers: config.max_import_encrypt_workers,
-        max_upload_workers: config.max_import_upload_workers,
-        max_db_write_workers: config.max_import_db_write_workers,
-        chunk_size_bytes: config.chunk_size_bytes,
-    };
-
     let torrent_manager = if screenshot_mode {
         torrent::start_torrent_manager_noop(runtime_handle.clone())
     } else {
         let torrent_options = torrent_options_from_config(&config);
-        torrent::start_torrent_manager(
-            cache_manager.clone(),
-            database.clone(),
-            config.chunk_size_bytes,
-            torrent_options,
-        )
+        torrent::start_torrent_manager(cache_manager.clone(), database.clone(), torrent_options)
     };
 
     let import_handle = import::ImportService::start(
-        import_config,
         runtime_handle.clone(),
         library_manager.clone(),
         encryption_service.clone(),
@@ -121,9 +108,7 @@ fn main() {
 
     let playback_handle = playback::PlaybackService::start(
         library_manager.get().clone(),
-        cache_manager.clone(),
         encryption_service.clone(),
-        config.chunk_size_bytes,
         runtime_handle.clone(),
     );
 
@@ -156,17 +141,9 @@ fn main() {
 
     if !screenshot_mode {
         let subsonic_library = library_manager.clone();
-        let subsonic_cache = cache_manager.clone();
         let subsonic_encryption = encryption_service.clone();
-        let subsonic_chunk_size = config.chunk_size_bytes;
         runtime_handle.spawn(async move {
-            start_subsonic_server(
-                subsonic_cache,
-                subsonic_library,
-                subsonic_encryption,
-                subsonic_chunk_size,
-            )
-            .await
+            start_subsonic_server(subsonic_library, subsonic_encryption).await
         });
     }
 
@@ -177,18 +154,11 @@ fn main() {
 
 /// Start the Subsonic API server
 async fn start_subsonic_server(
-    cache_manager: cache::CacheManager,
     library_manager: SharedLibraryManager,
     encryption_service: encryption::EncryptionService,
-    chunk_size_bytes: usize,
 ) {
     info!("Starting Subsonic API server...");
-    let app = create_router(
-        library_manager,
-        cache_manager,
-        encryption_service,
-        chunk_size_bytes,
-    );
+    let app = create_router(library_manager, encryption_service);
     let listener = match tokio::net::TcpListener::bind("127.0.0.1:4533").await {
         Ok(listener) => {
             info!("Subsonic API server listening on http://127.0.0.1:4533");

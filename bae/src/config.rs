@@ -21,10 +21,6 @@ pub enum ConfigError {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ConfigYaml {
     pub library_id: Option<String>,
-    pub max_import_encrypt_workers: Option<usize>,
-    pub max_import_upload_workers: Option<usize>,
-    pub max_import_db_write_workers: Option<usize>,
-    pub chunk_size_bytes: Option<usize>,
     pub torrent_bind_interface: Option<String>,
 }
 
@@ -34,10 +30,6 @@ pub struct Config {
     pub library_id: String,
     pub discogs_api_key: Option<String>,
     pub encryption_key: String,
-    pub max_import_encrypt_workers: usize,
-    pub max_import_upload_workers: usize,
-    pub max_import_db_write_workers: usize,
-    pub chunk_size_bytes: usize,
     pub torrent_bind_interface: Option<String>,
 }
 
@@ -71,26 +63,6 @@ impl Config {
             let key = Aes256Gcm::generate_key(OsRng);
             hex::encode(key.as_ref() as &[u8])
         });
-        let max_import_encrypt_workers = std::env::var("BAE_MAX_IMPORT_ENCRYPT_WORKERS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or_else(|| {
-                std::thread::available_parallelism()
-                    .map(|n| n.get() * 2)
-                    .unwrap_or(4)
-            });
-        let max_import_upload_workers = std::env::var("BAE_MAX_IMPORT_UPLOAD_WORKERS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(20);
-        let max_import_db_write_workers = std::env::var("BAE_MAX_IMPORT_DB_WRITE_WORKERS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(10);
-        let chunk_size_bytes = std::env::var("BAE_CHUNK_SIZE_BYTES")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1024 * 1024);
         let torrent_bind_interface = std::env::var("BAE_TORRENT_BIND_INTERFACE")
             .ok()
             .filter(|s| !s.is_empty());
@@ -99,10 +71,6 @@ impl Config {
             library_id,
             discogs_api_key,
             encryption_key,
-            chunk_size_bytes,
-            max_import_encrypt_workers,
-            max_import_upload_workers,
-            max_import_db_write_workers,
             torrent_bind_interface,
         }
     }
@@ -130,20 +98,11 @@ impl Config {
             }
             key_hex
         });
-        let default_workers = std::thread::available_parallelism()
-            .map(|n| n.get() * 2)
-            .unwrap_or(4);
 
         Self {
             library_id,
             discogs_api_key: credentials.discogs_api_key,
             encryption_key,
-            max_import_encrypt_workers: yaml_config
-                .max_import_encrypt_workers
-                .unwrap_or(default_workers),
-            max_import_upload_workers: yaml_config.max_import_upload_workers.unwrap_or(20),
-            max_import_db_write_workers: yaml_config.max_import_db_write_workers.unwrap_or(10),
-            chunk_size_bytes: yaml_config.chunk_size_bytes.unwrap_or(1024 * 1024),
             torrent_bind_interface: yaml_config.torrent_bind_interface,
         }
     }
@@ -183,19 +142,6 @@ impl Config {
             new_values.insert("BAE_DISCOGS_API_KEY", key.clone());
         }
         new_values.insert("BAE_ENCRYPTION_KEY", self.encryption_key.clone());
-        new_values.insert(
-            "BAE_MAX_IMPORT_ENCRYPT_WORKERS",
-            self.max_import_encrypt_workers.to_string(),
-        );
-        new_values.insert(
-            "BAE_MAX_IMPORT_UPLOAD_WORKERS",
-            self.max_import_upload_workers.to_string(),
-        );
-        new_values.insert(
-            "BAE_MAX_IMPORT_DB_WRITE_WORKERS",
-            self.max_import_db_write_workers.to_string(),
-        );
-        new_values.insert("BAE_CHUNK_SIZE_BYTES", self.chunk_size_bytes.to_string());
         if let Some(iface) = &self.torrent_bind_interface {
             new_values.insert("BAE_TORRENT_BIND_INTERFACE", iface.clone());
         }
@@ -235,10 +181,6 @@ impl Config {
         std::fs::create_dir_all(&config_dir)?;
         let yaml = ConfigYaml {
             library_id: Some(self.library_id.clone()),
-            max_import_encrypt_workers: Some(self.max_import_encrypt_workers),
-            max_import_upload_workers: Some(self.max_import_upload_workers),
-            max_import_db_write_workers: Some(self.max_import_db_write_workers),
-            chunk_size_bytes: Some(self.chunk_size_bytes),
             torrent_bind_interface: self.torrent_bind_interface.clone(),
         };
         std::fs::write(

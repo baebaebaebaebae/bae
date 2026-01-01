@@ -1,13 +1,10 @@
-mod album_chunk_layout;
 pub mod cover_art;
 mod discogs_matcher;
 mod discogs_parser;
 mod folder_metadata_detector;
 pub(crate) mod folder_scanner;
 mod handle;
-mod metadata_persister;
 mod musicbrainz_parser;
-mod pipeline;
 mod progress;
 mod service;
 mod track_to_file_mapper;
@@ -16,6 +13,6 @@ pub use discogs_matcher::{rank_discogs_matches, rank_mb_matches, MatchCandidate,
 pub use folder_metadata_detector::{detect_folder_contents, detect_metadata, FolderMetadata};
 pub use folder_scanner::{CategorizedFiles, DetectedRelease};
 pub use handle::{ImportServiceHandle, TorrentFileMetadata, TorrentImportMetadata};
-pub use service::{ImportConfig, ImportService};
+pub use service::ImportService;
 #[allow(unused_imports)]
 pub use types::{ImportPhase, ImportProgress, ImportRequest, PrepareStep, TorrentSource};

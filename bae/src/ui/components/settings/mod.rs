@@ -1,7 +1,6 @@
 mod about;
 mod api_keys;
 mod encryption;
-mod import_settings;
 mod network;
 mod storage_profiles;
 use dioxus::prelude::*;
@@ -10,7 +9,6 @@ pub enum SettingsTab {
     StorageProfiles,
     ApiKeys,
     Encryption,
-    ImportSettings,
     Network,
     About,
 }
@@ -20,7 +18,6 @@ impl SettingsTab {
             SettingsTab::StorageProfiles => "Storage Profiles",
             SettingsTab::ApiKeys => "API Keys",
             SettingsTab::Encryption => "Encryption",
-            SettingsTab::ImportSettings => "Import",
             SettingsTab::Network => "Network",
             SettingsTab::About => "About",
         }
@@ -30,7 +27,6 @@ impl SettingsTab {
             SettingsTab::StorageProfiles,
             SettingsTab::ApiKeys,
             SettingsTab::Encryption,
-            SettingsTab::ImportSettings,
             SettingsTab::Network,
             SettingsTab::About,
         ]
@@ -76,9 +72,6 @@ pub fn Settings() -> Element {
                         },
                         SettingsTab::Encryption => rsx! {
                             encryption::EncryptionSection {}
-                        },
-                        SettingsTab::ImportSettings => rsx! {
-                            import_settings::ImportSettingsSection {}
                         },
                         SettingsTab::Network => rsx! {
                             network::NetworkSection {}

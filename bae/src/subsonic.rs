@@ -1,4 +1,3 @@
-use crate::cloud_storage::CloudStorage;
 use crate::library::LibraryError;
 use crate::library::SharedLibraryManager;
 use crate::storage::create_storage_reader;
@@ -12,14 +11,12 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tower_http::cors::CorsLayer;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 /// Subsonic API server state
 #[derive(Clone)]
 pub struct SubsonicState {
     pub library_manager: SharedLibraryManager,
-    pub cache_manager: crate::cache::CacheManager,
     pub encryption_service: crate::encryption::EncryptionService,
-    pub chunk_size_bytes: usize,
 }
 /// Common query parameters for Subsonic API
 #[derive(Debug, Deserialize)]
@@ -126,15 +123,11 @@ pub struct AlbumList {
 /// Create the Subsonic API router
 pub fn create_router(
     library_manager: SharedLibraryManager,
-    cache_manager: crate::cache::CacheManager,
     encryption_service: crate::encryption::EncryptionService,
-    chunk_size_bytes: usize,
 ) -> Router {
     let state = SubsonicState {
         library_manager,
-        cache_manager,
         encryption_service,
-        chunk_size_bytes,
     };
     Router::new()
         .route("/rest/ping", get(ping))
@@ -302,7 +295,7 @@ async fn stream_song(
         }
     };
     info!("Streaming request for song ID: {}", song_id);
-    match stream_track_chunks(&state, &song_id).await {
+    match stream_track_audio(&state, &song_id).await {
         Ok(audio_data) => {
             let headers = [
                 ("Content-Type", "audio/flac"),
@@ -479,26 +472,21 @@ async fn load_album_with_songs(
         songs } }
     ))
 }
-/// Stream track chunks - reassemble encrypted chunks into audio data
-/// Optimized for CUE/FLAC tracks with chunk range queries and header prepending
-async fn stream_track_chunks(
+/// Stream track audio - read file and decrypt if needed
+async fn stream_track_audio(
     state: &SubsonicState,
     track_id: &str,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
     let library_manager = &state.library_manager;
-    info!("Starting chunk reassembly for track: {}", track_id);
-    let coords = library_manager
-        .get()
-        .get_track_chunk_coords(track_id)
-        .await
-        .map_err(|e| format!("Database error: {}", e))?
-        .ok_or_else(|| format!("No chunk coordinates found for track {}", track_id))?;
+    info!("Loading audio for track: {}", track_id);
+
     let audio_format = library_manager
         .get()
         .get_audio_format_by_track_id(track_id)
         .await
         .map_err(|e| format!("Database error: {}", e))?
         .ok_or_else(|| format!("No audio format found for track {}", track_id))?;
+
     let track = library_manager
         .get()
         .get_track(track_id)
@@ -506,118 +494,75 @@ async fn stream_track_chunks(
         .map_err(|e| format!("Database error: {}", e))?
         .ok_or_else(|| format!("Track not found: {}", track_id))?;
 
-    // Get storage profile and create reader
+    // Get storage profile
     let storage_profile = library_manager
         .get()
         .get_storage_profile_for_release(&track.release_id)
         .await
-        .map_err(|e| format!("Database error: {}", e))?
-        .ok_or_else(|| "No storage profile for release".to_string())?;
-    let storage = create_storage_reader(&storage_profile)
-        .await
-        .map_err(|e| format!("Failed to create storage reader: {}", e))?;
+        .map_err(|e| format!("Database error: {}", e))?;
 
-    let release_chunks = library_manager
+    // Find the audio file for this track
+    let files = library_manager
         .get()
-        .get_chunks_for_release(&track.release_id)
+        .get_files_for_release(&track.release_id)
         .await
         .map_err(|e| format!("Database error: {}", e))?;
-    let mut chunks: Vec<_> = release_chunks
-        .into_iter()
-        .filter(|c| {
-            c.chunk_index >= coords.start_chunk_index && c.chunk_index <= coords.end_chunk_index
+
+    let audio_file = files
+        .iter()
+        .find(|f| {
+            let ext = f.format.to_lowercase();
+            ext == "flac" || ext == "mp3" || ext == "m4a" || ext == "ogg" || ext == "wav"
         })
-        .collect();
-    if chunks.is_empty() {
-        return Err("No chunks found for track".into());
-    }
-    debug!("Found {} chunks to reassemble", chunks.len());
-    chunks.sort_by_key(|c| c.chunk_index);
-    let mut chunk_data_vec: Vec<Vec<u8>> = Vec::new();
-    for chunk in chunks {
-        debug!(
-            "Processing chunk {} (index {})",
-            chunk.id, chunk.chunk_index
-        );
-        let chunk_data = download_and_decrypt_chunk(state, &*storage, &chunk).await?;
-        chunk_data_vec.push(chunk_data);
-    }
-    let chunk_size = state.chunk_size_bytes;
-    let mut audio_data = extract_bytes_from_chunks(
-        &chunk_data_vec,
-        coords.start_byte_offset,
-        coords.end_byte_offset,
-        chunk_size,
-    );
-    if audio_format.needs_headers {
+        .ok_or_else(|| format!("No audio file found for track {}", track_id))?;
+
+    // Read file data
+    let file_data = if let Some(ref source_path) = audio_file.source_path {
+        debug!("Reading from local file: {}", source_path);
+        tokio::fs::read(source_path)
+            .await
+            .map_err(|e| format!("Failed to read file: {}", e))?
+    } else if let Some(ref profile) = storage_profile {
+        let storage = create_storage_reader(profile)
+            .await
+            .map_err(|e| format!("Failed to create storage reader: {}", e))?;
+        let key = format!("{}/{}", track.release_id, audio_file.original_filename);
+        debug!("Downloading from storage: {}", key);
+        storage
+            .download_chunk(&key)
+            .await
+            .map_err(|e| format!("Failed to download file: {}", e))?
+    } else {
+        return Err("No storage location for track".into());
+    };
+
+    // Decrypt if needed
+    let decrypted = if storage_profile.map(|p| p.encrypted).unwrap_or(false) {
+        state
+            .encryption_service
+            .decrypt_simple(&file_data)
+            .map_err(|e| format!("Failed to decrypt file: {}", e))?
+    } else {
+        file_data
+    };
+
+    // For CUE/FLAC tracks, prepend headers if needed
+    let audio_data = if audio_format.needs_headers {
         if let Some(ref headers) = audio_format.flac_headers {
             debug!("Prepending FLAC headers: {} bytes", headers.len());
             let mut complete_audio = headers.clone();
-            complete_audio.extend_from_slice(&audio_data);
-            audio_data = complete_audio;
+            complete_audio.extend_from_slice(&decrypted);
+            complete_audio
+        } else {
+            decrypted
         }
-    }
+    } else {
+        decrypted
+    };
+
     info!(
-        "Successfully reassembled {} bytes of audio data",
+        "Successfully loaded {} bytes of audio data",
         audio_data.len()
     );
     Ok(audio_data)
-}
-/// Download and decrypt a single chunk with caching
-async fn download_and_decrypt_chunk(
-    state: &SubsonicState,
-    storage: &dyn CloudStorage,
-    chunk: &crate::db::DbChunk,
-) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-    let cache_manager = &state.cache_manager;
-    if let Some(cached_encrypted_data) = cache_manager
-        .get_chunk(&chunk.id)
-        .await
-        .map_err(|e| format!("Cache error: {}", e))?
-    {
-        let decrypted_data = state
-            .encryption_service
-            .decrypt_chunk(&cached_encrypted_data)
-            .map_err(|e| format!("Failed to decrypt cached chunk: {}", e))?;
-        return Ok(decrypted_data);
-    }
-    debug!("Downloading chunk: {}", chunk.storage_location);
-    let encrypted_data = storage
-        .download_chunk(&chunk.storage_location)
-        .await
-        .map_err(|e| format!("Failed to download chunk: {}", e))?;
-    if let Err(e) = cache_manager.put_chunk(&chunk.id, &encrypted_data).await {
-        warn!("Failed to cache chunk {}: {}", chunk.id, e);
-    }
-    let decrypted_data = state
-        .encryption_service
-        .decrypt_chunk(&encrypted_data)
-        .map_err(|e| format!("Failed to decrypt chunk: {}", e))?;
-    Ok(decrypted_data)
-}
-/// Extract bytes from chunks using byte offsets
-fn extract_bytes_from_chunks(
-    chunks: &[Vec<u8>],
-    start_byte_offset: i64,
-    end_byte_offset: i64,
-    _chunk_size: usize,
-) -> Vec<u8> {
-    if chunks.is_empty() {
-        return Vec::new();
-    }
-    let mut result = Vec::new();
-    if chunks.len() == 1 {
-        let start = start_byte_offset as usize;
-        let end = (end_byte_offset + 1) as usize;
-        result.extend_from_slice(&chunks[0][start..end]);
-    } else {
-        let first_chunk_start = start_byte_offset as usize;
-        result.extend_from_slice(&chunks[0][first_chunk_start..]);
-        for chunk in &chunks[1..chunks.len() - 1] {
-            result.extend_from_slice(chunk);
-        }
-        let last_chunk_end = (end_byte_offset + 1) as usize;
-        result.extend_from_slice(&chunks[chunks.len() - 1][0..last_chunk_end]);
-    }
-    result
 }

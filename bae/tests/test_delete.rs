@@ -1,7 +1,7 @@
 #![cfg(feature = "test-utils")]
 mod support;
 use crate::support::tracing_init;
-use bae::db::{Database, DbAlbum, DbChunk, DbRelease, DbTrack, ImportStatus};
+use bae::db::{Database, DbAlbum, DbRelease, DbTrack, ImportStatus};
 use bae::library::{LibraryManager, SharedLibraryManager};
 use chrono::Utc;
 use tempfile::TempDir;
@@ -68,18 +68,6 @@ fn create_test_track(release_id: &str, track_number: i32) -> DbTrack {
     }
 }
 
-fn create_test_chunk(release_id: &str, chunk_index: i32) -> DbChunk {
-    DbChunk {
-        id: Uuid::new_v4().to_string(),
-        release_id: release_id.to_string(),
-        chunk_index,
-        encrypted_size: 1024,
-        storage_location: format!("/tmp/test_chunk_{}.bin", Uuid::new_v4()),
-        last_accessed: None,
-        created_at: Utc::now(),
-    }
-}
-
 #[tokio::test]
 async fn test_delete_album_integration() {
     let (library_manager, database, _temp_dir) = setup_test_environment().await;
@@ -87,15 +75,11 @@ async fn test_delete_album_integration() {
     let release = create_test_release(&album.id);
     let track1 = create_test_track(&release.id, 1);
     let track2 = create_test_track(&release.id, 2);
-    let chunk1 = create_test_chunk(&release.id, 0);
-    let chunk2 = create_test_chunk(&release.id, 1);
 
     database.insert_album(&album).await.unwrap();
     database.insert_release(&release).await.unwrap();
     database.insert_track(&track1).await.unwrap();
     database.insert_track(&track2).await.unwrap();
-    database.insert_chunk(&chunk1).await.unwrap();
-    database.insert_chunk(&chunk2).await.unwrap();
 
     library_manager.get().delete_album(&album.id).await.unwrap();
 
@@ -125,16 +109,12 @@ async fn test_delete_release_integration() {
     let release2 = create_test_release(&album.id);
     let track1 = create_test_track(&release1.id, 1);
     let track2 = create_test_track(&release2.id, 1);
-    let chunk1 = create_test_chunk(&release1.id, 0);
-    let chunk2 = create_test_chunk(&release2.id, 0);
 
     database.insert_album(&album).await.unwrap();
     database.insert_release(&release1).await.unwrap();
     database.insert_release(&release2).await.unwrap();
     database.insert_track(&track1).await.unwrap();
     database.insert_track(&track2).await.unwrap();
-    database.insert_chunk(&chunk1).await.unwrap();
-    database.insert_chunk(&chunk2).await.unwrap();
 
     library_manager
         .get()
@@ -177,11 +157,9 @@ async fn test_delete_last_release_deletes_album() {
     let (library_manager, database, _temp_dir) = setup_test_environment().await;
     let album = create_test_album();
     let release = create_test_release(&album.id);
-    let chunk = create_test_chunk(&release.id, 0);
 
     database.insert_album(&album).await.unwrap();
     database.insert_release(&release).await.unwrap();
-    database.insert_chunk(&chunk).await.unwrap();
 
     library_manager
         .get()

@@ -32,14 +32,12 @@ impl PlaybackTestFixture {
         std::fs::create_dir_all(&album_dir)?;
         let storage_dir = temp_dir.path().join("storage");
         std::fs::create_dir_all(&storage_dir)?;
-        let chunk_size_bytes = 1024 * 1024;
         let database = Database::new(db_path.to_str().unwrap()).await?;
         // Create a local storage profile (playback tests use local storage now)
         let storage_profile = DbStorageProfile::new_local(
             "test-local",
             storage_dir.to_str().unwrap(),
             true, // encrypted
-            true, // chunked
         );
         let storage_profile_id = storage_profile.id.clone();
         database.insert_storage_profile(&storage_profile).await?;
@@ -49,7 +47,7 @@ impl PlaybackTestFixture {
             max_size_bytes: 1024 * 1024 * 1024,
             max_chunks: 10000,
         };
-        let cache_manager = CacheManager::with_config(cache_config).await?;
+        let _cache_manager = CacheManager::with_config(cache_config).await?;
         let database_arc = Arc::new(database);
         let library_manager = LibraryManager::new((*database_arc).clone());
         let shared_library_manager = SharedLibraryManager::new(library_manager.clone());
@@ -57,17 +55,8 @@ impl PlaybackTestFixture {
         let runtime_handle = tokio::runtime::Handle::current();
         let discogs_release = create_test_album();
         let _track_data = generate_test_flac_files(&album_dir);
-        let import_config = bae::import::ImportConfig {
-            chunk_size_bytes,
-            max_encrypt_workers: std::thread::available_parallelism()
-                .map(|n| n.get() * 2)
-                .unwrap_or(4),
-            max_upload_workers: 20,
-            max_db_write_workers: 10,
-        };
         let torrent_handle = TorrentManagerHandle::new_dummy();
         let import_handle = bae::import::ImportService::start(
-            import_config,
             runtime_handle.clone(),
             shared_library_manager.clone(),
             encryption_service.clone(),
@@ -110,9 +99,7 @@ impl PlaybackTestFixture {
         std::env::set_var("MUTE_TEST_AUDIO", "1");
         let playback_handle = bae::playback::PlaybackService::start(
             library_manager_arc.as_ref().clone(),
-            cache_manager,
             encryption_service,
-            chunk_size_bytes,
             runtime_handle,
         );
         playback_handle.set_volume(0.0);

@@ -244,7 +244,6 @@ pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
                                         let library_manager_clone = library_manager.clone();
                                         let cache_clone = app_context.cache.clone();
                                         let encryption_service_clone = app_context.encryption_service.clone();
-                                        let chunk_size_bytes = app_context.config.chunk_size_bytes;
                                         let mut is_exporting_clone = is_exporting;
                                         let mut show_menu_clone = show_menu;
                                         move |_| {
@@ -254,7 +253,6 @@ pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
                                                 let library_manager_clone = library_manager_clone.clone();
                                                 let cache_clone = cache_clone.clone();
                                                 let encryption_service_clone = encryption_service_clone.clone();
-                                                let chunk_size_bytes = chunk_size_bytes;
                                                 spawn(async move {
                                                     is_exporting_clone.set(true);
                                                     if let Some(file_handle) = AsyncFileDialog::new()
@@ -272,7 +270,6 @@ pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
                                                                 &output_path,
                                                                 &cache_clone,
                                                                 &encryption_service_clone,
-                                                                chunk_size_bytes,
                                                             )
                                                             .await
                                                         {

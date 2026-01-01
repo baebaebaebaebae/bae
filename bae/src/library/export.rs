@@ -1,30 +1,27 @@
 use crate::cache::CacheManager;
 use crate::cloud_storage::CloudStorage;
-use crate::db::DbChunk;
 use crate::encryption::EncryptionService;
 use crate::library::LibraryManager;
 use crate::playback::reassembly::reassemble_track;
 use crate::storage::create_storage_reader;
-use futures::stream::{self, StreamExt};
 use std::path::Path;
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
-/// Export service for reconstructing files and tracks from chunks
+/// Export service for exporting files and tracks
 pub struct ExportService;
 
 impl ExportService {
     /// Export all files for a release to a directory
     ///
-    /// Reconstructs files sequentially from chunks in the order they were imported.
-    /// Files are written with their original filenames to the target directory.
+    /// Copies files from storage to the target directory.
+    /// Files are written with their original filenames.
     pub async fn export_release(
         release_id: &str,
         target_dir: &Path,
         library_manager: &LibraryManager,
-        cache: &CacheManager,
+        _cache: &CacheManager,
         encryption_service: &EncryptionService,
-        _chunk_size_bytes: usize,
     ) -> Result<(), String> {
         info!(
             "Exporting release {} to {}",
@@ -43,87 +40,54 @@ impl ExportService {
             .await
             .map_err(|e| format!("Failed to create storage reader: {}", e))?;
 
-        let mut files = library_manager
+        let files = library_manager
             .get_files_for_release(release_id)
             .await
             .map_err(|e| format!("Failed to get files: {}", e))?;
-        files.sort_by(|a, b| a.original_filename.cmp(&b.original_filename));
 
         if files.is_empty() {
             return Err("No files found for release".to_string());
         }
 
-        let mut chunks = library_manager
-            .get_chunks_for_release(release_id)
-            .await
-            .map_err(|e| format!("Failed to get chunks: {}", e))?;
-        chunks.sort_by_key(|c| c.chunk_index);
-
-        if chunks.is_empty() {
-            return Err("No chunks found for release".to_string());
-        }
-
-        info!("Downloading {} chunks...", chunks.len());
-
-        let chunk_results: Vec<Result<(i32, Vec<u8>), String>> = stream::iter(chunks.iter())
-            .map(|chunk| {
-                let storage = storage.clone();
-                let cache = cache.clone();
-                let encryption_service = encryption_service.clone();
-                async move {
-                    let chunk_data =
-                        download_and_decrypt_chunk(chunk, &*storage, &cache, &encryption_service)
-                            .await?;
-                    Ok::<_, String>((chunk.chunk_index, chunk_data))
-                }
-            })
-            .buffer_unordered(10)
-            .collect()
-            .await;
-
-        let mut indexed_chunks: Vec<(i32, Vec<u8>)> = Vec::new();
-        for result in chunk_results {
-            indexed_chunks.push(result?);
-        }
-        indexed_chunks.sort_by_key(|(idx, _)| *idx);
-        let chunk_data: Vec<Vec<u8>> = indexed_chunks.into_iter().map(|(_, data)| data).collect();
-
-        let mut chunk_offset = 0usize;
-        let mut byte_offset_in_chunk = 0usize;
-
         for file in &files {
-            let file_size = file.file_size as usize;
-            let mut file_data = Vec::with_capacity(file_size);
-            let mut remaining_bytes = file_size;
+            let file_data = if let Some(ref source_path) = file.source_path {
+                // Read from storage
+                debug!("Reading file from storage: {}", source_path);
+                let data = storage
+                    .download_chunk(source_path)
+                    .await
+                    .map_err(|e| format!("Failed to read file {}: {}", source_path, e))?;
 
-            while remaining_bytes > 0 && chunk_offset < chunk_data.len() {
-                let current_chunk = &chunk_data[chunk_offset];
-                let available_in_chunk = current_chunk.len() - byte_offset_in_chunk;
-                let bytes_to_take = remaining_bytes.min(available_in_chunk);
-                file_data.extend_from_slice(
-                    &current_chunk[byte_offset_in_chunk..byte_offset_in_chunk + bytes_to_take],
-                );
-                remaining_bytes -= bytes_to_take;
-                byte_offset_in_chunk += bytes_to_take;
-
-                if byte_offset_in_chunk >= current_chunk.len() {
-                    chunk_offset += 1;
-                    byte_offset_in_chunk = 0;
+                // Decrypt if profile has encryption enabled
+                if storage_profile.encrypted {
+                    let enc_service = encryption_service.clone();
+                    tokio::task::spawn_blocking(move || {
+                        enc_service
+                            .decrypt_simple(&data)
+                            .map_err(|e| format!("Failed to decrypt file: {}", e))
+                    })
+                    .await
+                    .map_err(|e| format!("Decryption task failed: {}", e))??
+                } else {
+                    data
                 }
-            }
-
-            if remaining_bytes > 0 {
+            } else {
                 return Err(format!(
-                    "Not enough data to reconstruct file {} (needed {} bytes, got {})",
-                    file.original_filename,
-                    file_size,
-                    file_size - remaining_bytes,
+                    "File {} has no source path",
+                    file.original_filename
                 ));
+            };
+
+            // Ensure subdirectories exist for nested filenames
+            let file_path = target_dir.join(&file.original_filename);
+            if let Some(parent) = file_path.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create directory: {}", e))?;
             }
 
-            let file_path = target_dir.join(&file.original_filename);
             std::fs::write(&file_path, &file_data)
                 .map_err(|e| format!("Failed to write file {}: {}", file.original_filename, e))?;
+
             debug!(
                 "Exported file {} ({} bytes)",
                 file.original_filename,
@@ -150,17 +114,15 @@ impl ExportService {
         storage: Arc<dyn CloudStorage>,
         cache: &CacheManager,
         encryption_service: &EncryptionService,
-        chunk_size_bytes: usize,
     ) -> Result<(), String> {
         info!("Exporting track {} to {}", track_id, output_path.display());
 
         let pcm_source = reassemble_track(
             track_id,
             library_manager,
-            storage,
+            Some(storage),
             cache,
             encryption_service,
-            chunk_size_bytes,
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -183,49 +145,4 @@ impl ExportService {
         );
         Ok(())
     }
-}
-
-/// Download and decrypt a single chunk with caching
-async fn download_and_decrypt_chunk(
-    chunk: &DbChunk,
-    storage: &dyn CloudStorage,
-    cache: &CacheManager,
-    encryption_service: &EncryptionService,
-) -> Result<Vec<u8>, String> {
-    let encrypted_data = match cache.get_chunk(&chunk.id).await {
-        Ok(Some(cached_encrypted_data)) => {
-            debug!("Cache hit for chunk: {}", chunk.id);
-            cached_encrypted_data
-        }
-        Ok(None) => {
-            debug!("Cache miss - downloading chunk: {}", chunk.id);
-            let data = storage
-                .download_chunk(&chunk.storage_location)
-                .await
-                .map_err(|e| format!("Failed to download chunk: {}", e))?;
-
-            if let Err(e) = cache.put_chunk(&chunk.id, &data).await {
-                warn!("Failed to cache chunk (non-fatal): {}", e);
-            }
-            data
-        }
-        Err(e) => {
-            warn!("Cache error (continuing with download): {}", e);
-            storage
-                .download_chunk(&chunk.storage_location)
-                .await
-                .map_err(|e| format!("Failed to download chunk: {}", e))?
-        }
-    };
-
-    let encryption_service = encryption_service.clone();
-    let decrypted_data = tokio::task::spawn_blocking(move || {
-        encryption_service
-            .decrypt_chunk(&encrypted_data)
-            .map_err(|e| format!("Failed to decrypt chunk: {}", e))
-    })
-    .await
-    .map_err(|e| format!("Decryption task failed: {}", e))??;
-
-    Ok(decrypted_data)
 }

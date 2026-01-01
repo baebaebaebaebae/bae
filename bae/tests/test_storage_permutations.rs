@@ -1,15 +1,14 @@
 #![cfg(feature = "test-utils")]
-//! Parameterized integration tests for all 8 storage permutations.
+//! Parameterized integration tests for storage configurations.
 //!
 //! Tests all combinations of:
 //! - Location: Local, Cloud
-//! - Chunked: true, false
 //! - Encrypted: true, false
 use bae::cache::CacheManager;
 use bae::db::{Database, DbStorageProfile, ImportStatus, StorageLocation};
 use bae::discogs::models::{DiscogsRelease, DiscogsTrack};
 use bae::encryption::EncryptionService;
-use bae::import::{ImportConfig, ImportPhase, ImportProgress, ImportRequest, ImportService};
+use bae::import::{ImportPhase, ImportProgress, ImportRequest, ImportService};
 use bae::library::LibraryManager;
 use bae::storage::create_storage_reader;
 use bae::torrent::TorrentManagerHandle;
@@ -18,6 +17,7 @@ use std::sync::Arc;
 use std::{fs, path::PathBuf};
 use tempfile::TempDir;
 use tracing::info;
+
 /// Initialize tracing for tests
 fn tracing_init() {
     let _ = tracing_subscriber::fmt()
@@ -27,6 +27,7 @@ fn tracing_init() {
         .with_file(true)
         .try_init();
 }
+
 #[tokio::test]
 async fn test_storage_permutations() {
     tracing_init();
@@ -34,18 +35,17 @@ async fn test_storage_permutations() {
     // which was removed with CloudStorageManager. Cloud storage is tested via
     // real S3 in manual testing or with the test_real_album test.
     for location in [StorageLocation::Local] {
-        for chunked in [false, true] {
-            for encrypted in [false, true] {
-                info!(
-                    "\n\n========== Testing: {:?} / chunked={} / encrypted={} ==========\n",
-                    location, chunked, encrypted
-                );
-                run_storage_test(location, chunked, encrypted).await;
-            }
+        for encrypted in [false, true] {
+            info!(
+                "\n\n========== Testing: {:?} / encrypted={} ==========\n",
+                location, encrypted
+            );
+            run_storage_test(location, encrypted).await;
         }
     }
 }
-async fn run_storage_test(location: StorageLocation, chunked: bool, encrypted: bool) {
+
+async fn run_storage_test(location: StorageLocation, encrypted: bool) {
     let temp_root = TempDir::new().expect("Failed to create temp root");
     let album_dir = temp_root.path().join("album");
     let db_dir = temp_root.path().join("db");
@@ -57,7 +57,6 @@ async fn run_storage_test(location: StorageLocation, chunked: bool, encrypted: b
     fs::create_dir_all(&storage_dir).expect("Failed to create storage dir");
     let file_data = generate_test_files(&album_dir);
     info!("Generated {} test files", file_data.len());
-    let chunk_size_bytes = 1024 * 1024;
     let db_file = db_dir.join("test.db");
     let database = Database::new(db_file.to_str().unwrap())
         .await
@@ -75,7 +74,7 @@ async fn run_storage_test(location: StorageLocation, chunked: bool, encrypted: b
     let shared_library_manager = bae::library::SharedLibraryManager::new(library_manager.clone());
     let library_manager = Arc::new(library_manager);
     let storage_profile =
-        create_storage_profile(&location, chunked, encrypted, storage_dir.to_str().unwrap());
+        create_storage_profile(&location, encrypted, storage_dir.to_str().unwrap());
     let storage_profile_id = storage_profile.id.clone();
     database
         .insert_storage_profile(&storage_profile)
@@ -86,16 +85,9 @@ async fn run_storage_test(location: StorageLocation, chunked: bool, encrypted: b
         storage_profile.name, storage_profile_id
     );
     let runtime_handle = tokio::runtime::Handle::current();
-    let import_config = ImportConfig {
-        chunk_size_bytes,
-        max_encrypt_workers: 4,
-        max_upload_workers: 20,
-        max_db_write_workers: 10,
-    };
     let torrent_handle = TorrentManagerHandle::new_dummy();
     let database_arc = Arc::new(database.clone());
     let import_handle = ImportService::start(
-        import_config,
         runtime_handle,
         shared_library_manager,
         encryption_service.clone(),
@@ -228,114 +220,29 @@ async fn run_storage_test(location: StorageLocation, chunked: bool, encrypted: b
         .await
         .expect("Failed to get files");
     assert!(!files.is_empty(), "Should have file records");
-    if !chunked {
-        for file in &files {
-            assert!(
-                file.source_path.is_some(),
-                "Non-chunked file '{}' should have source_path",
-                file.original_filename,
-            );
-        }
-        info!("✓ {} DbFile records with source_path", files.len());
-    } else {
-        info!(
-            "✓ {} DbFile records (chunked, source_path not required)",
-            files.len()
-        );
-    }
-    for track in &tracks {
-        let coords = library_manager
-            .get_track_chunk_coords(&track.id)
-            .await
-            .expect("Failed to get track chunk coords");
-        if chunked {
-            let coords = coords.expect("Chunked track should have coords");
-            assert!(
-                coords.start_chunk_index >= 0,
-                "Chunked track should have non-negative chunk index",
-            );
-            info!(
-                "✓ Track '{}' has chunk coords: chunks {}-{}",
-                track.title, coords.start_chunk_index, coords.end_chunk_index
-            );
-        } else {
-            match coords {
-                Some(coords) if coords.start_chunk_index == -1 => {
-                    assert!(
-                        coords.end_byte_offset > coords.start_byte_offset,
-                        "End byte should be > start byte",
-                    );
-                    info!(
-                        "✓ Track '{}' has non-chunked CUE/FLAC coords: bytes {}-{}",
-                        track.title, coords.start_byte_offset, coords.end_byte_offset
-                    );
-                }
-                Some(coords) => {
-                    panic!(
-                        "Unexpected coords for non-chunked track: chunk_index={}",
-                        coords.start_chunk_index,
-                    );
-                }
-                None => {
-                    info!(
-                        "✓ Track '{}' has no coords (single-file-per-track, non-chunked)",
-                        track.title
-                    );
-                }
-            }
-        }
-    }
-    if chunked {
-        let chunks = library_manager
-            .get_chunks_for_release(&release_id)
-            .await
-            .expect("Failed to get chunks");
+    for file in &files {
         assert!(
-            !chunks.is_empty(),
-            "Chunked storage should have chunk records"
+            file.source_path.is_some(),
+            "File '{}' should have source_path",
+            file.original_filename,
         );
-        info!("✓ {} DbChunk records exist", chunks.len());
-        let mut indices: Vec<i32> = chunks.iter().map(|c| c.chunk_index).collect();
-        indices.sort();
-        let unique_count = {
-            let mut sorted = indices.clone();
-            sorted.dedup();
-            sorted.len()
-        };
-        assert_eq!(
-            unique_count,
-            chunks.len(),
-            "Chunk indices must be unique - found {} unique indices for {} chunks",
-            unique_count,
-            chunks.len(),
-        );
-        let expected_indices: Vec<i32> = (0..chunks.len() as i32).collect();
-        assert_eq!(
-            indices, expected_indices,
-            "Chunk indices must be sequential 0..N"
-        );
-        info!(
-            "✓ Chunk indices are unique and sequential (0..{})",
-            chunks.len() - 1
-        );
-        for file in &files {
-            if file.format == "flac" {
-                let file_chunks = library_manager
-                    .get_file_chunks(&file.id)
-                    .await
-                    .expect("Failed to get file chunks");
-                assert!(
-                    !file_chunks.is_empty(),
-                    "FLAC file should have file_chunk mappings",
-                );
-                info!(
-                    "✓ File '{}' has {} chunk mappings",
-                    file.original_filename,
-                    file_chunks.len()
-                );
-            }
-        }
     }
+    info!("✓ {} DbFile records with source_path", files.len());
+
+    // Verify audio format records for tracks
+    for track in &tracks {
+        let audio_format = library_manager
+            .get_audio_format_by_track_id(&track.id)
+            .await
+            .expect("Failed to get audio format")
+            .expect("Audio format should exist for track");
+        assert_eq!(audio_format.format, "flac", "Should be FLAC format");
+        info!(
+            "✓ Track '{}' has audio format (single-file-per-track)",
+            track.title
+        );
+    }
+
     let images = library_manager
         .get_images_for_release(&release_id)
         .await
@@ -374,44 +281,30 @@ async fn run_storage_test(location: StorageLocation, chunked: bool, encrypted: b
         &storage_profile,
         &cache_manager,
         &encryption_service,
-        chunked,
         encrypted,
     )
     .await;
     info!("✓ Cover image data is loadable");
-    verify_storage_state(chunked, encrypted, &files, &library_manager, &release_id).await;
-    verify_roundtrip(
-        &tracks,
-        &library_manager,
-        &storage_profile,
-        &cache_manager,
-        &encryption_service,
-        chunk_size_bytes,
-        chunked,
-        encrypted,
-    )
-    .await;
+    verify_storage_state(encrypted, &files).await;
+    verify_roundtrip(&tracks, &library_manager, encrypted).await;
     info!(
-        "\n✅ Test passed: {:?} / chunked={} / encrypted={}\n",
-        location, chunked, encrypted
+        "\n✅ Test passed: {:?} / encrypted={}\n",
+        location, encrypted
     );
 }
+
 fn create_storage_profile(
     location: &StorageLocation,
-    chunked: bool,
     encrypted: bool,
     storage_path: &str,
 ) -> DbStorageProfile {
     let name = format!(
-        "Test-{:?}-{}-{}",
+        "Test-{:?}-{}",
         location,
-        if chunked { "chunked" } else { "raw" },
         if encrypted { "encrypted" } else { "plain" },
     );
     match location {
-        StorageLocation::Local => {
-            DbStorageProfile::new_local(&name, storage_path, encrypted, chunked)
-        }
+        StorageLocation::Local => DbStorageProfile::new_local(&name, storage_path, encrypted),
         StorageLocation::Cloud => DbStorageProfile::new_cloud(
             &name,
             "test-bucket",
@@ -420,10 +313,10 @@ fn create_storage_profile(
             "test-access-key",
             "test-secret-key",
             encrypted,
-            chunked,
         ),
     }
 }
+
 fn create_test_discogs_release() -> DiscogsRelease {
     DiscogsRelease {
         id: "test-release-storage".to_string(),
@@ -457,6 +350,7 @@ fn create_test_discogs_release() -> DiscogsRelease {
         master_id: "test-master-storage".to_string(),
     }
 }
+
 fn generate_test_files(dir: &Path) -> Vec<Vec<u8>> {
     let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -512,15 +406,14 @@ fn generate_test_files(dir: &Path) -> Vec<Vec<u8>> {
         })
         .collect()
 }
+
 /// Verify we can actually load image data from storage
-/// This mirrors the logic in ui/app.rs serve_image_from_chunks
 async fn verify_image_loadable(
     image: &bae::db::DbImage,
     library_manager: &LibraryManager,
     storage_profile: &DbStorageProfile,
     _cache_manager: &CacheManager,
     encryption_service: &EncryptionService,
-    chunked: bool,
     encrypted: bool,
 ) {
     let storage = create_storage_reader(storage_profile)
@@ -536,81 +429,32 @@ async fn verify_image_loadable(
         .await
         .expect("Failed to get file")
         .expect("File not found for image");
-    if !chunked {
-        let source_path = file
-            .source_path
-            .as_ref()
-            .expect("Non-chunked file should have source_path");
-        let data = storage
-            .download_chunk(source_path)
-            .await
-            .expect("Failed to read image file");
-        let data = if encrypted {
-            encryption_service
-                .decrypt_simple(&data)
-                .expect("Failed to decrypt image")
-        } else {
-            data
-        };
-        assert!(
-            data.len() >= 2 && data[0] == 0xFF && data[1] == 0xD8,
-            "Image data should be valid JPEG (got {} bytes, starts with {:02X}{:02X})",
-            data.len(),
-            data.first().unwrap_or(&0),
-            data.get(1).unwrap_or(&0),
-        );
-        return;
-    }
-    let file_chunks = library_manager
-        .get_file_chunks(&file.id)
+
+    let source_path = file
+        .source_path
+        .as_ref()
+        .expect("File should have source_path");
+    let data = storage
+        .download_chunk(source_path)
         .await
-        .expect("Failed to get file chunks");
-    assert!(!file_chunks.is_empty(), "Chunked file should have chunks");
-    let mut chunk_data_map: std::collections::HashMap<String, Vec<u8>> =
-        std::collections::HashMap::new();
-    for fc in &file_chunks {
-        if chunk_data_map.contains_key(&fc.chunk_id) {
-            continue;
-        }
-        let chunk = library_manager
-            .get_chunk_by_id(&fc.chunk_id)
-            .await
-            .expect("Failed to get chunk")
-            .expect("Chunk not found");
-        let data = storage
-            .download_chunk(&chunk.storage_location)
-            .await
-            .expect("Failed to read chunk");
-        let decrypted = if encrypted {
-            encryption_service
-                .decrypt_simple(&data)
-                .expect("Failed to decrypt chunk")
-        } else {
-            data
-        };
-        chunk_data_map.insert(fc.chunk_id.clone(), decrypted);
-    }
-    let mut file_data = Vec::new();
-    for fc in &file_chunks {
-        let chunk_data = chunk_data_map
-            .get(&fc.chunk_id)
-            .expect("Missing chunk data");
-        let start = fc.byte_offset as usize;
-        let end = start + fc.byte_length as usize;
-        file_data.extend_from_slice(&chunk_data[start..end]);
-    }
+        .expect("Failed to read image file");
+    let data = if encrypted {
+        encryption_service
+            .decrypt_simple(&data)
+            .expect("Failed to decrypt image")
+    } else {
+        data
+    };
     assert!(
-        file_data.len() >= 2 && file_data[0] == 0xFF && file_data[1] == 0xD8,
-        "Image data should be valid JPEG",
+        data.len() >= 2 && data[0] == 0xFF && data[1] == 0xD8,
+        "Image data should be valid JPEG (got {} bytes, starts with {:02X}{:02X})",
+        data.len(),
+        data.first().unwrap_or(&0),
+        data.get(1).unwrap_or(&0),
     );
 }
-async fn verify_storage_state(
-    chunked: bool,
-    encrypted: bool,
-    files: &[bae::db::DbFile],
-    library_manager: &LibraryManager,
-    release_id: &str,
-) {
+
+async fn verify_storage_state(encrypted: bool, files: &[bae::db::DbFile]) {
     // Verify local files exist (this test only runs for local storage now)
     for file in files {
         if let Some(ref source_path) = file.source_path {
@@ -629,117 +473,29 @@ async fn verify_storage_state(
             }
         }
     }
-    if chunked {
-        let chunks = library_manager
-            .get_chunks_for_release(release_id)
-            .await
-            .expect("Failed to get chunks");
-        for chunk in &chunks {
-            let path = PathBuf::from(&chunk.storage_location);
-            assert!(
-                path.exists(),
-                "Local chunk should exist at: {}",
-                chunk.storage_location
-            );
-        }
-        info!("✓ {} local chunks verified", chunks.len());
-    }
     info!("✓ Local storage files verified");
 }
+
 async fn verify_roundtrip(
     tracks: &[bae::db::DbTrack],
     library_manager: &LibraryManager,
-    storage_profile: &DbStorageProfile,
-    cache_manager: &CacheManager,
-    encryption_service: &EncryptionService,
-    chunk_size_bytes: usize,
-    chunked: bool,
-    encrypted: bool,
+    _encrypted: bool,
 ) {
-    let storage = create_storage_reader(storage_profile)
-        .await
-        .expect("Failed to create storage reader");
-
-    if chunked {
-        // For local storage with encryption, test reassembly
-        if encrypted {
-            for track in tracks.iter().take(1) {
-                let reassembled = bae::playback::reassemble_track(
-                    &track.id,
-                    library_manager,
-                    storage.clone(),
-                    cache_manager,
-                    encryption_service,
-                    chunk_size_bytes,
-                )
-                .await
-                .expect("Failed to reassemble track");
-                assert!(
-                    !reassembled.duration().is_zero(),
-                    "Reassembled track should have data",
-                );
-                info!(
-                    "✓ Track '{}' reassembled: {:?}",
-                    track.title,
-                    reassembled.duration()
-                );
-            }
-        } else {
-            // For non-encrypted, just verify chunks exist on disk
-            let chunks = library_manager
-                .get_chunks_for_release(&tracks[0].release_id)
-                .await
-                .expect("Failed to get chunks");
-            for chunk in chunks.iter().take(3) {
-                let path = std::path::Path::new(&chunk.storage_location);
-                assert!(
-                    path.exists(),
-                    "Local chunk should exist at: {}",
-                    chunk.storage_location,
-                );
-            }
-            info!("✓ Local chunks verified on disk");
-        }
-    } else {
-        for track in tracks {
-            let coords = library_manager
-                .get_track_chunk_coords(&track.id)
-                .await
-                .expect("Failed to get coords");
-            match coords {
-                Some(c) if c.start_chunk_index == -1 => {
-                    assert!(
-                        c.end_byte_offset > c.start_byte_offset,
-                        "Should have valid byte range",
-                    );
-                    info!(
-                        "✓ Track '{}' has valid non-chunked CUE/FLAC coords",
-                        track.title
-                    );
-                }
-                Some(c) => {
-                    panic!(
-                        "Unexpected chunk_index {} for non-chunked track",
-                        c.start_chunk_index,
-                    );
-                }
-                None => {
-                    let audio_format = library_manager
-                        .get_audio_format_by_track_id(&track.id)
-                        .await
-                        .expect("Failed to get audio format")
-                        .expect("Audio format should exist for single-file track");
-                    assert_eq!(audio_format.format, "flac", "Should be FLAC format");
-                    info!(
-                        "✓ Track '{}' has audio format (single-file-per-track)",
-                        track.title
-                    );
-                }
-            }
-        }
+    for track in tracks {
+        let audio_format = library_manager
+            .get_audio_format_by_track_id(&track.id)
+            .await
+            .expect("Failed to get audio format")
+            .expect("Audio format should exist for single-file track");
+        assert_eq!(audio_format.format, "flac", "Should be FLAC format");
+        info!(
+            "✓ Track '{}' has audio format (single-file-per-track)",
+            track.title
+        );
     }
     info!("✓ Roundtrip verification passed");
 }
+
 /// Test with a real album - run with:
 /// REAL_ALBUM_PATH="/path/to/album" cargo test --test test_storage_permutations --features test-utils test_real_album -- --ignored --nocapture
 #[tokio::test]
@@ -752,17 +508,13 @@ async fn test_real_album() {
     if !real_album_path.exists() {
         panic!("Real album path does not exist: {:?}", real_album_path);
     }
-    run_real_album_test(real_album_path, StorageLocation::Local, false, false).await;
+    run_real_album_test(real_album_path, StorageLocation::Local, false).await;
 }
-async fn run_real_album_test(
-    album_dir: PathBuf,
-    location: StorageLocation,
-    chunked: bool,
-    encrypted: bool,
-) {
+
+async fn run_real_album_test(album_dir: PathBuf, location: StorageLocation, encrypted: bool) {
     info!(
-        "\n\n========== Testing REAL ALBUM: {:?} / chunked={} / encrypted={} ==========\n",
-        location, chunked, encrypted
+        "\n\n========== Testing REAL ALBUM: {:?} / encrypted={} ==========\n",
+        location, encrypted
     );
     let temp_root = TempDir::new().expect("Failed to create temp root");
     let db_dir = temp_root.path().join("db");
@@ -779,7 +531,6 @@ async fn run_real_album_test(
     for entry in &entries {
         info!("  - {:?}", entry.file_name());
     }
-    let chunk_size_bytes = 1024 * 1024;
     let db_file = db_dir.join("test.db");
     let database = Database::new(db_file.to_str().unwrap())
         .await
@@ -789,7 +540,7 @@ async fn run_real_album_test(
     let shared_library_manager = bae::library::SharedLibraryManager::new(library_manager.clone());
     let library_manager = Arc::new(library_manager);
     let storage_profile =
-        create_storage_profile(&location, chunked, encrypted, storage_dir.to_str().unwrap());
+        create_storage_profile(&location, encrypted, storage_dir.to_str().unwrap());
     let storage_profile_id = storage_profile.id.clone();
     database
         .insert_storage_profile(&storage_profile)
@@ -800,16 +551,9 @@ async fn run_real_album_test(
         storage_profile.name, storage_profile_id
     );
     let runtime_handle = tokio::runtime::Handle::current();
-    let import_config = ImportConfig {
-        chunk_size_bytes,
-        max_encrypt_workers: 4,
-        max_upload_workers: 20,
-        max_db_write_workers: 10,
-    };
     let torrent_handle = TorrentManagerHandle::new_dummy();
     let database_arc = Arc::new(database.clone());
     let import_handle = ImportService::start(
-        import_config,
         runtime_handle,
         shared_library_manager,
         encryption_service.clone(),
@@ -863,18 +607,6 @@ async fn run_real_album_test(
             track.title,
             track.import_status
         );
-        let coords = library_manager
-            .get_track_chunk_coords(&track.id)
-            .await
-            .expect("Failed to get coords");
-        if let Some(c) = coords {
-            info!(
-                "    coords: chunks {}..{}, bytes {}..{}",
-                c.start_chunk_index, c.end_chunk_index, c.start_byte_offset, c.end_byte_offset
-            );
-        } else {
-            info!("    coords: None");
-        }
         let audio_format = library_manager
             .get_audio_format_by_track_id(&track.id)
             .await

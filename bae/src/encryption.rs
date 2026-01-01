@@ -88,12 +88,6 @@ impl EncryptionService {
         })?;
         Ok(plaintext)
     }
-    /// Decrypt a chunk from its serialized format
-    /// This reads the chunk file and decrypts it back to original data
-    pub fn decrypt_chunk(&self, chunk_bytes: &[u8]) -> Result<Vec<u8>, EncryptionError> {
-        let encrypted_chunk = EncryptedChunk::from_bytes(chunk_bytes)?;
-        self.decrypt(&encrypted_chunk.encrypted_data, &encrypted_chunk.nonce)
-    }
     /// Decrypt data in simple format: [nonce (12 bytes)][ciphertext]
     /// This is used by ReleaseStorageImpl which prepends nonce to ciphertext
     pub fn decrypt_simple(&self, encrypted_data: &[u8]) -> Result<Vec<u8>, EncryptionError> {
@@ -106,79 +100,7 @@ impl EncryptionService {
         self.decrypt(ciphertext, nonce)
     }
 }
-/// Encrypted chunk format that includes all data needed for decryption
-#[derive(Debug, Clone)]
-pub struct EncryptedChunk {
-    pub encrypted_data: Vec<u8>,
-    pub nonce: Vec<u8>,
-    pub key_id: String,
-}
-impl EncryptedChunk {
-    /// Create a new encrypted chunk
-    pub fn new(encrypted_data: Vec<u8>, nonce: Vec<u8>, key_id: String) -> Self {
-        EncryptedChunk {
-            encrypted_data,
-            nonce,
-            key_id,
-        }
-    }
-    /// Serialize the encrypted chunk to bytes for storage
-    /// Format: [nonce_len(4)][nonce][key_id_len(4)][key_id][encrypted_data]
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&(self.nonce.len() as u32).to_le_bytes());
-        bytes.extend_from_slice(&self.nonce);
-        let key_id_bytes = self.key_id.as_bytes();
-        bytes.extend_from_slice(&(key_id_bytes.len() as u32).to_le_bytes());
-        bytes.extend_from_slice(key_id_bytes);
-        bytes.extend_from_slice(&self.encrypted_data);
-        bytes
-    }
-    /// Deserialize encrypted chunk from bytes
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, EncryptionError> {
-        if bytes.len() < 8 {
-            return Err(EncryptionError::Decryption(
-                "Invalid chunk format".to_string(),
-            ));
-        }
-        let mut offset = 0;
-        let nonce_len = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
-        offset += 4;
-        if offset + nonce_len > bytes.len() {
-            return Err(EncryptionError::Decryption(
-                "Invalid nonce length".to_string(),
-            ));
-        }
-        let nonce = bytes[offset..offset + nonce_len].to_vec();
-        offset += nonce_len;
-        if offset + 4 > bytes.len() {
-            return Err(EncryptionError::Decryption(
-                "Invalid key ID format".to_string(),
-            ));
-        }
-        let key_id_len = u32::from_le_bytes([
-            bytes[offset],
-            bytes[offset + 1],
-            bytes[offset + 2],
-            bytes[offset + 3],
-        ]) as usize;
-        offset += 4;
-        if offset + key_id_len > bytes.len() {
-            return Err(EncryptionError::Decryption(
-                "Invalid key ID length".to_string(),
-            ));
-        }
-        let key_id = String::from_utf8(bytes[offset..offset + key_id_len].to_vec())
-            .map_err(|e| EncryptionError::Decryption(format!("Invalid key ID: {}", e)))?;
-        offset += key_id_len;
-        let encrypted_data = bytes[offset..].to_vec();
-        Ok(EncryptedChunk {
-            encrypted_data,
-            nonce,
-            key_id,
-        })
-    }
-}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,14 +112,11 @@ mod tests {
             library_id: "test-library".to_string(),
             discogs_api_key: Some("test-key".to_string()),
             encryption_key: test_key_hex,
-            max_import_encrypt_workers: 4,
-            max_import_upload_workers: 20,
-            max_import_db_write_workers: 10,
-            chunk_size_bytes: 1024 * 1024,
             torrent_bind_interface: None,
         };
         EncryptionService::new(&test_config).expect("Failed to create test encryption service")
     }
+
     #[test]
     fn test_encryption_roundtrip() {
         let encryption_service = create_test_encryption_service();
@@ -208,19 +127,7 @@ mod tests {
         let decrypted = encryption_service.decrypt(&ciphertext, &nonce).unwrap();
         assert_eq!(decrypted, plaintext);
     }
-    #[test]
-    fn test_encrypted_chunk_serialization() {
-        let chunk = EncryptedChunk::new(
-            vec![1, 2, 3, 4, 5],
-            vec![6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
-            "test_key_id".to_string(),
-        );
-        let bytes = chunk.to_bytes();
-        let deserialized = EncryptedChunk::from_bytes(&bytes).unwrap();
-        assert_eq!(deserialized.encrypted_data, chunk.encrypted_data);
-        assert_eq!(deserialized.nonce, chunk.nonce);
-        assert_eq!(deserialized.key_id, chunk.key_id);
-    }
+
     #[test]
     fn test_different_nonces() {
         let encryption_service = create_test_encryption_service();

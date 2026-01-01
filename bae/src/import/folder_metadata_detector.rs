@@ -138,8 +138,8 @@ fn read_flac_metadata(_path: &Path) -> (Option<String>, Option<String>, Option<u
 }
 /// Get FLAC file duration in seconds using libFLAC
 fn get_flac_duration_seconds(flac_path: &Path) -> Result<f64, MetadataDetectionError> {
-    use crate::import::album_chunk_layout::build_seektable;
-    let flac_info = build_seektable(flac_path).map_err(|e| {
+    use crate::cue_flac::CueFlacProcessor;
+    let flac_info = CueFlacProcessor::analyze_flac(flac_path).map_err(|e| {
         MetadataDetectionError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             format!("Failed to read FLAC metadata: {}", e),

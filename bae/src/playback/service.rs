@@ -1,4 +1,3 @@
-use crate::cache::CacheManager;
 use crate::db::DbTrack;
 use crate::encryption::EncryptionService;
 use crate::library::LibraryManager;
@@ -118,9 +117,7 @@ impl PlaybackHandle {
 /// Playback service that manages audio playback
 pub struct PlaybackService {
     library_manager: LibraryManager,
-    cache: CacheManager,
     encryption_service: EncryptionService,
-    chunk_size_bytes: usize,
     command_rx: tokio_mpsc::UnboundedReceiver<PlaybackCommand>,
     progress_tx: tokio_mpsc::UnboundedSender<PlaybackProgress>,
     queue: VecDeque<String>,
@@ -141,9 +138,7 @@ pub struct PlaybackService {
 impl PlaybackService {
     pub fn start(
         library_manager: LibraryManager,
-        cache: CacheManager,
         encryption_service: EncryptionService,
-        chunk_size_bytes: usize,
         runtime_handle: tokio::runtime::Handle,
     ) -> PlaybackHandle {
         let (command_tx, command_rx) = tokio_mpsc::unbounded_channel();
@@ -179,9 +174,7 @@ impl PlaybackService {
                 };
                 let mut service = PlaybackService {
                     library_manager,
-                    cache,
                     encryption_service,
-                    chunk_size_bytes,
                     command_rx,
                     progress_tx,
                     queue: VecDeque::new(),
@@ -521,7 +514,7 @@ impl PlaybackService {
                     }
                 }
             }
-            Some(profile) if !profile.chunked => {
+            Some(profile) => {
                 match self
                     .load_audio_from_storage(track_id, &track.release_id, profile)
                     .await
@@ -536,39 +529,6 @@ impl PlaybackService {
                     },
                     Err(e) => {
                         error!("Failed to load audio from storage: {}", e);
-                        self.stop().await;
-                        return;
-                    }
-                }
-            }
-            Some(profile) => {
-                let storage = match create_storage_reader(profile).await {
-                    Ok(s) => s,
-                    Err(e) => {
-                        error!("Failed to create storage reader: {}", e);
-                        let _ = self.progress_tx.send(PlaybackProgress::PlaybackError {
-                            message: format!("Failed to access storage: {}", e),
-                        });
-                        self.stop().await;
-                        return;
-                    }
-                };
-                match super::reassembly::reassemble_track(
-                    track_id,
-                    &self.library_manager,
-                    storage,
-                    &self.cache,
-                    &self.encryption_service,
-                    self.chunk_size_bytes,
-                )
-                .await
-                {
-                    Ok(source) => source,
-                    Err(e) => {
-                        error!("Failed to reassemble track: {}", e);
-                        let _ = self.progress_tx.send(PlaybackProgress::PlaybackError {
-                            message: format!("Failed to load track: {}", e),
-                        });
                         self.stop().await;
                         return;
                     }
@@ -762,7 +722,7 @@ impl PlaybackService {
                     }
                 }
             }
-            Some(profile) if !profile.chunked => {
+            Some(profile) => {
                 match self
                     .load_audio_from_storage(track_id, &track.release_id, profile)
                     .await
@@ -776,31 +736,6 @@ impl PlaybackService {
                     },
                     Err(e) => {
                         error!("Failed to load audio from storage for preload: {}", e);
-                        return;
-                    }
-                }
-            }
-            Some(profile) => {
-                let storage = match create_storage_reader(profile).await {
-                    Ok(s) => s,
-                    Err(e) => {
-                        error!("Failed to create storage reader for preload: {}", e);
-                        return;
-                    }
-                };
-                match super::reassembly::reassemble_track(
-                    track_id,
-                    &self.library_manager,
-                    storage,
-                    &self.cache,
-                    &self.encryption_service,
-                    self.chunk_size_bytes,
-                )
-                .await
-                {
-                    Ok(source) => source,
-                    Err(e) => {
-                        error!("Failed to preload track {}: {}", track_id, e);
                         return;
                     }
                 }
@@ -1075,11 +1010,6 @@ impl PlaybackService {
             "Loading audio from source path for track {} (None storage)",
             track_id
         );
-        let coords = self
-            .library_manager
-            .get_track_chunk_coords(track_id)
-            .await
-            .map_err(PlaybackError::database)?;
         let audio_format = self
             .library_manager
             .get_audio_format_by_track_id(track_id)
@@ -1125,10 +1055,14 @@ impl PlaybackService {
             .ok_or_else(|| PlaybackError::not_found("Source path", &audio_file.id))?;
         info!("Reading audio from: {}", source_path);
         let file_data = tokio::fs::read(source_path).await?;
-        if let (Some(coords), Some(audio_format)) = (coords, audio_format) {
-            if coords.start_chunk_index == -1 {
-                let start_byte = coords.start_byte_offset as usize;
-                let end_byte = coords.end_byte_offset as usize;
+
+        // Check if this is a CUE/FLAC track that needs byte range extraction
+        if let Some(audio_format) = audio_format {
+            if let (Some(start_offset), Some(end_offset)) =
+                (audio_format.start_byte_offset, audio_format.end_byte_offset)
+            {
+                let start_byte = start_offset as usize;
+                let end_byte = end_offset as usize;
                 info!(
                     "CUE/FLAC: Extracting track bytes {}-{} from {} byte file",
                     start_byte,
@@ -1175,11 +1109,6 @@ impl PlaybackService {
             "Loading audio from non-chunked storage for track {} (profile: {})",
             track_id, storage_profile.name
         );
-        let coords = self
-            .library_manager
-            .get_track_chunk_coords(track_id)
-            .await
-            .map_err(PlaybackError::database)?;
         let audio_format = self
             .library_manager
             .get_audio_format_by_track_id(track_id)
@@ -1223,10 +1152,13 @@ impl PlaybackService {
         } else {
             file_data
         };
-        if let (Some(coords), Some(audio_format)) = (coords, audio_format) {
-            if coords.start_chunk_index == -1 {
-                let start_byte = coords.start_byte_offset as usize;
-                let end_byte = coords.end_byte_offset as usize;
+        // Check if this is a CUE/FLAC track that needs byte range extraction
+        if let Some(audio_format) = audio_format {
+            if let (Some(start_offset), Some(end_offset)) =
+                (audio_format.start_byte_offset, audio_format.end_byte_offset)
+            {
+                let start_byte = start_offset as usize;
+                let end_byte = end_offset as usize;
                 info!(
                     "Extracting track bytes {}-{} from {} byte file",
                     start_byte,

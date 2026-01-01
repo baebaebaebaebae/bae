@@ -613,8 +613,8 @@ fn extract_duration_from_file(file_path: &Path) -> Option<i64> {
 }
 /// Extract duration from a FLAC file using libFLAC
 fn extract_flac_duration(file_path: &Path) -> Option<i64> {
-    use crate::import::album_chunk_layout::build_seektable;
-    match build_seektable(file_path) {
+    use crate::cue_flac::CueFlacProcessor;
+    match CueFlacProcessor::analyze_flac(file_path) {
         Ok(flac_info) => {
             let duration_ms = flac_info.duration_ms() as i64;
             debug!(

@@ -12,35 +12,24 @@
 //! - For CUE/FLAC: All logical tracks map to the same FLAC file, CUE sheet parsed for validation
 //! - Output: `TrackToFileMappingResult` (track→file mappings + optional CUE metadata)
 //!
-//! ## Phase 2: Chunk Layout Calculation
-//! - Concatenate all files into a single byte stream
-//! - Divide the stream into fixed-size chunks
-//! - Calculate chunk ranges for each track:
-//!   - One-file-per-track: Track boundaries = file boundaries in the stream
-//!   - CUE/FLAC: Track boundaries = time-based byte positions from CUE sheet
-//! - Output: `AlbumFileLayout` (file→chunk mappings, chunk→track mappings, track chunk counts)
+//! ## Phase 2: File Storage
+//! - Store files to local disk or cloud storage
+//! - Optionally encrypt files before storage
+//! - Track progress by bytes written
 //!
-//! ## Phase 3: Streaming & Upload
-//! - Stream each file sequentially, producing chunks in order
-//! - Encrypt and upload chunks to cloud storage
-//! - Track progress by mapping completed chunks back to affected tracks
-//!
-//! ## Phase 4: Metadata Persistence
-//! - Store file records with chunk ranges
-//! - Store track position records with chunk ranges and time ranges
-//! - Both import types produce the same database structure
-//!
-//! The key insight: Both import types use identical data structures. The only difference
-//! is how we calculate the byte positions and chunk ranges for each track.
+//! ## Phase 3: Metadata Persistence
+//! - Store file records with storage paths
+//! - Store track audio format records
 use crate::{
     cd::drive::CdToc,
-    cue_flac::{CueSheet, FlacHeaders},
+    cue_flac::CueSheet,
     db::{DbAlbum, DbRelease, DbTrack},
     discogs::DiscogsRelease,
     import::handle::TorrentImportMetadata,
     musicbrainz::MbRelease,
 };
 use std::{collections::HashMap, path::PathBuf};
+
 /// Request to import an album
 #[derive(Debug)]
 pub enum ImportRequest {
@@ -83,12 +72,14 @@ pub enum ImportRequest {
         selected_cover_filename: Option<String>,
     },
 }
+
 /// Source for torrent import
 #[derive(Debug, Clone)]
 pub enum TorrentSource {
     File(PathBuf),
     MagnetLink(String),
 }
+
 /// Progress updates during import
 #[derive(Debug, Clone)]
 pub enum ImportProgress {
@@ -107,10 +98,10 @@ pub enum ImportProgress {
     Progress {
         id: String,
         percent: u8,
-        /// Phase of import: Acquire (data fetching) or Chunk (upload/encryption)
+        /// Phase of import: Acquire (data fetching) or Chunk (storage/encryption)
         /// - Folder imports: Only Chunk phase (acquire is instant)
-        /// - Torrent imports: Acquire phase (download), then Chunk phase (upload)
-        /// - CD imports: Acquire phase (rip), then Chunk phase (upload)
+        /// - Torrent imports: Acquire phase (download), then Chunk phase (storage)
+        /// - CD imports: Acquire phase (rip), then Chunk phase (storage)
         phase: Option<ImportPhase>,
         import_id: Option<String>,
     },
@@ -129,6 +120,7 @@ pub enum ImportProgress {
         import_id: Option<String>,
     },
 }
+
 /// Phase of import process (applies to all import types)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportPhase {
@@ -137,10 +129,11 @@ pub enum ImportPhase {
     /// - Torrent: Download torrent to temporary folder
     /// - CD: Rip CD tracks to FLAC files
     Acquire,
-    /// Chunk phase: Upload and encrypt data to cloud storage
-    /// Same for all import types: stream files → encrypt → upload chunks
+    /// Chunk phase: Store and encrypt data
+    /// Same for all import types: read files → encrypt → store
     Chunk,
 }
+
 /// Steps during phase 0 preparation (in ImportHandle, before pipeline starts)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrepareStep {
@@ -151,6 +144,7 @@ pub enum PrepareStep {
     SavingToDatabase,
     ExtractingDurations,
 }
+
 impl PrepareStep {
     /// Human-readable display text for UI
     pub fn display_text(&self) -> &'static str {
@@ -164,16 +158,14 @@ impl PrepareStep {
         }
     }
 }
+
 /// Maps a logical track to its physical audio file.
 ///
 /// Links a track from album metadata (e.g., Discogs) to an audio file provided by the user.
-/// Created during Phase 1 (validation).
 ///
 /// Mapping types:
 /// - **One-file-per-track**: Each logical track maps to its own file (e.g., "01.flac", "02.flac")
 /// - **CUE/FLAC**: Multiple logical tracks map to the same FLAC file (e.g., all tracks → "album.flac")
-///
-/// After validation, tracks are inserted into the database with status='queued'.
 #[derive(Debug, Clone)]
 pub struct TrackFile {
     /// Database track ID (UUID) - represents the logical track from metadata
@@ -181,7 +173,8 @@ pub struct TrackFile {
     /// Path to the physical audio file containing this track's audio data
     pub file_path: PathBuf,
 }
-/// Output of Phase 1: Validated mapping of logical tracks to physical files.
+
+/// Output of track validation: Validated mapping of logical tracks to physical files.
 ///
 /// Links logical tracks (from album metadata) to physical files (from user's folder).
 /// Both import types produce these mappings. CUE/FLAC imports additionally include
@@ -195,6 +188,7 @@ pub struct TrackToFileMappingResult {
     /// None for one-file-per-track imports
     pub cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
 }
+
 /// Pre-parsed CUE/FLAC metadata from the track mapping phase.
 /// Parsed once during validation, then passed through to avoid re-parsing.
 #[derive(Debug, Clone)]
@@ -206,61 +200,22 @@ pub struct CueFlacMetadata {
     /// Path to the FLAC file
     pub flac_path: PathBuf,
 }
-/// A file discovered during folder scan (Phase 1).
+
+/// A file discovered during folder scan.
 ///
 /// All files in the album folder are discovered and their sizes recorded.
 /// This includes audio files, CUE sheets, cover art, and other metadata files.
-///
-/// Used in Phase 2 to calculate the chunk layout by treating all files
-/// as a single concatenated byte stream.
 #[derive(Clone, Debug)]
 pub struct DiscoveredFile {
     pub path: PathBuf,
     pub size: u64,
 }
-/// Maps a file to its position in the chunked album stream (Phase 2 output).
-///
-/// When all album files are concatenated into a single byte stream and divided into
-/// fixed-size chunks, this records which chunks each file spans and the byte offsets
-/// within the first and last chunks.
-///
-/// Used during Phase 3 to stream files in the correct sequence and produce chunks.
-#[derive(Debug, Clone)]
-pub struct FileToChunks {
-    pub file_path: PathBuf,
-    /// First chunk that contains bytes from this file
-    pub start_chunk_index: i32,
-    /// Last chunk that contains bytes from this file
-    pub end_chunk_index: i32,
-    /// Byte offset within start_chunk where this file begins
-    pub start_byte_offset: i64,
-    /// Byte offset within end_chunk where this file ends
-    pub end_byte_offset: i64,
-}
-/// CUE/FLAC-specific layout data calculated during Phase 2.
-///
-/// For CUE/FLAC imports, Phase 2 calculates per-track chunk ranges by converting
-/// CUE sheet timestamps to byte positions, then to chunk indices. This data is
-/// passed to Phase 4 (metadata persistence) alongside the regular file layout.
-///
-/// Note: Regular imports don't need this because track boundaries = file boundaries.
-#[derive(Debug, Clone)]
-pub struct CueFlacLayoutData {
-    /// Parsed CUE sheet with track timing information
-    pub cue_sheet: CueSheet,
-    /// Extracted FLAC headers (needed for byte position estimation)
-    pub flac_headers: FlacHeaders,
-    /// Per-track byte ranges: track_id → (start_byte, end_byte) in file
-    pub track_byte_ranges: HashMap<String, (i64, i64)>,
-    /// Seektable mapping sample positions to byte positions in the original FLAC file
-    /// Used for accurate seeking during playback
-    pub seektable: Option<HashMap<u64, u64>>,
-}
-/// Validated import command ready for pipeline execution.
+
+/// Validated import command ready for execution.
 ///
 /// All imports follow a two-phase model:
 /// - **Acquire phase**: Get data ready (folder: no-op, torrent: download, CD: rip)
-/// - **Chunk phase**: Upload and encrypt (same for all types)
+/// - **Chunk phase**: Store and encrypt (same for all types)
 ///
 /// Handle only validates and sends commands. Service executes both phases.
 #[derive(Debug)]
