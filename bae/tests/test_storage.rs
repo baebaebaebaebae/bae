@@ -1,9 +1,9 @@
 #![cfg(feature = "test-utils")]
 //! Parameterized integration tests for storage configurations.
 //!
-//! Tests all combinations of:
-//! - Location: Local, Cloud
-//! - Encrypted: true, false
+//! Tests:
+//! - Local/Cloud storage with encryption permutations
+//! - Storageless (files stay in place, no encryption)
 use bae::cache::CacheManager;
 use bae::cloud_storage::CloudStorage;
 use bae::db::{Database, DbStorageProfile, ImportStatus, StorageLocation};
@@ -43,6 +43,272 @@ async fn test_storage_permutations() {
             run_storage_test(location, encrypted).await;
         }
     }
+}
+
+/// Test storageless import: files stay in original location, no storage profile.
+#[tokio::test]
+async fn test_storageless_import() {
+    tracing_init();
+
+    let temp_root = TempDir::new().expect("temp root");
+    let album_dir = temp_root.path().join("album");
+    let db_dir = temp_root.path().join("db");
+    fs::create_dir_all(&album_dir).expect("album dir");
+    fs::create_dir_all(&db_dir).expect("db dir");
+
+    let file_data = generate_test_files(&album_dir);
+    let original_files: Vec<_> = [
+        "01 Track One.flac",
+        "02 Track Two.flac",
+        "03 Track Three.flac",
+    ]
+    .iter()
+    .map(|f| album_dir.join(f))
+    .collect();
+
+    // Verify files exist before import
+    for path in &original_files {
+        assert!(path.exists(), "Test file should exist: {:?}", path);
+    }
+
+    let db_file = db_dir.join("test.db");
+    let database = Database::new(db_file.to_str().unwrap())
+        .await
+        .expect("database");
+    let encryption_service = EncryptionService::new_with_key(vec![0u8; 32]);
+    let library_manager = LibraryManager::new(database.clone());
+    let shared_library_manager = bae::library::SharedLibraryManager::new(library_manager.clone());
+    let library_manager = Arc::new(library_manager);
+
+    let runtime_handle = tokio::runtime::Handle::current();
+    let torrent_handle = TorrentManagerHandle::new_dummy();
+    let database_arc = Arc::new(database.clone());
+
+    let import_handle = ImportService::start(
+        runtime_handle,
+        shared_library_manager,
+        encryption_service,
+        torrent_handle,
+        database_arc,
+    );
+
+    let discogs_release = create_test_discogs_release();
+    let import_id = uuid::Uuid::new_v4().to_string();
+    let (_album_id, release_id) = import_handle
+        .send_request(ImportRequest::Folder {
+            import_id,
+            discogs_release: Some(discogs_release),
+            mb_release: None,
+            folder: album_dir.clone(),
+            master_year: 2024,
+            cover_art_url: None,
+            storage_profile_id: None, // Storageless
+            selected_cover_filename: None,
+        })
+        .await
+        .expect("send request");
+
+    info!(
+        "Storageless import request sent, release_id: {}",
+        release_id
+    );
+
+    let mut progress_rx = import_handle.subscribe_release(release_id.clone());
+    while let Some(progress) = progress_rx.recv().await {
+        match &progress {
+            ImportProgress::Complete {
+                release_id: rid, ..
+            } if rid.is_none() => {
+                info!("Import completed");
+                break;
+            }
+            ImportProgress::Failed { error, .. } => {
+                panic!("Import failed: {}", error);
+            }
+            _ => {}
+        }
+    }
+
+    // Verify tracks completed
+    let tracks = library_manager
+        .get_tracks(&release_id)
+        .await
+        .expect("get tracks");
+    assert_eq!(tracks.len(), file_data.len(), "Should have all tracks");
+
+    for track in &tracks {
+        assert_eq!(
+            track.import_status,
+            ImportStatus::Complete,
+            "Track '{}' should be Complete",
+            track.title,
+        );
+    }
+
+    info!("✓ All {} tracks are Complete", tracks.len());
+
+    // Verify no release_storage record (storageless)
+    let release_storage = database
+        .get_release_storage(&release_id)
+        .await
+        .expect("query");
+    assert!(
+        release_storage.is_none(),
+        "Storageless import should NOT create release_storage record"
+    );
+
+    info!("✓ No release_storage record (correct for storageless)");
+
+    // Verify original files still exist in place
+    for path in &original_files {
+        assert!(
+            path.exists(),
+            "Original file should still exist after storageless import: {:?}",
+            path
+        );
+    }
+
+    info!("✓ Original files preserved in place");
+    info!("✅ Storageless import test passed");
+}
+
+/// Test that deleting a storageless release preserves the original files on disk.
+///
+/// When a release has no storage profile, the files live at their original location.
+/// Deleting the release should only remove database records, NOT the actual files.
+#[tokio::test]
+async fn test_storageless_delete_preserves_files() {
+    tracing_init();
+
+    let temp_root = TempDir::new().expect("temp root");
+    let album_dir = temp_root.path().join("album");
+    let db_dir = temp_root.path().join("db");
+    fs::create_dir_all(&album_dir).expect("album dir");
+    fs::create_dir_all(&db_dir).expect("db dir");
+
+    let _file_data = generate_test_files(&album_dir);
+    let original_files: Vec<_> = [
+        "01 Track One.flac",
+        "02 Track Two.flac",
+        "03 Track Three.flac",
+    ]
+    .iter()
+    .map(|f| album_dir.join(f))
+    .collect();
+
+    // Verify files exist before import
+    for path in &original_files {
+        assert!(path.exists(), "Test file should exist: {:?}", path);
+    }
+
+    let db_file = db_dir.join("test.db");
+    let database = Database::new(db_file.to_str().unwrap())
+        .await
+        .expect("database");
+    let encryption_service = EncryptionService::new_with_key(vec![0u8; 32]);
+    let library_manager = LibraryManager::new(database.clone());
+    let shared_library_manager = bae::library::SharedLibraryManager::new(library_manager.clone());
+    let library_manager = Arc::new(library_manager);
+
+    let runtime_handle = tokio::runtime::Handle::current();
+    let torrent_handle = TorrentManagerHandle::new_dummy();
+    let database_arc = Arc::new(database.clone());
+
+    let import_handle = ImportService::start(
+        runtime_handle,
+        shared_library_manager.clone(),
+        encryption_service,
+        torrent_handle,
+        database_arc,
+    );
+
+    let discogs_release = create_test_discogs_release();
+    let import_id = uuid::Uuid::new_v4().to_string();
+    let (album_id, release_id) = import_handle
+        .send_request(ImportRequest::Folder {
+            import_id,
+            discogs_release: Some(discogs_release),
+            mb_release: None,
+            folder: album_dir.clone(),
+            master_year: 2024,
+            cover_art_url: None,
+            storage_profile_id: None, // Storageless
+            selected_cover_filename: None,
+        })
+        .await
+        .expect("send request");
+
+    info!("Import request sent, release_id: {}", release_id);
+
+    let mut progress_rx = import_handle.subscribe_release(release_id.clone());
+    while let Some(progress) = progress_rx.recv().await {
+        match &progress {
+            ImportProgress::Complete {
+                release_id: rid, ..
+            } if rid.is_none() => {
+                info!("Import completed");
+                break;
+            }
+            ImportProgress::Failed { error, .. } => {
+                panic!("Import failed: {}", error);
+            }
+            _ => {}
+        }
+    }
+
+    // Verify import succeeded
+    let tracks = library_manager
+        .get_tracks(&release_id)
+        .await
+        .expect("get tracks");
+    assert_eq!(tracks.len(), 3, "Should have 3 tracks after import");
+
+    // Files should still exist after import
+    for path in &original_files {
+        assert!(
+            path.exists(),
+            "File should still exist after storageless import: {:?}",
+            path
+        );
+    }
+
+    // Now delete the release
+    info!("Deleting release {}", release_id);
+    shared_library_manager
+        .get()
+        .delete_release(&release_id)
+        .await
+        .expect("delete release");
+
+    // Verify database records are gone
+    let tracks_after = library_manager
+        .get_tracks(&release_id)
+        .await
+        .expect("get tracks after delete");
+    assert!(
+        tracks_after.is_empty(),
+        "Tracks should be deleted from database"
+    );
+
+    let album_after = library_manager
+        .get_album_by_id(&album_id)
+        .await
+        .expect("get album after delete");
+    assert!(
+        album_after.is_none(),
+        "Album should be deleted (was last release)"
+    );
+
+    // THE KEY ASSERTION: Original files must still exist on disk
+    for path in &original_files {
+        assert!(
+            path.exists(),
+            "Original file must be preserved after deleting storageless release: {:?}",
+            path
+        );
+    }
+
+    info!("✅ Storageless delete preserves original files");
 }
 
 async fn run_storage_test(location: StorageLocation, encrypted: bool) {
