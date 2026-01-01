@@ -55,6 +55,16 @@ for test in tests/*.rs; do
     fi
 done
 
-echo "✅ Code formatting and clippy checks passed"
+echo "Running tests..."
+cargo test --features test-utils
+
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "❌ Commit rejected: Tests failed"
+    echo "Fix the failing tests and try again"
+    exit 1
+fi
+
+echo "✅ All checks passed"
 exit 0
 
