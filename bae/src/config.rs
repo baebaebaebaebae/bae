@@ -42,6 +42,11 @@ pub struct ConfigYaml {
     pub torrent_max_uploads: Option<i32>,
     /// Max upload slots per torrent. None = disabled/unlimited.
     pub torrent_max_uploads_per_torrent: Option<i32>,
+    /// Enable the Subsonic API server
+    #[serde(default = "default_true")]
+    pub subsonic_enabled: bool,
+    /// Subsonic server port
+    pub subsonic_port: Option<u16>,
 }
 
 /// Application configuration
@@ -58,6 +63,8 @@ pub struct Config {
     pub torrent_max_connections_per_torrent: Option<i32>,
     pub torrent_max_uploads: Option<i32>,
     pub torrent_max_uploads_per_torrent: Option<i32>,
+    pub subsonic_enabled: bool,
+    pub subsonic_port: u16,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -106,6 +113,8 @@ impl Config {
             torrent_max_connections_per_torrent: None,
             torrent_max_uploads: None,
             torrent_max_uploads_per_torrent: None,
+            subsonic_enabled: true,
+            subsonic_port: 4533,
         }
     }
 
@@ -145,6 +154,8 @@ impl Config {
             torrent_max_connections_per_torrent: yaml_config.torrent_max_connections_per_torrent,
             torrent_max_uploads: yaml_config.torrent_max_uploads,
             torrent_max_uploads_per_torrent: yaml_config.torrent_max_uploads_per_torrent,
+            subsonic_enabled: yaml_config.subsonic_enabled,
+            subsonic_port: yaml_config.subsonic_port.unwrap_or(4533),
         }
     }
 
@@ -230,6 +241,8 @@ impl Config {
             torrent_max_connections_per_torrent: self.torrent_max_connections_per_torrent,
             torrent_max_uploads: self.torrent_max_uploads,
             torrent_max_uploads_per_torrent: self.torrent_max_uploads_per_torrent,
+            subsonic_enabled: self.subsonic_enabled,
+            subsonic_port: Some(self.subsonic_port),
         };
         std::fs::write(
             config_dir.join("config.yaml"),

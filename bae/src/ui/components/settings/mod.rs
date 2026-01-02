@@ -3,6 +3,7 @@ mod api_keys;
 mod bittorrent;
 mod encryption;
 mod storage_profiles;
+mod subsonic;
 use dioxus::prelude::*;
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum SettingsTab {
@@ -10,6 +11,7 @@ pub enum SettingsTab {
     ApiKeys,
     Encryption,
     BitTorrent,
+    Subsonic,
     About,
 }
 impl SettingsTab {
@@ -19,6 +21,7 @@ impl SettingsTab {
             SettingsTab::ApiKeys => "API Keys",
             SettingsTab::Encryption => "Encryption",
             SettingsTab::BitTorrent => "BitTorrent",
+            SettingsTab::Subsonic => "Subsonic",
             SettingsTab::About => "About",
         }
     }
@@ -28,6 +31,7 @@ impl SettingsTab {
             SettingsTab::ApiKeys,
             SettingsTab::Encryption,
             SettingsTab::BitTorrent,
+            SettingsTab::Subsonic,
             SettingsTab::About,
         ]
     }
@@ -75,6 +79,9 @@ pub fn Settings() -> Element {
                         },
                         SettingsTab::BitTorrent => rsx! {
                             bittorrent::BitTorrentSection {}
+                        },
+                        SettingsTab::Subsonic => rsx! {
+                            subsonic::SubsonicSection {}
                         },
                         SettingsTab::About => rsx! {
                             about::AboutSection {}

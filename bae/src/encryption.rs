@@ -119,6 +119,8 @@ mod tests {
             torrent_max_connections_per_torrent: None,
             torrent_max_uploads: None,
             torrent_max_uploads_per_torrent: None,
+            subsonic_enabled: true,
+            subsonic_port: 4533,
         };
         EncryptionService::new(&test_config).expect("Failed to create test encryption service")
     }

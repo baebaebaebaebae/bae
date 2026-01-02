@@ -154,11 +154,12 @@ fn main() {
         encryption_service: encryption_service.clone(),
     };
 
-    if !screenshot_mode {
+    if !screenshot_mode && config.subsonic_enabled {
         let subsonic_library = library_manager.clone();
         let subsonic_encryption = encryption_service.clone();
+        let subsonic_port = config.subsonic_port;
         runtime_handle.spawn(async move {
-            start_subsonic_server(subsonic_library, subsonic_encryption).await
+            start_subsonic_server(subsonic_library, subsonic_encryption, subsonic_port).await
         });
     }
 
@@ -171,12 +172,14 @@ fn main() {
 async fn start_subsonic_server(
     library_manager: SharedLibraryManager,
     encryption_service: encryption::EncryptionService,
+    port: u16,
 ) {
     info!("Starting Subsonic API server...");
     let app = create_router(library_manager, encryption_service);
-    let listener = match tokio::net::TcpListener::bind("127.0.0.1:4533").await {
+    let addr = format!("127.0.0.1:{}", port);
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => {
-            info!("Subsonic API server listening on http://127.0.0.1:4533");
+            info!("Subsonic API server listening on http://{}", addr);
             listener
         }
         Err(e) => {
