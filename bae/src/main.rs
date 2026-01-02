@@ -66,12 +66,16 @@ fn create_library_manager(database: Database) -> SharedLibraryManager {
 fn configure_logging() {
     use tracing_subscriber::prelude::*;
 
-    let env_filter = tracing_subscriber::EnvFilter::from_default_env();
+    // Default to info level if RUST_LOG not set
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_line_number(true)
         .with_target(false)
         .with_file(true);
 
+    // Always log to console. In release mode, also log to macOS Console.app.
     if config::Config::is_dev_mode() {
         tracing_subscriber::registry()
             .with(env_filter)
@@ -82,6 +86,7 @@ fn configure_logging() {
 
         tracing_subscriber::registry()
             .with(env_filter)
+            .with(fmt_layer)
             .with(oslog_layer)
             .init();
     }
