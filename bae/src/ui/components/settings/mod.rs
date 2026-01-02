@@ -1,7 +1,7 @@
 mod about;
 mod api_keys;
+mod bittorrent;
 mod encryption;
-mod network;
 mod storage_profiles;
 use dioxus::prelude::*;
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -9,7 +9,7 @@ pub enum SettingsTab {
     StorageProfiles,
     ApiKeys,
     Encryption,
-    Network,
+    BitTorrent,
     About,
 }
 impl SettingsTab {
@@ -18,7 +18,7 @@ impl SettingsTab {
             SettingsTab::StorageProfiles => "Storage Profiles",
             SettingsTab::ApiKeys => "API Keys",
             SettingsTab::Encryption => "Encryption",
-            SettingsTab::Network => "Network",
+            SettingsTab::BitTorrent => "BitTorrent",
             SettingsTab::About => "About",
         }
     }
@@ -27,7 +27,7 @@ impl SettingsTab {
             SettingsTab::StorageProfiles,
             SettingsTab::ApiKeys,
             SettingsTab::Encryption,
-            SettingsTab::Network,
+            SettingsTab::BitTorrent,
             SettingsTab::About,
         ]
     }
@@ -73,8 +73,8 @@ pub fn Settings() -> Element {
                         SettingsTab::Encryption => rsx! {
                             encryption::EncryptionSection {}
                         },
-                        SettingsTab::Network => rsx! {
-                            network::NetworkSection {}
+                        SettingsTab::BitTorrent => rsx! {
+                            bittorrent::BitTorrentSection {}
                         },
                         SettingsTab::About => rsx! {
                             about::AboutSection {}

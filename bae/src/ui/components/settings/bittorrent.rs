@@ -2,9 +2,9 @@ use crate::config::use_config;
 use crate::AppContext;
 use dioxus::prelude::*;
 use tracing::{error, info};
-/// Network section - torrent bind interface
+
 #[component]
-pub fn NetworkSection() -> Element {
+pub fn BitTorrentSection() -> Element {
     let config = use_config();
     let app_context = use_context::<AppContext>();
     let mut bind_interface =
@@ -27,7 +27,7 @@ pub fn NetworkSection() -> Element {
             };
             match config.save() {
                 Ok(()) => {
-                    info!("Saved network settings");
+                    info!("Saved BitTorrent settings");
                     is_editing.set(false);
                 }
                 Err(e) => {
@@ -45,7 +45,7 @@ pub fn NetworkSection() -> Element {
     };
     rsx! {
         div { class: "max-w-2xl",
-            h2 { class: "text-xl font-semibold text-white mb-6", "Network" }
+            h2 { class: "text-xl font-semibold text-white mb-6", "BitTorrent" }
             div { class: "bg-gray-800 rounded-lg p-6",
                 div { class: "space-y-4",
                     div { class: "flex items-center justify-between",
@@ -121,6 +121,20 @@ pub fn NetworkSection() -> Element {
                     p { class: "text-sm text-gray-400",
                         "Use this to route torrent traffic through a specific network interface, such as a VPN tunnel. "
                         "Changes take effect on next torrent download."
+                    }
+                }
+            }
+
+            div { class: "bg-gray-800 rounded-lg p-6 mt-6",
+                h3 { class: "text-lg font-medium text-white mb-4", "About BitTorrent in BAE" }
+                div { class: "space-y-3 text-sm text-gray-400",
+                    p {
+                        "BAE uses BitTorrent to download music from torrent files or magnet links. "
+                        "Downloaded files are imported into your library using your selected storage profile."
+                    }
+                    p {
+                        "If your storage profile has encryption enabled, all imported files (audio, cover art, metadata) "
+                        "are encrypted before storage."
                     }
                 }
             }
