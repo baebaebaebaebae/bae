@@ -1,10 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
-# Bundle Homebrew dylibs into macOS app and fix paths
+# Bundle Homebrew dylibs into macOS app, fix paths, and merge Info.plist
 # Run after: dx bundle --release
 
 APP_PATH="${1:-target/dx/bae/bundle/macos/bundle/macos/Bae.app}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 FRAMEWORKS_DIR="$APP_PATH/Contents/Frameworks"
 BINARY="$APP_PATH/Contents/MacOS/bae"
 
@@ -121,3 +123,23 @@ echo "✓ All dylibs properly bundled"
 echo ""
 echo "Bundled dylibs:"
 ls "$FRAMEWORKS_DIR" | sed 's/^/  /'
+
+# Merge custom Info.plist entries
+INFO_PLIST="$APP_PATH/Contents/Info.plist"
+CUSTOM_PLIST="$PROJECT_ROOT/Info.plist"
+
+if [[ -f "$CUSTOM_PLIST" ]]; then
+    echo ""
+    echo "Merging custom Info.plist entries..."
+    
+    # Extract keys from custom plist and add them to the bundle's plist
+    # Using PlistBuddy to add NSLocalNetworkUsageDescription
+    if /usr/libexec/PlistBuddy -c "Print :NSLocalNetworkUsageDescription" "$CUSTOM_PLIST" &>/dev/null; then
+        VALUE=$(/usr/libexec/PlistBuddy -c "Print :NSLocalNetworkUsageDescription" "$CUSTOM_PLIST")
+        /usr/libexec/PlistBuddy -c "Delete :NSLocalNetworkUsageDescription" "$INFO_PLIST" 2>/dev/null || true
+        /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string '$VALUE'" "$INFO_PLIST"
+        echo "  ✓ Added NSLocalNetworkUsageDescription"
+    fi
+    
+    echo "✓ Info.plist merged"
+fi

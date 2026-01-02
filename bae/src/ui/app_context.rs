@@ -14,5 +14,5 @@ pub struct AppContext {
     pub playback_handle: playback::PlaybackHandle,
     pub cache: cache::CacheManager,
     pub encryption_service: encryption::EncryptionService,
-    pub torrent_manager: torrent::TorrentManagerHandle,
+    pub torrent_manager: torrent::LazyTorrentManager,
 }

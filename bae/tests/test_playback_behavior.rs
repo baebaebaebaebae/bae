@@ -8,7 +8,7 @@ use bae::encryption::EncryptionService;
 use bae::import::ImportRequest;
 use bae::library::{LibraryManager, SharedLibraryManager};
 use bae::playback::{PlaybackProgress, PlaybackState};
-use bae::torrent::TorrentManagerHandle;
+use bae::torrent::LazyTorrentManager;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -55,12 +55,12 @@ impl PlaybackTestFixture {
         let runtime_handle = tokio::runtime::Handle::current();
         let discogs_release = create_test_album();
         let _track_data = generate_test_flac_files(&album_dir);
-        let torrent_handle = TorrentManagerHandle::new_dummy();
+        let torrent_manager = LazyTorrentManager::new_noop(runtime_handle.clone());
         let import_handle = bae::import::ImportService::start(
             runtime_handle.clone(),
             shared_library_manager.clone(),
             encryption_service.clone(),
-            torrent_handle,
+            torrent_manager,
             database_arc,
         );
         let master_year = discogs_release.year.unwrap_or(2024);

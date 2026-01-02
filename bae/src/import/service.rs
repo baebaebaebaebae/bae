@@ -11,7 +11,7 @@ use crate::import::types::{
 };
 use crate::library::{LibraryManager, SharedLibraryManager};
 use crate::storage::{ReleaseStorage, ReleaseStorageImpl};
-use crate::torrent::TorrentManagerHandle;
+use crate::torrent::LazyTorrentManager;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -49,8 +49,8 @@ pub struct ImportService {
     encryption_service: EncryptionService,
     /// Shared manager for library database operations
     library_manager: SharedLibraryManager,
-    /// Handle to torrent manager service for torrent operations
-    torrent_handle: TorrentManagerHandle,
+    /// Lazy-initialized torrent manager for torrent operations
+    torrent_manager: LazyTorrentManager,
     /// Database for storage operations
     database: Arc<Database>,
     /// Optional pre-built cloud storage (for testing with MockCloudStorage)
@@ -68,7 +68,7 @@ impl ImportService {
         _runtime_handle: tokio::runtime::Handle,
         library_manager: SharedLibraryManager,
         encryption_service: EncryptionService,
-        torrent_handle: TorrentManagerHandle,
+        torrent_manager: LazyTorrentManager,
         database: Arc<Database>,
     ) -> ImportServiceHandle {
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
@@ -86,7 +86,7 @@ impl ImportService {
                     progress_tx,
                     library_manager: library_manager_for_worker,
                     encryption_service,
-                    torrent_handle,
+                    torrent_manager,
                     database,
                     #[cfg(feature = "test-utils")]
                     injected_cloud: None,
@@ -124,7 +124,7 @@ impl ImportService {
         _runtime_handle: tokio::runtime::Handle,
         library_manager: SharedLibraryManager,
         encryption_service: EncryptionService,
-        torrent_handle: TorrentManagerHandle,
+        torrent_manager: LazyTorrentManager,
         database: Arc<Database>,
         cloud: Arc<dyn crate::cloud_storage::CloudStorage>,
     ) -> ImportServiceHandle {
@@ -143,7 +143,7 @@ impl ImportService {
                     progress_tx,
                     library_manager: library_manager_for_worker,
                     encryption_service,
-                    torrent_handle,
+                    torrent_manager,
                     database,
                     injected_cloud: Some(cloud),
                 };
@@ -996,7 +996,8 @@ impl ImportService {
 
         info!("Starting torrent download (acquire phase)");
         let torrent_handle = self
-            .torrent_handle
+            .torrent_manager
+            .get()
             .add_torrent(torrent_source.clone())
             .await
             .map_err(|e| format!("Failed to add torrent: {}", e))?;
@@ -1068,7 +1069,8 @@ impl ImportService {
         }
 
         let _ = self
-            .torrent_handle
+            .torrent_manager
+            .get()
             .remove_torrent(torrent_handle, false)
             .await;
 
@@ -1190,7 +1192,8 @@ impl ImportService {
 
         // Download torrent
         let torrent_handle = self
-            .torrent_handle
+            .torrent_manager
+            .get()
             .add_torrent(torrent_source.clone())
             .await
             .map_err(|e| format!("Failed to add torrent: {}", e))?;
@@ -1303,13 +1306,15 @@ impl ImportService {
 
         if seed_after_download {
             let _ = self
-                .torrent_handle
+                .torrent_manager
+                .get()
                 .start_seeding(db_release.id.clone())
                 .await;
         }
 
         let _ = self
-            .torrent_handle
+            .torrent_manager
+            .get()
             .remove_torrent(torrent_handle, true)
             .await;
 

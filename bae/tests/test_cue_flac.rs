@@ -15,7 +15,7 @@ use bae::discogs::models::{DiscogsRelease, DiscogsTrack};
 use bae::encryption::EncryptionService;
 use bae::import::{ImportProgress, ImportRequest, ImportService};
 use bae::library::{LibraryManager, SharedLibraryManager};
-use bae::torrent::TorrentManagerHandle;
+use bae::torrent::LazyTorrentManager;
 use std::path::Path;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -42,13 +42,13 @@ async fn test_cue_flac_records_track_positions() {
     let shared_library_manager = SharedLibraryManager::new(library_manager.clone());
     let library_manager = Arc::new(library_manager);
     let runtime_handle = tokio::runtime::Handle::current();
-    let torrent_handle = TorrentManagerHandle::new_dummy();
     let database_arc = Arc::new(database.clone());
+    let torrent_manager = LazyTorrentManager::new_noop(runtime_handle.clone());
     let import_handle = ImportService::start(
         runtime_handle,
         shared_library_manager,
         encryption_service,
-        torrent_handle,
+        torrent_manager,
         database_arc,
     );
     let discogs_release = create_test_discogs_release();
@@ -193,13 +193,13 @@ async fn test_cue_flac_playback_uses_track_positions() {
     let shared_library_manager = SharedLibraryManager::new(library_manager.clone());
     let library_manager = Arc::new(library_manager);
     let runtime_handle = tokio::runtime::Handle::current();
-    let torrent_handle = TorrentManagerHandle::new_dummy();
     let database_arc = Arc::new(database.clone());
+    let torrent_manager = LazyTorrentManager::new_noop(runtime_handle.clone());
     let import_handle = ImportService::start(
         runtime_handle.clone(),
         shared_library_manager,
         encryption_service.clone(),
-        torrent_handle,
+        torrent_manager,
         database_arc,
     );
     let discogs_release = create_two_track_discogs_release();

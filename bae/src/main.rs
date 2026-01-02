@@ -107,10 +107,10 @@ fn main() {
     );
 
     let torrent_manager = if screenshot_mode {
-        torrent::start_torrent_manager_noop(runtime_handle.clone())
+        torrent::LazyTorrentManager::new_noop(runtime_handle.clone())
     } else {
         let torrent_options = torrent_options_from_config(&config);
-        torrent::start_torrent_manager(cache_manager.clone(), database.clone(), torrent_options)
+        torrent::LazyTorrentManager::new(cache_manager.clone(), database.clone(), torrent_options)
     };
 
     let import_handle = import::ImportService::start(
