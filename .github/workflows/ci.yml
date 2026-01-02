@@ -284,18 +284,19 @@ jobs:
         
         xcrun stapler staple "$DMG_PATH"
 
-    - name: Generate screenshots
-      working-directory: ./bae
-      run: |
-        if [[ -d "/opt/homebrew" ]]; then
-          export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig"
-          export LIBRARY_PATH="/opt/homebrew/lib"
-        else
-          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig"
-          export LIBRARY_PATH="/usr/local/lib"
-        fi
-        cargo build --release --bin generate_screenshots
-        ./target/release/generate_screenshots
+    # Screenshot generation disabled - uncomment to re-enable
+    # - name: Generate screenshots
+    #   working-directory: ./bae
+    #   run: |
+    #     if [[ -d "/opt/homebrew" ]]; then
+    #       export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig"
+    #       export LIBRARY_PATH="/opt/homebrew/lib"
+    #     else
+    #       export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig"
+    #       export LIBRARY_PATH="/usr/local/lib"
+    #     fi
+    #     cargo build --release --bin generate_screenshots
+    #     ./target/release/generate_screenshots
 
     - name: Create git tag
       run: |
@@ -312,13 +313,14 @@ jobs:
         path: bae/target/Bae.dmg
         retention-days: 30
 
-    - name: Upload screenshots
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: screenshots
-        path: bae/screenshots/
-        if-no-files-found: ignore
+    # Screenshot upload disabled - uncomment to re-enable
+    # - name: Upload screenshots
+    #   if: always()
+    #   uses: actions/upload-artifact@v4
+    #   with:
+    #     name: screenshots
+    #     path: bae/screenshots/
+    #     if-no-files-found: ignore
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
@@ -326,7 +328,7 @@ jobs:
         tag_name: v${{ needs.check-version.outputs.version }}
         files: |
           bae/target/Bae.dmg
-          bae/screenshots/*.png
+          # bae/screenshots/*.png  # Screenshots disabled
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
