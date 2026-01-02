@@ -65,7 +65,7 @@ impl ImportService {
     /// Multiple imports will be queued and handled one at a time, not concurrently.
     /// Returns a handle that can be cloned and used throughout the app to submit import requests.
     pub fn start(
-        _runtime_handle: tokio::runtime::Handle,
+        runtime_handle: tokio::runtime::Handle,
         library_manager: SharedLibraryManager,
         encryption_service: EncryptionService,
         torrent_manager: LazyTorrentManager,
@@ -76,7 +76,6 @@ impl ImportService {
         let progress_tx_for_handle = progress_tx.clone();
         let library_manager_for_worker = library_manager.clone();
         let database_for_handle = database.clone();
-        let runtime_handle = tokio::runtime::Handle::current();
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
