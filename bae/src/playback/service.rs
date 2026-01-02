@@ -1023,7 +1023,6 @@ impl PlaybackService {
                 let rx = position_rx.clone();
                 match tokio::task::spawn_blocking(move || rx.lock().unwrap().recv()).await {
                     Ok(Ok(pos)) => {
-                        trace!("Seek: Bridge received position update: {:?}", pos);
                         let send_result = position_tx_async.send(pos);
                         if let Err(e) = send_result {
                             error!("Seek: Bridge failed to forward position update: {:?}", e);
@@ -1069,7 +1068,7 @@ impl PlaybackService {
             loop {
                 tokio::select! {
                     Some(pos) = position_rx_async.recv() => {
-                    trace!("Seek: Listener received position update: {:?}", pos); *
+                    *
                     current_position_for_seek_listener.lock().unwrap() = Some(pos); let
                     send_result = progress_tx_for_task
                     .send(PlaybackProgress::PositionUpdate { position : pos, track_id :
@@ -1206,10 +1205,13 @@ impl PlaybackService {
                 let start_byte = start_offset as usize;
                 let end_byte = end_offset as usize;
                 info!(
-                    "CUE/FLAC: Extracting track bytes {}-{} from {} byte file",
+                    "CUE/FLAC: Extracting track bytes {}-{} ({} bytes) from {} byte file, needs_headers={}, has_headers={}",
                     start_byte,
                     end_byte,
-                    file_data.len()
+                    end_byte - start_byte,
+                    file_data.len(),
+                    audio_format.needs_headers,
+                    audio_format.flac_headers.is_some()
                 );
                 if end_byte > file_data.len() {
                     return Err(PlaybackError::flac(format!(
@@ -1331,6 +1333,10 @@ impl PlaybackService {
 }
 
 /// Calculate starting position for track playback.
+///
+/// With frame-accurate byte positions from import, the track audio starts at
+/// the correct position (<93ms precision, imperceptible). Only pregap handling
+/// is needed here:
 /// - Direct selection (play, next, previous): skip pregap, start at INDEX 01
 /// - Natural transition (auto-advance): play pregap, start at INDEX 00
 pub fn calculate_start_position(

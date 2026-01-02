@@ -568,13 +568,13 @@ pub async fn extract_and_store_durations(
                 match CueFlacProcessor::parse_cue_sheet(&cue_path) {
                     Ok(cue_sheet) => {
                         for (mapping, cue_track) in mappings.iter().zip(cue_sheet.tracks.iter()) {
-                            let duration_ms = if let Some(end_time) = cue_track.end_time_ms {
-                                Some((end_time - cue_track.start_time_ms) as i64)
-                            } else {
-                                extract_duration_from_file(file_path).map(|file_duration_ms| {
-                                    file_duration_ms - cue_track.start_time_ms as i64
-                                })
-                            };
+                            let duration_ms =
+                                cue_track.audio_duration_ms().map(|d| d as i64).or_else(|| {
+                                    // Last track: calculate from file duration
+                                    extract_duration_from_file(file_path).map(|file_duration_ms| {
+                                        file_duration_ms - cue_track.audio_start_ms() as i64
+                                    })
+                                });
                             library_manager
                                 .update_track_duration(&mapping.db_track_id, duration_ms)
                                 .await

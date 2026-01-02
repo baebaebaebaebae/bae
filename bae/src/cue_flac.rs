@@ -29,6 +29,26 @@ pub struct CueTrack {
     pub pregap_time_ms: Option<u64>,
     pub end_time_ms: Option<u64>,
 }
+
+impl CueTrack {
+    /// Where audio bytes begin: INDEX 00 if pregap exists, else INDEX 01
+    pub fn audio_start_ms(&self) -> u64 {
+        self.pregap_time_ms.unwrap_or(self.start_time_ms)
+    }
+
+    /// Duration of audio bytes (None for last track)
+    pub fn audio_duration_ms(&self) -> Option<u64> {
+        self.end_time_ms.map(|end| end - self.audio_start_ms())
+    }
+
+    /// Pregap duration in ms (0 if no pregap)
+    pub fn pregap_duration_ms(&self) -> u64 {
+        self.pregap_time_ms
+            .map(|pregap| self.start_time_ms - pregap)
+            .unwrap_or(0)
+    }
+}
+
 /// Represents a parsed CUE sheet
 #[derive(Debug, Clone)]
 pub struct CueSheet {
@@ -42,14 +62,13 @@ pub struct FlacHeaders {
     pub headers: Vec<u8>,
 }
 
-/// FLAC file analysis results including seektable
+/// FLAC file analysis results
 #[derive(Debug, Clone)]
 pub struct FlacInfo {
     pub sample_rate: u32,
     pub total_samples: u64,
     pub audio_data_start: u64,
     pub audio_data_end: u64,
-    pub seektable: Vec<SeekPoint>,
 }
 
 impl FlacInfo {
@@ -67,6 +86,17 @@ impl FlacInfo {
 pub struct SeekPoint {
     pub sample_number: u64,
     pub stream_offset: u64,
+}
+
+/// Dense seektable built by scanning FLAC frames during import.
+///
+/// We build our own seektable rather than using the embedded one because:
+/// - Embedded seektables often have ~10 second gaps between entries
+/// - We need ~100ms precision for smooth seeking during playback (scrubbing)
+/// - Track boundary positioning also benefits from frame-accurate offsets
+#[derive(Debug, Clone)]
+pub struct DenseSeektable {
+    pub entries: Vec<SeekPoint>,
 }
 /// Represents a CUE/FLAC pair found during import
 #[derive(Debug, Clone)]
@@ -108,14 +138,82 @@ impl CueFlacProcessor {
         }
         Ok(pairs)
     }
-    /// Extract FLAC headers from a FLAC file
+    /// Extract FLAC headers from a FLAC file, omitting the embedded seektable.
+    ///
+    /// We skip the seektable because our extracted track byte ranges are smaller
+    /// than the full file. The embedded seektable would point to invalid offsets,
+    /// causing decoder errors when it tries to use them for error recovery.
     pub fn extract_flac_headers(flac_path: &Path) -> Result<FlacHeaders, CueFlacError> {
         let file_data = fs::read(flac_path)?;
-        let audio_start_byte = Self::find_audio_start(&file_data)?;
-        let headers = file_data[..audio_start_byte as usize].to_vec();
+        Self::extract_flac_headers_from_data(&file_data)
+    }
+
+    /// Extract FLAC headers from data, omitting the embedded seektable.
+    fn extract_flac_headers_from_data(file_data: &[u8]) -> Result<FlacHeaders, CueFlacError> {
+        if file_data.len() < 4 || &file_data[0..4] != b"fLaC" {
+            return Err(CueFlacError::Flac("Invalid FLAC signature".to_string()));
+        }
+
+        let mut headers = Vec::with_capacity(8192);
+        headers.extend_from_slice(&file_data[0..4]); // "fLaC" magic
+
+        let mut pos = 4;
+        let mut found_last = false;
+
+        while !found_last && pos + 4 <= file_data.len() {
+            let header_byte = file_data[pos];
+            let is_last = (header_byte & 0x80) != 0;
+            let block_type = header_byte & 0x7F;
+            let block_size = u32::from_be_bytes([
+                0,
+                file_data[pos + 1],
+                file_data[pos + 2],
+                file_data[pos + 3],
+            ]) as usize;
+
+            if pos + 4 + block_size > file_data.len() {
+                return Err(CueFlacError::Flac("Block extends beyond file".to_string()));
+            }
+
+            // Skip seektable (type 3) - it points to offsets in the full file
+            if block_type == 3 {
+                pos += 4 + block_size;
+                continue;
+            }
+
+            // Write this block to headers
+            headers.push(header_byte);
+            headers.extend_from_slice(&file_data[pos + 1..pos + 4]); // size bytes
+            headers.extend_from_slice(&file_data[pos + 4..pos + 4 + block_size]); // block data
+
+            found_last = is_last;
+            pos += 4 + block_size;
+        }
+
+        // If we skipped blocks after the last one, we need to mark the actual last block
+        // Find the last block in our headers and set its is_last flag
+        if !found_last && headers.len() > 4 {
+            // Find the last metadata block header and set is_last
+            let mut scan_pos = 4;
+            let mut last_block_pos = 4;
+            while scan_pos + 4 <= headers.len() {
+                last_block_pos = scan_pos;
+                let block_size = u32::from_be_bytes([
+                    0,
+                    headers[scan_pos + 1],
+                    headers[scan_pos + 2],
+                    headers[scan_pos + 3],
+                ]) as usize;
+                scan_pos += 4 + block_size;
+            }
+            if last_block_pos < headers.len() {
+                headers[last_block_pos] |= 0x80; // Set is_last flag
+            }
+        }
+
         Ok(FlacHeaders { headers })
     }
-    /// Analyze a FLAC file and extract metadata including seektable
+    /// Analyze a FLAC file and extract metadata
     pub fn analyze_flac(flac_path: &Path) -> Result<FlacInfo, CueFlacError> {
         let file_data = fs::read(flac_path)?;
         Self::analyze_flac_data(&file_data)
@@ -130,7 +228,6 @@ impl CueFlacProcessor {
         let mut pos = 4;
         let mut sample_rate = 0u32;
         let mut total_samples = 0u64;
-        let mut seektable = Vec::new();
         let audio_data_start: u64;
 
         loop {
@@ -154,63 +251,19 @@ impl CueFlacProcessor {
                 return Err(CueFlacError::Flac("Block extends beyond file".to_string()));
             }
 
-            match block_type {
-                0 => {
-                    // STREAMINFO block
-                    if block_size >= 18 {
-                        let block = &file_data[pos..pos + block_size];
-                        // Sample rate: bits 80-99 (20 bits)
-                        sample_rate = ((block[10] as u32) << 12)
-                            | ((block[11] as u32) << 4)
-                            | ((block[12] as u32) >> 4);
-                        // Total samples: bits 108-143 (36 bits)
-                        total_samples = (((block[13] & 0x0F) as u64) << 32)
-                            | ((block[14] as u64) << 24)
-                            | ((block[15] as u64) << 16)
-                            | ((block[16] as u64) << 8)
-                            | (block[17] as u64);
-                    }
-                }
-                3 => {
-                    // SEEKTABLE block
-                    let num_entries = block_size / 18;
-                    for i in 0..num_entries {
-                        let entry_offset = pos + i * 18;
-                        if entry_offset + 18 > file_data.len() {
-                            break;
-                        }
-                        let sample_number = u64::from_be_bytes([
-                            file_data[entry_offset],
-                            file_data[entry_offset + 1],
-                            file_data[entry_offset + 2],
-                            file_data[entry_offset + 3],
-                            file_data[entry_offset + 4],
-                            file_data[entry_offset + 5],
-                            file_data[entry_offset + 6],
-                            file_data[entry_offset + 7],
-                        ]);
-                        // Skip placeholder entries (0xFFFFFFFFFFFFFFFF)
-                        if sample_number == 0xFFFFFFFFFFFFFFFF {
-                            continue;
-                        }
-                        let stream_offset = u64::from_be_bytes([
-                            file_data[entry_offset + 8],
-                            file_data[entry_offset + 9],
-                            file_data[entry_offset + 10],
-                            file_data[entry_offset + 11],
-                            file_data[entry_offset + 12],
-                            file_data[entry_offset + 13],
-                            file_data[entry_offset + 14],
-                            file_data[entry_offset + 15],
-                        ]);
-                        // Skip frame_samples (2 bytes) - not needed for playback
-                        seektable.push(SeekPoint {
-                            sample_number,
-                            stream_offset,
-                        });
-                    }
-                }
-                _ => {}
+            if block_type == 0 && block_size >= 18 {
+                // STREAMINFO block
+                let block = &file_data[pos..pos + block_size];
+                // Sample rate: bits 80-99 (20 bits)
+                sample_rate = ((block[10] as u32) << 12)
+                    | ((block[11] as u32) << 4)
+                    | ((block[12] as u32) >> 4);
+                // Total samples: bits 108-143 (36 bits)
+                total_samples = (((block[13] & 0x0F) as u64) << 32)
+                    | ((block[14] as u64) << 24)
+                    | ((block[15] as u64) << 16)
+                    | ((block[16] as u64) << 8)
+                    | (block[17] as u64);
             }
 
             pos += block_size;
@@ -225,11 +278,50 @@ impl CueFlacProcessor {
             total_samples,
             audio_data_start,
             audio_data_end: file_data.len() as u64,
-            seektable,
         })
     }
 
-    /// Find the byte range for a track in a CUE/FLAC file
+    /// Build a dense seektable by scanning FLAC frames.
+    ///
+    /// Embedded FLAC seektables typically have ~10 second gaps between entries,
+    /// which is too coarse for:
+    /// 1. Smooth seeking during playback (user scrubbing through a track)
+    /// 2. Accurate track boundary positioning for CUE/FLAC
+    ///
+    /// By scanning every frame (~93ms at 44.1kHz), we get the precision needed
+    /// for both use cases. The seektable is stored in the DB and used at playback.
+    /// Build a dense seektable by scanning FLAC frames using libFLAC.
+    ///
+    /// This uses the official FLAC library to iterate through all frames,
+    /// which is more reliable than manual sync-code scanning because libFLAC
+    /// properly validates frame headers and CRCs.
+    pub fn build_dense_seektable(file_data: &[u8], _flac_info: &FlacInfo) -> DenseSeektable {
+        match crate::flac_decoder::scan_flac_frames(file_data) {
+            Ok(scan_result) => {
+                let entries: Vec<SeekPoint> = scan_result
+                    .seektable
+                    .into_iter()
+                    .map(|e| SeekPoint {
+                        sample_number: e.sample_number,
+                        stream_offset: e.byte_offset,
+                    })
+                    .collect();
+                DenseSeektable { entries }
+            }
+            Err(e) => {
+                tracing::warn!("libFLAC scan failed: {}, returning empty seektable", e);
+                DenseSeektable {
+                    entries: Vec::new(),
+                }
+            }
+        }
+    }
+
+    /// Find the byte range for a track in a CUE/FLAC file.
+    ///
+    /// Returns (start_byte, end_byte) as absolute byte positions in the file.
+    /// With a frame-accurate seektable (built during import), positions are
+    /// accurate to ~93ms (one FLAC frame), which is imperceptible.
     pub fn find_track_byte_range(
         start_time_ms: u64,
         end_time_ms: Option<u64>,
@@ -266,12 +358,14 @@ impl CueFlacProcessor {
             audio_data_start + best_offset
         };
 
-        // Find end byte using seektable
+        // Find end byte using seektable - use "at or after" to include all audio
         let end_byte = if seektable.is_empty() {
             let audio_size = audio_data_end - audio_data_start;
             audio_data_start + (end_sample * audio_size) / total_samples
         } else {
-            // Find the seek point at or after end_sample
+            // Find the seek point at or after end_sample to include all audio up to end.
+            // This may create byte overlap with next track, but FLAC frames are self-contained
+            // and the decoder handles overlapping byte ranges correctly.
             let mut best_offset = audio_data_end - audio_data_start;
             for sp in seektable.iter().rev() {
                 if sp.sample_number >= end_sample {
@@ -287,31 +381,6 @@ impl CueFlacProcessor {
     }
 
     /// Find where audio frames start in a FLAC file
-    fn find_audio_start(file_data: &[u8]) -> Result<u64, CueFlacError> {
-        if file_data.len() < 4 || &file_data[0..4] != b"fLaC" {
-            return Err(CueFlacError::Flac("Invalid FLAC signature".to_string()));
-        }
-        let mut pos = 4;
-        loop {
-            if pos + 4 > file_data.len() {
-                return Err(CueFlacError::Flac("Unexpected end of file".to_string()));
-            }
-            let header = u32::from_be_bytes([
-                file_data[pos],
-                file_data[pos + 1],
-                file_data[pos + 2],
-                file_data[pos + 3],
-            ]);
-            let is_last = (header & 0x80000000) != 0;
-            let block_size = (header & 0x00FFFFFF) as usize;
-            pos += 4;
-            pos += block_size;
-            if is_last {
-                break;
-            }
-        }
-        Ok(pos as u64)
-    }
     /// Parse a CUE sheet file
     pub fn parse_cue_sheet(cue_path: &Path) -> Result<CueSheet, CueFlacError> {
         use tracing::{debug, error};
@@ -763,6 +832,48 @@ FILE "test.flac" WAVE
         );
         assert_eq!(track2_end_ms, 6 * 60 * 1000);
     }
+
+    #[test]
+    fn test_cue_track_audio_methods() {
+        // Track 2 has pregap at 2:46 (INDEX 00) and start at 2:49 (INDEX 01)
+        // Track 3 starts at 9:31, so track 2 ends at 9:31
+        let cue_content = r#"PERFORMER "Test Artist"
+TITLE "Test Album"
+FILE "test.flac" WAVE
+  TRACK 01 AUDIO
+    TITLE "Track 1"
+    INDEX 01 00:00:00
+  TRACK 02 AUDIO
+    TITLE "Track 2"
+    INDEX 00 02:46:00
+    INDEX 01 02:49:00
+  TRACK 03 AUDIO
+    TITLE "Track 3"
+    INDEX 01 09:31:00
+"#;
+        let (_, cue_sheet) = CueFlacProcessor::parse_cue_content(cue_content).unwrap();
+
+        // Track 1: no pregap
+        let track1 = &cue_sheet.tracks[0];
+        assert_eq!(track1.audio_start_ms(), 0);
+        assert_eq!(track1.pregap_duration_ms(), 0);
+        // Track 1 ends at track 2's pregap (2:46 = 166000ms)
+        assert_eq!(track1.audio_duration_ms(), Some(166000));
+
+        // Track 2: has pregap
+        let track2 = &cue_sheet.tracks[1];
+        assert_eq!(track2.audio_start_ms(), 166000); // 2:46 (INDEX 00)
+        assert_eq!(track2.pregap_duration_ms(), 3000); // 3 seconds
+                                                       // Duration: 9:31 - 2:46 = 405 seconds (includes pregap)
+        assert_eq!(track2.audio_duration_ms(), Some(405000));
+
+        // Track 3: last track, no end time
+        let track3 = &cue_sheet.tracks[2];
+        assert_eq!(track3.audio_start_ms(), 571000); // 9:31
+        assert_eq!(track3.pregap_duration_ms(), 0);
+        assert_eq!(track3.audio_duration_ms(), None);
+    }
+
     #[test]
     fn test_parse_cue_with_rem_between_title_and_file() {
         let cue_content = r#"REM DATE 1970
@@ -805,6 +916,106 @@ FILE "Test Artist - Test Album.flac" WAVE
         assert_eq!(
             cue_sheet.tracks[1].start_time_ms,
             6 * 60 * 1000 + 17 * 1000 + 53 * 1000 / 75,
+        );
+    }
+
+    #[test]
+    fn test_consecutive_tracks_have_no_gaps_in_byte_ranges() {
+        // Two consecutive tracks sharing a boundary must not have gaps.
+        // Overlap is OK (FLAC decoder handles it), but gaps lose audio.
+        let sample_rate = 44100u32;
+        let total_samples = 44100 * 300; // 5 minutes
+        let audio_data_start = 1000u64;
+        let audio_data_end = 10_000_000u64;
+
+        // Seektable with entries every ~10 seconds
+        let seektable: Vec<SeekPoint> = (0..30)
+            .map(|i| SeekPoint {
+                sample_number: i * 44100 * 10, // every 10 sec
+                stream_offset: i * 300_000,    // ~300KB per 10 sec
+            })
+            .collect();
+
+        // Boundary at 2:46 (166 seconds) = sample 7,318,600
+        let boundary_ms = 166_000u64;
+
+        // Track 1: 0 to boundary
+        let (_, track1_end) = CueFlacProcessor::find_track_byte_range(
+            0,
+            Some(boundary_ms),
+            &seektable,
+            sample_rate,
+            total_samples,
+            audio_data_start,
+            audio_data_end,
+        );
+
+        // Track 2: boundary to end
+        let (track2_start, _) = CueFlacProcessor::find_track_byte_range(
+            boundary_ms,
+            None,
+            &seektable,
+            sample_rate,
+            total_samples,
+            audio_data_start,
+            audio_data_end,
+        );
+
+        assert!(
+            track1_end >= track2_start,
+            "Track 1 end ({}) must be >= track 2 start ({}) - gaps would lose audio!",
+            track1_end,
+            track2_start
+        );
+    }
+
+    #[test]
+    fn test_dense_seektable_gives_accurate_byte_offsets() {
+        // Simulate a dense seektable with ~93ms precision (4096 samples per frame)
+        // For a 45-minute file at 44100Hz
+        let sample_rate = 44100u32;
+        let samples_per_frame = 4096u32;
+        let total_duration_s = 45 * 60; // 45 minutes
+        let total_samples = sample_rate as u64 * total_duration_s;
+        let audio_data_start = 100_000u64; // 100KB of headers
+        let bytes_per_frame = 15_000u64; // ~15KB per frame (~163KB/s for CD quality)
+        let num_frames = total_samples / samples_per_frame as u64;
+        let audio_data_end = audio_data_start + num_frames * bytes_per_frame;
+
+        // Build a dense seektable (one entry per frame)
+        let seektable: Vec<SeekPoint> = (0..num_frames)
+            .map(|i| SeekPoint {
+                sample_number: i * samples_per_frame as u64,
+                stream_offset: i * bytes_per_frame,
+            })
+            .collect();
+
+        // Track 2 starts at 02:47:02 (INDEX 01) = 167027ms
+        let track2_start_ms = 167027u64;
+        let _track2_start_sample = track2_start_ms * sample_rate as u64 / 1000; // ~7,365,991
+
+        let (start_byte, _) = CueFlacProcessor::find_track_byte_range(
+            track2_start_ms,
+            None,
+            &seektable,
+            sample_rate,
+            total_samples,
+            audio_data_start,
+            audio_data_end,
+        );
+
+        // The byte offset should correspond to a sample number close to track2_start_sample
+        // Find which seektable entry we landed on
+        let frame_index = (start_byte as u64 - audio_data_start) / bytes_per_frame;
+        let frame_sample = frame_index * samples_per_frame as u64;
+        let frame_time_ms = frame_sample * 1000 / sample_rate as u64;
+
+        // The difference should be at most one frame (~93ms)
+        let diff_ms = track2_start_ms as i64 - frame_time_ms as i64;
+        assert!(
+            (0..=93).contains(&diff_ms),
+            "Byte offset should be within 93ms of track start. Got frame at {}ms, wanted {}ms, diff={}ms",
+            frame_time_ms, track2_start_ms, diff_ms
         );
     }
 }

@@ -2,7 +2,7 @@ use crate::cache::CacheManager;
 use crate::cloud_storage::CloudStorage;
 use crate::encryption::EncryptionService;
 use crate::library::LibraryManager;
-use crate::playback::reassembly::reassemble_track;
+use crate::playback::track_loader::load_track_audio;
 use crate::storage::create_storage_reader;
 use std::path::Path;
 use std::sync::Arc;
@@ -117,7 +117,7 @@ impl ExportService {
     ) -> Result<(), String> {
         info!("Exporting track {} to {}", track_id, output_path.display());
 
-        let pcm_source = reassemble_track(
+        let pcm_source = load_track_audio(
             track_id,
             library_manager,
             Some(storage),

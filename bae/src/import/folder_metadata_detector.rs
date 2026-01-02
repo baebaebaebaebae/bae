@@ -442,7 +442,7 @@ pub fn calculate_mb_discid_from_log(log_path: &Path) -> Result<String, MetadataD
     })?;
     let mb_discid_str = disc.id();
     info!("✅ MusicBrainz DiscID: {}", mb_discid_str);
-    println!("🎵 MusicBrainz DiscID result: {}", mb_discid_str);
+    info!("🎵 MusicBrainz DiscID result: {}", mb_discid_str);
     Ok(mb_discid_str.to_string())
 }
 /// Calculate MusicBrainz DiscID from CUE file and FLAC file

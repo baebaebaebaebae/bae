@@ -234,16 +234,23 @@ pub struct DbFile {
 ///
 /// **Seektables are only needed for CUE/FLAC tracks:**
 /// - One-file-per-track: Can calculate byte position from time directly
-/// - CUE/FLAC: Seektables map sample positions to byte positions in the original album FLAC file for accurate seeking
+/// - CUE/FLAC: We build a dense seektable during import (scanning every frame, ~93ms precision)
+///   rather than using the embedded seektable (~10s precision). This enables:
+///   1. Smooth seeking during playback (user scrubbing)
+///   2. Accurate track boundary positioning
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbAudioFormat {
     pub id: String,
     pub track_id: String,
     pub format: String,
     pub flac_headers: Option<Vec<u8>>,
+    /// Dense seektable built during import by scanning every FLAC frame (~93ms precision).
+    /// Stored as bincode-serialized Vec<(sample_number, byte_offset)>.
+    /// Used for smooth seeking during playback and accurate track boundary positioning.
     pub flac_seektable: Option<Vec<u8>>,
     pub needs_headers: bool,
-    /// Start byte offset within the source file (for CUE/FLAC tracks)
+    /// Start byte offset within the source file (for CUE/FLAC tracks).
+    /// Calculated using the dense seektable for frame-accurate positioning.
     pub start_byte_offset: Option<i64>,
     /// End byte offset within the source file (for CUE/FLAC tracks)
     pub end_byte_offset: Option<i64>,

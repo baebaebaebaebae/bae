@@ -388,8 +388,13 @@ impl ImportService {
                     .ok_or_else(|| format!("Invalid FLAC path: {:?}", flac_path))?
                     .to_string();
 
+                // Read file and build dense seektable for accurate byte ranges
+                let file_data = std::fs::read(flac_path)
+                    .map_err(|e| format!("Failed to read FLAC {:?}: {}", flac_path, e))?;
                 let flac_info = CueFlacProcessor::analyze_flac(flac_path)
                     .map_err(|e| format!("Failed to analyze FLAC {:?}: {}", flac_path, e))?;
+                let dense_seektable =
+                    CueFlacProcessor::build_dense_seektable(&file_data, &flac_info);
 
                 let flac_tracks: Vec<_> = tracks_to_files
                     .iter()
@@ -399,13 +404,11 @@ impl ImportService {
                 let mut track_infos = Vec::new();
                 for (i, cue_track) in metadata.cue_sheet.tracks.iter().enumerate() {
                     if let Some(track_file) = flac_tracks.get(i) {
-                        // Audio starts at INDEX 00 (pregap) if present
-                        let audio_start_ms =
-                            cue_track.pregap_time_ms.unwrap_or(cue_track.start_time_ms);
+                        let audio_start_ms = cue_track.audio_start_ms();
                         let (start_byte, end_byte) = CueFlacProcessor::find_track_byte_range(
                             audio_start_ms,
                             cue_track.end_time_ms,
-                            &flac_info.seektable,
+                            &dense_seektable.entries,
                             flac_info.sample_rate,
                             flac_info.total_samples,
                             flac_info.audio_data_start,
@@ -735,25 +738,44 @@ impl ImportService {
 
         let library_manager = self.library_manager.get();
 
-        // Build CUE/FLAC data if present (metadata, flac headers, flac info for byte offsets)
+        // Build CUE/FLAC data if present (metadata, flac headers, flac info, dense seektable)
         #[allow(clippy::type_complexity)]
-        let cue_flac_data: HashMap<PathBuf, (CueFlacMetadata, Vec<u8>, FlacInfo)> =
-            if let Some(ref cue_metadata) = cue_flac_metadata {
-                let mut data = HashMap::new();
-                for (flac_path, metadata) in cue_metadata {
-                    let flac_headers = CueFlacProcessor::extract_flac_headers(flac_path)
-                        .map_err(|e| format!("Failed to extract FLAC headers: {}", e))?;
-                    let flac_info = CueFlacProcessor::analyze_flac(flac_path)
-                        .map_err(|e| format!("Failed to analyze FLAC: {}", e))?;
-                    data.insert(
-                        flac_path.clone(),
-                        (metadata.clone(), flac_headers.headers, flac_info),
-                    );
-                }
-                data
-            } else {
-                HashMap::new()
-            };
+        let cue_flac_data: HashMap<
+            PathBuf,
+            (
+                CueFlacMetadata,
+                Vec<u8>,
+                FlacInfo,
+                Vec<crate::cue_flac::SeekPoint>,
+            ),
+        > = if let Some(ref cue_metadata) = cue_flac_metadata {
+            let mut data = HashMap::new();
+            for (flac_path, metadata) in cue_metadata {
+                let flac_headers = CueFlacProcessor::extract_flac_headers(flac_path)
+                    .map_err(|e| format!("Failed to extract FLAC headers: {}", e))?;
+
+                // Read file once, analyze and build dense seektable
+                let file_data = std::fs::read(flac_path)
+                    .map_err(|e| format!("Failed to read FLAC file: {}", e))?;
+                let flac_info = CueFlacProcessor::analyze_flac(flac_path)
+                    .map_err(|e| format!("Failed to analyze FLAC: {}", e))?;
+                let dense_seektable =
+                    CueFlacProcessor::build_dense_seektable(&file_data, &flac_info);
+
+                data.insert(
+                    flac_path.clone(),
+                    (
+                        metadata.clone(),
+                        flac_headers.headers,
+                        flac_info,
+                        dense_seektable.entries,
+                    ),
+                );
+            }
+            data
+        } else {
+            HashMap::new()
+        };
 
         // Track which CUE track index we're on for each FLAC file
         let mut track_indices: HashMap<PathBuf, usize> = HashMap::new();
@@ -766,7 +788,7 @@ impl ImportService {
                 .unwrap_or("unknown")
                 .to_lowercase();
 
-            if let Some((metadata, flac_headers, flac_info)) =
+            if let Some((metadata, flac_headers, flac_info, dense_seektable)) =
                 cue_flac_data.get(&track_file.file_path)
             {
                 // Get current track index for this FLAC file
@@ -782,28 +804,26 @@ impl ImportService {
                     )
                 })?;
 
-                // For pregap support: audio starts at INDEX 00 if present, otherwise INDEX 01
-                let audio_start_ms = cue_track.pregap_time_ms.unwrap_or(cue_track.start_time_ms);
+                let audio_start_ms = cue_track.audio_start_ms();
+                let pregap_ms = if cue_track.pregap_duration_ms() > 0 {
+                    Some(cue_track.pregap_duration_ms() as i64)
+                } else {
+                    None
+                };
 
-                // Calculate pregap duration (INDEX 01 - INDEX 00)
-                let pregap_ms = cue_track
-                    .pregap_time_ms
-                    .map(|pregap| (cue_track.start_time_ms - pregap) as i64);
-
-                // Calculate byte offsets using seektable
+                // Calculate byte offsets using dense seektable for frame-accurate positioning
                 let (start_byte, end_byte) = CueFlacProcessor::find_track_byte_range(
                     audio_start_ms,
                     cue_track.end_time_ms,
-                    &flac_info.seektable,
+                    dense_seektable,
                     flac_info.sample_rate,
                     flac_info.total_samples,
                     flac_info.audio_data_start,
                     flac_info.audio_data_end,
                 );
 
-                // Serialize seektable for storage
-                let seektable_tuples: Vec<(u64, u64)> = flac_info
-                    .seektable
+                // Serialize dense seektable for storage (used for seeking during playback)
+                let seektable_tuples: Vec<(u64, u64)> = dense_seektable
                     .iter()
                     .map(|sp| (sp.sample_number, sp.stream_offset))
                     .collect();
