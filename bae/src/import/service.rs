@@ -405,7 +405,7 @@ impl ImportService {
                 for (i, cue_track) in metadata.cue_sheet.tracks.iter().enumerate() {
                     if let Some(track_file) = flac_tracks.get(i) {
                         let audio_start_ms = cue_track.audio_start_ms();
-                        let (start_byte, end_byte, _) = CueFlacProcessor::find_track_byte_range(
+                        let (start_byte, end_byte, _, _) = CueFlacProcessor::find_track_byte_range(
                             audio_start_ms,
                             cue_track.end_time_ms,
                             &dense_seektable.entries,
@@ -812,7 +812,7 @@ impl ImportService {
                 };
 
                 // Calculate byte offsets using dense seektable for frame-accurate positioning
-                let (start_byte, end_byte, frame_offset_samples) =
+                let (start_byte, end_byte, frame_offset_samples, exact_sample_count) =
                     CueFlacProcessor::find_track_byte_range(
                         audio_start_ms,
                         cue_track.end_time_ms,
@@ -841,6 +841,7 @@ impl ImportService {
                     end_byte,
                     pregap_ms,
                     Some(frame_offset_samples),
+                    Some(exact_sample_count),
                 );
                 library_manager
                     .add_audio_format(&audio_format)

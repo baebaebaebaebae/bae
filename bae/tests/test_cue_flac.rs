@@ -838,15 +838,16 @@ async fn test_cue_flac_track2_samples_match_ground_truth() {
 
     let seektable_entries: Vec<bae::cue_flac::SeekPoint> = dense_seektable.entries;
 
-    let (start_byte, end_byte, _frame_offset_ms) = CueFlacProcessor::find_track_byte_range(
-        track2_start_ms,
-        track2_cue.end_time_ms,
-        &seektable_entries,
-        flac_info.sample_rate,
-        flac_info.total_samples,
-        flac_info.audio_data_start,
-        flac_info.audio_data_end,
-    );
+    let (start_byte, end_byte, _frame_offset_samples, _exact_sample_count) =
+        CueFlacProcessor::find_track_byte_range(
+            track2_start_ms,
+            track2_cue.end_time_ms,
+            &seektable_entries,
+            flac_info.sample_rate,
+            flac_info.total_samples,
+            flac_info.audio_data_start,
+            flac_info.audio_data_end,
+        );
     info!(
         "Byte range for track 2: {} - {} ({} bytes)",
         start_byte,
@@ -1012,15 +1013,16 @@ async fn test_cue_flac_track_start_positions() {
         info!("Testing: {} - expected start {}ms", desc, expected_start_ms);
 
         // Get byte range and frame offset
-        let (start_byte, end_byte, frame_offset_samples) = CueFlacProcessor::find_track_byte_range(
-            expected_start_ms,
-            track.end_time_ms,
-            &dense_seektable.entries,
-            flac_info.sample_rate,
-            flac_info.total_samples,
-            flac_info.audio_data_start,
-            flac_info.audio_data_end,
-        );
+        let (start_byte, end_byte, frame_offset_samples, _exact_sample_count) =
+            CueFlacProcessor::find_track_byte_range(
+                expected_start_ms,
+                track.end_time_ms,
+                &dense_seektable.entries,
+                flac_info.sample_rate,
+                flac_info.total_samples,
+                flac_info.audio_data_start,
+                flac_info.audio_data_end,
+            );
 
         info!(
             "  Frame offset: {} samples ({:.1}ms)",
@@ -1062,6 +1064,240 @@ async fn test_cue_flac_track_start_positions() {
 
         info!("  ✅ passed");
     }
+}
+
+/// Test gapless continuity at track boundaries.
+///
+/// Verifies that when Track 1 ends and Track 2 begins during auto-advance,
+/// there are no missing or duplicated samples at the boundary.
+///
+/// Our fixture has:
+/// - Track 1: 0ms to 8000ms (ends at Track 2's INDEX 00)
+/// - Track 2: 8000ms to 20000ms (starts at INDEX 00, pregap until INDEX 01 at 10000ms)
+///
+/// For gapless playback, the concatenation of Track 1 + Track 2 must equal
+/// the continuous audio from the full decode.
+#[tokio::test]
+async fn test_cue_flac_gapless_track_boundary() {
+    use bae::cue_flac::CueFlacProcessor;
+    use bae::flac_decoder::decode_flac_range;
+
+    tracing_init();
+
+    let fixture_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cue_flac");
+    let flac_path = fixture_dir.join("Test Album.flac");
+    let cue_path = fixture_dir.join("Test Album.cue");
+
+    if !flac_path.exists() || !cue_path.exists() {
+        panic!("Fixture not found. Run: ./scripts/generate_cue_flac_fixture.sh");
+    }
+
+    let cue_sheet = CueFlacProcessor::parse_cue_sheet(&cue_path).expect("parse cue");
+    let flac_data = std::fs::read(&flac_path).expect("read flac");
+    let flac_info = CueFlacProcessor::analyze_flac(&flac_path).expect("analyze flac");
+    let dense_seektable = CueFlacProcessor::build_dense_seektable(&flac_data, &flac_info);
+    let headers = CueFlacProcessor::extract_flac_headers(&flac_path).expect("headers");
+
+    // Decode full file as ground truth
+    let full_decode = decode_flac_range(&flac_data, None, None).expect("decode full");
+    let channels = full_decode.channels as usize;
+    let sample_rate = full_decode.sample_rate;
+
+    info!(
+        "Full decode: {} total samples ({} per channel), {}Hz",
+        full_decode.samples.len(),
+        full_decode.samples.len() / channels,
+        sample_rate
+    );
+
+    // Track 1: ends at Track 2's audio_start (INDEX 00 at 8000ms)
+    let track1 = &cue_sheet.tracks[0];
+    let (t1_start_byte, t1_end_byte, t1_frame_offset, t1_exact_samples) =
+        CueFlacProcessor::find_track_byte_range(
+            track1.audio_start_ms(),
+            track1.end_time_ms,
+            &dense_seektable.entries,
+            flac_info.sample_rate,
+            flac_info.total_samples,
+            flac_info.audio_data_start,
+            flac_info.audio_data_end,
+        );
+
+    // Track 2: starts at INDEX 00 (8000ms), auto-advance plays pregap
+    let track2 = &cue_sheet.tracks[1];
+    let (t2_start_byte, t2_end_byte, t2_frame_offset, t2_exact_samples) =
+        CueFlacProcessor::find_track_byte_range(
+            track2.audio_start_ms(), // INDEX 00 for auto-advance
+            track2.end_time_ms,
+            &dense_seektable.entries,
+            flac_info.sample_rate,
+            flac_info.total_samples,
+            flac_info.audio_data_start,
+            flac_info.audio_data_end,
+        );
+
+    info!(
+        "Track 1: bytes {}..{}, frame_offset={}, exact_samples={}",
+        t1_start_byte, t1_end_byte, t1_frame_offset, t1_exact_samples
+    );
+    info!(
+        "Track 2: bytes {}..{}, frame_offset={}, exact_samples={}",
+        t2_start_byte, t2_end_byte, t2_frame_offset, t2_exact_samples
+    );
+
+    // Extract and decode Track 1
+    let t1_bytes = &flac_data[t1_start_byte as usize..t1_end_byte as usize];
+    let mut t1_flac = headers.headers.clone();
+    t1_flac.extend_from_slice(t1_bytes);
+    let t1_decode = decode_flac_range(&t1_flac, None, None).expect("decode track 1");
+
+    // Extract and decode Track 2
+    let t2_bytes = &flac_data[t2_start_byte as usize..t2_end_byte as usize];
+    let mut t2_flac = headers.headers.clone();
+    t2_flac.extend_from_slice(t2_bytes);
+    let t2_decode = decode_flac_range(&t2_flac, None, None).expect("decode track 2");
+
+    // Skip lead-in samples from frame boundary alignment, then trim to exact sample count
+    let t1_skip = if t1_frame_offset > 0 {
+        t1_frame_offset as usize * channels
+    } else {
+        0
+    };
+    let t2_skip = if t2_frame_offset > 0 {
+        t2_frame_offset as usize * channels
+    } else {
+        0
+    };
+
+    // Trim to exact sample count (channels * samples)
+    let t1_end_idx = t1_skip + (t1_exact_samples as usize * channels);
+    let t2_end_idx = t2_skip + (t2_exact_samples as usize * channels);
+
+    let t1_samples = &t1_decode.samples[t1_skip..t1_end_idx.min(t1_decode.samples.len())];
+    let t2_samples = &t2_decode.samples[t2_skip..t2_end_idx.min(t2_decode.samples.len())];
+
+    info!(
+        "Track 1: {} samples after skipping {} lead-in",
+        t1_samples.len() / channels,
+        t1_skip / channels
+    );
+    info!(
+        "Track 2: {} samples after skipping {} lead-in",
+        t2_samples.len() / channels,
+        t2_skip / channels
+    );
+
+    // The boundary is at Track 2's audio_start_ms (8000ms)
+    let boundary_ms = track2.audio_start_ms();
+    let boundary_sample = (boundary_ms * sample_rate as u64 / 1000) as usize;
+    let boundary_idx = boundary_sample * channels;
+
+    info!(
+        "Boundary at {}ms = sample {} (idx {})",
+        boundary_ms, boundary_sample, boundary_idx
+    );
+
+    // Track 1's last samples should match ground truth just before boundary
+    let t1_expected_samples = boundary_sample; // samples from 0 to boundary
+    let t1_actual_samples = t1_samples.len() / channels;
+
+    info!(
+        "Track 1: expected {} samples, got {}",
+        t1_expected_samples, t1_actual_samples
+    );
+
+    // Track 2's first samples should match ground truth starting at boundary
+    let compare_samples = 100; // Check 100 samples at the boundary
+
+    // Ground truth at boundary
+    let truth_at_boundary: Vec<i32> =
+        full_decode.samples[boundary_idx..boundary_idx + compare_samples * channels].to_vec();
+
+    // Track 2's first samples (after lead-in skip)
+    let t2_at_start: Vec<i32> = t2_samples[0..compare_samples * channels].to_vec();
+
+    info!(
+        "Ground truth at boundary: {:?}...",
+        &truth_at_boundary[0..8]
+    );
+    info!("Track 2 start:            {:?}...", &t2_at_start[0..8]);
+
+    // Verify Track 2 starts at the right sample
+    let mut t2_mismatches = 0;
+    for i in 0..compare_samples * channels {
+        if t2_at_start[i] != truth_at_boundary[i] {
+            t2_mismatches += 1;
+        }
+    }
+
+    // Also verify Track 1 ends at the right sample
+    let truth_before_boundary: Vec<i32> =
+        full_decode.samples[boundary_idx - compare_samples * channels..boundary_idx].to_vec();
+    let t1_at_end: Vec<i32> = t1_samples[t1_samples.len() - compare_samples * channels..].to_vec();
+
+    info!(
+        "Ground truth before boundary: {:?}...",
+        &truth_before_boundary[0..8]
+    );
+    info!("Track 1 end:                  {:?}...", &t1_at_end[0..8]);
+
+    let mut t1_mismatches = 0;
+    for i in 0..compare_samples * channels {
+        if t1_at_end[i] != truth_before_boundary[i] {
+            t1_mismatches += 1;
+        }
+    }
+
+    // Calculate total samples and check for gaps/overlaps
+    let total_extracted_samples = t1_actual_samples + t2_samples.len() / channels;
+    let track2_end_sample = (track2.end_time_ms.unwrap() * sample_rate as u64 / 1000) as usize;
+    let expected_total = track2_end_sample; // From 0 to end of Track 2
+
+    info!(
+        "Total extracted: {} samples, expected: {} (diff: {})",
+        total_extracted_samples,
+        expected_total,
+        total_extracted_samples as i64 - expected_total as i64
+    );
+
+    // These assertions verify gapless playback
+    assert_eq!(
+        t2_mismatches, 0,
+        "Track 2 start mismatch: {} samples differ at boundary. \
+         Track 2's extracted audio doesn't start at the right position.",
+        t2_mismatches
+    );
+
+    assert_eq!(
+        t1_mismatches, 0,
+        "Track 1 end mismatch: {} samples differ at boundary. \
+         Track 1's extracted audio doesn't end at the right position.",
+        t1_mismatches
+    );
+
+    // Check for gaps (missing samples) or overlaps (extra samples)
+    let sample_diff = total_extracted_samples as i64 - expected_total as i64;
+    assert!(
+        sample_diff.abs() < 100,
+        "Sample count mismatch at boundary: {} samples {}. \
+         This would cause {} at track transition.",
+        sample_diff.abs(),
+        if sample_diff > 0 {
+            "extra (overlap)"
+        } else {
+            "missing (gap)"
+        },
+        if sample_diff > 0 {
+            "audio repeat"
+        } else {
+            "audio skip"
+        }
+    );
+
+    info!(
+        "✅ Gapless boundary verified: Track 1 ends and Track 2 starts correctly at {}ms",
+        boundary_ms
+    );
 }
 
 /// Discogs release matching the seektable fixture (tests/fixtures/cue_flac/)

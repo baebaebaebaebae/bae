@@ -263,6 +263,10 @@ pub struct DbAudioFormat {
     /// decoder how many samples to skip when playing.
     /// Stored as samples (not ms) to avoid rounding errors.
     pub frame_offset_samples: Option<i64>,
+    /// Exact number of samples this track should contain (for gapless playback).
+    /// After decoding, trim output to this count. Required because FLAC frames
+    /// at track boundaries may extend past the logical track end.
+    pub exact_sample_count: Option<i64>,
     pub created_at: DateTime<Utc>,
 }
 impl DbArtist {
@@ -524,6 +528,7 @@ impl DbAudioFormat {
             None,
             None,
             None,
+            None,
         )
     }
 
@@ -544,6 +549,7 @@ impl DbAudioFormat {
             None,
             None,
             None,
+            None,
         )
     }
 
@@ -557,6 +563,7 @@ impl DbAudioFormat {
         end_byte_offset: i64,
         pregap_ms: Option<i64>,
         frame_offset_samples: Option<i64>,
+        exact_sample_count: Option<i64>,
     ) -> Self {
         Self::new_full(
             track_id,
@@ -568,6 +575,7 @@ impl DbAudioFormat {
             Some(end_byte_offset),
             pregap_ms,
             frame_offset_samples,
+            exact_sample_count,
         )
     }
 
@@ -581,6 +589,7 @@ impl DbAudioFormat {
         end_byte_offset: Option<i64>,
         pregap_ms: Option<i64>,
         frame_offset_samples: Option<i64>,
+        exact_sample_count: Option<i64>,
     ) -> Self {
         DbAudioFormat {
             id: Uuid::new_v4().to_string(),
@@ -593,6 +602,7 @@ impl DbAudioFormat {
             end_byte_offset,
             pregap_ms,
             frame_offset_samples,
+            exact_sample_count,
             created_at: Utc::now(),
         }
     }

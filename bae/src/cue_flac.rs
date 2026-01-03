@@ -333,6 +333,13 @@ impl CueFlacProcessor {
     /// Due to FLAC frame alignment, start_byte is at a frame boundary which may be
     /// up to ~4096 samples before the track's actual start. The frame_offset_samples tells
     /// the decoder how many samples to skip when playing.
+    /// Find the byte range for a track, plus sample offsets for precise trimming.
+    ///
+    /// Returns: (start_byte, end_byte, frame_offset_samples, exact_sample_count)
+    /// - start_byte: Byte offset where track data begins (frame-aligned)
+    /// - end_byte: Byte offset where track data ends (frame-aligned, may include extra samples)
+    /// - frame_offset_samples: Samples to skip at start (frame boundary → actual track start)
+    /// - exact_sample_count: Exact number of samples in this track (for end trimming)
     pub fn find_track_byte_range(
         start_time_ms: u64,
         end_time_ms: Option<u64>,
@@ -341,15 +348,18 @@ impl CueFlacProcessor {
         total_samples: u64,
         audio_data_start: u64,
         audio_data_end: u64,
-    ) -> (i64, i64, i64) {
+    ) -> (i64, i64, i64, i64) {
         if sample_rate == 0 {
-            return (audio_data_start as i64, audio_data_end as i64, 0);
+            return (audio_data_start as i64, audio_data_end as i64, 0, 0);
         }
 
         let start_sample = (start_time_ms * sample_rate as u64) / 1000;
         let end_sample = end_time_ms
             .map(|ms| (ms * sample_rate as u64) / 1000)
             .unwrap_or(total_samples);
+
+        // Exact sample count for this track
+        let exact_sample_count = (end_sample - start_sample) as i64;
 
         // Find start byte using seektable, tracking the frame's sample number
         let (start_byte, frame_sample) = if seektable.is_empty() {
@@ -396,7 +406,12 @@ impl CueFlacProcessor {
             audio_data_start + best_offset
         };
 
-        (start_byte as i64, end_byte as i64, frame_offset_samples)
+        (
+            start_byte as i64,
+            end_byte as i64,
+            frame_offset_samples,
+            exact_sample_count,
+        )
     }
 
     /// Find where audio frames start in a FLAC file
@@ -962,7 +977,7 @@ FILE "Test Artist - Test Album.flac" WAVE
         let boundary_ms = 166_000u64;
 
         // Track 1: 0 to boundary
-        let (_, track1_end, _) = CueFlacProcessor::find_track_byte_range(
+        let (_, track1_end, _, _) = CueFlacProcessor::find_track_byte_range(
             0,
             Some(boundary_ms),
             &seektable,
@@ -973,7 +988,7 @@ FILE "Test Artist - Test Album.flac" WAVE
         );
 
         // Track 2: boundary to end
-        let (track2_start, _, _) = CueFlacProcessor::find_track_byte_range(
+        let (track2_start, _, _, _) = CueFlacProcessor::find_track_byte_range(
             boundary_ms,
             None,
             &seektable,
@@ -1016,7 +1031,7 @@ FILE "Test Artist - Test Album.flac" WAVE
         let track2_start_ms = 167027u64;
         let _track2_start_sample = track2_start_ms * sample_rate as u64 / 1000; // ~7,365,991
 
-        let (start_byte, _, _) = CueFlacProcessor::find_track_byte_range(
+        let (start_byte, _, _, _) = CueFlacProcessor::find_track_byte_range(
             track2_start_ms,
             None,
             &seektable,
