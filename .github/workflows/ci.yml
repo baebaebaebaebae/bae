@@ -78,8 +78,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        # Windows disabled: libcdio and libdiscid not available in vcpkg
-        os: [macos-latest, ubuntu-latest]
+        os: [macos-latest, ubuntu-latest, windows-latest]
 
     steps:
     - name: Checkout code
@@ -96,35 +95,30 @@ jobs:
       run: |
         brew install libdiscid libcdio libsodium pkg-config libtorrent-rasterbar boost
 
-    - name: Setup vcpkg (Windows)
+    # Windows uses MSYS2/MinGW for CD libraries (libcdio, libdiscid) since they're not in vcpkg
+    - name: Setup MSYS2 (Windows)
       if: runner.os == 'Windows'
-      uses: lukka/run-vcpkg@v11
+      uses: msys2/setup-msys2@v2
       with:
-        vcpkgGitCommitId: '84bab45d415d22042bd0b9081aea57f362da3f35'
+        msystem: MINGW64
+        update: true
+        install: >-
+          mingw-w64-x86_64-libcdio
+          mingw-w64-x86_64-libdiscid
+          mingw-w64-x86_64-libsodium
+          mingw-w64-x86_64-libtorrent-rasterbar
+          mingw-w64-x86_64-boost
+          mingw-w64-x86_64-pkg-config
 
-    - name: Install Windows dependencies (vcpkg)
+    - name: Install MinGW Rust target (Windows)
       if: runner.os == 'Windows'
-      run: |
-        vcpkg install libsodium:x64-windows libtorrent:x64-windows libcdio:x64-windows boost:x64-windows
-      shell: pwsh
-
-    # libdiscid is not available in vcpkg, so we build it from source
-    - name: Build libdiscid from source (Windows)
-      if: runner.os == 'Windows'
-      run: |
-        git clone --depth 1 https://github.com/metabrainz/libdiscid.git
-        cd libdiscid
-        cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$env:VCPKG_ROOT/installed/x64-windows
-        cmake --build build --config Release
-        cmake --install build --config Release
-      shell: pwsh
+      run: rustup target add x86_64-pc-windows-gnu
 
     - name: Set Windows environment
       if: runner.os == 'Windows'
       run: |
-        echo "VCPKG_ROOT=$env:VCPKG_ROOT" >> $env:GITHUB_ENV
-        echo "$env:VCPKG_ROOT\installed\x64-windows\bin" >> $env:GITHUB_PATH
-        echo "PKG_CONFIG_PATH=$env:VCPKG_ROOT\installed\x64-windows\lib\pkgconfig" >> $env:GITHUB_ENV
+        echo "C:\msys64\mingw64\bin" >> $env:GITHUB_PATH
+        echo "PKG_CONFIG_PATH=C:\msys64\mingw64\lib\pkgconfig" >> $env:GITHUB_ENV
       shell: pwsh
 
     - name: Install Rust (uses rust-toolchain.toml)
@@ -184,18 +178,24 @@ jobs:
       working-directory: ./bae
       shell: cmd
       run: |
-        cargo clippy --lib -- -D warnings
-        cargo clippy --bin bae -- -D warnings
+        cargo clippy --target x86_64-pc-windows-gnu --lib -- -D warnings
+        cargo clippy --target x86_64-pc-windows-gnu --bin bae -- -D warnings
         for %%f in (tests\*.rs) do (
           for %%n in ("%%~nf") do (
             echo Checking integration test: %%~n
-            cargo clippy --test "%%~n" --features test-utils -- -D warnings
+            cargo clippy --target x86_64-pc-windows-gnu --test "%%~n" --features test-utils -- -D warnings
           )
         )
 
-    - name: Run tests
+    - name: Run tests (Linux/macOS)
+      if: runner.os != 'Windows'
       working-directory: ./bae
       run: cargo test --features test-utils --verbose
+
+    - name: Run tests (Windows)
+      if: runner.os == 'Windows'
+      working-directory: ./bae
+      run: cargo test --target x86_64-pc-windows-gnu --features test-utils --verbose
 
   security:
     name: Security Audit
