@@ -381,11 +381,10 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # Generate screenshots when screenshot fixtures change or on release
+  # Screenshot generation disabled - uncomment to re-enable
   generate-screenshots:
     name: Generate Screenshots
-    if: |
-      github.ref == 'refs/heads/main' &&
-      (needs.check-website.outputs.screenshots_changed == 'true' || needs.check-version.outputs.should_release == 'true')
+    if: false  # Disabled - uncomment condition above to re-enable
     runs-on: macos-latest
     needs: [check-website, check-version]
     permissions:
