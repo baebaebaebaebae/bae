@@ -2,11 +2,26 @@
 //!
 //! # Why we need a custom scanner
 //!
-//! libFLAC's public API is designed for decoding/encoding streams and editing metadata.
-//! The frame parsing logic is internal - there's no `FLAC__parse_frame_header()` or
-//! similar exposed function. To build a dense seektable (one entry per frame) for
-//! CUE/FLAC track boundary calculations, we need to know where each frame starts
-//! and what sample number it contains. This module fills that gap.
+//! For CUE/FLAC imports, we need to extract specific byte ranges from a FLAC file -
+//! one range per track defined in the CUE sheet. CUE times are in MM:SS:FF format
+//! (75 frames/sec for CD audio), which we convert to sample numbers. For example:
+//!
+//! ```text
+//! Track 2 starts at INDEX 01 03:45:00
+//!   = 3 min 45 sec = 225 seconds
+//!   = 225 × 44100 = sample 9,922,500
+//! ```
+//!
+//! Now we need the byte offset in the FLAC file where sample 9,922,500 lives. libFLAC's
+//! API is designed to answer "decode audio starting at sample X" (you get PCM data),
+//! but we need "what byte offset corresponds to sample X?" (for byte-range extraction).
+//!
+//! libFLAC does have `get_decode_position()` which returns a byte offset after seeking,
+//! but it reflects the decoder's read buffer position, not the frame boundary - internal
+//! buffering makes it unreliable for precise offsets. The frame parsing logic is internal
+//! with no exposed `FLAC__parse_frame_header()` or similar. This module fills that gap
+//! by scanning frames directly to build a dense seektable (one entry per frame) mapping
+//! sample numbers to byte offsets.
 //!
 //! # How it works
 //!

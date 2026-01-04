@@ -239,12 +239,9 @@ fn PositionZone(
                                         if let Some(pos) = local_position() {
                                             on_seek.call(pos);
                                         }
-                                        spawn(async move {
-                                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                                            if is_seeking() {
-                                                is_seeking.set(false);
-                                            }
-                                        });
+                                        // Don't clear is_seeking here - the Seeked/SeekError/SeekSkipped
+                                        // event from the playback service will clear it once the seek
+                                        // actually completes.
                                     }
                                 },
                                 oninput: move |evt| {
@@ -296,6 +293,9 @@ pub fn NowPlayingBar() -> Element {
                             requested_position: _,
                             track_duration: _,
                         } => {
+                            if is_seeking() {
+                                is_seeking.set(false);
+                            }
                             tracing::warn!("Seek failed: requested position past track end");
                         }
                         PlaybackProgress::Seeked {
