@@ -78,7 +78,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        os: [macos-latest, ubuntu-latest, windows-latest]
 
     steps:
     - name: Checkout code
@@ -99,7 +99,7 @@ jobs:
       if: runner.os == 'Windows'
       uses: lukka/run-vcpkg@v11
       with:
-        vcpkgGitCommitId: '5b1214315250939257ef5d62ecdcbca18cf4fb1c'
+        vcpkgGitCommitId: '84bab45d415d22042bd0b9081aea57f362da3f35'
 
     - name: Install Windows dependencies
       if: runner.os == 'Windows'
