@@ -859,7 +859,7 @@ dependencies = [
 
 [[package]]
 name = "bae"
-version = "2026.1.4"
+version = "2026.1.5"
 dependencies = [
  "ashpd",
  "async-trait",
