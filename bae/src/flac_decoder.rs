@@ -375,8 +375,13 @@ pub fn scan_flac_frames(flac_data: &[u8]) -> Result<FlacScanResult, String> {
                 if let Some(sample_number) =
                     parse_frame_sample_number(flac_data, scan_pos, min_block_size)
                 {
-                    // Only add if this is a new sample position (avoid duplicates)
-                    if last_sample_number.is_none() || sample_number > last_sample_number.unwrap() {
+                    // Only add if this is a new sample position (avoid duplicates).
+                    // Also reject sample_number > total_samples - even if CRC passes,
+                    // such values are clearly false positives from random byte patterns.
+                    if sample_number <= total_samples
+                        && (last_sample_number.is_none()
+                            || sample_number > last_sample_number.unwrap())
+                    {
                         let stream_offset = (scan_pos - audio_data_start) as u64;
                         seektable.push(SeekEntry {
                             sample_number,
@@ -524,6 +529,9 @@ fn parse_frame_sample_number(data: &[u8], pos: usize, min_block_size: u32) -> Op
 ///
 /// The CRC-8 check is essential because random compressed audio data frequently
 /// contains 0xFF 0xF8 patterns that pass basic field validation but fail CRC.
+/// However, in rare cases (like byte offset 263929204 in Led Zeppelin I), random
+/// audio data can pass all checks including CRC-8. The sample_number validation
+/// in scan_flac_frames catches these cases.
 fn validate_frame_header(data: &[u8], pos: usize) -> bool {
     if pos + 4 >= data.len() {
         return false;

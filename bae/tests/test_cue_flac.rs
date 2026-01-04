@@ -1408,3 +1408,57 @@ fn test_scan_flac_frames_with_small_min_frame_size() {
         }
     }
 }
+
+/// Regression: Seeking near end of last track fails with "past end of track".
+///
+/// User tried to seek to 7:08 of an 8:28 track and got an error saying the
+/// position was past the end. Only 280s of audio was decoded instead of 508s.
+///
+/// Root cause: The FLAC frame scanner found a false positive - random audio bytes
+/// that happen to match the frame sync pattern (0xFF 0xF9), pass CRC-8 validation,
+/// and parse to a garbage sample_number larger than total_samples. This corrupt
+/// entry caused find_track_byte_range to return the wrong end_byte for the last track.
+///
+/// Fix: scan_flac_frames now rejects entries where sample_number > total_samples.
+///
+/// This test injects the actual false-positive bytes (captured from the original
+/// bug report) into our test fixture to verify the fix works.
+#[test]
+fn test_scan_flac_frames_rejects_sample_numbers_beyond_total() {
+    use bae::flac_decoder::scan_flac_frames;
+
+    // Read the test fixture
+    let fixture_path = "tests/fixtures/cue_flac/Test Album.flac";
+    let mut flac_data = std::fs::read(fixture_path).expect("read test fixture");
+
+    // These are the exact bytes from position 263929204 in the Led Zeppelin file
+    // that triggered the original bug. They:
+    // - Match FLAC sync pattern (0xFF 0xF9)
+    // - Pass CRC-8 validation
+    // - Parse to sample_number 534,178,014 (way beyond any real file's total_samples)
+    let false_positive_bytes: [u8; 16] = [
+        0xff, 0xf9, 0xc2, 0xa2, 0xfc, 0x5f, 0xf5, 0xae, 0x63, 0xde, 0x0d, 0xe8, 0x09, 0x09, 0x19,
+        0x89,
+    ];
+
+    // Inject false positive bytes near the end of the file (in audio data section)
+    // The fixture has 1,323,000 samples - this will try to add sample 534M
+    let inject_pos = flac_data.len() - 100;
+    flac_data[inject_pos..inject_pos + 16].copy_from_slice(&false_positive_bytes);
+
+    let result = scan_flac_frames(&flac_data).expect("scan");
+
+    // The test fixture has 1,323,000 total_samples
+    let total_samples = 1_323_000u64;
+
+    // Verify: no seektable entry should have sample_number > total_samples
+    // (the false positive at 534M should have been rejected)
+    for entry in &result.seektable {
+        assert!(
+            entry.sample_number <= total_samples,
+            "Seektable has corrupt entry: sample {} > total {} - false positive not rejected!",
+            entry.sample_number,
+            total_samples
+        );
+    }
+}
