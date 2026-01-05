@@ -13,7 +13,7 @@ use cpal::traits::StreamTrait;
 use std::collections::VecDeque;
 use std::sync::{mpsc, Arc, Mutex};
 use tokio::sync::mpsc as tokio_mpsc;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{error, info, trace};
 /// Playback commands sent to the service
 #[derive(Debug, Clone)]
 pub enum PlaybackCommand {
@@ -688,58 +688,13 @@ impl PlaybackService {
             all_flac_headers.as_ref().map(|h| h.len()).unwrap_or(0)
         );
 
-        // Load seektable from audio format
-        let full_seektable: Option<Vec<crate::audio_codec::SeekEntry>> = audio_format
+        // Load seektable from audio format.
+        // For CUE/FLAC tracks, the seektable is already per-track and adjusted during import
+        // (byte offsets start at 0 = first byte of track audio data).
+        let seektable: Option<Vec<crate::audio_codec::SeekEntry>> = audio_format
             .as_ref()
             .and_then(|af| af.seektable_json.as_ref())
             .and_then(|json| serde_json::from_str(json).ok());
-
-        // For CUE/FLAC (byte-range tracks), filter and adjust seektable offsets.
-        // IMPORTANT: start_byte/end_byte are ABSOLUTE file offsets (include audio_data_start).
-        // But seektable byte_offset values are RELATIVE to audio_data_start.
-        // We must convert when filtering.
-        let audio_data_start = audio_format
-            .as_ref()
-            .and_then(|af| af.audio_data_start.map(|x| x as u64))
-            .unwrap_or(0);
-
-        let seektable = match (&full_seektable, start_byte) {
-            (Some(st), Some(abs_track_start)) if !st.is_empty() => {
-                // Convert absolute file offset to relative-to-audio-data offset
-                let rel_track_start = abs_track_start.saturating_sub(audio_data_start);
-                let rel_track_end = end_byte
-                    .map(|e| e.saturating_sub(audio_data_start))
-                    .unwrap_or(u64::MAX);
-
-                // Filter to entries within our byte range and adjust offsets
-                let adjusted: Vec<crate::audio_codec::SeekEntry> = st
-                    .iter()
-                    .filter(|e| e.byte >= rel_track_start && e.byte < rel_track_end)
-                    .map(|e| crate::audio_codec::SeekEntry {
-                        sample: e.sample,
-                        byte: e.byte - rel_track_start,
-                    })
-                    .collect();
-
-                if adjusted.is_empty() {
-                    warn!(
-                        "No seektable entries in relative byte range {}-{} (audio_data_start={}), using full seektable",
-                        rel_track_start, rel_track_end, audio_data_start
-                    );
-                    full_seektable
-                } else {
-                    debug!(
-                        "Adjusted seektable for byte range: {} -> {} entries (rel_start={}, rel_end={})",
-                        st.len(),
-                        adjusted.len(),
-                        rel_track_start,
-                        rel_track_end
-                    );
-                    Some(adjusted)
-                }
-            }
-            _ => full_seektable,
-        };
 
         let file_size = if let (Some(start), Some(end)) = (start_byte, end_byte) {
             end - start
@@ -823,9 +778,16 @@ impl PlaybackService {
         self.current_seektable_json = audio_format
             .as_ref()
             .and_then(|af| af.seektable_json.clone());
-        self.current_audio_data_start = audio_format
-            .as_ref()
-            .and_then(|af| af.audio_data_start.map(|s| s as u64));
+        // For seek calculations, audio_data_start is where audio begins in our playback buffer.
+        // - CUE/FLAC (needs_headers=true): We prepend headers, so audio starts at headers_len
+        // - Regular FLAC: Buffer contains full file, use stored audio_data_start
+        self.current_audio_data_start = if needs_headers {
+            Some(headers_len)
+        } else {
+            audio_format
+                .as_ref()
+                .and_then(|af| af.audio_data_start.map(|s| s as u64))
+        };
 
         let source = Arc::new(Mutex::new(source));
         let (source_sample_rate, source_channels) = {
@@ -1620,7 +1582,7 @@ impl PlaybackService {
                     }
 
                     self.stream = Some(stream);
-                    self.current_streaming_source = Some(source);
+                    self.current_streaming_source = Some(source.clone());
 
                     // gen was already incremented at the start of the seek
                     *self.current_position_shared.lock().unwrap() = Some(position);
@@ -1633,6 +1595,7 @@ impl PlaybackService {
                     let track_id = track.id.clone();
                     let current_position_for_listener = self.current_position_shared.clone();
                     let position_generation = self.position_generation.clone();
+                    let streaming_source_for_stats = Some(source);
 
                     tokio::spawn(async move {
                         loop {
@@ -1651,9 +1614,20 @@ impl PlaybackService {
                                 }
                                 Some(()) = completion_rx_async.recv() => {
                                     if position_generation.load(std::sync::atomic::Ordering::SeqCst) == gen {
-                                        info!("Track completed after smart seek: {}", track_id);
+                                        // Get decode error count from streaming source
+                                        let error_count = streaming_source_for_stats
+                                            .as_ref()
+                                            .and_then(|s| s.lock().ok())
+                                            .map(|g| g.decode_error_count())
+                                            .unwrap_or(0);
+
+                                        info!("Track completed after smart seek: {} ({} decode errors)", track_id, error_count);
                                         let _ = progress_tx.send(PlaybackProgress::TrackCompleted {
                                             track_id: track_id.clone(),
+                                        });
+                                        let _ = progress_tx.send(PlaybackProgress::DecodeStats {
+                                            track_id: track_id.clone(),
+                                            error_count,
                                         });
                                     }
                                     break;
@@ -1773,20 +1747,15 @@ impl PlaybackService {
 
                         // Parse and adjust seektable for seek position
                         let rel_seek_byte = target_byte.saturating_sub(audio_data_start);
-                        let seek_seektable: Vec<crate::audio_codec::SeekEntry> = self
+                        let original_seektable: Vec<crate::audio_codec::SeekEntry> = self
                             .current_seektable_json
                             .as_ref()
                             .and_then(|json| serde_json::from_str(json).ok())
-                            .map(|st: Vec<crate::audio_codec::SeekEntry>| {
-                                st.iter()
-                                    .filter(|e| e.byte >= rel_seek_byte)
-                                    .map(|e| crate::audio_codec::SeekEntry {
-                                        sample: e.sample,
-                                        byte: e.byte - rel_seek_byte,
-                                    })
-                                    .collect()
-                            })
                             .unwrap_or_default();
+                        let seek_seektable = crate::audio_codec::adjust_seektable_for_seek(
+                            &original_seektable,
+                            rel_seek_byte,
+                        );
 
                         std::thread::spawn(move || {
                             if let Err(e) = crate::audio_codec::decode_audio_streaming(

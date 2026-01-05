@@ -1308,6 +1308,11 @@ async fn test_cue_flac_playback() {
 }
 
 /// Test that seeking in CUE/FLAC tracks decodes correctly without errors.
+///
+/// This specifically tests seeking in track 2 (not track 1) because track 1
+/// starts near byte 0, so seektable bugs might not manifest. Track 2 starts
+/// mid-album, exposing bugs where the album's seektable offsets don't match
+/// the track's byte range.
 #[tokio::test]
 async fn test_cue_flac_seek() {
     if should_skip_audio_tests() {
@@ -1324,9 +1329,10 @@ async fn test_cue_flac_seek() {
     };
 
     assert_eq!(fixture.track_ids.len(), 3, "Should have 3 tracks");
-    let track_id = fixture.track_ids[0].clone();
+    // Use track 2 (index 1) - this starts mid-album, exposing seektable bugs
+    let track_id = fixture.track_ids[1].clone();
 
-    // Play track 1
+    // Play track 2
     fixture.playback_handle.play(track_id.clone());
 
     // Wait for playback to start (any state change to Playing)
@@ -1346,34 +1352,56 @@ async fn test_cue_flac_seek() {
     }
     assert!(started, "Playback should start");
 
-    // Seek forward immediately after start
-    // Note: Test tracks are ~16s each, seek to 12s to trigger smart seek within buffer
-    fixture.playback_handle.seek(Duration::from_secs(12));
+    // Seek forward - test tracks are ~16s each, seek to 5s to trigger smart seek
+    fixture.playback_handle.seek(Duration::from_secs(5));
 
     // Wait for seek to complete and track to finish (or timeout)
-    let deadline = Instant::now() + Duration::from_secs(15);
+    // We need to check DecodeStats specifically for our track (track 2), not subsequent tracks
+    let deadline = Instant::now() + Duration::from_secs(20);
     let mut decode_error_count: Option<u32> = None;
+    let mut track_completed = false;
 
     while Instant::now() < deadline {
         let remaining = deadline - Instant::now();
         match timeout(remaining, fixture.progress_rx.recv()).await {
-            Ok(Some(PlaybackProgress::DecodeStats { error_count, .. })) => {
-                decode_error_count = Some(error_count);
-                break;
+            Ok(Some(PlaybackProgress::DecodeStats {
+                error_count,
+                track_id: stats_track_id,
+            })) => {
+                if stats_track_id == track_id {
+                    decode_error_count = Some(error_count);
+                    break;
+                }
+                // Stats for a different track (auto-advanced), keep waiting
             }
-            Ok(Some(PlaybackProgress::TrackCompleted { .. })) => {
-                // Track completed, DecodeStats should follow
+            Ok(Some(PlaybackProgress::TrackCompleted {
+                track_id: completed_track_id,
+            })) => {
+                if completed_track_id == track_id {
+                    track_completed = true;
+                    // DecodeStats should follow for this track
+                }
             }
             Ok(Some(_)) => continue,
             Ok(None) | Err(_) => break,
         }
     }
 
-    // Check FFmpeg decode errors after seek - should be 0 for valid decode
-    let error_count = decode_error_count.unwrap_or(0);
+    assert!(
+        track_completed,
+        "Track 2 should complete (either normally or after failed seek decode)"
+    );
+
+    // If we got DecodeStats for our track, check the error count
+    // If we didn't get DecodeStats (bug: smart seek doesn't emit stats), the test should also fail
+    let error_count = decode_error_count.expect(
+        "Should receive DecodeStats for track 2 - \
+         if missing, smart seek completion may not be emitting stats",
+    );
     assert_eq!(
         error_count, 0,
-        "CUE/FLAC seek had {} FFmpeg decode errors",
+        "CUE/FLAC seek had {} FFmpeg decode errors - \
+         likely seektable offsets are wrong for mid-album track",
         error_count
     );
 }

@@ -836,8 +836,40 @@ impl ImportService {
                         flac_info.audio_data_end,
                     );
 
-                // Serialize seektable to JSON for smart seek support
-                let seektable_json = serde_json::to_string(&dense_seektable).ok();
+                // Create per-track adjusted seektable for smart seek support.
+                // Filter to entries within this track's byte range and adjust both
+                // byte offsets AND sample numbers to be track-relative:
+                // - byte 0 = first byte of track audio data
+                // - sample 0 = first sample of track
+                let start_byte_u64 = start_byte as u64;
+                let end_byte_u64 = end_byte as u64;
+
+                // Find the first sample in our track range to use as baseline
+                let first_track_sample = dense_seektable
+                    .iter()
+                    .find(|e| {
+                        let abs_byte = flac_info.audio_data_start + e.byte;
+                        abs_byte >= start_byte_u64
+                    })
+                    .map(|e| e.sample)
+                    .unwrap_or(0);
+
+                let track_seektable: Vec<crate::audio_codec::SeekEntry> = dense_seektable
+                    .iter()
+                    .filter(|e| {
+                        let abs_byte = flac_info.audio_data_start + e.byte;
+                        abs_byte >= start_byte_u64 && abs_byte < end_byte_u64
+                    })
+                    .map(|e| {
+                        let abs_byte = flac_info.audio_data_start + e.byte;
+                        crate::audio_codec::SeekEntry {
+                            sample: e.sample.saturating_sub(first_track_sample),
+                            byte: abs_byte - start_byte_u64,
+                        }
+                    })
+                    .collect();
+
+                let seektable_json = serde_json::to_string(&track_seektable).ok();
 
                 // Look up file_id by filename
                 let filename = track_file
