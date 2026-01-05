@@ -118,7 +118,7 @@ impl ImportService {
 
     /// Start the import service with an injected cloud storage (for testing).
     #[cfg(feature = "test-utils")]
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Used by integration tests
     pub fn start_with_cloud(
         _runtime_handle: tokio::runtime::Handle,
         library_manager: SharedLibraryManager,

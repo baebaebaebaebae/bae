@@ -16,16 +16,9 @@ pub enum RipError {
 }
 /// Progress update during ripping
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct RipProgress {
-    pub track: u8,
-    pub total_tracks: u8,
     /// Overall album progress (0-100%)
     pub percent: u8,
-    /// Progress within the current track (0-100%)
-    pub track_percent: u8,
-    pub bytes_read: u64,
-    pub errors: u32,
 }
 /// Result of ripping a single track
 #[derive(Debug, Clone)]
@@ -71,14 +64,7 @@ impl CdRipper {
             info!("Ripping track {} ({}/{})", track_num, idx + 1, total_tracks);
             if let Some(ref tx) = progress_tx {
                 let percent = ((idx * 100) / total_tracks as usize) as u8;
-                let _ = tx.send(RipProgress {
-                    track: track_num,
-                    total_tracks,
-                    percent,
-                    track_percent: 0,
-                    bytes_read: 0,
-                    errors: 0,
-                });
+                let _ = tx.send(RipProgress { percent });
             }
             info!("Calling rip_track for track {}", track_num);
             let result = self.rip_track(track_num, progress_tx.as_ref()).await?;
@@ -89,14 +75,7 @@ impl CdRipper {
             results.push(result);
             if let Some(ref tx) = progress_tx {
                 let percent = (((idx + 1) * 100) / total_tracks as usize) as u8;
-                let _ = tx.send(RipProgress {
-                    track: track_num,
-                    total_tracks,
-                    percent,
-                    track_percent: 100,
-                    bytes_read: results.last().unwrap().bytes_written,
-                    errors: results.last().unwrap().errors,
-                });
+                let _ = tx.send(RipProgress { percent });
             }
         }
         info!("All tracks ripped successfully");

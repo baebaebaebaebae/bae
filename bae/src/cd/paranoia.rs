@@ -54,12 +54,7 @@ impl ParanoiaReader {
                 let track_index = (current_track - 1) as usize;
                 let overall_percent = ((track_index as f32 / total_tracks as f32) * 100.0) as u8;
                 let _ = tx.send(RipProgress {
-                    track: current_track,
-                    total_tracks,
                     percent: overall_percent,
-                    track_percent: 0,
-                    bytes_read: 0,
-                    errors: 0,
                 });
             }
             tracing::info!(
@@ -125,14 +120,8 @@ impl ParanoiaReader {
                         let overall_percent = ((track_index as f32 + track_progress_percent)
                             / total_tracks as f32
                             * 100.0) as u8;
-                        let bytes_read = (sectors_read as usize) * sector_size;
                         let _ = tx.send(RipProgress {
-                            track: current_track,
-                            total_tracks,
                             percent: overall_percent,
-                            track_percent: track_progress.min(100.0) as u8,
-                            bytes_read: bytes_read as u64,
-                            errors,
                         });
                     }
                 }
@@ -199,24 +188,13 @@ impl ParanoiaReader {
                 let track_index = (current_track - 1) as usize;
                 let overall_percent =
                     (((track_index + 1) as f32 / total_tracks as f32) * 100.0) as u8;
-                let total_bytes = (num_sectors as usize) * sector_size;
                 let _ = tx.send(RipProgress {
-                    track: current_track,
-                    total_tracks,
                     percent: overall_percent,
-                    track_percent: 100,
-                    bytes_read: total_bytes as u64,
-                    errors,
                 });
                 tracing::info!("Final progress update sent");
             }
             tracing::info!("Returning from read_audio_sectors_paranoia_with_progress");
             Ok((buffer, errors))
         }
-    }
-    /// Get the underlying drive
-    #[allow(dead_code)]
-    pub fn drive(&self) -> &LibcdioDrive {
-        &self.drive
     }
 }
