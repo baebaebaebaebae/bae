@@ -756,8 +756,8 @@ fn copy_cue_flac_fixture_with_seektable(dir: &Path) {
 /// If byte offsets are wrong by even one frame, samples won't match.
 #[tokio::test]
 async fn test_cue_flac_track2_samples_match_ground_truth() {
-    use bae::cue_flac::CueFlacProcessor;
     use bae::audio_codec::decode_audio;
+    use bae::cue_flac::CueFlacProcessor;
 
     tracing_init();
 
@@ -946,8 +946,8 @@ async fn test_cue_flac_track2_samples_match_ground_truth() {
 /// Currently FAILS due to lead-in samples from frame boundary alignment.
 #[tokio::test]
 async fn test_cue_flac_track_start_positions() {
-    use bae::cue_flac::CueFlacProcessor;
     use bae::audio_codec::decode_audio;
+    use bae::cue_flac::CueFlacProcessor;
 
     tracing_init();
 
@@ -1056,8 +1056,8 @@ async fn test_cue_flac_track_start_positions() {
 /// the continuous audio from the full decode.
 #[tokio::test]
 async fn test_cue_flac_gapless_track_boundary() {
-    use bae::cue_flac::CueFlacProcessor;
     use bae::audio_codec::decode_audio;
+    use bae::cue_flac::CueFlacProcessor;
 
     tracing_init();
 

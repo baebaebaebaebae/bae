@@ -823,6 +823,20 @@ impl ImportService {
                         flac_info.audio_data_end,
                     );
 
+                // Serialize seektable to JSON for smart seek support
+                let seektable_json = serde_json::to_string(
+                    &dense_seektable
+                        .iter()
+                        .map(|e| {
+                            serde_json::json!({
+                                "sample": e.sample_number,
+                                "byte": e.stream_offset
+                            })
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .ok();
+
                 let audio_format = DbAudioFormat::new_with_byte_offsets(
                     &track_file.db_track_id,
                     "flac",
@@ -833,14 +847,76 @@ impl ImportService {
                     pregap_ms,
                     Some(frame_offset_samples),
                     Some(exact_sample_count),
+                    Some(flac_info.sample_rate as i64),
+                    seektable_json,
+                    Some(flac_info.audio_data_start as i64),
                 );
                 library_manager
                     .add_audio_format(&audio_format)
                     .await
                     .map_err(|e| format!("Failed to insert audio format: {}", e))?;
             } else {
-                let audio_format =
-                    DbAudioFormat::new(&track_file.db_track_id, &format, None, false);
+                // For regular FLAC files (not CUE), extract headers and seektable for smart seek
+                let (flac_headers, sample_rate, seektable_json, audio_data_start) = if format
+                    == "flac"
+                {
+                    let headers = crate::cue_flac::CueFlacProcessor::extract_flac_headers(
+                        &track_file.file_path,
+                    )
+                    .ok()
+                    .map(|h| h.headers);
+
+                    // Build seektable for frame-accurate seeking
+                    let file_data = std::fs::read(&track_file.file_path).ok();
+                    let (sample_rate, seektable, audio_start) = if let Some(data) = file_data {
+                        let flac_info =
+                            crate::cue_flac::CueFlacProcessor::analyze_flac(&track_file.file_path)
+                                .ok();
+                        if let Some(info) = flac_info {
+                            let seektable =
+                                crate::cue_flac::CueFlacProcessor::build_dense_seektable(
+                                    &data, &info,
+                                );
+                            // Serialize seektable to JSON
+                            let json = serde_json::to_string(
+                                &seektable
+                                    .entries
+                                    .iter()
+                                    .map(|e| {
+                                        serde_json::json!({
+                                            "sample": e.sample_number,
+                                            "byte": e.stream_offset
+                                        })
+                                    })
+                                    .collect::<Vec<_>>(),
+                            )
+                            .ok();
+                            (
+                                Some(info.sample_rate as i64),
+                                json,
+                                Some(info.audio_data_start as i64),
+                            )
+                        } else {
+                            (None, None, None)
+                        }
+                    } else {
+                        (None, None, None)
+                    };
+
+                    (headers, sample_rate, seektable, audio_start)
+                } else {
+                    (None, None, None, None)
+                };
+
+                let audio_format = DbAudioFormat::new(
+                    &track_file.db_track_id,
+                    &format,
+                    flac_headers,
+                    false,
+                    sample_rate,
+                    seektable_json,
+                    audio_data_start,
+                );
                 library_manager
                     .add_audio_format(&audio_format)
                     .await

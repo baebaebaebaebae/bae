@@ -6,7 +6,7 @@
 //!
 //! Also provides streaming decode via AVIO custom I/O for real-time playback.
 
-use crate::playback::{SharedStreamingBuffer, StreamingPcmSink};
+use crate::playback::{SharedSparseBuffer, StreamingPcmSink};
 use std::io::Write;
 use std::path::Path;
 use tempfile::NamedTempFile;
@@ -66,8 +66,8 @@ fn decode_audio_file(
         .to_str()
         .ok_or_else(|| "Invalid path encoding".to_string())?;
 
-    let mut ictx =
-        ffmpeg_next::format::input(&path_str).map_err(|e| format!("Failed to open audio file: {}", e))?;
+    let mut ictx = ffmpeg_next::format::input(&path_str)
+        .map_err(|e| format!("Failed to open audio file: {}", e))?;
 
     // Find best audio stream
     let input_stream = ictx
@@ -149,7 +149,8 @@ fn decode_audio_file(
 
             if collecting {
                 // Extract samples based on format
-                let frame_samples_vec = extract_samples_from_frame(&decoded, channels as usize, is_float);
+                let frame_samples_vec =
+                    extract_samples_from_frame(&decoded, channels as usize, is_float);
 
                 // Calculate which samples to take based on range
                 let skip_start = if let Some(start) = start_sample {
@@ -196,7 +197,8 @@ fn decode_audio_file(
     let mut decoded = ffmpeg_next::util::frame::audio::Audio::empty();
     while decoder.receive_frame(&mut decoded).is_ok() {
         if collecting {
-            let frame_samples_vec = extract_samples_from_frame(&decoded, channels as usize, is_float);
+            let frame_samples_vec =
+                extract_samples_from_frame(&decoded, channels as usize, is_float);
             samples.extend_from_slice(&frame_samples_vec);
         }
     }
@@ -252,9 +254,7 @@ fn extract_samples_from_frame(
                     let offset = i * bytes_per_sample;
                     if offset + bytes_per_sample <= plane.len() {
                         let sample = match bytes_per_sample {
-                            2 => {
-                                i16::from_ne_bytes([plane[offset], plane[offset + 1]]) as i32
-                            }
+                            2 => i16::from_ne_bytes([plane[offset], plane[offset + 1]]) as i32,
                             4 => i32::from_ne_bytes([
                                 plane[offset],
                                 plane[offset + 1],
@@ -665,10 +665,11 @@ fn validate_flac_frame_header(data: &[u8], pos: usize) -> bool {
     }
 
     // Calculate header length
-    let header_len = match calculate_flac_frame_header_length(data, pos, block_size_code, sample_rate_code) {
-        Some(len) => len,
-        None => return false,
-    };
+    let header_len =
+        match calculate_flac_frame_header_length(data, pos, block_size_code, sample_rate_code) {
+            Some(len) => len,
+            None => return false,
+        };
 
     if pos + header_len >= data.len() {
         return false;
@@ -772,21 +773,21 @@ fn compute_flac_crc8(data: &[u8]) -> u8 {
 pub struct StreamingAudioInfo {
     pub sample_rate: u32,
     pub channels: u32,
-    pub bits_per_sample: u32,
 }
 
 /// Decode audio from a streaming buffer and push f32 samples to sink.
 ///
-/// This function runs in a blocking thread, reading from the streaming buffer
-/// as data becomes available, decoding with FFmpeg, and pushing f32 samples
-/// to the ring buffer sink.
+/// Streaming audio decoder using sparse buffer.
 ///
-/// Returns audio info on success, or error message on failure.
-pub fn decode_audio_streaming(
-    buffer: SharedStreamingBuffer,
+/// This function runs in a blocking thread, reading from the sparse streaming buffer
+/// as data becomes available, decoding with FFmpeg, and pushing f32 samples
+/// to the ring buffer sink. The sparse buffer supports non-contiguous ranges
+/// and seeking within buffered data.
+pub fn decode_audio_streaming_sparse(
+    buffer: SharedSparseBuffer,
     sink: &mut StreamingPcmSink,
 ) -> Result<StreamingAudioInfo, String> {
-    // Read all data from streaming buffer (blocking until EOF or cancelled)
+    // Read all data from sparse buffer (blocking until EOF or cancelled)
     let mut audio_data = Vec::new();
     let mut read_buf = [0u8; 32768]; // 32KB chunks
 
@@ -808,7 +809,10 @@ pub fn decode_audio_streaming(
         return Err("No audio data received".to_string());
     }
 
-    debug!("Streaming decoder received {} bytes", audio_data.len());
+    debug!(
+        "Sparse streaming decoder received {} bytes",
+        audio_data.len()
+    );
 
     // Decode the audio data
     let decoded = decode_audio(&audio_data, None, None)?;
@@ -816,7 +820,6 @@ pub fn decode_audio_streaming(
     let info = StreamingAudioInfo {
         sample_rate: decoded.sample_rate,
         channels: decoded.channels,
-        bits_per_sample: decoded.bits_per_sample,
     };
 
     // Convert i32 samples to f32 and push to sink
@@ -832,7 +835,7 @@ pub fn decode_audio_streaming(
     const CHUNK_SIZE: usize = 8192;
     for chunk in f32_samples.chunks(CHUNK_SIZE) {
         if sink.is_cancelled() {
-            warn!("Streaming decode cancelled during push");
+            warn!("Sparse streaming decode cancelled during push");
             return Err("Cancelled".to_string());
         }
         sink.push_samples_blocking(chunk);
@@ -841,7 +844,7 @@ pub fn decode_audio_streaming(
     sink.mark_finished();
 
     info!(
-        "Streaming decode complete: {} samples, {}Hz, {} channels",
+        "Sparse streaming decode complete: {} samples, {}Hz, {} channels",
         f32_samples.len(),
         info.sample_rate,
         info.channels
@@ -917,7 +920,8 @@ mod tests {
 
     #[test]
     fn test_streaming_decode() {
-        use crate::playback::{create_streaming_buffer, create_streaming_pair_with_capacity};
+        use crate::playback::create_streaming_pair_with_capacity;
+        use crate::playback::sparse_buffer::create_sparse_buffer;
         use std::thread;
 
         init();
@@ -928,16 +932,18 @@ mod tests {
             .collect();
         let flac_data = encode_to_flac(&samples, 44100, 1, 16).unwrap();
 
-        // Create streaming infrastructure
-        let buffer = create_streaming_buffer();
+        // Create streaming infrastructure with sparse buffer
+        let buffer = create_sparse_buffer();
         let (mut sink, mut source) = create_streaming_pair_with_capacity(44100, 1, 100000);
 
         // Spawn decoder thread
         let decoder_buffer = buffer.clone();
-        let decoder_handle = thread::spawn(move || decode_audio_streaming(decoder_buffer, &mut sink));
+        let decoder_handle =
+            thread::spawn(move || decode_audio_streaming_sparse(decoder_buffer, &mut sink));
 
         // Feed data to buffer (simulating download)
-        buffer.append(&flac_data);
+        buffer.append_at(0, &flac_data);
+        buffer.set_total_size(flac_data.len() as u64);
         buffer.mark_eof();
 
         // Wait for decoder

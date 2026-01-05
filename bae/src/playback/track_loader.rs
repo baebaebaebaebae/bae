@@ -145,10 +145,8 @@ pub(crate) async fn decode_audio_to_pcm(
     audio_data: &[u8],
 ) -> Result<crate::audio_codec::DecodedAudio, PlaybackError> {
     let audio_data = audio_data.to_vec();
-    tokio::task::spawn_blocking(move || {
-        crate::audio_codec::decode_audio(&audio_data, None, None)
-    })
-    .await
-    .map_err(PlaybackError::task)?
-    .map_err(PlaybackError::flac)
+    tokio::task::spawn_blocking(move || crate::audio_codec::decode_audio(&audio_data, None, None))
+        .await
+        .map_err(PlaybackError::task)?
+        .map_err(PlaybackError::flac)
 }

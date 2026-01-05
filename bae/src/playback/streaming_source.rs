@@ -72,6 +72,7 @@ impl StreamingPcmSink {
     ///
     /// Returns the number of samples actually pushed. If the buffer is full,
     /// this will push as many as possible and return early.
+    #[cfg(test)]
     pub fn push_samples(&mut self, samples: &[f32]) -> usize {
         if self.state.is_cancelled() {
             return 0;
@@ -120,11 +121,6 @@ impl StreamingPcmSink {
     pub fn is_cancelled(&self) -> bool {
         self.state.is_cancelled()
     }
-
-    /// Get number of slots available in the buffer.
-    pub fn available(&self) -> usize {
-        self.producer.slots()
-    }
 }
 
 /// Consumer side of the streaming audio pipeline.
@@ -172,6 +168,7 @@ impl StreamingPcmSource {
     }
 
     /// Check if the producer signaled finished (may still have buffered data).
+    #[cfg(test)]
     pub fn producer_finished(&self) -> bool {
         self.state.is_finished()
     }
@@ -182,6 +179,7 @@ impl StreamingPcmSource {
     }
 
     /// Check if cancelled.
+    #[cfg(test)]
     pub fn is_cancelled(&self) -> bool {
         self.state.is_cancelled()
     }
@@ -205,22 +203,13 @@ impl StreamingPcmSource {
     pub fn channels(&self) -> u32 {
         self.state.channels()
     }
-
-    /// Get number of samples available in buffer.
-    pub fn available(&self) -> usize {
-        self.consumer.slots()
-    }
-
-    /// Reset position counter (for seek operations).
-    pub fn reset_position(&self, position_samples: u64) {
-        self.state
-            .position_samples
-            .store(position_samples, Ordering::Relaxed);
-    }
 }
 
 /// Create a streaming source/sink pair with default capacity.
-pub fn create_streaming_pair(sample_rate: u32, channels: u32) -> (StreamingPcmSink, StreamingPcmSource) {
+pub fn create_streaming_pair(
+    sample_rate: u32,
+    channels: u32,
+) -> (StreamingPcmSink, StreamingPcmSource) {
     create_streaming_pair_with_capacity(sample_rate, channels, DEFAULT_CAPACITY_SAMPLES)
 }
 
@@ -238,10 +227,7 @@ pub fn create_streaming_pair_with_capacity(
         state: state.clone(),
     };
 
-    let source = StreamingPcmSource {
-        consumer,
-        state,
-    };
+    let source = StreamingPcmSource { consumer, state };
 
     (sink, source)
 }

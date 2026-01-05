@@ -263,6 +263,15 @@ pub struct DbAudioFormat {
     /// After decoding, trim output to this count. Required because FLAC frames
     /// at track boundaries may extend past the logical track end.
     pub exact_sample_count: Option<i64>,
+    /// Sample rate in Hz (for time-to-sample conversion during seek)
+    pub sample_rate: Option<i64>,
+    /// Dense seektable for frame-accurate seeking.
+    /// JSON array of {sample_number, byte_offset} entries built by scanning FLAC frames.
+    /// Enables smart seek: prepend headers + data from frame boundary.
+    pub seektable_json: Option<String>,
+    /// Byte offset where audio data starts in the file (after headers).
+    /// Seektable byte offsets are relative to this position.
+    pub audio_data_start: Option<i64>,
     pub created_at: DateTime<Utc>,
 }
 impl DbArtist {
@@ -513,6 +522,9 @@ impl DbAudioFormat {
         format: &str,
         flac_headers: Option<Vec<u8>>,
         needs_headers: bool,
+        sample_rate: Option<i64>,
+        seektable_json: Option<String>,
+        audio_data_start: Option<i64>,
     ) -> Self {
         Self::new_full(
             track_id,
@@ -524,6 +536,9 @@ impl DbAudioFormat {
             None,
             None,
             None,
+            sample_rate,
+            seektable_json,
+            audio_data_start,
         )
     }
 
@@ -537,6 +552,9 @@ impl DbAudioFormat {
         pregap_ms: Option<i64>,
         frame_offset_samples: Option<i64>,
         exact_sample_count: Option<i64>,
+        sample_rate: Option<i64>,
+        seektable_json: Option<String>,
+        audio_data_start: Option<i64>,
     ) -> Self {
         Self::new_full(
             track_id,
@@ -548,6 +566,9 @@ impl DbAudioFormat {
             pregap_ms,
             frame_offset_samples,
             exact_sample_count,
+            sample_rate,
+            seektable_json,
+            audio_data_start,
         )
     }
 
@@ -561,6 +582,9 @@ impl DbAudioFormat {
         pregap_ms: Option<i64>,
         frame_offset_samples: Option<i64>,
         exact_sample_count: Option<i64>,
+        sample_rate: Option<i64>,
+        seektable_json: Option<String>,
+        audio_data_start: Option<i64>,
     ) -> Self {
         DbAudioFormat {
             id: Uuid::new_v4().to_string(),
@@ -573,6 +597,9 @@ impl DbAudioFormat {
             pregap_ms,
             frame_offset_samples,
             exact_sample_count,
+            sample_rate,
+            seektable_json,
+            audio_data_start,
             created_at: Utc::now(),
         }
     }
