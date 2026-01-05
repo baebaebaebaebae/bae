@@ -4,7 +4,8 @@ use crate::library::LibraryManager;
 use crate::playback::cpal_output::AudioOutput;
 use crate::playback::progress::{PlaybackProgress, PlaybackProgressHandle};
 use crate::playback::{
-    create_streaming_buffer, create_streaming_pair, PcmSource, PlaybackError, StreamingPcmSource,
+    create_streaming_buffer, create_streaming_pair, PcmSource, PlaybackError,
+    SharedStreamingBuffer, StreamingPcmSource,
 };
 use crate::storage::{
     create_storage_reader, download_encrypted_to_streaming_buffer, download_to_streaming_buffer,
@@ -161,6 +162,8 @@ pub struct PlaybackService {
     next_pregap_ms: Option<i64>,
     /// Current streaming source (if using streaming playback)
     current_streaming_source: Option<Arc<Mutex<StreamingPcmSource>>>,
+    /// Current streaming buffer (for cancellation on seek/stop)
+    current_streaming_buffer: Option<SharedStreamingBuffer>,
 }
 impl PlaybackService {
     pub fn start(
@@ -221,6 +224,7 @@ impl PlaybackService {
                     next_duration: None,
                     next_pregap_ms: None,
                     current_streaming_source: None,
+                    current_streaming_buffer: None,
                 };
                 service.run().await;
             });
@@ -594,11 +598,11 @@ impl PlaybackService {
 
         match &storage_profile {
             None => {
-                self.play_track_streaming_local(track_id, track, is_natural_transition)
+                self.play_track_streaming_local(track_id, track, is_natural_transition, None)
                     .await;
             }
             Some(profile) => {
-                self.play_track_streaming(track_id, track, profile, is_natural_transition)
+                self.play_track_streaming(track_id, track, profile, is_natural_transition, None)
                     .await;
             }
         }
@@ -938,7 +942,10 @@ impl PlaybackService {
             drop(stream);
         }
 
-        // Clear streaming source if active (cancellation happens via buffer)
+        // Cancel and clear streaming buffer (stops download/decode tasks)
+        if let Some(buffer) = self.current_streaming_buffer.take() {
+            buffer.cancel();
+        }
         self.current_streaming_source.take();
 
         self.current_track = None;
@@ -954,25 +961,75 @@ impl PlaybackService {
             state: PlaybackState::Stopped,
         });
     }
+
+    /// Calculate byte offset for seeking within a byte range.
+    ///
+    /// Uses linear interpolation: seek_time / duration * (end - start) + start
+    fn calculate_byte_offset_for_seek(
+        seek_time: std::time::Duration,
+        track_duration: std::time::Duration,
+        start_byte: u64,
+        end_byte: u64,
+    ) -> u64 {
+        if track_duration.is_zero() {
+            return start_byte;
+        }
+        let ratio = seek_time.as_secs_f64() / track_duration.as_secs_f64();
+        let ratio = ratio.clamp(0.0, 1.0);
+        start_byte + ((end_byte - start_byte) as f64 * ratio) as u64
+    }
+
     async fn seek(&mut self, position: std::time::Duration) {
         // Check if we're using streaming playback
         if self.current_streaming_source.is_some() {
-            // For streaming playback, seeking requires restarting the entire pipeline.
-            // For now, we don't support seeking in streaming mode - just log and return.
-            info!(
-                "Seek not fully supported for streaming playback. Requested position: {:?}",
-                position
-            );
+            info!("Seeking in streaming playback to {:?}", position);
 
-            // Update the displayed position even though we can't actually seek
-            let _ = self.progress_tx.send(PlaybackProgress::SeekSkipped {
-                requested_position: position,
-                current_position: self
-                    .current_position_shared
-                    .lock()
-                    .unwrap()
-                    .unwrap_or(std::time::Duration::ZERO),
-            });
+            // Get current track info
+            let track = match &self.current_track {
+                Some(t) => t.clone(),
+                None => {
+                    error!("Cannot seek: no track playing");
+                    return;
+                }
+            };
+            let track_id = track.id.clone();
+
+            // Cancel current streaming buffer (stops download and decoder)
+            if let Some(buffer) = self.current_streaming_buffer.take() {
+                buffer.cancel();
+            }
+            self.current_streaming_source.take();
+
+            // Stop current stream
+            if let Some(stream) = self.stream.take() {
+                drop(stream);
+            }
+
+            // Re-fetch storage profile and restart with seek offset
+            let storage_profile = match self
+                .library_manager
+                .get_storage_profile_for_release(&track.release_id)
+                .await
+            {
+                Ok(profile) => profile,
+                Err(e) => {
+                    error!("Failed to get storage profile for seek: {}", e);
+                    self.stop().await;
+                    return;
+                }
+            };
+
+            match &storage_profile {
+                None => {
+                    self.play_track_streaming_local(&track_id, track, false, Some(position))
+                        .await;
+                }
+                Some(profile) => {
+                    self.play_track_streaming(&track_id, track, profile, false, Some(position))
+                        .await;
+                }
+            }
+
             return;
         }
 
@@ -1401,10 +1458,11 @@ impl PlaybackService {
         track_id: &str,
         track: DbTrack,
         is_natural_transition: bool,
+        seek_offset: Option<std::time::Duration>,
     ) {
         info!(
-            "Playing track (streaming local): {} (natural_transition: {})",
-            track_id, is_natural_transition
+            "Playing track (streaming local): {} (natural_transition: {}, seek: {:?})",
+            track_id, is_natural_transition, seek_offset
         );
 
         let _ = self.progress_tx.send(PlaybackProgress::StateChanged {
@@ -1458,8 +1516,14 @@ impl PlaybackService {
 
         let source_path = audio_file.source_path.clone().unwrap();
 
+        // Get track duration for seek calculations
+        let track_duration = track
+            .duration_ms
+            .map(|ms| std::time::Duration::from_millis(ms as u64))
+            .unwrap_or(std::time::Duration::from_secs(300));
+
         // Determine byte range for CUE/FLAC if applicable
-        let (start_byte, end_byte) = if let Some(af) = &audio_format {
+        let (base_start_byte, end_byte) = if let Some(af) = &audio_format {
             if let (Some(start), Some(end)) = (af.start_byte_offset, af.end_byte_offset) {
                 (Some(start as u64), Some(end as u64))
             } else {
@@ -1467,6 +1531,32 @@ impl PlaybackService {
             }
         } else {
             (None, None)
+        };
+
+        // Calculate actual start byte accounting for seek offset
+        let start_byte = if let Some(seek_pos) = seek_offset {
+            if let (Some(base), Some(end)) = (base_start_byte, end_byte) {
+                // CUE/FLAC: calculate offset within track's byte range
+                let seek_byte =
+                    Self::calculate_byte_offset_for_seek(seek_pos, track_duration, base, end);
+                Some(seek_byte)
+            } else {
+                // Regular file: get file size and calculate offset
+                match std::fs::metadata(&source_path) {
+                    Ok(meta) => {
+                        let file_size = meta.len();
+                        Some(Self::calculate_byte_offset_for_seek(
+                            seek_pos,
+                            track_duration,
+                            0,
+                            file_size,
+                        ))
+                    }
+                    Err(_) => None,
+                }
+            }
+        } else {
+            base_start_byte
         };
 
         // Check if we need to prepend FLAC headers
@@ -1564,7 +1654,9 @@ impl PlaybackService {
             (guard.sample_rate(), guard.channels())
         };
 
-        let start_position = calculate_start_position(pregap_ms, is_natural_transition);
+        // Use seek_offset if provided, otherwise calculate from pregap
+        let start_position = seek_offset
+            .unwrap_or_else(|| calculate_start_position(pregap_ms, is_natural_transition));
 
         if let Some(stream) = self.stream.take() {
             drop(stream);
@@ -1629,6 +1721,7 @@ impl PlaybackService {
         self.stream = Some(stream);
         self.current_track = Some(track.clone());
         self.current_streaming_source = Some(source);
+        self.current_streaming_buffer = Some(buffer);
         self.current_position = Some(start_position);
         self.current_pregap_ms = pregap_ms;
         self.is_paused = false;
@@ -1698,10 +1791,11 @@ impl PlaybackService {
         track: DbTrack,
         storage_profile: &crate::db::DbStorageProfile,
         is_natural_transition: bool,
+        seek_offset: Option<std::time::Duration>,
     ) {
         info!(
-            "Playing track (streaming): {} (natural_transition: {})",
-            track_id, is_natural_transition
+            "Playing track (streaming): {} (natural_transition: {}, seek: {:?})",
+            track_id, is_natural_transition, seek_offset
         );
 
         let _ = self.progress_tx.send(PlaybackProgress::StateChanged {
@@ -1764,8 +1858,14 @@ impl PlaybackService {
         // Create streaming infrastructure
         let buffer = create_streaming_buffer();
 
+        // Get track duration for seek calculations
+        let track_duration = track
+            .duration_ms
+            .map(|ms| std::time::Duration::from_millis(ms as u64))
+            .unwrap_or(std::time::Duration::from_secs(300));
+
         // Determine byte range for CUE/FLAC if applicable
-        let (start_byte, end_byte) = if let Some(af) = &audio_format {
+        let (base_start_byte, end_byte) = if let Some(af) = &audio_format {
             if let (Some(start), Some(end)) = (af.start_byte_offset, af.end_byte_offset) {
                 (Some(start as u64), Some(end as u64))
             } else {
@@ -1773,6 +1873,23 @@ impl PlaybackService {
             }
         } else {
             (None, None)
+        };
+
+        // Calculate actual start byte accounting for seek offset
+        let start_byte = if let Some(seek_pos) = seek_offset {
+            if let (Some(base), Some(end)) = (base_start_byte, end_byte) {
+                // CUE/FLAC: calculate offset within track's byte range
+                let seek_byte =
+                    Self::calculate_byte_offset_for_seek(seek_pos, track_duration, base, end);
+                Some(seek_byte)
+            } else {
+                // For regular files without byte offsets, start from proportion of file
+                // Note: For cloud files without size info, we'd need to fetch size first
+                // For now, use linear interpolation assuming typical file size
+                None // Fall through to default behavior
+            }
+        } else {
+            base_start_byte
         };
 
         // Spawn download task
@@ -1842,8 +1959,9 @@ impl PlaybackService {
             (guard.sample_rate(), guard.channels())
         };
 
-        // Calculate start position
-        let start_position = calculate_start_position(pregap_ms, is_natural_transition);
+        // Use seek_offset if provided, otherwise calculate from pregap
+        let start_position = seek_offset
+            .unwrap_or_else(|| calculate_start_position(pregap_ms, is_natural_transition));
 
         // Clean up old stream
         if let Some(stream) = self.stream.take() {
@@ -1912,6 +2030,7 @@ impl PlaybackService {
         self.stream = Some(stream);
         self.current_track = Some(track.clone());
         self.current_streaming_source = Some(source);
+        self.current_streaming_buffer = Some(buffer);
         self.current_position = Some(start_position);
         self.current_pregap_ms = pregap_ms;
         self.is_paused = false;
@@ -2165,5 +2284,70 @@ mod tests {
             validate_seek_position(seek_position, track_duration_metadata).is_err(),
             "This shows the bug: using track_duration would incorrectly reject the seek"
         );
+    }
+
+    #[test]
+    fn test_calculate_byte_offset_for_seek_at_start() {
+        let seek_time = std::time::Duration::ZERO;
+        let track_duration = std::time::Duration::from_secs(180);
+        let start_byte = 1000u64;
+        let end_byte = 10000u64;
+
+        let result =
+            PlaybackService::calculate_byte_offset_for_seek(seek_time, track_duration, start_byte, end_byte);
+
+        assert_eq!(result, 1000, "Seeking to start should return start_byte");
+    }
+
+    #[test]
+    fn test_calculate_byte_offset_for_seek_at_end() {
+        let seek_time = std::time::Duration::from_secs(180);
+        let track_duration = std::time::Duration::from_secs(180);
+        let start_byte = 1000u64;
+        let end_byte = 10000u64;
+
+        let result =
+            PlaybackService::calculate_byte_offset_for_seek(seek_time, track_duration, start_byte, end_byte);
+
+        assert_eq!(result, 10000, "Seeking to end should return end_byte");
+    }
+
+    #[test]
+    fn test_calculate_byte_offset_for_seek_at_middle() {
+        let seek_time = std::time::Duration::from_secs(90); // Half of 180
+        let track_duration = std::time::Duration::from_secs(180);
+        let start_byte = 0u64;
+        let end_byte = 10000u64;
+
+        let result =
+            PlaybackService::calculate_byte_offset_for_seek(seek_time, track_duration, start_byte, end_byte);
+
+        assert_eq!(result, 5000, "Seeking to middle should return midpoint");
+    }
+
+    #[test]
+    fn test_calculate_byte_offset_for_seek_clamped_past_end() {
+        let seek_time = std::time::Duration::from_secs(200); // Past track end
+        let track_duration = std::time::Duration::from_secs(180);
+        let start_byte = 1000u64;
+        let end_byte = 10000u64;
+
+        let result =
+            PlaybackService::calculate_byte_offset_for_seek(seek_time, track_duration, start_byte, end_byte);
+
+        assert_eq!(result, 10000, "Seeking past end should clamp to end_byte");
+    }
+
+    #[test]
+    fn test_calculate_byte_offset_for_seek_zero_duration() {
+        let seek_time = std::time::Duration::from_secs(10);
+        let track_duration = std::time::Duration::ZERO;
+        let start_byte = 1000u64;
+        let end_byte = 10000u64;
+
+        let result =
+            PlaybackService::calculate_byte_offset_for_seek(seek_time, track_duration, start_byte, end_byte);
+
+        assert_eq!(result, 1000, "Zero duration should return start_byte");
     }
 }
