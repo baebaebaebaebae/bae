@@ -169,11 +169,11 @@ jobs:
           if [[ -d "/opt/homebrew" ]]; then
             export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig"
             export LIBRARY_PATH="/opt/homebrew/lib"
-            export BINDGEN_EXTRA_CLANG_ARGS="-I/opt/homebrew/include"
+            export FFMPEG_DIR="/opt/homebrew"
           else
             export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig"
             export LIBRARY_PATH="/usr/local/lib"
-            export BINDGEN_EXTRA_CLANG_ARGS="-I/usr/local/include"
+            export FFMPEG_DIR="/usr/local"
           fi
         fi
         cargo clippy --lib -- -D warnings
