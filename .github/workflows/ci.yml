@@ -164,12 +164,16 @@ jobs:
       if: runner.os != 'Windows'
       working-directory: ./bae
       run: |
-        # Set PKG_CONFIG_PATH for macOS Homebrew (arm64 vs x86_64)
+        # Set env vars for macOS Homebrew (arm64 vs x86_64)
         if [[ "$RUNNER_OS" == "macOS" ]]; then
-          if [[ -d "/opt/homebrew/lib/pkgconfig" ]]; then
+          if [[ -d "/opt/homebrew" ]]; then
             export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig"
+            export CPATH="/opt/homebrew/include"
+            export LIBRARY_PATH="/opt/homebrew/lib"
           else
             export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig"
+            export CPATH="/usr/local/include"
+            export LIBRARY_PATH="/usr/local/lib"
           fi
         fi
         cargo clippy --lib -- -D warnings
@@ -200,12 +204,16 @@ jobs:
       if: runner.os != 'Windows'
       working-directory: ./bae
       run: |
-        # Set PKG_CONFIG_PATH for macOS Homebrew (arm64 vs x86_64)
+        # Set env vars for macOS Homebrew (arm64 vs x86_64)
         if [[ "$RUNNER_OS" == "macOS" ]]; then
-          if [[ -d "/opt/homebrew/lib/pkgconfig" ]]; then
+          if [[ -d "/opt/homebrew" ]]; then
             export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig"
+            export CPATH="/opt/homebrew/include"
+            export LIBRARY_PATH="/opt/homebrew/lib"
           else
             export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig"
+            export CPATH="/usr/local/include"
+            export LIBRARY_PATH="/usr/local/lib"
           fi
         fi
         cargo test --features test-utils --verbose
@@ -293,9 +301,11 @@ jobs:
       run: |
         if [[ -d "/opt/homebrew" ]]; then
           export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig"
+          export CPATH="/opt/homebrew/include"
           export LIBRARY_PATH="/opt/homebrew/lib"
         else
           export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig"
+          export CPATH="/usr/local/include"
           export LIBRARY_PATH="/usr/local/lib"
         fi
         dx bundle --release
