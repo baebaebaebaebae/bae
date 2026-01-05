@@ -4,8 +4,8 @@ use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::{Device, Stream, StreamConfig};
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::{mpsc, Mutex};
 use std::sync::Arc;
+use std::sync::{mpsc, Mutex};
 use tracing::{error, info, trace, warn};
 #[derive(Debug, Clone)]
 pub enum AudioCommand {
@@ -345,8 +345,7 @@ impl AudioOutput {
                                     Vec::with_capacity(output_frames * source_channels);
 
                                 for frame_idx in 0..output_frames {
-                                    let src_idx =
-                                        (frame_idx as f64 * sample_rate_ratio) as usize;
+                                    let src_idx = (frame_idx as f64 * sample_rate_ratio) as usize;
                                     if src_idx < input_frames {
                                         for ch in 0..source_channels {
                                             let idx = src_idx * source_channels + ch;

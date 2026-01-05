@@ -3,10 +3,8 @@ use crate::encryption::EncryptionService;
 use crate::library::LibraryManager;
 use crate::playback::cpal_output::AudioOutput;
 use crate::playback::progress::{PlaybackProgress, PlaybackProgressHandle};
-use crate::playback::{
-    create_streaming_buffer, create_streaming_pair, PcmSource, PlaybackError,
-    SharedStreamingBuffer, StreamingPcmSource,
-};
+use crate::playback::sparse_buffer::{create_sparse_buffer, SharedSparseBuffer};
+use crate::playback::{create_streaming_pair, PcmSource, PlaybackError, StreamingPcmSource};
 use crate::storage::{
     create_storage_reader, download_encrypted_to_streaming_buffer, download_to_streaming_buffer,
     download_to_streaming_buffer_with_range,
@@ -152,6 +150,8 @@ pub struct PlaybackService {
     current_pregap_ms: Option<i64>,
     is_paused: bool,
     current_position_shared: Arc<std::sync::Mutex<Option<std::time::Duration>>>,
+    /// Generation counter to invalidate old position listeners after seek
+    position_generation: Arc<std::sync::atomic::AtomicU64>,
     audio_output: AudioOutput,
     stream: Option<cpal::Stream>,
     current_pcm_source: Option<Arc<PcmSource>>,
@@ -162,8 +162,20 @@ pub struct PlaybackService {
     next_pregap_ms: Option<i64>,
     /// Current streaming source (if using streaming playback)
     current_streaming_source: Option<Arc<Mutex<StreamingPcmSource>>>,
-    /// Current streaming buffer (for cancellation on seek/stop)
-    current_streaming_buffer: Option<SharedStreamingBuffer>,
+    /// Current sparse buffer for smart seek support
+    current_sparse_buffer: Option<SharedSparseBuffer>,
+    /// File size or byte range size for current streaming track (for seek calculations)
+    current_streaming_file_size: Option<u64>,
+    /// Source path for current streaming track (for starting new downloads on seek)
+    current_streaming_source_path: Option<String>,
+    /// FLAC headers for current streaming track (for smart seek - prepended on decoder restart)
+    current_flac_headers: Option<Vec<u8>>,
+    /// Sample rate for current streaming track (for time-to-sample conversion)
+    current_sample_rate: Option<u32>,
+    /// Seektable JSON for current streaming track (for frame-accurate seek)
+    current_seektable_json: Option<String>,
+    /// Audio data start offset for current streaming track (seektable byte offsets are relative to this)
+    current_audio_data_start: Option<u64>,
 }
 impl PlaybackService {
     pub fn start(
@@ -216,6 +228,7 @@ impl PlaybackService {
                     current_pregap_ms: None,
                     is_paused: false,
                     current_position_shared: Arc::new(std::sync::Mutex::new(None)),
+                    position_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
                     audio_output,
                     stream: None,
                     current_pcm_source: None,
@@ -224,7 +237,13 @@ impl PlaybackService {
                     next_duration: None,
                     next_pregap_ms: None,
                     current_streaming_source: None,
-                    current_streaming_buffer: None,
+                    current_sparse_buffer: None,
+                    current_streaming_file_size: None,
+                    current_streaming_source_path: None,
+                    current_flac_headers: None,
+                    current_sample_rate: None,
+                    current_seektable_json: None,
+                    current_audio_data_start: None,
                 };
                 service.run().await;
             });
@@ -598,11 +617,11 @@ impl PlaybackService {
 
         match &storage_profile {
             None => {
-                self.play_track_streaming_local(track_id, track, is_natural_transition, None)
+                self.play_track_streaming_local(track_id, track, is_natural_transition)
                     .await;
             }
             Some(profile) => {
-                self.play_track_streaming(track_id, track, profile, is_natural_transition, None)
+                self.play_track_streaming(track_id, track, profile, is_natural_transition)
                     .await;
             }
         }
@@ -942,11 +961,17 @@ impl PlaybackService {
             drop(stream);
         }
 
-        // Cancel and clear streaming buffer (stops download/decode tasks)
-        if let Some(buffer) = self.current_streaming_buffer.take() {
+        // Cancel streaming source if active
+        if let Some(source) = self.current_streaming_source.take() {
+            if let Ok(guard) = source.lock() {
+                guard.cancel();
+            }
+        }
+
+        // Cancel sparse buffer if active
+        if let Some(buffer) = &self.current_sparse_buffer {
             buffer.cancel();
         }
-        self.current_streaming_source.take();
 
         self.current_track = None;
         self.current_pcm_source = None;
@@ -955,81 +980,518 @@ impl PlaybackService {
         self.next_pcm_source = None;
         self.next_track_id = None;
         self.next_duration = None;
+        self.current_sparse_buffer = None;
+        self.current_streaming_file_size = None;
+        self.current_streaming_source_path = None;
+        self.current_flac_headers = None;
+        self.current_sample_rate = None;
+        self.current_seektable_json = None;
+        self.current_audio_data_start = None;
         self.audio_output
             .send_command(crate::playback::cpal_output::AudioCommand::Stop);
         let _ = self.progress_tx.send(PlaybackProgress::StateChanged {
             state: PlaybackState::Stopped,
         });
     }
-
-    /// Calculate byte offset for seeking within a byte range.
-    ///
-    /// Uses linear interpolation: seek_time / duration * (end - start) + start
-    fn calculate_byte_offset_for_seek(
-        seek_time: std::time::Duration,
-        track_duration: std::time::Duration,
-        start_byte: u64,
-        end_byte: u64,
-    ) -> u64 {
-        if track_duration.is_zero() {
-            return start_byte;
-        }
-        let ratio = seek_time.as_secs_f64() / track_duration.as_secs_f64();
-        let ratio = ratio.clamp(0.0, 1.0);
-        start_byte + ((end_byte - start_byte) as f64 * ratio) as u64
-    }
-
     async fn seek(&mut self, position: std::time::Duration) {
-        // Check if we're using streaming playback
+        // Check if we're using streaming playback with smart seek support
         if self.current_streaming_source.is_some() {
-            info!("Seeking in streaming playback to {:?}", position);
-
-            // Get current track info
-            let track = match &self.current_track {
-                Some(t) => t.clone(),
-                None => {
-                    error!("Cannot seek: no track playing");
+            if let (Some(buffer), Some(file_size), Some(track)) = (
+                &self.current_sparse_buffer,
+                self.current_streaming_file_size,
+                &self.current_track,
+            ) {
+                // Check for same-position seek (difference < 100ms)
+                let current_position = self
+                    .current_position_shared
+                    .lock()
+                    .unwrap()
+                    .unwrap_or(std::time::Duration::ZERO);
+                let position_diff = position.abs_diff(current_position);
+                if position_diff < std::time::Duration::from_millis(100) {
+                    trace!(
+                        "Streaming seek: Skipping seek to same position (difference: {:?} < 100ms)",
+                        position_diff
+                    );
+                    let _ = self.progress_tx.send(PlaybackProgress::SeekSkipped {
+                        requested_position: position,
+                        current_position,
+                    });
                     return;
                 }
-            };
-            let track_id = track.id.clone();
 
-            // Cancel current streaming buffer (stops download and decoder)
-            if let Some(buffer) = self.current_streaming_buffer.take() {
-                buffer.cancel();
-            }
-            self.current_streaming_source.take();
+                let track_duration = self
+                    .current_decoded_duration
+                    .unwrap_or_else(|| std::time::Duration::from_secs(300));
 
-            // Stop current stream
-            if let Some(stream) = self.stream.take() {
-                drop(stream);
-            }
+                // Try frame-accurate seek using seektable, fall back to linear interpolation
+                // Seektable byte offsets are relative to audio_data_start, so add it to get file offset
+                let audio_data_start = self.current_audio_data_start.unwrap_or(0);
+                let (target_byte, _sample_offset) = if let (
+                    Some(sample_rate),
+                    Some(ref seektable),
+                ) =
+                    (self.current_sample_rate, &self.current_seektable_json)
+                {
+                    if let Some((frame_byte, offset)) =
+                        find_frame_boundary_for_seek(position, sample_rate, seektable)
+                    {
+                        // frame_byte is relative to audio data start, convert to file offset
+                        let file_byte = audio_data_start + frame_byte;
+                        info!(
+                            "Smart seek using seektable: position {:?}, frame_byte {}, file_byte {}, sample_offset {}",
+                            position, frame_byte, file_byte, offset
+                        );
+                        (file_byte, offset)
+                    } else {
+                        let byte =
+                            calculate_byte_offset_for_seek(position, track_duration, file_size);
+                        (byte, 0)
+                    }
+                } else {
+                    let byte = calculate_byte_offset_for_seek(position, track_duration, file_size);
+                    (byte, 0)
+                };
 
-            // Re-fetch storage profile and restart with seek offset
-            let storage_profile = match self
-                .library_manager
-                .get_storage_profile_for_release(&track.release_id)
-                .await
-            {
-                Ok(profile) => profile,
-                Err(e) => {
-                    error!("Failed to get storage profile for seek: {}", e);
-                    self.stop().await;
+                info!(
+                    "Smart seek: position {:?}, target_byte {}, file_size {}, audio_data_start {}",
+                    position, target_byte, file_size, audio_data_start
+                );
+
+                if buffer.is_buffered(target_byte) {
+                    // Data is buffered - create new buffer with headers + data from frame boundary
+                    info!(
+                        "Seek within buffer, creating decoder buffer from byte {}",
+                        target_byte
+                    );
+
+                    // Increment generation FIRST to invalidate old position listeners
+                    // This prevents stale updates during the blocking data copy below
+                    let gen = self
+                        .position_generation
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                        + 1;
+
+                    // Cancel old streaming source to stop the decoder
+                    if let Some(source) = &self.current_streaming_source {
+                        if let Ok(guard) = source.lock() {
+                            guard.cancel();
+                        }
+                    }
+
+                    // Drop old stream
+                    if let Some(stream) = self.stream.take() {
+                        drop(stream);
+                    }
+
+                    // Create a new buffer with headers prepended + audio data from frame boundary
+                    let seek_buffer = create_sparse_buffer();
+
+                    // Prepend FLAC headers if available
+                    let mut write_pos = 0u64;
+                    if let Some(ref headers) = self.current_flac_headers {
+                        seek_buffer.append_at(0, headers);
+                        write_pos = headers.len() as u64;
+                    }
+
+                    // Copy buffered audio data from target_byte onwards
+                    // Read from the original buffer and write to seek_buffer
+                    buffer.seek(target_byte);
+                    let mut temp_buf = vec![0u8; 65536]; // 64KB chunks
+                    loop {
+                        match buffer.read(&mut temp_buf) {
+                            Some(0) => break, // EOF
+                            Some(n) => {
+                                seek_buffer.append_at(write_pos, &temp_buf[..n]);
+                                write_pos += n as u64;
+                            }
+                            None => break, // Cancelled
+                        }
+                    }
+                    seek_buffer.mark_eof();
+
+                    // Start decoder on the seek buffer
+                    let (mut sink, source) = create_streaming_pair(44100, 2);
+
+                    std::thread::spawn(move || {
+                        if let Err(e) = crate::audio_codec::decode_audio_streaming_sparse(
+                            seek_buffer,
+                            &mut sink,
+                        ) {
+                            error!("Smart seek decode failed: {}", e);
+                        }
+                    });
+
+                    // Wait for decoder to start
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+                    let source = Arc::new(Mutex::new(source));
+                    let (source_sample_rate, source_channels) = {
+                        let guard = source.lock().unwrap();
+                        (guard.sample_rate(), guard.channels())
+                    };
+
+                    // Create new channels
+                    let (position_tx, position_rx) = mpsc::channel();
+                    let (completion_tx, completion_rx) = mpsc::channel();
+                    let (position_tx_async, mut position_rx_async) =
+                        tokio_mpsc::unbounded_channel();
+                    let (completion_tx_async, mut completion_rx_async) =
+                        tokio_mpsc::unbounded_channel();
+
+                    // Bridge channels
+                    let position_rx_clone = position_rx;
+                    tokio::spawn(async move {
+                        let position_rx = Arc::new(std::sync::Mutex::new(position_rx_clone));
+                        loop {
+                            let rx = position_rx.clone();
+                            match tokio::task::spawn_blocking(move || rx.lock().unwrap().recv())
+                                .await
+                            {
+                                Ok(Ok(pos)) => {
+                                    let _ = position_tx_async.send(pos);
+                                }
+                                Ok(Err(_)) | Err(_) => break,
+                            }
+                        }
+                    });
+
+                    let completion_rx_clone = completion_rx;
+                    tokio::spawn(async move {
+                        let completion_rx = Arc::new(std::sync::Mutex::new(completion_rx_clone));
+                        loop {
+                            let rx = completion_rx.clone();
+                            match tokio::task::spawn_blocking(move || rx.lock().unwrap().recv())
+                                .await
+                            {
+                                Ok(Ok(())) => {
+                                    let _ = completion_tx_async.send(());
+                                }
+                                Ok(Err(_)) | Err(_) => break,
+                            }
+                        }
+                    });
+
+                    // Create new stream
+                    let stream = match self.audio_output.create_streaming_stream(
+                        source.clone(),
+                        source_sample_rate,
+                        source_channels,
+                        position_tx,
+                        completion_tx,
+                    ) {
+                        Ok(stream) => stream,
+                        Err(e) => {
+                            error!("Failed to create stream after smart seek: {:?}", e);
+                            return;
+                        }
+                    };
+
+                    if let Err(e) = stream.play() {
+                        error!("Failed to start stream after smart seek: {:?}", e);
+                        return;
+                    }
+
+                    let was_paused = self.is_paused;
+                    if was_paused {
+                        self.audio_output
+                            .send_command(crate::playback::cpal_output::AudioCommand::Pause);
+                    } else {
+                        self.audio_output
+                            .send_command(crate::playback::cpal_output::AudioCommand::Play);
+                    }
+
+                    self.stream = Some(stream);
+                    self.current_streaming_source = Some(source);
+
+                    // gen was already incremented at the start of the seek
+                    *self.current_position_shared.lock().unwrap() = Some(position);
+
+                    // Spawn position/completion listener
+                    // Note: positions from the decoder are relative to the seek buffer (starting from 0),
+                    // so we add the seek target to get the actual track position
+                    let seek_offset = position;
+                    let progress_tx = self.progress_tx.clone();
+                    let track_id = track.id.clone();
+                    let current_position_for_listener = self.current_position_shared.clone();
+                    let position_generation = self.position_generation.clone();
+
+                    tokio::spawn(async move {
+                        loop {
+                            tokio::select! {
+                                Some(pos) = position_rx_async.recv() => {
+                                    // Only update if this listener is still current
+                                    if position_generation.load(std::sync::atomic::Ordering::SeqCst) == gen {
+                                        // Add seek offset to get actual track position
+                                        let actual_pos = seek_offset + pos;
+                                        *current_position_for_listener.lock().unwrap() = Some(actual_pos);
+                                        let _ = progress_tx.send(PlaybackProgress::PositionUpdate {
+                                            position: actual_pos,
+                                            track_id: track_id.clone(),
+                                        });
+                                    }
+                                }
+                                Some(()) = completion_rx_async.recv() => {
+                                    if position_generation.load(std::sync::atomic::Ordering::SeqCst) == gen {
+                                        info!("Track completed after smart seek: {}", track_id);
+                                        let _ = progress_tx.send(PlaybackProgress::TrackCompleted {
+                                            track_id: track_id.clone(),
+                                        });
+                                    }
+                                    break;
+                                }
+                                else => break,
+                            }
+                        }
+                    });
+
+                    let _ = self.progress_tx.send(PlaybackProgress::Seeked {
+                        position,
+                        track_id: track.id.clone(),
+                        was_paused,
+                    });
+
                     return;
-                }
-            };
+                } else {
+                    // Data not buffered - start new download from target position
+                    info!(
+                        "Seek past buffer: byte {} not buffered, buffered ranges: {:?}",
+                        target_byte,
+                        buffer.get_ranges()
+                    );
 
-            match &storage_profile {
-                None => {
-                    self.play_track_streaming_local(&track_id, track, false, Some(position))
-                        .await;
-                }
-                Some(profile) => {
-                    self.play_track_streaming(&track_id, track, profile, false, Some(position))
-                        .await;
+                    // Start new download at target byte (if we have source path)
+                    if let Some(source_path) = &self.current_streaming_source_path {
+                        let read_buffer = buffer.clone();
+                        let read_path = source_path.clone();
+                        let start_offset = target_byte;
+
+                        // Spawn new reader task starting at target offset
+                        tokio::spawn(async move {
+                            use tokio::io::{AsyncReadExt, AsyncSeekExt};
+
+                            let mut file = match tokio::fs::File::open(&read_path).await {
+                                Ok(f) => f,
+                                Err(e) => {
+                                    error!(
+                                        "Failed to open file for seek download {}: {}",
+                                        read_path, e
+                                    );
+                                    return;
+                                }
+                            };
+
+                            if let Err(e) = file.seek(std::io::SeekFrom::Start(start_offset)).await
+                            {
+                                error!("Failed to seek for download: {}", e);
+                                return;
+                            }
+
+                            let mut buffer_pos = start_offset;
+                            let mut chunk = vec![0u8; 65536];
+
+                            loop {
+                                if read_buffer.is_cancelled() {
+                                    return;
+                                }
+
+                                match file.read(&mut chunk).await {
+                                    Ok(0) => break, // EOF
+                                    Ok(n) => {
+                                        read_buffer.append_at(buffer_pos, &chunk[..n]);
+                                        buffer_pos += n as u64;
+                                    }
+                                    Err(e) => {
+                                        error!("Read error during seek download: {}", e);
+                                        break;
+                                    }
+                                }
+                            }
+                        });
+
+                        // Seek buffer to target position (will block until data arrives)
+                        buffer.seek(target_byte);
+
+                        // Cancel old streaming source to stop the decoder
+                        if let Some(source) = &self.current_streaming_source {
+                            if let Ok(guard) = source.lock() {
+                                guard.cancel();
+                            }
+                        }
+
+                        // Drop old stream
+                        if let Some(stream) = self.stream.take() {
+                            drop(stream);
+                        }
+
+                        // Wait briefly for new download to start buffering
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+                        // Restart decoder from new buffer position
+                        let (mut sink, source) = create_streaming_pair(44100, 2);
+                        let decoder_buffer = buffer.clone();
+
+                        std::thread::spawn(move || {
+                            if let Err(e) = crate::audio_codec::decode_audio_streaming_sparse(
+                                decoder_buffer,
+                                &mut sink,
+                            ) {
+                                error!("Seek past buffer decode failed: {}", e);
+                            }
+                        });
+
+                        // Wait for decoder to start
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+                        let source = Arc::new(Mutex::new(source));
+                        let (source_sample_rate, source_channels) = {
+                            let guard = source.lock().unwrap();
+                            (guard.sample_rate(), guard.channels())
+                        };
+
+                        // Create new channels
+                        let (position_tx, position_rx) = mpsc::channel();
+                        let (completion_tx, completion_rx) = mpsc::channel();
+                        let (position_tx_async, mut position_rx_async) =
+                            tokio_mpsc::unbounded_channel();
+                        let (completion_tx_async, mut completion_rx_async) =
+                            tokio_mpsc::unbounded_channel();
+
+                        // Bridge channels
+                        let position_rx_clone = position_rx;
+                        tokio::spawn(async move {
+                            let position_rx = Arc::new(std::sync::Mutex::new(position_rx_clone));
+                            loop {
+                                let rx = position_rx.clone();
+                                match tokio::task::spawn_blocking(move || rx.lock().unwrap().recv())
+                                    .await
+                                {
+                                    Ok(Ok(pos)) => {
+                                        let _ = position_tx_async.send(pos);
+                                    }
+                                    Ok(Err(_)) | Err(_) => break,
+                                }
+                            }
+                        });
+
+                        let completion_rx_clone = completion_rx;
+                        tokio::spawn(async move {
+                            let completion_rx =
+                                Arc::new(std::sync::Mutex::new(completion_rx_clone));
+                            loop {
+                                let rx = completion_rx.clone();
+                                match tokio::task::spawn_blocking(move || rx.lock().unwrap().recv())
+                                    .await
+                                {
+                                    Ok(Ok(())) => {
+                                        let _ = completion_tx_async.send(());
+                                    }
+                                    Ok(Err(_)) | Err(_) => break,
+                                }
+                            }
+                        });
+
+                        // Create new stream
+                        let stream = match self.audio_output.create_streaming_stream(
+                            source.clone(),
+                            source_sample_rate,
+                            source_channels,
+                            position_tx,
+                            completion_tx,
+                        ) {
+                            Ok(stream) => stream,
+                            Err(e) => {
+                                error!("Failed to create stream after seek past buffer: {:?}", e);
+                                return;
+                            }
+                        };
+
+                        if let Err(e) = stream.play() {
+                            error!("Failed to start stream after seek past buffer: {:?}", e);
+                            return;
+                        }
+
+                        let was_paused = self.is_paused;
+                        if was_paused {
+                            self.audio_output
+                                .send_command(crate::playback::cpal_output::AudioCommand::Pause);
+                        } else {
+                            self.audio_output
+                                .send_command(crate::playback::cpal_output::AudioCommand::Play);
+                        }
+
+                        self.stream = Some(stream);
+                        self.current_streaming_source = Some(source);
+
+                        // Increment generation to invalidate any old position listeners
+                        let gen = self
+                            .position_generation
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                            + 1;
+
+                        *self.current_position_shared.lock().unwrap() = Some(position);
+
+                        // Spawn position/completion listener
+                        // Note: positions from the decoder are relative to the seek point,
+                        // so we add the seek target to get the actual track position
+                        let seek_offset = position;
+                        let progress_tx = self.progress_tx.clone();
+                        let track_id = track.id.clone();
+                        let current_position_for_listener = self.current_position_shared.clone();
+                        let position_generation = self.position_generation.clone();
+
+                        tokio::spawn(async move {
+                            loop {
+                                tokio::select! {
+                                    Some(pos) = position_rx_async.recv() => {
+                                        if position_generation.load(std::sync::atomic::Ordering::SeqCst) == gen {
+                                            let actual_pos = seek_offset + pos;
+                                            *current_position_for_listener.lock().unwrap() = Some(actual_pos);
+                                            let _ = progress_tx.send(PlaybackProgress::PositionUpdate {
+                                                position: actual_pos,
+                                                track_id: track_id.clone(),
+                                            });
+                                        }
+                                    }
+                                    Some(()) = completion_rx_async.recv() => {
+                                        if position_generation.load(std::sync::atomic::Ordering::SeqCst) == gen {
+                                            info!("Track completed after seek past buffer: {}", track_id);
+                                            let _ = progress_tx.send(PlaybackProgress::TrackCompleted {
+                                                track_id: track_id.clone(),
+                                            });
+                                        }
+                                        break;
+                                    }
+                                    else => break,
+                                }
+                            }
+                        });
+
+                        let _ = self.progress_tx.send(PlaybackProgress::Seeked {
+                            position,
+                            track_id: track.id.clone(),
+                            was_paused,
+                        });
+
+                        return;
+                    }
                 }
             }
 
+            // Fallback: streaming without smart seek support
+            info!(
+                "Seek not fully supported for this streaming track. Requested position: {:?}",
+                position
+            );
+
+            let _ = self.progress_tx.send(PlaybackProgress::SeekSkipped {
+                requested_position: position,
+                current_position: self
+                    .current_position_shared
+                    .lock()
+                    .unwrap()
+                    .unwrap_or(std::time::Duration::ZERO),
+            });
             return;
         }
 
@@ -1458,11 +1920,10 @@ impl PlaybackService {
         track_id: &str,
         track: DbTrack,
         is_natural_transition: bool,
-        seek_offset: Option<std::time::Duration>,
     ) {
         info!(
-            "Playing track (streaming local): {} (natural_transition: {}, seek: {:?})",
-            track_id, is_natural_transition, seek_offset
+            "Playing track (streaming local): {} (natural_transition: {})",
+            track_id, is_natural_transition
         );
 
         let _ = self.progress_tx.send(PlaybackProgress::StateChanged {
@@ -1516,14 +1977,8 @@ impl PlaybackService {
 
         let source_path = audio_file.source_path.clone().unwrap();
 
-        // Get track duration for seek calculations
-        let track_duration = track
-            .duration_ms
-            .map(|ms| std::time::Duration::from_millis(ms as u64))
-            .unwrap_or(std::time::Duration::from_secs(300));
-
         // Determine byte range for CUE/FLAC if applicable
-        let (base_start_byte, end_byte) = if let Some(af) = &audio_format {
+        let (start_byte, end_byte) = if let Some(af) = &audio_format {
             if let (Some(start), Some(end)) = (af.start_byte_offset, af.end_byte_offset) {
                 (Some(start as u64), Some(end as u64))
             } else {
@@ -1533,44 +1988,36 @@ impl PlaybackService {
             (None, None)
         };
 
-        // Calculate actual start byte accounting for seek offset
-        let start_byte = if let Some(seek_pos) = seek_offset {
-            if let (Some(base), Some(end)) = (base_start_byte, end_byte) {
-                // CUE/FLAC: calculate offset within track's byte range
-                let seek_byte =
-                    Self::calculate_byte_offset_for_seek(seek_pos, track_duration, base, end);
-                Some(seek_byte)
-            } else {
-                // Regular file: get file size and calculate offset
-                match std::fs::metadata(&source_path) {
-                    Ok(meta) => {
-                        let file_size = meta.len();
-                        Some(Self::calculate_byte_offset_for_seek(
-                            seek_pos,
-                            track_duration,
-                            0,
-                            file_size,
-                        ))
-                    }
-                    Err(_) => None,
-                }
-            }
-        } else {
-            base_start_byte
-        };
-
         // Check if we need to prepend FLAC headers
         let flac_headers = audio_format
             .as_ref()
             .filter(|af| af.needs_headers)
             .and_then(|af| af.flac_headers.clone());
 
-        // Create streaming infrastructure
-        let buffer = create_streaming_buffer();
+        // Get file size for seek calculations
+        let file_size = match tokio::fs::metadata(&source_path).await {
+            Ok(meta) => {
+                if let (Some(start), Some(end)) = (start_byte, end_byte) {
+                    // CUE/FLAC track: use byte range size
+                    end - start
+                } else {
+                    meta.len()
+                }
+            }
+            Err(e) => {
+                error!("Failed to get file metadata: {}", e);
+                self.stop().await;
+                return;
+            }
+        };
+
+        // Create sparse buffer for smart seek support
+        let buffer = create_sparse_buffer();
 
         // Spawn local file reader task
         let read_buffer = buffer.clone();
         let read_path = source_path.clone();
+        let headers_len = flac_headers.as_ref().map(|h| h.len() as u64).unwrap_or(0);
         tokio::spawn(async move {
             use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
@@ -1583,9 +2030,11 @@ impl PlaybackService {
                 }
             };
 
-            // If we have FLAC headers to prepend, add them first
+            // If we have FLAC headers to prepend, add them first at offset 0
+            let mut buffer_pos: u64 = 0;
             if let Some(headers) = flac_headers {
-                read_buffer.append(&headers);
+                read_buffer.append_at(buffer_pos, &headers);
+                buffer_pos += headers.len() as u64;
             }
 
             // Seek to start position if needed
@@ -1599,7 +2048,7 @@ impl PlaybackService {
             }
 
             let end = end_byte;
-            let mut pos = start;
+            let mut file_pos = start;
             let mut chunk = vec![0u8; 65536];
 
             loop {
@@ -1608,7 +2057,7 @@ impl PlaybackService {
                 }
 
                 let to_read = if let Some(end) = end {
-                    chunk.len().min((end - pos) as usize)
+                    chunk.len().min((end - file_pos) as usize)
                 } else {
                     chunk.len()
                 };
@@ -1620,8 +2069,9 @@ impl PlaybackService {
                 match file.read(&mut chunk[..to_read]).await {
                     Ok(0) => break, // EOF
                     Ok(n) => {
-                        read_buffer.append(&chunk[..n]);
-                        pos += n as u64;
+                        read_buffer.append_at(buffer_pos, &chunk[..n]);
+                        buffer_pos += n as u64;
+                        file_pos += n as u64;
                     }
                     Err(e) => {
                         error!("Read error: {}", e);
@@ -1630,6 +2080,7 @@ impl PlaybackService {
                 }
             }
 
+            read_buffer.set_total_size(buffer_pos);
             read_buffer.mark_eof();
         });
 
@@ -1639,10 +2090,27 @@ impl PlaybackService {
         // Spawn decoder thread
         let decoder_buffer = buffer.clone();
         std::thread::spawn(move || {
-            if let Err(e) = crate::audio_codec::decode_audio_streaming(decoder_buffer, &mut sink) {
+            if let Err(e) =
+                crate::audio_codec::decode_audio_streaming_sparse(decoder_buffer, &mut sink)
+            {
                 error!("Streaming decode failed: {}", e);
             }
         });
+
+        // Store buffer, file size, source path, and seek metadata for smart seek
+        self.current_sparse_buffer = Some(buffer);
+        self.current_streaming_file_size = Some(file_size + headers_len);
+        self.current_streaming_source_path = Some(source_path.clone());
+        self.current_flac_headers = audio_format.as_ref().and_then(|af| af.flac_headers.clone());
+        self.current_sample_rate = audio_format
+            .as_ref()
+            .and_then(|af| af.sample_rate.map(|r| r as u32));
+        self.current_seektable_json = audio_format
+            .as_ref()
+            .and_then(|af| af.seektable_json.clone());
+        self.current_audio_data_start = audio_format
+            .as_ref()
+            .and_then(|af| af.audio_data_start.map(|s| s as u64));
 
         // Wait for initial buffering
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -1654,9 +2122,7 @@ impl PlaybackService {
             (guard.sample_rate(), guard.channels())
         };
 
-        // Use seek_offset if provided, otherwise calculate from pregap
-        let start_position = seek_offset
-            .unwrap_or_else(|| calculate_start_position(pregap_ms, is_natural_transition));
+        let start_position = calculate_start_position(pregap_ms, is_natural_transition);
 
         if let Some(stream) = self.stream.take() {
             drop(stream);
@@ -1721,7 +2187,6 @@ impl PlaybackService {
         self.stream = Some(stream);
         self.current_track = Some(track.clone());
         self.current_streaming_source = Some(source);
-        self.current_streaming_buffer = Some(buffer);
         self.current_position = Some(start_position);
         self.current_pregap_ms = pregap_ms;
         self.is_paused = false;
@@ -1745,25 +2210,36 @@ impl PlaybackService {
             },
         });
 
+        // Increment generation for new playback session
+        let gen = self
+            .position_generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+
         let progress_tx = self.progress_tx.clone();
         let track_id_owned = track_id.to_string();
         let current_position_for_listener = self.current_position_shared.clone();
+        let position_generation = self.position_generation.clone();
 
         tokio::spawn(async move {
             loop {
                 tokio::select! {
                     Some(position) = position_rx_async.recv() => {
-                        *current_position_for_listener.lock().unwrap() = Some(position);
-                        let _ = progress_tx.send(PlaybackProgress::PositionUpdate {
-                            position,
-                            track_id: track_id_owned.clone(),
-                        });
+                        if position_generation.load(std::sync::atomic::Ordering::SeqCst) == gen {
+                            *current_position_for_listener.lock().unwrap() = Some(position);
+                            let _ = progress_tx.send(PlaybackProgress::PositionUpdate {
+                                position,
+                                track_id: track_id_owned.clone(),
+                            });
+                        }
                     }
                     Some(()) = completion_rx_async.recv() => {
-                        info!("Streaming track completed: {}", track_id_owned);
-                        let _ = progress_tx.send(PlaybackProgress::TrackCompleted {
-                            track_id: track_id_owned.clone(),
-                        });
+                        if position_generation.load(std::sync::atomic::Ordering::SeqCst) == gen {
+                            info!("Streaming track completed: {}", track_id_owned);
+                            let _ = progress_tx.send(PlaybackProgress::TrackCompleted {
+                                track_id: track_id_owned.clone(),
+                            });
+                        }
                         break;
                     }
                     else => break,
@@ -1782,7 +2258,7 @@ impl PlaybackService {
     ///
     /// This method streams audio from storage, enabling playback to start
     /// before the full file is downloaded. Uses a pipeline:
-    /// 1. Download task fills StreamingAudioBuffer
+    /// 1. Download task fills SparseStreamingBuffer with append_at()
     /// 2. Decoder thread reads from buffer, outputs to ring buffer
     /// 3. cpal callback pulls from ring buffer
     async fn play_track_streaming(
@@ -1791,11 +2267,10 @@ impl PlaybackService {
         track: DbTrack,
         storage_profile: &crate::db::DbStorageProfile,
         is_natural_transition: bool,
-        seek_offset: Option<std::time::Duration>,
     ) {
         info!(
-            "Playing track (streaming): {} (natural_transition: {}, seek: {:?})",
-            track_id, is_natural_transition, seek_offset
+            "Playing track (streaming): {} (natural_transition: {})",
+            track_id, is_natural_transition
         );
 
         let _ = self.progress_tx.send(PlaybackProgress::StateChanged {
@@ -1855,17 +2330,8 @@ impl PlaybackService {
             }
         };
 
-        // Create streaming infrastructure
-        let buffer = create_streaming_buffer();
-
-        // Get track duration for seek calculations
-        let track_duration = track
-            .duration_ms
-            .map(|ms| std::time::Duration::from_millis(ms as u64))
-            .unwrap_or(std::time::Duration::from_secs(300));
-
         // Determine byte range for CUE/FLAC if applicable
-        let (base_start_byte, end_byte) = if let Some(af) = &audio_format {
+        let (start_byte, end_byte) = if let Some(af) = &audio_format {
             if let (Some(start), Some(end)) = (af.start_byte_offset, af.end_byte_offset) {
                 (Some(start as u64), Some(end as u64))
             } else {
@@ -1875,22 +2341,17 @@ impl PlaybackService {
             (None, None)
         };
 
-        // Calculate actual start byte accounting for seek offset
-        let start_byte = if let Some(seek_pos) = seek_offset {
-            if let (Some(base), Some(end)) = (base_start_byte, end_byte) {
-                // CUE/FLAC: calculate offset within track's byte range
-                let seek_byte =
-                    Self::calculate_byte_offset_for_seek(seek_pos, track_duration, base, end);
-                Some(seek_byte)
-            } else {
-                // For regular files without byte offsets, start from proportion of file
-                // Note: For cloud files without size info, we'd need to fetch size first
-                // For now, use linear interpolation assuming typical file size
-                None // Fall through to default behavior
-            }
+        // Calculate file size for seek calculations
+        let file_size = if let (Some(start), Some(end)) = (start_byte, end_byte) {
+            // CUE/FLAC track: use byte range size
+            end - start
         } else {
-            base_start_byte
+            // Use file size from database (stored during import)
+            audio_file.file_size as u64
         };
+
+        // Create sparse buffer for smart seek support
+        let buffer = create_sparse_buffer();
 
         // Spawn download task
         let storage = match create_storage_reader(storage_profile).await {
@@ -1924,11 +2385,11 @@ impl PlaybackService {
                     &download_path,
                     download_buffer,
                     start,
-                    Some(end),
+                    end,
                 )
                 .await
             } else {
-                download_to_streaming_buffer(storage, &download_path, download_buffer, None).await
+                download_to_streaming_buffer(storage, &download_path, download_buffer).await
             };
 
             if let Err(e) = result {
@@ -1940,10 +2401,27 @@ impl PlaybackService {
         // Use default sample rate/channels, will be updated when decoder reports actual values
         let (mut sink, source) = create_streaming_pair(44100, 2);
 
+        // Store buffer, file size, source path, and seek metadata for smart seek support
+        self.current_sparse_buffer = Some(buffer.clone());
+        self.current_streaming_file_size = Some(file_size);
+        self.current_streaming_source_path = Some(source_path.clone());
+        self.current_flac_headers = audio_format.as_ref().and_then(|af| af.flac_headers.clone());
+        self.current_sample_rate = audio_format
+            .as_ref()
+            .and_then(|af| af.sample_rate.map(|r| r as u32));
+        self.current_seektable_json = audio_format
+            .as_ref()
+            .and_then(|af| af.seektable_json.clone());
+        self.current_audio_data_start = audio_format
+            .as_ref()
+            .and_then(|af| af.audio_data_start.map(|s| s as u64));
+
         // Spawn decoder thread
         let decoder_buffer = buffer.clone();
         std::thread::spawn(move || {
-            if let Err(e) = crate::audio_codec::decode_audio_streaming(decoder_buffer, &mut sink) {
+            if let Err(e) =
+                crate::audio_codec::decode_audio_streaming_sparse(decoder_buffer, &mut sink)
+            {
                 error!("Streaming decode failed: {}", e);
             }
         });
@@ -1959,9 +2437,8 @@ impl PlaybackService {
             (guard.sample_rate(), guard.channels())
         };
 
-        // Use seek_offset if provided, otherwise calculate from pregap
-        let start_position = seek_offset
-            .unwrap_or_else(|| calculate_start_position(pregap_ms, is_natural_transition));
+        // Calculate start position
+        let start_position = calculate_start_position(pregap_ms, is_natural_transition);
 
         // Clean up old stream
         if let Some(stream) = self.stream.take() {
@@ -2030,7 +2507,6 @@ impl PlaybackService {
         self.stream = Some(stream);
         self.current_track = Some(track.clone());
         self.current_streaming_source = Some(source);
-        self.current_streaming_buffer = Some(buffer);
         self.current_position = Some(start_position);
         self.current_pregap_ms = pregap_ms;
         self.is_paused = false;
@@ -2056,26 +2532,37 @@ impl PlaybackService {
             },
         });
 
+        // Increment generation for new playback session
+        let gen = self
+            .position_generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+
         // Spawn completion listener
         let progress_tx = self.progress_tx.clone();
         let track_id_owned = track_id.to_string();
         let current_position_for_listener = self.current_position_shared.clone();
+        let position_generation = self.position_generation.clone();
 
         tokio::spawn(async move {
             loop {
                 tokio::select! {
                     Some(position) = position_rx_async.recv() => {
-                        *current_position_for_listener.lock().unwrap() = Some(position);
-                        let _ = progress_tx.send(PlaybackProgress::PositionUpdate {
-                            position,
-                            track_id: track_id_owned.clone(),
-                        });
+                        if position_generation.load(std::sync::atomic::Ordering::SeqCst) == gen {
+                            *current_position_for_listener.lock().unwrap() = Some(position);
+                            let _ = progress_tx.send(PlaybackProgress::PositionUpdate {
+                                position,
+                                track_id: track_id_owned.clone(),
+                            });
+                        }
                     }
                     Some(()) = completion_rx_async.recv() => {
-                        info!("Streaming track completed: {}", track_id_owned);
-                        let _ = progress_tx.send(PlaybackProgress::TrackCompleted {
-                            track_id: track_id_owned.clone(),
-                        });
+                        if position_generation.load(std::sync::atomic::Ordering::SeqCst) == gen {
+                            info!("Streaming track completed: {}", track_id_owned);
+                            let _ = progress_tx.send(PlaybackProgress::TrackCompleted {
+                                track_id: track_id_owned.clone(),
+                            });
+                        }
                         break;
                     }
                     else => break,
@@ -2090,6 +2577,63 @@ impl PlaybackService {
 
         info!("Streaming playback started for track: {}", track_id);
     }
+}
+
+/// Calculate byte offset for seeking based on time position.
+///
+/// Uses linear interpolation assuming constant bitrate.
+/// This is approximate but works well for CBR audio like FLAC.
+pub fn calculate_byte_offset_for_seek(
+    seek_time: std::time::Duration,
+    track_duration: std::time::Duration,
+    file_size: u64,
+) -> u64 {
+    if track_duration.is_zero() {
+        return 0;
+    }
+    let ratio = seek_time.as_secs_f64() / track_duration.as_secs_f64();
+    let ratio = ratio.clamp(0.0, 1.0);
+    (file_size as f64 * ratio) as u64
+}
+
+/// Seektable entry for frame-accurate seeking.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct SeekEntry {
+    sample: u64,
+    byte: u64,
+}
+
+/// Find frame-aligned byte offset using seektable.
+///
+/// Returns (byte_offset, sample_offset) where:
+/// - byte_offset: frame-aligned position in the file
+/// - sample_offset: samples to skip after decoding to reach exact target
+pub fn find_frame_boundary_for_seek(
+    seek_time: std::time::Duration,
+    sample_rate: u32,
+    seektable_json: &str,
+) -> Option<(u64, u64)> {
+    let entries: Vec<SeekEntry> = serde_json::from_str(seektable_json).ok()?;
+    if entries.is_empty() {
+        return None;
+    }
+
+    let target_sample = (seek_time.as_secs_f64() * sample_rate as f64) as u64;
+
+    // Binary search for the frame at or before target_sample
+    let mut best_idx = 0;
+    for (i, entry) in entries.iter().enumerate() {
+        if entry.sample <= target_sample {
+            best_idx = i;
+        } else {
+            break;
+        }
+    }
+
+    let frame = &entries[best_idx];
+    let sample_offset = target_sample.saturating_sub(frame.sample);
+
+    Some((frame.byte, sample_offset))
 }
 
 /// Calculate starting position for track playback.
@@ -2286,68 +2830,189 @@ mod tests {
         );
     }
 
+    // Smart seek tests for SparseStreamingBuffer integration
+    use crate::playback::sparse_buffer::SparseStreamingBuffer;
+
     #[test]
-    fn test_calculate_byte_offset_for_seek_at_start() {
-        let seek_time = std::time::Duration::ZERO;
+    fn test_calculate_byte_offset_for_seek() {
+        // 3 minute track at 1411 kbps (CD quality) ≈ 31.7 MB
         let track_duration = std::time::Duration::from_secs(180);
-        let start_byte = 1000u64;
-        let end_byte = 10000u64;
+        let file_size = 31_700_000u64;
 
-        let result =
-            PlaybackService::calculate_byte_offset_for_seek(seek_time, track_duration, start_byte, end_byte);
+        // Seek to 1 minute (1/3 of the track)
+        let seek_time = std::time::Duration::from_secs(60);
+        let offset = calculate_byte_offset_for_seek(seek_time, track_duration, file_size);
 
-        assert_eq!(result, 1000, "Seeking to start should return start_byte");
+        // Should be roughly 1/3 of file size
+        let expected = file_size / 3;
+        assert!(
+            (offset as i64 - expected as i64).abs() < 1000,
+            "offset {} should be close to {} (1/3 of file)",
+            offset,
+            expected
+        );
     }
 
     #[test]
-    fn test_calculate_byte_offset_for_seek_at_end() {
-        let seek_time = std::time::Duration::from_secs(180);
-        let track_duration = std::time::Duration::from_secs(180);
-        let start_byte = 1000u64;
-        let end_byte = 10000u64;
-
-        let result =
-            PlaybackService::calculate_byte_offset_for_seek(seek_time, track_duration, start_byte, end_byte);
-
-        assert_eq!(result, 10000, "Seeking to end should return end_byte");
-    }
-
-    #[test]
-    fn test_calculate_byte_offset_for_seek_at_middle() {
-        let seek_time = std::time::Duration::from_secs(90); // Half of 180
-        let track_duration = std::time::Duration::from_secs(180);
-        let start_byte = 0u64;
-        let end_byte = 10000u64;
-
-        let result =
-            PlaybackService::calculate_byte_offset_for_seek(seek_time, track_duration, start_byte, end_byte);
-
-        assert_eq!(result, 5000, "Seeking to middle should return midpoint");
-    }
-
-    #[test]
-    fn test_calculate_byte_offset_for_seek_clamped_past_end() {
-        let seek_time = std::time::Duration::from_secs(200); // Past track end
-        let track_duration = std::time::Duration::from_secs(180);
-        let start_byte = 1000u64;
-        let end_byte = 10000u64;
-
-        let result =
-            PlaybackService::calculate_byte_offset_for_seek(seek_time, track_duration, start_byte, end_byte);
-
-        assert_eq!(result, 10000, "Seeking past end should clamp to end_byte");
-    }
-
-    #[test]
-    fn test_calculate_byte_offset_for_seek_zero_duration() {
-        let seek_time = std::time::Duration::from_secs(10);
+    fn test_calculate_byte_offset_zero_duration() {
         let track_duration = std::time::Duration::ZERO;
-        let start_byte = 1000u64;
-        let end_byte = 10000u64;
+        let file_size = 1000u64;
+        let seek_time = std::time::Duration::from_secs(10);
 
-        let result =
-            PlaybackService::calculate_byte_offset_for_seek(seek_time, track_duration, start_byte, end_byte);
+        let offset = calculate_byte_offset_for_seek(seek_time, track_duration, file_size);
+        assert_eq!(offset, 0, "Zero duration should return 0");
+    }
 
-        assert_eq!(result, 1000, "Zero duration should return start_byte");
+    #[test]
+    fn test_smart_seek_within_buffer() {
+        let buffer = SparseStreamingBuffer::new();
+        // Buffer has first 10000 bytes
+        buffer.append_at(0, &vec![0u8; 10000]);
+
+        // Seek to byte 5000 - should be buffered
+        assert!(
+            buffer.is_buffered(5000),
+            "Position 5000 should be within buffered range"
+        );
+    }
+
+    #[test]
+    fn test_smart_seek_past_buffer() {
+        let buffer = SparseStreamingBuffer::new();
+        // Buffer has first 10000 bytes
+        buffer.append_at(0, &vec![0u8; 10000]);
+
+        // Seek to byte 50000 - should NOT be buffered
+        assert!(
+            !buffer.is_buffered(50000),
+            "Position 50000 should be past buffered range"
+        );
+    }
+
+    #[test]
+    fn test_smart_seek_multiple_ranges() {
+        let buffer = SparseStreamingBuffer::new();
+        // Buffer has 0-10000 and 50000-60000
+        buffer.append_at(0, &vec![0u8; 10000]);
+        buffer.append_at(50000, &vec![0u8; 10000]);
+
+        // Currently at 55000, seek back to 5000 should reuse first range
+        assert!(buffer.is_buffered(5000), "Position 5000 should be buffered");
+        assert!(
+            buffer.is_buffered(55000),
+            "Position 55000 should be buffered"
+        );
+        assert!(
+            !buffer.is_buffered(30000),
+            "Position 30000 should NOT be buffered (gap)"
+        );
+    }
+
+    #[test]
+    fn test_seek_decision_buffered_vs_not() {
+        use crate::playback::sparse_buffer::create_sparse_buffer;
+
+        let buffer = create_sparse_buffer();
+        let file_size = 100_000u64;
+        let track_duration = std::time::Duration::from_secs(60);
+
+        // Simulate downloading first 30%
+        buffer.append_at(0, &vec![0u8; 30000]);
+
+        // Seek to 10 seconds (1/6 of track) = ~16,666 bytes - should be buffered
+        let seek_10s = std::time::Duration::from_secs(10);
+        let byte_offset_10s = calculate_byte_offset_for_seek(seek_10s, track_duration, file_size);
+        assert!(
+            buffer.is_buffered(byte_offset_10s),
+            "10s seek should be within buffered data"
+        );
+
+        // Seek to 50 seconds (5/6 of track) = ~83,333 bytes - should NOT be buffered
+        let seek_50s = std::time::Duration::from_secs(50);
+        let byte_offset_50s = calculate_byte_offset_for_seek(seek_50s, track_duration, file_size);
+        assert!(
+            !buffer.is_buffered(byte_offset_50s),
+            "50s seek should be past buffered data"
+        );
+    }
+
+    #[test]
+    fn test_seek_back_after_forward_seek() {
+        use crate::playback::sparse_buffer::create_sparse_buffer;
+
+        let buffer = create_sparse_buffer();
+
+        // Initial download: 0-30000
+        buffer.append_at(0, &vec![0u8; 30000]);
+
+        // User seeks forward to byte 70000 - new download starts there
+        // Simulating: 70000-90000
+        buffer.append_at(70000, &vec![0u8; 20000]);
+
+        // Now we have two ranges: 0-30000 and 70000-90000
+        assert_eq!(
+            buffer.get_ranges(),
+            vec![(0, 30000), (70000, 90000)],
+            "Should have two non-contiguous ranges"
+        );
+
+        // User seeks back to byte 15000 - should be buffered (first range)
+        assert!(buffer.is_buffered(15000), "15000 should be in first range");
+
+        // User seeks to byte 75000 - should be buffered (second range)
+        assert!(buffer.is_buffered(75000), "75000 should be in second range");
+
+        // User seeks to byte 50000 - gap between ranges, not buffered
+        assert!(!buffer.is_buffered(50000), "50000 should be in the gap");
+    }
+
+    #[test]
+    fn test_ranges_merge_when_gap_filled() {
+        use crate::playback::sparse_buffer::create_sparse_buffer;
+
+        let buffer = create_sparse_buffer();
+
+        // Initial download: 0-10000
+        buffer.append_at(0, &vec![0u8; 10000]);
+
+        // Seek forward creates second range: 20000-30000
+        buffer.append_at(20000, &vec![0u8; 10000]);
+
+        assert_eq!(buffer.get_ranges().len(), 2, "Should have two ranges");
+
+        // Original download continues and fills gap: 10000-20000
+        buffer.append_at(10000, &vec![0u8; 10000]);
+
+        // Ranges should now be merged
+        assert_eq!(buffer.get_ranges().len(), 1, "Ranges should be merged");
+        assert_eq!(
+            buffer.get_ranges(),
+            vec![(0, 30000)],
+            "Should be single contiguous range"
+        );
+    }
+
+    #[test]
+    fn test_full_track_buffered_all_seeks_instant() {
+        use crate::playback::sparse_buffer::create_sparse_buffer;
+
+        let buffer = create_sparse_buffer();
+        let file_size = 100_000u64;
+        let track_duration = std::time::Duration::from_secs(60);
+
+        // Full track downloaded
+        buffer.append_at(0, &vec![0u8; 100_000]);
+
+        // All seeks should be within buffer
+        for secs in [0, 10, 30, 45, 59] {
+            let seek_time = std::time::Duration::from_secs(secs);
+            let byte_offset = calculate_byte_offset_for_seek(seek_time, track_duration, file_size);
+            assert!(
+                buffer.is_buffered(byte_offset),
+                "Seek to {}s (byte {}) should be buffered when full track cached",
+                secs,
+                byte_offset
+            );
+        }
     }
 }

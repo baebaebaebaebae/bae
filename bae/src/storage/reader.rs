@@ -2,7 +2,7 @@
 use crate::cloud_storage::{CloudStorage, CloudStorageError, S3CloudStorage};
 use crate::db::{DbStorageProfile, StorageLocation};
 use crate::encryption::{encrypted_range_for_plaintext, EncryptionService, CHUNK_SIZE};
-use crate::playback::SharedStreamingBuffer;
+use crate::playback::SharedSparseBuffer;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tracing::{debug, info};
@@ -64,9 +64,11 @@ impl CloudStorage for LocalFileStorage {
         let mut file = tokio::fs::File::open(path).await?;
         file.seek(std::io::SeekFrom::Start(start)).await?;
 
-        let len = (end - start) as usize;
-        let mut buffer = vec![0u8; len];
-        file.read_exact(&mut buffer).await?;
+        let max_len = (end - start) as usize;
+        let mut buffer = vec![0u8; max_len];
+        // Use read instead of read_exact to handle ranges that extend past EOF
+        let bytes_read = file.read(&mut buffer).await?;
+        buffer.truncate(bytes_read);
 
         Ok(buffer)
     }
@@ -78,13 +80,14 @@ impl CloudStorage for LocalFileStorage {
     }
 }
 
-/// Download a file to a streaming buffer in chunks.
+/// Download a file to a sparse streaming buffer in chunks.
 ///
-/// Data is appended to the buffer as it arrives, enabling streaming playback.
+/// Data is appended at the appropriate offset as it arrives, enabling streaming playback
+/// with smart seek support.
 pub async fn download_to_streaming_buffer(
     storage: Arc<dyn CloudStorage>,
     path: &str,
-    buffer: SharedStreamingBuffer,
+    buffer: SharedSparseBuffer,
 ) -> Result<(), CloudStorageError> {
     info!("Starting streaming download: {}", path);
 
@@ -107,7 +110,7 @@ pub async fn download_to_streaming_buffer(
             }
             Ok(data) => {
                 let len = data.len();
-                buffer.append(&data);
+                buffer.append_at(offset, &data);
                 offset += len as u64;
 
                 // If we got less than requested, we've reached EOF
@@ -123,19 +126,22 @@ pub async fn download_to_streaming_buffer(
         }
     }
 
+    buffer.set_total_size(offset);
     buffer.mark_eof();
 
     info!("Streaming download complete: {} bytes", offset);
     Ok(())
 }
 
-/// Download a byte range to a streaming buffer in chunks.
+/// Download a byte range to a sparse streaming buffer in chunks.
 ///
 /// Used for CUE/FLAC tracks where only a portion of the file is needed.
+/// Data is written with offsets relative to the start of the range (i.e., buffer offset 0
+/// corresponds to file offset start_byte).
 pub async fn download_to_streaming_buffer_with_range(
     storage: Arc<dyn CloudStorage>,
     path: &str,
-    buffer: SharedStreamingBuffer,
+    buffer: SharedSparseBuffer,
     start_byte: u64,
     end_byte: u64,
 ) -> Result<(), CloudStorageError> {
@@ -145,6 +151,7 @@ pub async fn download_to_streaming_buffer_with_range(
     );
 
     let mut offset = start_byte;
+    let total_size = end_byte - start_byte;
 
     while offset < end_byte {
         if buffer.is_cancelled() {
@@ -160,10 +167,13 @@ pub async fn download_to_streaming_buffer_with_range(
         }
 
         let len = chunk.len();
-        buffer.append(&chunk);
+        // Buffer offset is relative to start_byte
+        let buffer_offset = offset - start_byte;
+        buffer.append_at(buffer_offset, &chunk);
         offset += len as u64;
     }
 
+    buffer.set_total_size(total_size);
     buffer.mark_eof();
 
     info!(
@@ -173,14 +183,14 @@ pub async fn download_to_streaming_buffer_with_range(
     Ok(())
 }
 
-/// Download an encrypted file to a streaming buffer, decrypting on the fly.
+/// Download an encrypted file to a sparse streaming buffer, decrypting on the fly.
 ///
 /// Downloads encrypted chunks aligned with encryption boundaries, decrypts,
-/// and appends plaintext to the buffer.
+/// and appends plaintext to the buffer at the appropriate offset.
 pub async fn download_encrypted_to_streaming_buffer(
     storage: Arc<dyn CloudStorage>,
     path: &str,
-    buffer: SharedStreamingBuffer,
+    buffer: SharedSparseBuffer,
     encryption: &EncryptionService,
     plaintext_start: u64,
     plaintext_end: Option<u64>,
@@ -197,10 +207,14 @@ pub async fn download_encrypted_to_streaming_buffer(
     // First, download the nonce (always needed)
     let nonce_data = storage.download_range(path, 0, NONCE_SIZE).await?;
     if nonce_data.len() < NONCE_SIZE as usize {
-        return Err(CloudStorageError::Download("File too short for nonce".into()));
+        return Err(CloudStorageError::Download(
+            "File too short for nonce".into(),
+        ));
     }
 
     let mut plaintext_pos = plaintext_start;
+    // Buffer offset is relative to plaintext_start
+    let mut buffer_offset = 0u64;
 
     loop {
         if buffer.is_cancelled() {
@@ -216,7 +230,9 @@ pub async fn download_encrypted_to_streaming_buffer(
         };
 
         // Calculate the encrypted byte range needed
-        let (enc_start, enc_end) = encrypted_range_for_plaintext(plaintext_pos, chunk_plaintext_end);
+        let (enc_start, enc_end) =
+            encrypted_range_for_plaintext(plaintext_pos, chunk_plaintext_end);
+        let expected_enc_len = (enc_end - enc_start) as usize;
 
         // Download encrypted data (including nonce at start)
         let encrypted_data = storage.download_range(path, enc_start, enc_end).await?;
@@ -225,17 +241,44 @@ pub async fn download_encrypted_to_streaming_buffer(
             break;
         }
 
-        // Decrypt the range
+        // If we got less than expected encrypted bytes, adjust the plaintext end
+        // to only cover chunks we can actually decrypt
+        let actual_plaintext_end = if encrypted_data.len() < expected_enc_len {
+            // Calculate how much plaintext we can actually decrypt
+            let nonce_size = 24usize;
+            let enc_data_after_nonce = encrypted_data.len().saturating_sub(nonce_size);
+            let enc_chunk_size = CHUNK_SIZE + 16; // plaintext + tag
+            let complete_chunks = enc_data_after_nonce / enc_chunk_size;
+            let remaining_enc = enc_data_after_nonce % enc_chunk_size;
+
+            // Calculate total decryptable plaintext
+            let complete_plaintext = complete_chunks * CHUNK_SIZE;
+            // Last partial chunk: remaining encrypted bytes minus tag (if any)
+            let partial_plaintext = remaining_enc.saturating_sub(16);
+
+            if complete_plaintext == 0 && partial_plaintext == 0 {
+                debug!("No decryptable data available at EOF");
+                break;
+            }
+
+            // Calculate actual plaintext end from start position
+            plaintext_pos + (complete_plaintext + partial_plaintext) as u64
+        } else {
+            chunk_plaintext_end
+        };
+
         let plaintext = encryption
-            .decrypt_range(&encrypted_data, plaintext_pos, chunk_plaintext_end)
+            .decrypt_range(&encrypted_data, plaintext_pos, actual_plaintext_end)
             .map_err(|e| CloudStorageError::Download(format!("Decryption failed: {}", e)))?;
 
         if plaintext.is_empty() {
             break;
         }
 
-        buffer.append(&plaintext);
-        plaintext_pos += plaintext.len() as u64;
+        let len = plaintext.len() as u64;
+        buffer.append_at(buffer_offset, &plaintext);
+        plaintext_pos += len;
+        buffer_offset += len;
 
         // Check if we've reached the requested end
         if let Some(end) = plaintext_end {
@@ -250,6 +293,7 @@ pub async fn download_encrypted_to_streaming_buffer(
         }
     }
 
+    buffer.set_total_size(buffer_offset);
     buffer.mark_eof();
 
     info!(
