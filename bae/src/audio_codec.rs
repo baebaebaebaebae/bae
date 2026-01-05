@@ -1863,4 +1863,118 @@ mod tests {
             samples.len()
         );
     }
+
+    /// Test that CUE/FLAC byte-range extraction requires adjusted seektable offsets.
+    ///
+    /// Bug: When playing a track from a CUE/FLAC album, the seektable contains
+    /// byte offsets for the entire album file. If we extract bytes 172239464-186031289
+    /// (track 9), the seektable still has offsets starting at 0, so the decoder
+    /// extracts wrong byte ranges and produces 0 samples.
+    ///
+    /// This test uses FlacStreamingDecoder directly to avoid threading complexity.
+    #[test]
+    fn test_streaming_decode_cue_flac_byte_range_seektable() {
+        init();
+
+        // Generate a longer FLAC file to simulate an album (multiple tracks worth)
+        let samples: Vec<i32> = (0..44100 * 30) // 30 seconds of audio
+            .map(|i| ((i as f64 * 0.01).sin() * 10000.0) as i32)
+            .collect();
+
+        let flac_data = encode_to_flac(&samples, 44100, 1, 16).unwrap();
+
+        // Build seektable for the full album
+        let full_seektable = build_seektable(&flac_data).unwrap();
+        assert!(
+            full_seektable.len() > 10,
+            "Need enough frames to test: got {}",
+            full_seektable.len()
+        );
+
+        // Find headers end (audio data start)
+        let audio_data_start = find_flac_headers_end(&flac_data).unwrap();
+        let headers = flac_data[0..audio_data_start].to_vec();
+
+        // Simulate extracting a "track" from the middle of the album.
+        // Pick frame indices somewhere in the middle.
+        let start_frame_idx = full_seektable.len() / 3;
+        let end_frame_idx = (full_seektable.len() * 2) / 3;
+
+        let track_start_byte = full_seektable[start_frame_idx].byte_offset;
+        let track_end_byte = if end_frame_idx < full_seektable.len() {
+            full_seektable[end_frame_idx].byte_offset
+        } else {
+            flac_data.len() as u64 - audio_data_start as u64
+        };
+
+        // Extract the track's audio data (from the middle of the album)
+        let track_audio_data = &flac_data[(audio_data_start + track_start_byte as usize)
+            ..(audio_data_start + track_end_byte as usize)];
+
+        // Filter seektable to only include entries within our track range,
+        // and adjust offsets to be relative to the track's start.
+        let adjusted_seektable: Vec<SeekEntry> = full_seektable
+            .iter()
+            .filter(|e| e.byte_offset >= track_start_byte && e.byte_offset < track_end_byte)
+            .map(|e| SeekEntry {
+                sample_number: e.sample_number - full_seektable[start_frame_idx].sample_number,
+                byte_offset: e.byte_offset - track_start_byte,
+            })
+            .collect();
+
+        assert!(
+            !adjusted_seektable.is_empty(),
+            "Adjusted seektable should not be empty: start={}, end={}, track_start_byte={}, track_end_byte={}",
+            start_frame_idx, end_frame_idx, track_start_byte, track_end_byte
+        );
+
+        // Test 1: With ADJUSTED seektable (correct) - should decode successfully
+        {
+            let mut decoder = FlacStreamingDecoder::new(headers.clone(), &adjusted_seektable)
+                .expect("Should create decoder with adjusted seektable");
+
+            // Feed all track audio data
+            let samples = decoder.feed(track_audio_data).unwrap();
+            let final_samples = decoder.finish().unwrap();
+
+            let total_samples = samples.len() + final_samples.len();
+            let expected_frames = end_frame_idx - start_frame_idx;
+
+            assert!(
+                total_samples > expected_frames * 1000, // At least 1000 samples per frame (conservative)
+                "Adjusted seektable should produce good output: {} samples from {} frames",
+                total_samples,
+                expected_frames
+            );
+        }
+
+        // Test 2: With FULL ALBUM seektable (the actual bug) - should fail
+        //
+        // This reproduces what happens in production: we pass the entire album's
+        // seektable (starting from byte 0) but feed track data that starts mid-album.
+        // The decoder uses frame_offsets[0] = 0, but the first byte of our buffer
+        // is actually from byte 172239464, which is mid-frame garbage.
+        {
+            // Use the FULL album seektable, not sliced
+            let mut decoder = FlacStreamingDecoder::new(headers.clone(), &full_seektable)
+                .expect("Should create decoder");
+
+            // Feed the track audio data - but decoder thinks it starts at byte 0
+            // It will try to decode frame 0 (bytes 0-4096) from our buffer,
+            // but our buffer actually contains bytes 172239464+ which is mid-frame
+            let samples = decoder.feed(track_audio_data).unwrap();
+            let final_samples = decoder.finish().unwrap();
+
+            let total_samples = samples.len() + final_samples.len();
+
+            // With full album seektable, decoder extracts wrong frame boundaries
+            // because it thinks data starts at byte 0 but it actually starts mid-album
+            assert!(
+                total_samples < 10000,
+                "Full album seektable with mid-album track data should produce very few samples \
+                 (got {}). This is the bug: seektable offsets aren't adjusted for byte-range tracks.",
+                total_samples
+            );
+        }
+    }
 }

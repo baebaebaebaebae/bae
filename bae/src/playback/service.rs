@@ -13,7 +13,7 @@ use cpal::traits::StreamTrait;
 use std::collections::VecDeque;
 use std::sync::{mpsc, Arc, Mutex};
 use tokio::sync::mpsc as tokio_mpsc;
-use tracing::{error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 /// Playback commands sent to the service
 #[derive(Debug, Clone)]
 pub enum PlaybackCommand {
@@ -678,10 +678,58 @@ impl PlaybackService {
             None
         };
 
-        let seektable: Option<Vec<crate::audio_codec::SeekEntry>> = audio_format
+        // Load seektable from audio format
+        let full_seektable: Option<Vec<crate::audio_codec::SeekEntry>> = audio_format
             .as_ref()
             .and_then(|af| af.seektable_json.as_ref())
             .and_then(|json| serde_json::from_str(json).ok());
+
+        // For CUE/FLAC (byte-range tracks), filter and adjust seektable offsets.
+        // IMPORTANT: start_byte/end_byte are ABSOLUTE file offsets (include audio_data_start).
+        // But seektable byte_offset values are RELATIVE to audio_data_start.
+        // We must convert when filtering.
+        let audio_data_start = audio_format
+            .as_ref()
+            .and_then(|af| af.audio_data_start.map(|x| x as u64))
+            .unwrap_or(0);
+
+        let seektable = match (&full_seektable, start_byte) {
+            (Some(st), Some(abs_track_start)) if !st.is_empty() => {
+                // Convert absolute file offset to relative-to-audio-data offset
+                let rel_track_start = abs_track_start.saturating_sub(audio_data_start);
+                let rel_track_end = end_byte
+                    .map(|e| e.saturating_sub(audio_data_start))
+                    .unwrap_or(u64::MAX);
+
+                // Filter to entries within our byte range and adjust offsets
+                let adjusted: Vec<crate::audio_codec::SeekEntry> = st
+                    .iter()
+                    .filter(|e| e.byte_offset >= rel_track_start && e.byte_offset < rel_track_end)
+                    .map(|e| crate::audio_codec::SeekEntry {
+                        sample_number: e.sample_number,
+                        byte_offset: e.byte_offset - rel_track_start,
+                    })
+                    .collect();
+
+                if adjusted.is_empty() {
+                    warn!(
+                        "No seektable entries in relative byte range {}-{} (audio_data_start={}), using full seektable",
+                        rel_track_start, rel_track_end, audio_data_start
+                    );
+                    full_seektable
+                } else {
+                    debug!(
+                        "Adjusted seektable for byte range: {} -> {} entries (rel_start={}, rel_end={})",
+                        st.len(),
+                        adjusted.len(),
+                        rel_track_start,
+                        rel_track_end
+                    );
+                    Some(adjusted)
+                }
+            }
+            _ => full_seektable,
+        };
 
         let file_size = if let (Some(start), Some(end)) = (start_byte, end_byte) {
             end - start
