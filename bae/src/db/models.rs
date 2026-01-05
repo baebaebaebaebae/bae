@@ -272,6 +272,9 @@ pub struct DbAudioFormat {
     /// Byte offset where audio data starts in the file (after headers).
     /// Seektable byte offsets are relative to this position.
     pub audio_data_start: Option<i64>,
+    /// FK to DbFile containing this track's audio data.
+    /// Links to files.id to get the actual source_path.
+    pub file_id: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 impl DbArtist {
@@ -539,6 +542,7 @@ impl DbAudioFormat {
             sample_rate,
             seektable_json,
             audio_data_start,
+            None,
         )
     }
 
@@ -569,7 +573,14 @@ impl DbAudioFormat {
             sample_rate,
             seektable_json,
             audio_data_start,
+            None,
         )
+    }
+
+    /// Set the file_id linking to DbFile
+    pub fn with_file_id(mut self, file_id: &str) -> Self {
+        self.file_id = Some(file_id.to_string());
+        self
     }
 
     fn new_full(
@@ -585,6 +596,7 @@ impl DbAudioFormat {
         sample_rate: Option<i64>,
         seektable_json: Option<String>,
         audio_data_start: Option<i64>,
+        file_id: Option<String>,
     ) -> Self {
         DbAudioFormat {
             id: Uuid::new_v4().to_string(),
@@ -600,6 +612,7 @@ impl DbAudioFormat {
             sample_rate,
             seektable_json,
             audio_data_start,
+            file_id,
             created_at: Utc::now(),
         }
     }

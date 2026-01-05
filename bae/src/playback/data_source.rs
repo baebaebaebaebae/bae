@@ -7,7 +7,7 @@
 use crate::encryption::EncryptionService;
 use crate::playback::sparse_buffer::SharedSparseBuffer;
 use std::sync::Arc;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 /// Reads audio data into a sparse buffer for streaming playback.
 ///
@@ -157,6 +157,14 @@ impl AudioDataReader for CloudStorageReader {
         let encrypted = self.encrypted;
 
         tokio::spawn(async move {
+            info!(
+                "CloudStorageReader: encrypted={}, start={:?}, end={:?}, headers_len={}",
+                encrypted,
+                config.start_byte,
+                config.end_byte,
+                config.flac_headers.as_ref().map(|h| h.len()).unwrap_or(0)
+            );
+
             let result = if encrypted {
                 download_encrypted_to_buffer(
                     storage,
@@ -284,10 +292,11 @@ async fn download_encrypted_to_buffer(
     buffer.append_at(buffer_pos, &decrypted);
     buffer_pos += decrypted.len() as u64;
 
-    debug!(
-        "CloudStorageReader: decrypted {} bytes -> {} bytes",
+    info!(
+        "CloudStorageReader: decrypted {} bytes -> {} bytes (headers prepended: {})",
         encrypted_data.len(),
-        buffer_pos
+        buffer_pos,
+        flac_headers.is_some()
     );
     buffer.set_total_size(buffer_pos);
     buffer.mark_eof();

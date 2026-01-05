@@ -559,8 +559,18 @@ impl ImportService {
             );
         }
 
+        // Build file_ids map: filename -> DbFile.id
+        let files = library_manager
+            .get_files_for_release(&db_release.id)
+            .await
+            .map_err(|e| format!("Failed to get files: {}", e))?;
+        let file_ids: HashMap<String, String> = files
+            .into_iter()
+            .map(|f| (f.original_filename, f.id))
+            .collect();
+
         // Persist track metadata
-        self.persist_track_metadata(tracks_to_files, cue_flac_metadata)
+        self.persist_track_metadata(tracks_to_files, cue_flac_metadata, &file_ids)
             .await?;
 
         let cover_image_id = self
@@ -728,10 +738,13 @@ impl ImportService {
     }
 
     /// Persist track metadata (audio format info for playback).
+    ///
+    /// `file_ids` maps original filename -> DbFile.id for linking audio_format to file.
     async fn persist_track_metadata(
         &self,
         tracks_to_files: &[TrackFile],
         cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
+        file_ids: &HashMap<String, String>,
     ) -> Result<(), String> {
         use crate::cue_flac::{CueFlacProcessor, FlacInfo};
         use crate::db::DbAudioFormat;
@@ -746,7 +759,7 @@ impl ImportService {
                 CueFlacMetadata,
                 Vec<u8>,
                 FlacInfo,
-                Vec<crate::cue_flac::SeekPoint>,
+                Vec<crate::audio_codec::SeekEntry>,
             ),
         > = if let Some(ref cue_metadata) = cue_flac_metadata {
             let mut data = HashMap::new();
@@ -824,18 +837,15 @@ impl ImportService {
                     );
 
                 // Serialize seektable to JSON for smart seek support
-                let seektable_json = serde_json::to_string(
-                    &dense_seektable
-                        .iter()
-                        .map(|e| {
-                            serde_json::json!({
-                                "sample": e.sample_number,
-                                "byte": e.stream_offset
-                            })
-                        })
-                        .collect::<Vec<_>>(),
-                )
-                .ok();
+                let seektable_json = serde_json::to_string(&dense_seektable).ok();
+
+                // Look up file_id by filename
+                let filename = track_file
+                    .file_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+                let file_id = file_ids.get(filename).cloned();
 
                 let audio_format = DbAudioFormat::new_with_byte_offsets(
                     &track_file.db_track_id,
@@ -850,7 +860,8 @@ impl ImportService {
                     Some(flac_info.sample_rate as i64),
                     seektable_json,
                     Some(flac_info.audio_data_start as i64),
-                );
+                )
+                .with_file_id(file_id.as_deref().unwrap_or(""));
                 library_manager
                     .add_audio_format(&audio_format)
                     .await
@@ -878,19 +889,7 @@ impl ImportService {
                                     &data, &info,
                                 );
                             // Serialize seektable to JSON
-                            let json = serde_json::to_string(
-                                &seektable
-                                    .entries
-                                    .iter()
-                                    .map(|e| {
-                                        serde_json::json!({
-                                            "sample": e.sample_number,
-                                            "byte": e.stream_offset
-                                        })
-                                    })
-                                    .collect::<Vec<_>>(),
-                            )
-                            .ok();
+                            let json = serde_json::to_string(&seektable.entries).ok();
                             (
                                 Some(info.sample_rate as i64),
                                 json,
@@ -908,6 +907,14 @@ impl ImportService {
                     (None, None, None, None)
                 };
 
+                // Look up file_id by filename
+                let filename = track_file
+                    .file_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+                let file_id = file_ids.get(filename).cloned();
+
                 let audio_format = DbAudioFormat::new(
                     &track_file.db_track_id,
                     &format,
@@ -916,7 +923,8 @@ impl ImportService {
                     sample_rate,
                     seektable_json,
                     audio_data_start,
-                );
+                )
+                .with_file_id(file_id.as_deref().unwrap_or(""));
                 library_manager
                     .add_audio_format(&audio_format)
                     .await
@@ -966,6 +974,8 @@ impl ImportService {
             map
         };
 
+        let mut file_ids: HashMap<String, String> = HashMap::new();
+
         for (idx, file) in discovered_files.iter().enumerate() {
             let filename = file
                 .path
@@ -985,6 +995,7 @@ impl ImportService {
 
             let db_file = DbFile::new(&db_release.id, filename, file.size as i64, &format)
                 .with_source_path(source_path);
+            file_ids.insert(filename.to_string(), db_file.id.clone());
             library_manager
                 .add_file(&db_file)
                 .await
@@ -1019,7 +1030,7 @@ impl ImportService {
         }
 
         if cue_flac_metadata.is_some() {
-            self.persist_track_metadata(tracks_to_files, cue_flac_metadata)
+            self.persist_track_metadata(tracks_to_files, cue_flac_metadata, &file_ids)
                 .await?;
         }
 

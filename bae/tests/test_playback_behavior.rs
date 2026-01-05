@@ -1306,3 +1306,74 @@ async fn test_cue_flac_playback() {
         error_count
     );
 }
+
+/// Test that seeking in CUE/FLAC tracks decodes correctly without errors.
+#[tokio::test]
+async fn test_cue_flac_seek() {
+    if should_skip_audio_tests() {
+        debug!("Skipping audio test - no audio device available");
+        return;
+    }
+
+    let mut fixture = match CueFlacTestFixture::new().await {
+        Ok(f) => f,
+        Err(e) => {
+            debug!("Failed to set up CUE/FLAC test fixture: {}", e);
+            return;
+        }
+    };
+
+    assert_eq!(fixture.track_ids.len(), 3, "Should have 3 tracks");
+    let track_id = fixture.track_ids[0].clone();
+
+    // Play track 1
+    fixture.playback_handle.play(track_id.clone());
+
+    // Wait for playback to start (any state change to Playing)
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut started = false;
+    while Instant::now() < deadline && !started {
+        let remaining = deadline - Instant::now();
+        match timeout(remaining, fixture.progress_rx.recv()).await {
+            Ok(Some(PlaybackProgress::StateChanged { state })) => {
+                if matches!(state, PlaybackState::Playing { .. }) {
+                    started = true;
+                }
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) | Err(_) => break,
+        }
+    }
+    assert!(started, "Playback should start");
+
+    // Seek forward immediately after start
+    // Note: Test tracks are ~16s each, seek to 12s to trigger smart seek within buffer
+    fixture.playback_handle.seek(Duration::from_secs(12));
+
+    // Wait for seek to complete and track to finish (or timeout)
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut decode_error_count: Option<u32> = None;
+
+    while Instant::now() < deadline {
+        let remaining = deadline - Instant::now();
+        match timeout(remaining, fixture.progress_rx.recv()).await {
+            Ok(Some(PlaybackProgress::DecodeStats { error_count, .. })) => {
+                decode_error_count = Some(error_count);
+                break;
+            }
+            Ok(Some(PlaybackProgress::TrackCompleted { .. })) => {
+                // Track completed, DecodeStats should follow
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) | Err(_) => break,
+        }
+    }
+
+    // Check FFmpeg decode errors after seek - should be 0 for valid decode
+    let error_count = decode_error_count.unwrap_or(0);
+    assert_eq!(
+        error_count, 0,
+        "CUE/FLAC seek had {} FFmpeg decode errors",
+        error_count
+    );
+}

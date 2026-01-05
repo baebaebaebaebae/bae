@@ -702,15 +702,15 @@ async fn test_cue_flac_builds_dense_seektable() {
         .entries
         .iter()
         .rev()
-        .find(|e| e.sample_number <= track2_start_sample)
+        .find(|e| e.sample <= track2_start_sample)
         .expect("should find entry before track 2");
 
-    let samples_from_boundary = track2_start_sample - closest_entry.sample_number;
+    let samples_from_boundary = track2_start_sample - closest_entry.sample;
     let ms_from_boundary = (samples_from_boundary * 1000) / flac_info.sample_rate as u64;
 
     info!(
         "Track 2 starts at sample {}, nearest frame at sample {} ({}ms offset)",
-        track2_start_sample, closest_entry.sample_number, ms_from_boundary
+        track2_start_sample, closest_entry.sample, ms_from_boundary
     );
 
     // With frame-accurate positioning, we should be within one frame (~93ms)
@@ -813,7 +813,7 @@ async fn test_cue_flac_track2_samples_match_ground_truth() {
         dense_seektable.entries.len()
     );
 
-    let seektable_entries: Vec<bae::cue_flac::SeekPoint> = dense_seektable.entries;
+    let seektable_entries: Vec<bae::audio_codec::SeekEntry> = dense_seektable.entries;
 
     let (start_byte, end_byte, _frame_offset_samples, _exact_sample_count) =
         CueFlacProcessor::find_track_byte_range(
@@ -864,12 +864,11 @@ async fn test_cue_flac_track2_samples_match_ground_truth() {
     let start_entry = seektable_entries
         .iter()
         .rev()
-        .find(|e| e.sample_number <= track2_start_ms * sample_rate as u64 / 1000)
+        .find(|e| e.sample <= track2_start_ms * sample_rate as u64 / 1000)
         .expect("find start entry");
 
-    let lead_in_samples = (track2_start_ms * sample_rate as u64 / 1000 - start_entry.sample_number)
-        as usize
-        * channels;
+    let lead_in_samples =
+        (track2_start_ms * sample_rate as u64 / 1000 - start_entry.sample) as usize * channels;
 
     info!(
         "Lead-in samples (frame alignment): {} ({:.1}ms)",

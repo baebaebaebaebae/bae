@@ -185,6 +185,7 @@ impl Database {
                 sample_rate INTEGER,
                 seektable_json TEXT,
                 audio_data_start INTEGER,
+                file_id TEXT REFERENCES files(id),
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (track_id) REFERENCES tracks (id) ON DELETE CASCADE
             )
@@ -1053,8 +1054,8 @@ impl Database {
         sqlx::query(
             r#"
             INSERT INTO audio_formats (
-                id, track_id, format, flac_headers, needs_headers, start_byte_offset, end_byte_offset, pregap_ms, frame_offset_samples, exact_sample_count, sample_rate, seektable_json, audio_data_start, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, track_id, format, flac_headers, needs_headers, start_byte_offset, end_byte_offset, pregap_ms, frame_offset_samples, exact_sample_count, sample_rate, seektable_json, audio_data_start, file_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&audio_format.id)
@@ -1070,6 +1071,7 @@ impl Database {
         .bind(audio_format.sample_rate)
         .bind(&audio_format.seektable_json)
         .bind(audio_format.audio_data_start)
+        .bind(&audio_format.file_id)
         .bind(audio_format.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
@@ -1099,6 +1101,7 @@ impl Database {
                 sample_rate: row.get("sample_rate"),
                 seektable_json: row.get("seektable_json"),
                 audio_data_start: row.get("audio_data_start"),
+                file_id: row.get("file_id"),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),

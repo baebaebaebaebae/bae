@@ -56,13 +56,33 @@ pub struct DecodedAudio {
 }
 
 /// A seek point entry mapping sample number to byte offset.
-/// Deserializes from JSON with fields "sample" and "byte".
-#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct SeekEntry {
-    #[serde(rename = "sample")]
-    pub sample_number: u64,
-    #[serde(rename = "byte")]
-    pub byte_offset: u64,
+    pub sample: u64,
+    pub byte: u64,
+}
+
+/// Adjust seektable for a seek operation.
+///
+/// When seeking to a position, we need to filter the seektable to only include
+/// entries from the target frame onwards, and adjust byte offsets to be relative
+/// to the new starting point.
+///
+/// # Arguments
+/// * `seektable` - Original seektable with byte offsets relative to audio_data_start
+/// * `seek_frame_byte` - The byte offset of the frame we're seeking to (relative to audio_data_start)
+///
+/// # Returns
+/// Adjusted seektable starting from the seek position with offsets relative to it.
+pub fn adjust_seektable_for_seek(seektable: &[SeekEntry], seek_frame_byte: u64) -> Vec<SeekEntry> {
+    seektable
+        .iter()
+        .filter(|e| e.byte >= seek_frame_byte)
+        .map(|e| SeekEntry {
+            sample: e.sample,
+            byte: e.byte - seek_frame_byte,
+        })
+        .collect()
 }
 
 /// Information about streaming audio being decoded
@@ -708,21 +728,21 @@ pub fn build_seektable(flac_data: &[u8]) -> Result<Vec<SeekEntry>, String> {
             // Validate frame header
             if validate_flac_frame_header(flac_data, scan_pos) {
                 // Read actual sample number from frame header
-                if let Some(sample_number) =
+                if let Some(sample_num) =
                     parse_flac_frame_sample_number(flac_data, scan_pos, min_block_size)
                 {
                     // Only add if this is a new sample position (avoid duplicates)
-                    // Also reject sample_number > total_samples
-                    if sample_number <= total_samples
+                    // Also reject sample_num > total_samples
+                    if sample_num <= total_samples
                         && (last_sample_number.is_none()
-                            || sample_number > last_sample_number.unwrap())
+                            || sample_num > last_sample_number.unwrap())
                     {
                         let stream_offset = (scan_pos - audio_data_start) as u64;
                         seektable.push(SeekEntry {
-                            sample_number,
-                            byte_offset: stream_offset,
+                            sample: sample_num,
+                            byte: stream_offset,
                         });
-                        last_sample_number = Some(sample_number);
+                        last_sample_number = Some(sample_num);
 
                         // Skip ahead by minimum frame size
                         scan_pos += skip_size;
@@ -736,8 +756,8 @@ pub fn build_seektable(flac_data: &[u8]) -> Result<Vec<SeekEntry>, String> {
 
     // Add final entry
     seektable.push(SeekEntry {
-        sample_number: total_samples,
-        byte_offset: (audio_data_end - audio_data_start) as u64,
+        sample: total_samples,
+        byte: (audio_data_end - audio_data_start) as u64,
     });
 
     let precision_ms = if seektable.len() > 1 && sample_rate > 0 {
@@ -1021,7 +1041,7 @@ impl FlacStreamingDecoder {
         let (sample_rate, channels, bits_per_sample) = parse_streaminfo(&headers)?;
 
         // Extract frame byte offsets from seektable
-        let frame_offsets: Vec<u64> = seektable.iter().map(|e| e.byte_offset).collect();
+        let frame_offsets: Vec<u64> = seektable.iter().map(|e| e.byte).collect();
 
         if frame_offsets.is_empty() {
             return Err("Empty seektable".to_string());
@@ -1207,25 +1227,17 @@ fn parse_streaminfo(headers: &[u8]) -> Result<(u32, u32, u32), String> {
 }
 
 /// Decode audio from a streaming buffer using seektable-based frame decoding.
+/// Decode audio using seektable for frame boundaries.
 ///
-/// If seektable is provided, uses it for precise frame boundaries.
-/// Otherwise falls back to sync code scanning.
-pub fn decode_audio_streaming_sparse(
-    buffer: SharedSparseBuffer,
-    sink: &mut StreamingPcmSink,
-) -> Result<StreamingAudioInfo, String> {
-    decode_audio_streaming_with_seektable(buffer, sink, None, None)
-}
-
-/// Decode audio with optional seektable for frame boundaries.
+/// The seektable provides exact frame boundaries from import, allowing us to
+/// decode frames as soon as their bytes arrive - no scanning needed.
 ///
-/// When seektable is provided, we know exact frame boundaries from import
-/// and can decode frames as soon as their bytes arrive - no scanning needed.
-pub fn decode_audio_streaming_with_seektable(
+/// Seektable is required - all tracks should have one from import.
+pub fn decode_audio_streaming(
     buffer: SharedSparseBuffer,
     sink: &mut StreamingPcmSink,
     headers: Option<Vec<u8>>,
-    seektable: Option<Vec<SeekEntry>>,
+    seektable: Vec<SeekEntry>,
 ) -> Result<StreamingAudioInfo, String> {
     // Install FFmpeg error callback and reset error counter for this decode
     install_ffmpeg_log_callback();
@@ -1265,20 +1277,14 @@ pub fn decode_audio_streaming_with_seektable(
     };
 
     debug!(
-        "Streaming decoder: {} bytes headers, seektable: {}",
+        "Streaming decoder: {} bytes headers, seektable: {} entries",
         headers.len(),
-        seektable.as_ref().map(|s| s.len()).unwrap_or(0)
+        seektable.len()
     );
 
-    // Use seektable if provided, otherwise build one by scanning
-    let seektable = match seektable {
-        Some(st) if !st.is_empty() => st,
-        _ => {
-            // No seektable - fall back to batch decode (legacy behavior)
-            warn!("No seektable provided, falling back to batch decode");
-            return decode_audio_streaming_batch(buffer, sink, headers, initial_audio);
-        }
-    };
+    if seektable.is_empty() {
+        return Err("Seektable is required but empty".to_string());
+    }
 
     // Create seektable-based decoder
     let mut decoder = FlacStreamingDecoder::new(headers, &seektable)?;
@@ -1330,58 +1336,6 @@ pub fn decode_audio_streaming_with_seektable(
     info!(
         "Streaming decode complete: {}Hz, {} channels, {} errors",
         info.sample_rate, info.channels, error_count
-    );
-
-    Ok(info)
-}
-
-/// Fallback: batch decode when no seektable available (legacy behavior).
-fn decode_audio_streaming_batch(
-    buffer: SharedSparseBuffer,
-    sink: &mut StreamingPcmSink,
-    headers: Vec<u8>,
-    initial_audio: Vec<u8>,
-) -> Result<StreamingAudioInfo, String> {
-    let mut audio_data = initial_audio;
-    let mut read_buf = [0u8; 32768];
-
-    // Read all remaining data
-    loop {
-        if sink.is_cancelled() {
-            return Err("Decode cancelled".to_string());
-        }
-
-        match buffer.read(&mut read_buf) {
-            Some(0) => break,
-            Some(n) => audio_data.extend_from_slice(&read_buf[..n]),
-            None => return Err("Buffer cancelled".to_string()),
-        }
-    }
-
-    // Build complete FLAC and decode
-    let mut flac_data = headers;
-    flac_data.extend(audio_data);
-
-    debug!("Batch decode: {} bytes total", flac_data.len());
-
-    let decoded = decode_audio(&flac_data, None, None)?;
-
-    let info = StreamingAudioInfo {
-        sample_rate: decoded.sample_rate,
-        channels: decoded.channels,
-    };
-
-    let scale = 1.0 / (i32::MAX as f32);
-    let f32_samples: Vec<f32> = decoded.samples.iter().map(|&s| s as f32 * scale).collect();
-
-    push_samples_to_sink(sink, &f32_samples)?;
-    sink.mark_finished();
-
-    info!(
-        "Batch decode complete: {} samples, {}Hz, {} channels",
-        f32_samples.len(),
-        info.sample_rate,
-        info.channels
     );
 
     Ok(info)
@@ -1488,10 +1442,74 @@ mod tests {
         // Sample numbers should be monotonically increasing
         for window in seektable.windows(2) {
             assert!(
-                window[1].sample_number >= window[0].sample_number,
+                window[1].sample >= window[0].sample,
                 "Sample numbers should be monotonically increasing"
             );
         }
+    }
+
+    #[test]
+    fn test_adjust_seektable_for_seek() {
+        // Create a sample seektable: frames at bytes 0, 4096, 8192, 12288, 16384
+        let seektable = vec![
+            SeekEntry { sample: 0, byte: 0 },
+            SeekEntry {
+                sample: 4096,
+                byte: 4096,
+            },
+            SeekEntry {
+                sample: 8192,
+                byte: 8192,
+            },
+            SeekEntry {
+                sample: 12288,
+                byte: 12288,
+            },
+            SeekEntry {
+                sample: 16384,
+                byte: 16384,
+            },
+        ];
+
+        // Seek to frame at byte 8192 (3rd frame)
+        let adjusted = adjust_seektable_for_seek(&seektable, 8192);
+
+        assert_eq!(
+            adjusted.len(),
+            3,
+            "Should have 3 entries from frame 3 onwards"
+        );
+        assert_eq!(adjusted[0].byte, 0, "First entry should be at offset 0");
+        assert_eq!(
+            adjusted[0].sample, 8192,
+            "First entry sample should be 8192"
+        );
+        assert_eq!(
+            adjusted[1].byte, 4096,
+            "Second entry should be at offset 4096"
+        );
+        assert_eq!(
+            adjusted[2].byte, 8192,
+            "Third entry should be at offset 8192"
+        );
+
+        // Seek to exact frame boundary
+        let adjusted = adjust_seektable_for_seek(&seektable, 4096);
+        assert_eq!(adjusted.len(), 4);
+        assert_eq!(adjusted[0].byte, 0);
+        assert_eq!(adjusted[0].sample, 4096);
+
+        // Seek past all frames
+        let adjusted = adjust_seektable_for_seek(&seektable, 20000);
+        assert!(
+            adjusted.is_empty(),
+            "Should have no entries when seeking past end"
+        );
+
+        // Seek to byte 0 (no adjustment needed)
+        let adjusted = adjust_seektable_for_seek(&seektable, 0);
+        assert_eq!(adjusted.len(), 5);
+        assert_eq!(adjusted[0].byte, 0);
     }
 
     /// Test that FLAC encode/decode is lossless - samples should match exactly.
@@ -1559,14 +1577,18 @@ mod tests {
             .collect();
         let flac_data = encode_to_flac(&samples, 44100, 1, 16).unwrap();
 
+        // Build seektable
+        let seektable = build_seektable(&flac_data).unwrap();
+
         // Create streaming infrastructure with sparse buffer
         let buffer = create_sparse_buffer();
         let (mut sink, mut source) = create_streaming_pair_with_capacity(44100, 1, 100000);
 
         // Spawn decoder thread
         let decoder_buffer = buffer.clone();
-        let decoder_handle =
-            thread::spawn(move || decode_audio_streaming_sparse(decoder_buffer, &mut sink));
+        let decoder_handle = thread::spawn(move || {
+            decode_audio_streaming(decoder_buffer, &mut sink, None, seektable)
+        });
 
         // Feed data to buffer (simulating download)
         buffer.append_at(0, &flac_data);
@@ -1630,15 +1652,9 @@ mod tests {
 
         // Spawn decoder thread with seektable
         let decoder_buffer = buffer.clone();
-        let decoder_seektable = Some(seektable);
         let decoder_headers = Some(headers.clone());
         let decoder_handle = thread::spawn(move || {
-            decode_audio_streaming_with_seektable(
-                decoder_buffer,
-                &mut sink,
-                decoder_headers,
-                decoder_seektable,
-            )
+            decode_audio_streaming(decoder_buffer, &mut sink, decoder_headers, seektable)
         });
 
         // Feed ONLY audio data (headers provided separately)
@@ -1729,67 +1745,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_seektable_fallback_to_batch() {
-        use crate::playback::create_streaming_pair_with_capacity;
-        use crate::playback::sparse_buffer::create_sparse_buffer;
-        use std::thread;
-
-        init();
-
-        // Create test FLAC data
-        let samples: Vec<i32> = (0..44100)
-            .map(|i| ((i as f64 * 0.01).sin() * 10000.0) as i32)
-            .collect();
-        let flac_data = encode_to_flac(&samples, 44100, 1, 16).unwrap();
-
-        // Create streaming infrastructure
-        let buffer = create_sparse_buffer();
-        let (mut sink, mut source) = create_streaming_pair_with_capacity(44100, 1, 100000);
-
-        // Spawn decoder thread WITHOUT seektable (should fallback to batch)
-        let decoder_buffer = buffer.clone();
-        let decoder_handle = thread::spawn(move || {
-            decode_audio_streaming_with_seektable(
-                decoder_buffer,
-                &mut sink,
-                None, // No headers
-                None, // No seektable - should fallback
-            )
-        });
-
-        // Feed complete FLAC data
-        buffer.append_at(0, &flac_data);
-        buffer.set_total_size(flac_data.len() as u64);
-        buffer.mark_eof();
-
-        // Wait for decoder
-        let result = decoder_handle.join().unwrap();
-        assert!(result.is_ok(), "Batch fallback failed: {:?}", result.err());
-
-        let info = result.unwrap();
-        assert_eq!(info.sample_rate, 44100);
-        assert_eq!(info.channels, 1);
-
-        // Pull samples
-        let mut decoded_samples = Vec::new();
-        let mut buf = [0.0f32; 1024];
-        loop {
-            let n = source.pull_samples(&mut buf);
-            if n == 0 && source.is_finished() {
-                break;
-            }
-            decoded_samples.extend_from_slice(&buf[..n]);
-        }
-
-        assert!(
-            (decoded_samples.len() as i64 - samples.len() as i64).abs() < 1000,
-            "Batch fallback sample count mismatch: {} vs {}",
-            decoded_samples.len(),
-            samples.len()
-        );
-    }
-
     /// Test streaming decode when buffer contains full FLAC data (headers + audio).
     /// The decoder should read headers from buffer (pass None for headers param).
     /// This is the standard pattern - buffer always has headers, decoder reads them.
@@ -1818,13 +1773,12 @@ mod tests {
         let (mut sink, mut source) = create_streaming_pair_with_capacity(44100, 1, 100000);
 
         let decoder_buffer = buffer.clone();
-        let decoder_seektable = Some(seektable);
         let decoder_handle = thread::spawn(move || {
-            decode_audio_streaming_with_seektable(
+            decode_audio_streaming(
                 decoder_buffer,
                 &mut sink,
                 None, // Headers are in buffer, decoder reads them
-                decoder_seektable,
+                seektable,
             )
         });
 
@@ -1900,9 +1854,9 @@ mod tests {
         let start_frame_idx = full_seektable.len() / 3;
         let end_frame_idx = (full_seektable.len() * 2) / 3;
 
-        let track_start_byte = full_seektable[start_frame_idx].byte_offset;
+        let track_start_byte = full_seektable[start_frame_idx].byte;
         let track_end_byte = if end_frame_idx < full_seektable.len() {
-            full_seektable[end_frame_idx].byte_offset
+            full_seektable[end_frame_idx].byte
         } else {
             flac_data.len() as u64 - audio_data_start as u64
         };
@@ -1915,10 +1869,10 @@ mod tests {
         // and adjust offsets to be relative to the track's start.
         let adjusted_seektable: Vec<SeekEntry> = full_seektable
             .iter()
-            .filter(|e| e.byte_offset >= track_start_byte && e.byte_offset < track_end_byte)
+            .filter(|e| e.byte >= track_start_byte && e.byte < track_end_byte)
             .map(|e| SeekEntry {
-                sample_number: e.sample_number - full_seektable[start_frame_idx].sample_number,
-                byte_offset: e.byte_offset - track_start_byte,
+                sample: e.sample - full_seektable[start_frame_idx].sample,
+                byte: e.byte - track_start_byte,
             })
             .collect();
 
@@ -1976,5 +1930,74 @@ mod tests {
                 total_samples
             );
         }
+    }
+
+    /// Test smart seek: adjusting seektable when seeking mid-track.
+    ///
+    /// When seeking, we copy audio from the seek position and prepend headers.
+    /// The seektable must be adjusted so offsets are relative to the new start.
+    #[test]
+    fn test_smart_seek_seektable_adjustment() {
+        init();
+
+        // Create a longer FLAC file to have more frames
+        let duration_samples = 44100 * 5; // 5 seconds
+        let samples: Vec<i32> = (0..duration_samples)
+            .map(|i| ((i as f64 * 0.01).sin() * 10000.0) as i32)
+            .collect();
+        let flac_data = encode_to_flac(&samples, 44100, 1, 16).unwrap();
+
+        let seektable = build_seektable(&flac_data).unwrap();
+        assert!(seektable.len() >= 5, "Need at least 5 frames for seek test");
+
+        let headers_end = find_flac_headers_end(&flac_data).unwrap();
+        let headers = flac_data[..headers_end].to_vec();
+        let audio_data = &flac_data[headers_end..];
+
+        // Seek to frame 3 (index 3)
+        let seek_frame_idx = 3;
+        let seek_frame_byte = seektable[seek_frame_idx].byte;
+
+        // Audio data from seek position onwards
+        let seek_audio = &audio_data[seek_frame_byte as usize..];
+
+        // Adjust seektable using the public function
+        let adjusted_seektable = adjust_seektable_for_seek(&seektable, seek_frame_byte);
+
+        assert!(
+            !adjusted_seektable.is_empty(),
+            "Adjusted seektable should not be empty"
+        );
+        assert_eq!(
+            adjusted_seektable[0].byte, 0,
+            "First entry should be at offset 0"
+        );
+
+        // Decode with adjusted seektable
+        let mut decoder = FlacStreamingDecoder::new(headers.clone(), &adjusted_seektable)
+            .expect("Should create decoder");
+
+        let samples = decoder.feed(seek_audio).unwrap();
+        let final_samples = decoder.finish().unwrap();
+        let total_samples = samples.len() + final_samples.len();
+
+        // Should have decoded a reasonable number of samples
+        // We're decoding from frame 3 onwards, so roughly (total_frames - 3) / total_frames of samples
+        let expected_fraction = (seektable.len() - seek_frame_idx) as f64 / seektable.len() as f64;
+        let min_expected = (duration_samples as f64 * expected_fraction * 0.5) as usize;
+
+        assert!(
+            total_samples >= min_expected,
+            "Smart seek decode produced too few samples: {} (expected at least {})",
+            total_samples,
+            min_expected
+        );
+
+        // Verify we got actual audio, not silence
+        let non_zero = samples.iter().filter(|&&s| s.abs() > 0.001).count();
+        assert!(
+            non_zero > samples.len() / 2,
+            "Decoded samples should not be mostly silence"
+        );
     }
 }

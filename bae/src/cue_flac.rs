@@ -88,13 +88,6 @@ impl FlacInfo {
     }
 }
 
-/// A single seek point in FLAC seektable
-#[derive(Debug, Clone, Copy)]
-pub struct SeekPoint {
-    pub sample_number: u64,
-    pub stream_offset: u64,
-}
-
 /// Dense seektable built by scanning FLAC frames during import.
 ///
 /// We build our own seektable rather than using the embedded one because:
@@ -103,7 +96,7 @@ pub struct SeekPoint {
 /// - Track boundary positioning also benefits from frame-accurate offsets
 #[derive(Debug, Clone)]
 pub struct DenseSeektable {
-    pub entries: Vec<SeekPoint>,
+    pub entries: Vec<crate::audio_codec::SeekEntry>,
 }
 /// Represents a CUE/FLAC pair found during import
 #[derive(Debug, Clone)]
@@ -304,11 +297,11 @@ impl CueFlacProcessor {
     pub fn build_dense_seektable(file_data: &[u8], _flac_info: &FlacInfo) -> DenseSeektable {
         match crate::audio_codec::build_seektable(file_data) {
             Ok(entries) => {
-                let entries: Vec<SeekPoint> = entries
+                let entries: Vec<crate::audio_codec::SeekEntry> = entries
                     .into_iter()
-                    .map(|e| SeekPoint {
-                        sample_number: e.sample_number,
-                        stream_offset: e.byte_offset,
+                    .map(|e| crate::audio_codec::SeekEntry {
+                        sample: e.sample,
+                        byte: e.byte,
                     })
                     .collect();
                 DenseSeektable { entries }
@@ -341,7 +334,7 @@ impl CueFlacProcessor {
     pub fn find_track_byte_range(
         start_time_ms: u64,
         end_time_ms: Option<u64>,
-        seektable: &[SeekPoint],
+        seektable: &[crate::audio_codec::SeekEntry],
         sample_rate: u32,
         total_samples: u64,
         audio_data_start: u64,
@@ -372,9 +365,9 @@ impl CueFlacProcessor {
             let mut best_offset = 0u64;
             let mut best_sample = 0u64;
             for sp in seektable.iter() {
-                if sp.sample_number <= start_sample {
-                    best_offset = sp.stream_offset;
-                    best_sample = sp.sample_number;
+                if sp.sample <= start_sample {
+                    best_offset = sp.byte;
+                    best_sample = sp.sample;
                 } else {
                     break;
                 }
@@ -395,8 +388,8 @@ impl CueFlacProcessor {
             // and the decoder handles overlapping byte ranges correctly.
             let mut best_offset = audio_data_end - audio_data_start;
             for sp in seektable.iter().rev() {
-                if sp.sample_number >= end_sample {
-                    best_offset = sp.stream_offset;
+                if sp.sample >= end_sample {
+                    best_offset = sp.byte;
                 } else {
                     break;
                 }
@@ -964,10 +957,10 @@ FILE "Test Artist - Test Album.flac" WAVE
         let audio_data_end = 10_000_000u64;
 
         // Seektable with entries every ~10 seconds
-        let seektable: Vec<SeekPoint> = (0..30)
-            .map(|i| SeekPoint {
-                sample_number: i * 44100 * 10, // every 10 sec
-                stream_offset: i * 300_000,    // ~300KB per 10 sec
+        let seektable: Vec<crate::audio_codec::SeekEntry> = (0..30)
+            .map(|i| crate::audio_codec::SeekEntry {
+                sample: i * 44100 * 10, // every 10 sec
+                byte: i * 300_000,      // ~300KB per 10 sec
             })
             .collect();
 
@@ -1018,10 +1011,10 @@ FILE "Test Artist - Test Album.flac" WAVE
         let audio_data_end = audio_data_start + num_frames * bytes_per_frame;
 
         // Build a dense seektable (one entry per frame)
-        let seektable: Vec<SeekPoint> = (0..num_frames)
-            .map(|i| SeekPoint {
-                sample_number: i * samples_per_frame as u64,
-                stream_offset: i * bytes_per_frame,
+        let seektable: Vec<crate::audio_codec::SeekEntry> = (0..num_frames)
+            .map(|i| crate::audio_codec::SeekEntry {
+                sample: i * samples_per_frame as u64,
+                byte: i * bytes_per_frame,
             })
             .collect();
 

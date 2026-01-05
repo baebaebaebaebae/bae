@@ -629,34 +629,38 @@ impl PlaybackService {
             }
         };
 
-        // Find the audio file
-        let files = match self
-            .library_manager
-            .get_files_for_release(&track.release_id)
-            .await
-        {
-            Ok(files) => files,
-            Err(e) => {
-                error!("Failed to get files: {}", e);
-                self.stop().await;
-                return;
-            }
-        };
-
-        let audio_file = match files.iter().find(|f| {
-            let ext = f.format.to_lowercase();
-            (ext == "flac" || ext == "mp3" || ext == "wav" || ext == "ogg")
-                && f.source_path.is_some()
-        }) {
-            Some(f) => f,
+        // Get the audio file via file_id FK
+        let file_id = match audio_format.as_ref().and_then(|af| af.file_id.as_ref()) {
+            Some(id) => id,
             None => {
-                error!("No audio file with source_path found");
+                error!("No file_id in audio_format for track");
                 self.stop().await;
                 return;
             }
         };
 
-        let source_path = audio_file.source_path.clone().unwrap();
+        let audio_file = match self.library_manager.get_file_by_id(file_id).await {
+            Ok(Some(f)) => f,
+            Ok(None) => {
+                error!("Audio file not found for file_id: {}", file_id);
+                self.stop().await;
+                return;
+            }
+            Err(e) => {
+                error!("Failed to get audio file: {}", e);
+                self.stop().await;
+                return;
+            }
+        };
+
+        let source_path = match audio_file.source_path {
+            Some(p) => p,
+            None => {
+                error!("Audio file has no source_path");
+                self.stop().await;
+                return;
+            }
+        };
         let pregap_ms = audio_format.as_ref().and_then(|af| af.pregap_ms);
 
         let (start_byte, end_byte) = audio_format
@@ -677,6 +681,12 @@ impl PlaybackService {
         } else {
             None
         };
+        info!(
+            "Play track: needs_headers={}, will_prepend_headers={}, all_headers_len={}",
+            needs_headers,
+            flac_headers.is_some(),
+            all_flac_headers.as_ref().map(|h| h.len()).unwrap_or(0)
+        );
 
         // Load seektable from audio format
         let full_seektable: Option<Vec<crate::audio_codec::SeekEntry>> = audio_format
@@ -704,10 +714,10 @@ impl PlaybackService {
                 // Filter to entries within our byte range and adjust offsets
                 let adjusted: Vec<crate::audio_codec::SeekEntry> = st
                     .iter()
-                    .filter(|e| e.byte_offset >= rel_track_start && e.byte_offset < rel_track_end)
+                    .filter(|e| e.byte >= rel_track_start && e.byte < rel_track_end)
                     .map(|e| crate::audio_codec::SeekEntry {
-                        sample_number: e.sample_number,
-                        byte_offset: e.byte_offset - rel_track_start,
+                        sample: e.sample,
+                        byte: e.byte - rel_track_start,
                     })
                     .collect();
 
@@ -790,9 +800,9 @@ impl PlaybackService {
         // Buffer always has headers (reader prepends for byte ranges, or file has them).
         // Decoder reads headers from buffer.
         let decoder_buffer = buffer.clone();
-        let decoder_seektable = seektable.clone();
+        let decoder_seektable = seektable.clone().unwrap_or_default();
         std::thread::spawn(move || {
-            if let Err(e) = crate::audio_codec::decode_audio_streaming_with_seektable(
+            if let Err(e) = crate::audio_codec::decode_audio_streaming(
                 decoder_buffer,
                 &mut sink,
                 None, // Headers are in buffer
@@ -1176,32 +1186,23 @@ impl PlaybackService {
             }
         };
         let pcm_source = match &storage_profile {
-            None => {
-                match self
-                    .load_audio_from_source_path(track_id, &track.release_id)
-                    .await
-                {
-                    Ok(data) => {
-                        match Self::decode_audio_bytes(
-                            &data,
-                            frame_offset_samples,
-                            exact_sample_count,
-                        )
+            None => match self.load_audio_from_source_path(track_id).await {
+                Ok(data) => {
+                    match Self::decode_audio_bytes(&data, frame_offset_samples, exact_sample_count)
                         .await
-                        {
-                            Ok(source) => source,
-                            Err(e) => {
-                                error!("Failed to decode FLAC for preload: {}", e);
-                                return;
-                            }
+                    {
+                        Ok(source) => source,
+                        Err(e) => {
+                            error!("Failed to decode FLAC for preload: {}", e);
+                            return;
                         }
                     }
-                    Err(e) => {
-                        error!("Failed to load audio from source path for preload: {}", e);
-                        return;
-                    }
                 }
-            }
+                Err(e) => {
+                    error!("Failed to load audio from source path for preload: {}", e);
+                    return;
+                }
+            },
             Some(profile) => {
                 match self
                     .load_audio_from_storage(track_id, &track.release_id, profile)
@@ -1431,7 +1432,31 @@ impl PlaybackService {
 
                     // Copy buffered audio data from target_byte onwards
                     // Read from the original buffer and write to seek_buffer
+
+                    // Check what bytes are at audio_data_start (should be first frame sync code ff f8)
+                    buffer.seek(audio_data_start);
+                    let mut first_frame = [0u8; 4];
+                    if buffer.read(&mut first_frame).is_some() {
+                        info!(
+                            "Original buffer at audio_data_start {}: {:02x} {:02x} {:02x} {:02x}",
+                            audio_data_start,
+                            first_frame[0],
+                            first_frame[1],
+                            first_frame[2],
+                            first_frame[3]
+                        );
+                    }
+
+                    // Check what bytes are at target_byte in original buffer
                     buffer.seek(target_byte);
+                    let mut orig_check = [0u8; 4];
+                    if let Some(n) = buffer.read(&mut orig_check) {
+                        info!(
+                            "Original buffer at target_byte {}: {:02x} {:02x} {:02x} {:02x} (read {})",
+                            target_byte, orig_check[0], orig_check[1], orig_check[2], orig_check[3], n
+                        );
+                    }
+                    buffer.seek(target_byte); // Reset after check
                     let mut temp_buf = vec![0u8; 65536]; // 64KB chunks
                     loop {
                         match buffer.read(&mut temp_buf) {
@@ -1445,13 +1470,71 @@ impl PlaybackService {
                     }
                     seek_buffer.mark_eof();
 
-                    // Start decoder on the seek buffer
+                    // Check first bytes of audio data to verify sync code
+                    let audio_start_pos = self
+                        .current_flac_headers
+                        .as_ref()
+                        .map(|h| h.len() as u64)
+                        .unwrap_or(0);
+                    seek_buffer.seek(audio_start_pos);
+                    let mut check_buf = [0u8; 4];
+                    if let Some(n) = seek_buffer.read(&mut check_buf) {
+                        info!(
+                            "Smart seek buffer: {} bytes total, headers_len={}, first audio bytes: {:02x} {:02x} {:02x} {:02x} (read {})",
+                            write_pos,
+                            audio_start_pos,
+                            check_buf[0], check_buf[1], check_buf[2], check_buf[3],
+                            n
+                        );
+                    }
+                    // Reset seek position to start for decoder
+                    seek_buffer.seek(0);
+
+                    // Start decoder on the seek buffer with adjusted seektable
                     let (mut sink, source) = create_streaming_pair(44100, 2);
 
+                    // Parse and adjust seektable for seek position
+                    // target_byte is absolute file offset, seektable offsets are relative to audio_data_start
+                    let rel_seek_byte = target_byte.saturating_sub(audio_data_start);
+                    let original_seektable: Vec<crate::audio_codec::SeekEntry> = self
+                        .current_seektable_json
+                        .as_ref()
+                        .and_then(|json| serde_json::from_str(json).ok())
+                        .unwrap_or_default();
+
+                    // Log some seektable entries to debug
+                    if !original_seektable.is_empty() {
+                        info!(
+                            "Smart seek: seektable[0] sample={} byte={}, seektable[last] sample={} byte={}",
+                            original_seektable[0].sample,
+                            original_seektable[0].byte,
+                            original_seektable.last().unwrap().sample,
+                            original_seektable.last().unwrap().byte,
+                        );
+                    }
+                    info!(
+                        "Smart seek: original seektable has {} entries, rel_seek_byte={}",
+                        original_seektable.len(),
+                        rel_seek_byte
+                    );
+
+                    let seek_seektable = crate::audio_codec::adjust_seektable_for_seek(
+                        &original_seektable,
+                        rel_seek_byte,
+                    );
+
+                    info!(
+                        "Smart seek: adjusted seektable has {} entries, first offset={}",
+                        seek_seektable.len(),
+                        seek_seektable.first().map(|e| e.byte).unwrap_or(u64::MAX)
+                    );
+
                     std::thread::spawn(move || {
-                        if let Err(e) = crate::audio_codec::decode_audio_streaming_sparse(
+                        if let Err(e) = crate::audio_codec::decode_audio_streaming(
                             seek_buffer,
                             &mut sink,
+                            None, // Headers already in buffer
+                            seek_seektable,
                         ) {
                             error!("Smart seek decode failed: {}", e);
                         }
@@ -1685,13 +1768,32 @@ impl PlaybackService {
                         }
                         seek_buffer.mark_eof();
 
-                        // Restart decoder from seek buffer (has headers)
+                        // Restart decoder from seek buffer with adjusted seektable
                         let (mut sink, source) = create_streaming_pair(44100, 2);
 
+                        // Parse and adjust seektable for seek position
+                        let rel_seek_byte = target_byte.saturating_sub(audio_data_start);
+                        let seek_seektable: Vec<crate::audio_codec::SeekEntry> = self
+                            .current_seektable_json
+                            .as_ref()
+                            .and_then(|json| serde_json::from_str(json).ok())
+                            .map(|st: Vec<crate::audio_codec::SeekEntry>| {
+                                st.iter()
+                                    .filter(|e| e.byte >= rel_seek_byte)
+                                    .map(|e| crate::audio_codec::SeekEntry {
+                                        sample: e.sample,
+                                        byte: e.byte - rel_seek_byte,
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+
                         std::thread::spawn(move || {
-                            if let Err(e) = crate::audio_codec::decode_audio_streaming_sparse(
+                            if let Err(e) = crate::audio_codec::decode_audio_streaming(
                                 seek_buffer,
                                 &mut sink,
+                                None, // Headers already in buffer
+                                seek_seektable,
                             ) {
                                 error!("Seek past buffer decode failed: {}", e);
                             }
@@ -2033,11 +2135,7 @@ impl PlaybackService {
     ///
     /// For single-file-per-track imports, finds the audio file and reads it.
     /// For CUE/FLAC imports, reads only the track's byte range using seek + read_exact.
-    async fn load_audio_from_source_path(
-        &self,
-        track_id: &str,
-        release_id: &str,
-    ) -> Result<Vec<u8>, PlaybackError> {
+    async fn load_audio_from_source_path(&self, track_id: &str) -> Result<Vec<u8>, PlaybackError> {
         info!(
             "Loading audio from source path for track {} (None storage)",
             track_id
@@ -2047,40 +2145,18 @@ impl PlaybackService {
             .get_audio_format_by_track_id(track_id)
             .await
             .map_err(PlaybackError::database)?;
-        let files = self
+        let file_id = audio_format
+            .as_ref()
+            .and_then(|af| af.file_id.as_ref())
+            .ok_or_else(|| PlaybackError::not_found("file_id in audio_format", track_id))?;
+
+        let audio_file = self
             .library_manager
-            .get_files_for_release(release_id)
-            .await
-            .map_err(PlaybackError::database)?;
-        let track = self
-            .library_manager
-            .get_track(track_id)
+            .get_file_by_id(file_id)
             .await
             .map_err(PlaybackError::database)?
-            .ok_or_else(|| PlaybackError::not_found("Track", track_id))?;
-        let audio_file = files
-            .iter()
-            .filter(|f| {
-                let ext = f.format.to_lowercase();
-                (ext == "flac" || ext == "mp3" || ext == "wav" || ext == "ogg")
-                    && f.source_path.is_some()
-            })
-            .find(|f| {
-                if let Some(track_num) = track.track_number {
-                    let num_str = format!("{:02}", track_num);
-                    f.original_filename.contains(&num_str)
-                } else {
-                    true
-                }
-            })
-            .or_else(|| {
-                files.iter().find(|f| {
-                    let ext = f.format.to_lowercase();
-                    (ext == "flac" || ext == "mp3" || ext == "wav" || ext == "ogg")
-                        && f.source_path.is_some()
-                })
-            })
-            .ok_or_else(|| PlaybackError::not_found("Audio file", release_id))?;
+            .ok_or_else(|| PlaybackError::not_found("Audio file", file_id))?;
+
         let source_path = audio_file
             .source_path
             .as_ref()
@@ -2287,24 +2363,17 @@ pub fn calculate_byte_offset_for_seek(
     (file_size as f64 * ratio) as u64
 }
 
-/// Seektable entry for frame-accurate seeking.
-#[derive(Debug, Clone, serde::Deserialize)]
-struct SeekEntry {
-    sample: u64,
-    byte: u64,
-}
-
 /// Find frame-aligned byte offset using seektable.
 ///
 /// Returns (byte_offset, sample_offset) where:
-/// - byte_offset: frame-aligned position in the file
+/// - byte: frame-aligned position in the file
 /// - sample_offset: samples to skip after decoding to reach exact target
 pub fn find_frame_boundary_for_seek(
     seek_time: std::time::Duration,
     sample_rate: u32,
     seektable_json: &str,
 ) -> Option<(u64, u64)> {
-    let entries: Vec<SeekEntry> = serde_json::from_str(seektable_json).ok()?;
+    let entries: Vec<crate::audio_codec::SeekEntry> = serde_json::from_str(seektable_json).ok()?;
     if entries.is_empty() {
         return None;
     }
