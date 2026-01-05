@@ -1405,3 +1405,103 @@ async fn test_cue_flac_seek() {
         error_count
     );
 }
+
+/// Test pregap skip behavior with CUE/FLAC.
+///
+/// Track 2 has a 2-second pregap (INDEX 00 at 8s, INDEX 01 at 10s).
+/// When directly playing track 2, playback should skip the pregap and start at INDEX 01.
+/// The actual audio position should start at ~2000ms (the pregap duration), not 0.
+#[tokio::test]
+async fn test_direct_play_skips_pregap_cue_flac() {
+    if should_skip_audio_tests() {
+        debug!("Skipping audio test - no audio device available");
+        return;
+    }
+
+    let mut fixture = match CueFlacTestFixture::new().await {
+        Ok(f) => f,
+        Err(e) => {
+            debug!("Failed to set up CUE/FLAC test fixture: {}", e);
+            return;
+        }
+    };
+
+    assert_eq!(fixture.track_ids.len(), 3, "Should have 3 tracks");
+    // Track 2 (index 1) has a 2-second pregap: INDEX 00 at 8s, INDEX 01 at 10s
+    let track_id = fixture.track_ids[1].clone();
+
+    // Direct play track 2
+    fixture.playback_handle.play(track_id.clone());
+
+    // Wait for playback to start
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut pregap_ms_value: Option<i64> = None;
+
+    while Instant::now() < deadline && pregap_ms_value.is_none() {
+        let remaining = deadline - Instant::now();
+        match timeout(remaining, fixture.progress_rx.recv()).await {
+            Ok(Some(PlaybackProgress::StateChanged { state })) => {
+                if let PlaybackState::Playing {
+                    track, pregap_ms, ..
+                } = &state
+                {
+                    if track.id == track_id {
+                        pregap_ms_value = *pregap_ms;
+                    }
+                }
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) | Err(_) => break,
+        }
+    }
+
+    let pregap = pregap_ms_value.expect("Track 2 should have pregap_ms set");
+    assert!(
+        pregap > 0,
+        "Track 2 should have a positive pregap_ms, got {}",
+        pregap
+    );
+
+    // Wait for position updates and verify we see positions >= pregap offset.
+    // The seek happens after playback starts, so there may be a few early positions
+    // before the seek completes. We wait until we see a position >= pregap threshold.
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut positions: Vec<u64> = Vec::new();
+    let mut found_post_seek = false;
+    let threshold = (pregap as u64).saturating_sub(500); // pregap minus 500ms tolerance
+
+    while Instant::now() < deadline && !found_post_seek {
+        let remaining = deadline - Instant::now();
+        match timeout(remaining, fixture.progress_rx.recv()).await {
+            Ok(Some(PlaybackProgress::PositionUpdate {
+                position,
+                track_id: pos_track_id,
+            })) => {
+                if pos_track_id == track_id {
+                    let pos_ms = position.as_millis() as u64;
+                    positions.push(pos_ms);
+                    if pos_ms >= threshold {
+                        found_post_seek = true;
+                    }
+                }
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) | Err(_) => break,
+        }
+    }
+
+    assert!(
+        !positions.is_empty(),
+        "Should receive at least one position update"
+    );
+
+    // The bug: without the seek, position starts at 0 and progresses linearly.
+    // With the seek, position should eventually jump to >= pregap_ms (~2000ms).
+    assert!(
+        found_post_seek,
+        "Direct play should skip pregap: never saw position >= {}ms (pregap {} minus 500ms). \
+         Positions received: {:?}. \
+         If positions stay low, the pregap seek is not being performed or not completing.",
+        threshold, pregap, positions
+    );
+}

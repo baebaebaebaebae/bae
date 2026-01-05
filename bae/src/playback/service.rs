@@ -795,7 +795,9 @@ impl PlaybackService {
             (guard.sample_rate(), guard.channels())
         };
 
-        let start_position = calculate_start_position(pregap_ms, is_natural_transition);
+        // Check if we need to seek to skip the pregap (direct selection with pregap)
+        let pregap_seek = pregap_seek_position(pregap_ms, is_natural_transition);
+        let start_position = pregap_seek.unwrap_or(std::time::Duration::ZERO);
 
         if let Some(stream) = self.stream.take() {
             drop(stream);
@@ -885,6 +887,12 @@ impl PlaybackService {
                 pregap_ms,
             },
         });
+
+        // Seek to skip pregap if needed (direct selection with pregap)
+        if let Some(seek_pos) = pregap_seek {
+            info!("Seeking to skip pregap: {:?}", seek_pos);
+            self.seek(seek_pos).await;
+        }
 
         // Preload next track
         let track_id_owned = track_id.to_string();
@@ -1253,7 +1261,9 @@ impl PlaybackService {
             (guard.sample_rate(), guard.channels())
         };
 
-        let start_position = calculate_start_position(pregap_ms, is_natural_transition);
+        // Check if we need to seek to skip the pregap (direct selection with pregap)
+        let pregap_seek = pregap_seek_position(pregap_ms, is_natural_transition);
+        let start_position = pregap_seek.unwrap_or(std::time::Duration::ZERO);
 
         let (position_tx, position_rx) = mpsc::channel();
         let (completion_tx, completion_rx) = mpsc::channel();
@@ -1341,6 +1351,12 @@ impl PlaybackService {
                 pregap_ms,
             },
         });
+
+        // Seek to skip pregap if needed (direct selection with pregap)
+        if let Some(seek_pos) = pregap_seek {
+            info!("Seeking to skip pregap (preloaded): {:?}", seek_pos);
+            self.seek(seek_pos).await;
+        }
 
         // Start completion listener
         let track_id_owned = track_id.to_string();
@@ -2099,23 +2115,26 @@ pub fn find_frame_boundary_for_seek(
     Some((frame.byte, sample_offset))
 }
 
-/// Calculate starting position for track playback.
+/// Determine if we need to seek to skip the pregap.
 ///
-/// With frame-accurate byte positions from import, the track audio starts at
-/// the correct position (<93ms precision, imperceptible). Only pregap handling
-/// is needed here:
+/// Returns `Some(position)` if a seek is needed to skip the pregap (direct selection),
+/// or `None` if playback should start from the beginning (natural transition or no pregap).
+///
+/// CD-like pregap behavior:
 /// - Direct selection (play, next, previous): skip pregap, start at INDEX 01
-/// - Natural transition (auto-advance): play pregap, start at INDEX 00
-pub fn calculate_start_position(
+/// - Natural transition (auto-advance): play pregap from INDEX 00
+pub fn pregap_seek_position(
     pregap_ms: Option<i64>,
     is_natural_transition: bool,
-) -> std::time::Duration {
+) -> Option<std::time::Duration> {
     if is_natural_transition {
-        // Natural transition: start at INDEX 00 (position 0), play the pregap
-        std::time::Duration::ZERO
+        // Natural transition: start at INDEX 00, play the pregap
+        None
     } else {
-        // Direct selection: skip to INDEX 01 (skip the pregap)
-        std::time::Duration::from_millis(pregap_ms.unwrap_or(0).max(0) as u64)
+        // Direct selection: skip to INDEX 01 if there's a pregap
+        pregap_ms
+            .filter(|&p| p > 0)
+            .map(|p| std::time::Duration::from_millis(p as u64))
     }
 }
 
@@ -2157,64 +2176,61 @@ mod tests {
     #[test]
     fn test_direct_selection_skips_pregap() {
         // When directly selecting a track with 3-second pregap,
-        // playback should start at 3000ms (skipping the pregap)
+        // we need to seek to 3000ms (skipping the pregap)
         let pregap_ms = Some(3000i64);
         let is_natural_transition = false;
 
-        let start_pos = calculate_start_position(pregap_ms, is_natural_transition);
+        let seek_pos = pregap_seek_position(pregap_ms, is_natural_transition);
 
         assert_eq!(
-            start_pos,
-            std::time::Duration::from_millis(3000),
-            "Direct selection should skip pregap and start at INDEX 01"
+            seek_pos,
+            Some(std::time::Duration::from_millis(3000)),
+            "Direct selection should return seek position to skip pregap"
         );
     }
 
     #[test]
     fn test_natural_transition_plays_pregap() {
         // When naturally transitioning to a track with 3-second pregap,
-        // playback should start at 0ms (playing the pregap, showing negative time)
+        // no seek needed - play from start (including pregap)
         let pregap_ms = Some(3000i64);
         let is_natural_transition = true;
 
-        let start_pos = calculate_start_position(pregap_ms, is_natural_transition);
+        let seek_pos = pregap_seek_position(pregap_ms, is_natural_transition);
 
         assert_eq!(
-            start_pos,
-            std::time::Duration::ZERO,
-            "Natural transition should start at INDEX 00 to play pregap"
+            seek_pos, None,
+            "Natural transition should return None (no seek, play pregap)"
         );
     }
 
     #[test]
     fn test_direct_selection_no_pregap() {
         // When directly selecting a track without pregap,
-        // playback should start at 0ms
+        // no seek needed
         let pregap_ms = None;
         let is_natural_transition = false;
 
-        let start_pos = calculate_start_position(pregap_ms, is_natural_transition);
+        let seek_pos = pregap_seek_position(pregap_ms, is_natural_transition);
 
         assert_eq!(
-            start_pos,
-            std::time::Duration::ZERO,
-            "Direct selection without pregap should start at 0"
+            seek_pos, None,
+            "Direct selection without pregap should return None (no seek needed)"
         );
     }
 
     #[test]
     fn test_natural_transition_no_pregap() {
         // When naturally transitioning to a track without pregap,
-        // playback should start at 0ms (same as direct selection)
+        // no seek needed
         let pregap_ms = None;
         let is_natural_transition = true;
 
-        let start_pos = calculate_start_position(pregap_ms, is_natural_transition);
+        let seek_pos = pregap_seek_position(pregap_ms, is_natural_transition);
 
         assert_eq!(
-            start_pos,
-            std::time::Duration::ZERO,
-            "Natural transition without pregap should start at 0"
+            seek_pos, None,
+            "Natural transition without pregap should return None"
         );
     }
 
