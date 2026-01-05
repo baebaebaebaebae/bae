@@ -1,4 +1,15 @@
+// macOS-only modules (used by TitleBar)
+#[cfg(target_os = "macos")]
 pub mod active_imports_context;
+#[cfg(target_os = "macos")]
+pub mod imports_button;
+#[cfg(target_os = "macos")]
+pub mod imports_dropdown;
+#[cfg(target_os = "macos")]
+pub mod library_search_context;
+#[cfg(target_os = "macos")]
+pub mod title_bar;
+
 pub mod album_card;
 pub mod album_detail;
 pub mod app;
@@ -6,22 +17,19 @@ pub mod dialog;
 pub mod dialog_context;
 pub mod import;
 pub mod import_hooks;
-pub mod imports_button;
-pub mod imports_dropdown;
 pub mod library;
-pub mod library_search_context;
 pub mod navbar;
 pub mod now_playing_bar;
 pub mod playback_hooks;
 pub mod queue_sidebar;
 pub mod settings;
-#[cfg(target_os = "macos")]
-pub mod title_bar;
 pub mod torrent_hooks;
+
 pub use album_detail::AlbumDetail;
 pub use app::App;
 pub use import_hooks::use_track_progress;
 pub use library::Library;
+#[cfg(target_os = "macos")]
 pub use library_search_context::use_library_search;
 pub use navbar::Navbar;
 pub use now_playing_bar::NowPlayingBar;
