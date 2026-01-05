@@ -4,9 +4,8 @@ use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::{Device, Stream, StreamConfig};
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::mpsc;
+use std::sync::{mpsc, Mutex};
 use std::sync::Arc;
-use std::sync::Mutex;
 use tracing::{error, info, trace, warn};
 #[derive(Debug, Clone)]
 pub enum AudioCommand {
@@ -224,12 +223,10 @@ impl AudioOutput {
             .map_err(|e| AudioError::StreamBuildError(e.to_string()))?;
         Ok(stream)
     }
-
-    /// Create a stream with streaming PCM source (ring buffer)
+    /// Create a stream that pulls from a streaming PCM source (ring buffer).
     ///
-    /// Unlike `create_stream`, this pulls from a ring buffer that's being
-    /// filled asynchronously by a decoder thread.
-    #[allow(dead_code)] // Will be used when PlaybackService streaming is wired up
+    /// Unlike `create_stream`, this pulls f32 samples from a `StreamingPcmSource`
+    /// which is fed by a decoder thread. Handles buffer underrun with silence.
     pub fn create_streaming_stream(
         &mut self,
         source: Arc<Mutex<StreamingPcmSource>>,
@@ -287,7 +284,6 @@ impl AudioOutput {
                         }
                     }
 
-                    // Check play state
                     if !is_playing.load(Ordering::Relaxed) || is_paused.load(Ordering::Relaxed) {
                         data.fill(0.0);
                         return;
@@ -296,24 +292,21 @@ impl AudioOutput {
                     let vol = volume.load(Ordering::Relaxed) as f32 / 10000.0;
                     let mut output_pos = 0;
 
-                    // Try to lock the source - if we can't, output silence
+                    // Try to lock the source (non-blocking in audio callback)
                     let mut source_guard = match source.try_lock() {
                         Ok(guard) => guard,
                         Err(_) => {
-                            trace!("Streaming: couldn't lock source, outputting silence");
+                            // Can't get lock, output silence
                             data.fill(0.0);
                             return;
                         }
                     };
 
                     while output_pos < data.len() {
-                        // Refill resample buffer if needed
                         if resample_pos >= resample_buffer.len() {
-                            // Calculate how many source samples we need
+                            // Need more samples from source
                             let samples_needed =
-                                ((data.len() - output_pos) as f64 * sample_rate_ratio) as usize
-                                    + source_channels;
-
+                                (data.len() as f64 * sample_rate_ratio) as usize + source_channels;
                             let mut raw_samples = vec![0.0f32; samples_needed];
                             let read = source_guard.pull_samples(&mut raw_samples);
 
@@ -321,7 +314,7 @@ impl AudioOutput {
                                 if source_guard.is_finished() {
                                     // End of stream
                                     if !completion_sent {
-                                        info!("Streaming: End of stream detected");
+                                        info!("Streaming audio callback: End of stream");
                                         is_playing.store(false, Ordering::Relaxed);
                                         if completion_tx.send(()).is_err() {
                                             warn!("Failed to send completion signal");
@@ -331,8 +324,8 @@ impl AudioOutput {
                                     data[output_pos..].fill(0.0);
                                     return;
                                 } else {
-                                    // Buffer starving - output silence and continue
-                                    trace!("Streaming: buffer starving, outputting silence");
+                                    // Buffer underrun - output silence and continue
+                                    trace!("Streaming buffer underrun");
                                     data[output_pos..].fill(0.0);
                                     return;
                                 }
@@ -342,15 +335,18 @@ impl AudioOutput {
                             resample_buffer.clear();
                             resample_pos = 0;
 
-                            // Resample if needed
                             let input_frames = raw_samples.len() / source_channels;
+
+                            // Resample if needed
                             let converted = if sample_rate_ratio != 1.0 {
                                 let output_frames =
                                     (input_frames as f64 / sample_rate_ratio) as usize;
                                 let mut resampled =
                                     Vec::with_capacity(output_frames * source_channels);
+
                                 for frame_idx in 0..output_frames {
-                                    let src_idx = (frame_idx as f64 * sample_rate_ratio) as usize;
+                                    let src_idx =
+                                        (frame_idx as f64 * sample_rate_ratio) as usize;
                                     if src_idx < input_frames {
                                         for ch in 0..source_channels {
                                             let idx = src_idx * source_channels + ch;
@@ -399,7 +395,7 @@ impl AudioOutput {
                         }
                     }
 
-                    // Position update
+                    // Position updates
                     if last_position_update.elapsed() >= position_update_interval {
                         let _ = position_tx.send(source_guard.position());
                         last_position_update = std::time::Instant::now();
@@ -418,6 +414,7 @@ impl AudioOutput {
     pub fn send_command(&self, cmd: AudioCommand) {
         let _ = self.command_tx.send(cmd);
     }
+
     pub fn set_volume(&self, volume: f32) {
         self.send_command(AudioCommand::SetVolume(volume));
     }

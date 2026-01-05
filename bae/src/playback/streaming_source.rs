@@ -1,207 +1,230 @@
-//! Streaming PCM source using a lock-free ring buffer.
+//! Streaming PCM source/sink using a lock-free ring buffer.
 //!
-//! Separates the producer (decoder thread) from the consumer (cpal audio callback)
-//! using a single-producer single-consumer ring buffer. This enables:
-//! - Starting playback before entire track is decoded
-//! - Bounded memory usage regardless of track length
-//! - No blocking in the real-time audio thread
+//! This module provides a producer/consumer pair for streaming audio samples:
+//! - `StreamingPcmSink`: Producer side, receives decoded f32 samples from decoder
+//! - `StreamingPcmSource`: Consumer side, feeds samples to cpal audio callback
+//!
+//! Uses `rtrb` for lock-free SPSC communication, safe for real-time audio.
 
 use rtrb::{Consumer, Producer, RingBuffer};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 
-/// Default buffer size: ~200ms at 44.1kHz stereo
-/// 44100 * 2 channels * 0.2 seconds = 17640 samples
-const DEFAULT_BUFFER_SAMPLES: usize = 44100 * 2 / 5; // ~200ms
+/// Default ring buffer capacity: ~100ms at 44.1kHz stereo
+const DEFAULT_CAPACITY_SAMPLES: usize = 44100 * 2 / 10;
 
-/// Shared state between producer and consumer
+/// Shared state between sink and source
 pub struct StreamingState {
-    /// True when decoder has finished and no more samples will be produced
-    pub finished: AtomicBool,
-    /// True when consumer is starving (buffer empty but not finished)
-    pub starving: AtomicBool,
-    /// Total frames consumed (for position tracking)
-    pub frames_consumed: AtomicU64,
-    /// Sample rate for position calculation
-    pub sample_rate: u32,
+    /// Audio sample rate
+    sample_rate: AtomicU32,
     /// Number of channels
-    pub channels: u32,
+    channels: AtomicU32,
+    /// Current playback position in samples (per channel)
+    position_samples: AtomicU64,
+    /// Whether the producer has finished (EOF reached)
+    finished: AtomicBool,
+    /// Whether playback was cancelled
+    cancelled: AtomicBool,
 }
 
 impl StreamingState {
     fn new(sample_rate: u32, channels: u32) -> Self {
         Self {
+            sample_rate: AtomicU32::new(sample_rate),
+            channels: AtomicU32::new(channels),
+            position_samples: AtomicU64::new(0),
             finished: AtomicBool::new(false),
-            starving: AtomicBool::new(false),
-            frames_consumed: AtomicU64::new(0),
-            sample_rate,
-            channels,
+            cancelled: AtomicBool::new(false),
         }
     }
 
-    /// Get current playback position based on consumed frames
-    pub fn position(&self) -> Duration {
-        let frames = self.frames_consumed.load(Ordering::Relaxed);
-        Duration::from_secs_f64(frames as f64 / self.sample_rate as f64)
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate.load(Ordering::Relaxed)
+    }
+
+    pub fn channels(&self) -> u32 {
+        self.channels.load(Ordering::Relaxed)
+    }
+
+    pub fn position_samples(&self) -> u64 {
+        self.position_samples.load(Ordering::Relaxed)
+    }
+
+    pub fn is_finished(&self) -> bool {
+        self.finished.load(Ordering::Acquire)
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
     }
 }
 
-/// Producer side - owned by decoder thread
+/// Producer side of the streaming audio pipeline.
+///
+/// Receives decoded f32 samples and pushes them to the ring buffer.
 pub struct StreamingPcmSink {
     producer: Producer<f32>,
     state: Arc<StreamingState>,
 }
 
-#[allow(dead_code)] // Methods will be used when PlaybackService streaming is wired up
 impl StreamingPcmSink {
     /// Push samples to the ring buffer.
-    /// Blocks if buffer is full, waiting for consumer to drain.
-    /// Returns number of samples written.
+    ///
+    /// Returns the number of samples actually pushed. If the buffer is full,
+    /// this will push as many as possible and return early.
     pub fn push_samples(&mut self, samples: &[f32]) -> usize {
-        let mut written = 0;
+        if self.state.is_cancelled() {
+            return 0;
+        }
+
+        let mut pushed = 0;
         for &sample in samples {
-            // Spin-wait if buffer is full
+            match self.producer.push(sample) {
+                Ok(()) => pushed += 1,
+                Err(_) => break, // Buffer full
+            }
+        }
+        pushed
+    }
+
+    /// Push samples, blocking until all are pushed or cancelled.
+    ///
+    /// Uses spin-wait with yield for backpressure.
+    pub fn push_samples_blocking(&mut self, samples: &[f32]) -> usize {
+        let mut pushed = 0;
+        for &sample in samples {
             loop {
+                if self.state.is_cancelled() {
+                    return pushed;
+                }
                 match self.producer.push(sample) {
                     Ok(()) => {
-                        written += 1;
+                        pushed += 1;
                         break;
                     }
                     Err(_) => {
-                        // Buffer full, yield and retry
                         std::thread::yield_now();
                     }
                 }
             }
         }
-        written
+        pushed
     }
 
-    /// Push samples without blocking. Returns number actually written.
-    pub fn try_push_samples(&mut self, samples: &[f32]) -> usize {
-        let mut written = 0;
-        for &sample in samples {
-            match self.producer.push(sample) {
-                Ok(()) => written += 1,
-                Err(_) => break, // Buffer full
-            }
-        }
-        written
-    }
-
-    /// Check if buffer has space for more samples
-    pub fn has_space(&self) -> bool {
-        !self.producer.is_full()
-    }
-
-    /// Get number of slots available in buffer
-    pub fn available_slots(&self) -> usize {
-        self.producer.slots()
-    }
-
-    /// Signal that decoding is complete - no more samples will be pushed
+    /// Signal that all samples have been pushed (EOF).
     pub fn mark_finished(&self) {
         self.state.finished.store(true, Ordering::Release);
     }
 
-    /// Get shared state reference
-    pub fn state(&self) -> &Arc<StreamingState> {
-        &self.state
+    /// Check if cancelled.
+    pub fn is_cancelled(&self) -> bool {
+        self.state.is_cancelled()
+    }
+
+    /// Get number of slots available in the buffer.
+    pub fn available(&self) -> usize {
+        self.producer.slots()
     }
 }
 
-/// Consumer side - owned by cpal audio callback
+/// Consumer side of the streaming audio pipeline.
+///
+/// Pulls f32 samples from the ring buffer to feed to cpal.
 pub struct StreamingPcmSource {
     consumer: Consumer<f32>,
     state: Arc<StreamingState>,
 }
 
-#[allow(dead_code)] // Methods will be used when PlaybackService streaming is wired up
 impl StreamingPcmSource {
     /// Pull samples from the ring buffer into the output slice.
-    /// Returns the number of samples actually read.
-    /// If buffer is empty and not finished, marks as starving.
+    ///
+    /// Returns the number of samples actually pulled. If the buffer is empty,
+    /// returns 0 immediately (non-blocking).
     pub fn pull_samples(&mut self, output: &mut [f32]) -> usize {
-        let mut read = 0;
-
-        for sample in output.iter_mut() {
+        let mut pulled = 0;
+        for slot in output.iter_mut() {
             match self.consumer.pop() {
-                Ok(s) => {
-                    *sample = s;
-                    read += 1;
+                Ok(sample) => {
+                    *slot = sample;
+                    pulled += 1;
                 }
-                Err(_) => {
-                    // Buffer empty
-                    break;
-                }
+                Err(_) => break, // Buffer empty
             }
         }
 
-        // Update position tracking
-        if read > 0 {
-            let frames = read / self.state.channels as usize;
-            self.state
-                .frames_consumed
-                .fetch_add(frames as u64, Ordering::Relaxed);
-            self.state.starving.store(false, Ordering::Relaxed);
-        } else if !self.state.finished.load(Ordering::Acquire) {
-            // Empty but not finished = starving
-            self.state.starving.store(true, Ordering::Relaxed);
+        // Update position based on samples pulled
+        if pulled > 0 {
+            let channels = self.state.channels() as u64;
+            if channels > 0 {
+                let frames = pulled as u64 / channels;
+                self.state
+                    .position_samples
+                    .fetch_add(frames, Ordering::Relaxed);
+            }
         }
 
-        read
+        pulled
     }
 
-    /// Check if playback has finished (buffer empty and decoder done)
+    /// Check if the producer has finished and buffer is empty.
     pub fn is_finished(&self) -> bool {
-        self.consumer.is_empty() && self.state.finished.load(Ordering::Acquire)
+        self.state.is_finished() && self.consumer.is_empty()
     }
 
-    /// Check if buffer is starving (empty but decoder not done)
-    pub fn is_starving(&self) -> bool {
-        self.state.starving.load(Ordering::Relaxed)
+    /// Check if the producer signaled finished (may still have buffered data).
+    pub fn producer_finished(&self) -> bool {
+        self.state.is_finished()
     }
 
-    /// Get current playback position
-    pub fn position(&self) -> Duration {
-        self.state.position()
+    /// Cancel playback.
+    pub fn cancel(&self) {
+        self.state.cancelled.store(true, Ordering::Release);
     }
 
-    /// Get shared state reference
-    pub fn state(&self) -> &Arc<StreamingState> {
-        &self.state
+    /// Check if cancelled.
+    pub fn is_cancelled(&self) -> bool {
+        self.state.is_cancelled()
     }
 
-    /// Get sample rate
+    /// Get current playback position as Duration.
+    pub fn position(&self) -> std::time::Duration {
+        let samples = self.state.position_samples();
+        let sample_rate = self.state.sample_rate() as u64;
+        if sample_rate == 0 {
+            return std::time::Duration::ZERO;
+        }
+        std::time::Duration::from_secs_f64(samples as f64 / sample_rate as f64)
+    }
+
+    /// Get sample rate.
     pub fn sample_rate(&self) -> u32 {
-        self.state.sample_rate
+        self.state.sample_rate()
     }
 
-    /// Get number of channels
+    /// Get number of channels.
     pub fn channels(&self) -> u32 {
-        self.state.channels
+        self.state.channels()
     }
 
-    /// Get number of samples available in buffer
-    pub fn available_samples(&self) -> usize {
+    /// Get number of samples available in buffer.
+    pub fn available(&self) -> usize {
         self.consumer.slots()
     }
+
+    /// Reset position counter (for seek operations).
+    pub fn reset_position(&self, position_samples: u64) {
+        self.state
+            .position_samples
+            .store(position_samples, Ordering::Relaxed);
+    }
 }
 
-/// Create a streaming source/sink pair.
-///
-/// Returns (sink, source) where:
-/// - sink: owned by decoder thread, pushes samples
-/// - source: owned by cpal callback, pulls samples
-pub fn create_streaming_pair(
-    sample_rate: u32,
-    channels: u32,
-) -> (StreamingPcmSink, StreamingPcmSource) {
-    create_streaming_pair_with_capacity(sample_rate, channels, DEFAULT_BUFFER_SAMPLES)
+/// Create a streaming source/sink pair with default capacity.
+pub fn create_streaming_pair(sample_rate: u32, channels: u32) -> (StreamingPcmSink, StreamingPcmSource) {
+    create_streaming_pair_with_capacity(sample_rate, channels, DEFAULT_CAPACITY_SAMPLES)
 }
 
-/// Create a streaming pair with custom buffer capacity.
+/// Create a streaming source/sink pair with specified capacity.
 pub fn create_streaming_pair_with_capacity(
     sample_rate: u32,
     channels: u32,
@@ -215,7 +238,10 @@ pub fn create_streaming_pair_with_capacity(
         state: state.clone(),
     };
 
-    let source = StreamingPcmSource { consumer, state };
+    let source = StreamingPcmSource {
+        consumer,
+        state,
+    };
 
     (sink, source)
 }
@@ -225,81 +251,84 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_basic_push_pull() {
+    fn test_push_pull_samples() {
         let (mut sink, mut source) = create_streaming_pair(44100, 2);
 
-        // Push some samples
-        let samples = vec![0.5f32; 100];
-        let written = sink.push_samples(&samples);
-        assert_eq!(written, 100);
+        let samples = vec![0.1, 0.2, 0.3, 0.4];
+        let pushed = sink.push_samples(&samples);
+        assert_eq!(pushed, 4);
 
-        // Pull them back
-        let mut output = vec![0.0f32; 100];
-        let read = source.pull_samples(&mut output);
-        assert_eq!(read, 100);
-        assert!(output.iter().all(|&s| s == 0.5));
+        let mut output = vec![0.0; 4];
+        let pulled = source.pull_samples(&mut output);
+        assert_eq!(pulled, 4);
+        assert_eq!(output, samples);
     }
 
     #[test]
-    fn test_empty_buffer_not_finished() {
-        let (sink, mut source) = create_streaming_pair(44100, 2);
+    fn test_finished_flag() {
+        let (sink, source) = create_streaming_pair(44100, 2);
 
-        // Buffer is empty but not finished
-        let mut output = vec![0.0f32; 10];
-        let read = source.pull_samples(&mut output);
-        assert_eq!(read, 0);
-        assert!(source.is_starving());
         assert!(!source.is_finished());
+        assert!(!source.producer_finished());
 
-        drop(sink); // sink not marked finished, just dropped
-    }
-
-    #[test]
-    fn test_finished_state() {
-        let (mut sink, mut source) = create_streaming_pair(44100, 2);
-
-        // Push some samples
-        sink.push_samples(&[0.5f32; 10]);
         sink.mark_finished();
 
-        // Drain the buffer
-        let mut output = vec![0.0f32; 10];
-        source.pull_samples(&mut output);
-
-        // Now should be finished
-        assert!(source.is_finished());
-        assert!(!source.is_starving());
+        assert!(source.producer_finished());
+        assert!(source.is_finished()); // Empty buffer + finished = done
     }
 
     #[test]
     fn test_position_tracking() {
-        // Use a buffer large enough to hold all samples (no blocking)
-        let (mut sink, mut source) = create_streaming_pair_with_capacity(44100, 2, 50000);
+        let (mut sink, mut source) = create_streaming_pair_with_capacity(44100, 2, 10000);
 
-        // Push 44100 samples (stereo = 22050 frames = 0.5 seconds)
-        let samples = vec![0.0f32; 44100];
+        // Push 1000 stereo samples (500 frames)
+        let samples: Vec<f32> = (0..1000).map(|i| i as f32 * 0.001).collect();
         sink.push_samples(&samples);
 
-        // Pull all samples
-        let mut output = vec![0.0f32; 44100];
+        // Pull them
+        let mut output = vec![0.0; 1000];
         source.pull_samples(&mut output);
 
-        // Position should be ~0.5 seconds
+        // Position should be 500 samples (frames)
+        assert_eq!(source.state.position_samples(), 500);
+
+        // Duration = 500 / 44100 ≈ 11.3ms
         let pos = source.position();
-        assert!((pos.as_secs_f64() - 0.5).abs() < 0.001);
+        assert!(pos.as_millis() >= 11 && pos.as_millis() <= 12);
     }
 
     #[test]
-    fn test_try_push_no_block() {
-        let (mut sink, _source) = create_streaming_pair_with_capacity(44100, 2, 100);
+    fn test_cancel() {
+        let (sink, source) = create_streaming_pair(44100, 2);
 
-        // Fill the buffer
-        let samples = vec![0.5f32; 100];
-        let written = sink.try_push_samples(&samples);
-        assert_eq!(written, 100);
+        assert!(!sink.is_cancelled());
+        assert!(!source.is_cancelled());
 
-        // Try to push more - should not block, just return 0
-        let written = sink.try_push_samples(&[0.5f32; 10]);
-        assert_eq!(written, 0);
+        source.cancel();
+
+        assert!(sink.is_cancelled());
+        assert!(source.is_cancelled());
+    }
+
+    #[test]
+    fn test_buffer_full() {
+        let (mut sink, _source) = create_streaming_pair_with_capacity(44100, 2, 10);
+
+        // Try to push more than capacity
+        let samples = vec![0.5; 20];
+        let pushed = sink.push_samples(&samples);
+
+        // Should only push up to capacity
+        assert!(pushed <= 10);
+    }
+
+    #[test]
+    fn test_buffer_empty() {
+        let (_sink, mut source) = create_streaming_pair(44100, 2);
+
+        let mut output = vec![0.0; 10];
+        let pulled = source.pull_samples(&mut output);
+
+        assert_eq!(pulled, 0);
     }
 }
