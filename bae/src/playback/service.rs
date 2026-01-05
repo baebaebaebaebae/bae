@@ -605,7 +605,7 @@ impl PlaybackService {
                     .await
                 {
                     Ok(data) => {
-                        match Self::decode_flac_bytes(
+                        match Self::decode_audio_bytes(
                             &data,
                             frame_offset_samples,
                             exact_sample_count,
@@ -633,7 +633,7 @@ impl PlaybackService {
                     .await
                 {
                     Ok(data) => {
-                        match Self::decode_flac_bytes(
+                        match Self::decode_audio_bytes(
                             &data,
                             frame_offset_samples,
                             exact_sample_count,
@@ -676,21 +676,25 @@ impl PlaybackService {
         )
         .await;
     }
-    /// Decode raw FLAC bytes to PCM source
+    /// Decode raw audio bytes to PCM source
     ///
     /// - frame_offset_samples: Skip this many samples at the start (frame boundary alignment)
     /// - exact_sample_count: Trim output to exactly this many samples (gapless playback)
-    async fn decode_flac_bytes(
-        flac_data: &[u8],
+    async fn decode_audio_bytes(
+        audio_data: &[u8],
         frame_offset_samples: Option<i64>,
         exact_sample_count: Option<i64>,
     ) -> Result<Arc<PcmSource>, PlaybackError> {
-        if flac_data.len() < 4 || &flac_data[0..4] != b"fLaC" {
-            return Err(PlaybackError::flac("Invalid FLAC header"));
+        // Check for FLAC header (for backwards compatibility)
+        if audio_data.len() >= 4 && &audio_data[0..4] == b"fLaC" {
+            // FLAC file - proceed
+        } else if audio_data.len() < 4 {
+            return Err(PlaybackError::flac("Audio data too short"));
         }
-        let flac_data = flac_data.to_vec();
+        // FFmpeg can handle format detection automatically
+        let audio_data = audio_data.to_vec();
         let decoded = tokio::task::spawn_blocking(move || {
-            crate::flac_decoder::decode_flac_range(&flac_data, None, None)
+            crate::audio_codec::decode_audio(&audio_data, None, None)
         })
         .await
         .map_err(PlaybackError::task)?
@@ -893,7 +897,7 @@ impl PlaybackService {
                     .await
                 {
                     Ok(data) => {
-                        match Self::decode_flac_bytes(
+                        match Self::decode_audio_bytes(
                             &data,
                             frame_offset_samples,
                             exact_sample_count,
@@ -919,7 +923,7 @@ impl PlaybackService {
                     .await
                 {
                     Ok(data) => {
-                        match Self::decode_flac_bytes(
+                        match Self::decode_audio_bytes(
                             &data,
                             frame_offset_samples,
                             exact_sample_count,
