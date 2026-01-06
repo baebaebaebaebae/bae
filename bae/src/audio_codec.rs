@@ -24,7 +24,22 @@ fn get_ffmpeg_errors() -> u32 {
     FFMPEG_DECODE_ERRORS.with(|c| c.get())
 }
 
-/// Custom FFmpeg log callback that counts errors per-thread
+/// Custom FFmpeg log callback that counts errors per-thread (Linux x86_64)
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+unsafe extern "C" fn ffmpeg_log_callback(
+    _avcl: *mut c_void,
+    level: c_int,
+    _fmt: *const i8,
+    _vl: *mut ffmpeg_sys_next::__va_list_tag,
+) {
+    // AV_LOG_ERROR = 16
+    if level <= 16 {
+        FFMPEG_DECODE_ERRORS.with(|c| c.set(c.get() + 1));
+    }
+}
+
+/// Custom FFmpeg log callback that counts errors per-thread (other platforms)
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 unsafe extern "C" fn ffmpeg_log_callback(
     _avcl: *mut c_void,
     level: c_int,
