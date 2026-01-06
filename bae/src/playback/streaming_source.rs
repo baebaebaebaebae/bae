@@ -101,7 +101,10 @@ impl StreamingPcmSink {
 
     /// Push samples, blocking until all are pushed or cancelled.
     ///
-    /// Uses spin-wait with yield for backpressure.
+    /// The decoder produces samples much faster than realtime, so when the ~100ms
+    /// ring buffer fills up, we sleep to avoid busy-waiting. The audio callback
+    /// drains the buffer every ~10-20ms, so 1ms sleeps give responsive backpressure
+    /// without spinning the CPU. Using yield_now() here would cause 100%+ CPU usage.
     pub fn push_samples_blocking(&mut self, samples: &[f32]) -> usize {
         let mut pushed = 0;
         for &sample in samples {
@@ -115,7 +118,7 @@ impl StreamingPcmSink {
                         break;
                     }
                     Err(_) => {
-                        std::thread::yield_now();
+                        std::thread::sleep(std::time::Duration::from_millis(1));
                     }
                 }
             }
