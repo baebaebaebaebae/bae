@@ -129,6 +129,31 @@ impl PlaybackHandle {
         let _ = self.command_tx.send(PlaybackCommand::GetQueue);
     }
 }
+
+/// Prepared track data for playback.
+/// Contains all metadata and buffer state needed to start decoding from any position.
+struct PreparedTrack {
+    track: DbTrack,
+    /// Raw audio buffer (may have headers prepended for CUE/FLAC)
+    buffer: SharedSparseBuffer,
+    /// FLAC headers for seek support (prepended when restarting decoder)
+    flac_headers: Option<Vec<u8>>,
+    /// Dense seektable for frame-accurate seeking
+    seektable_json: Option<String>,
+    /// Sample rate for time-to-sample conversion
+    sample_rate: Option<u32>,
+    /// Byte offset in buffer where audio data starts (after headers)
+    audio_data_start: u64,
+    /// Total size of audio data in buffer (for seek calculations)
+    file_size: u64,
+    /// Source path for re-reading on seek past buffer
+    source_path: String,
+    /// Pre-gap duration in ms (for CUE/FLAC tracks)
+    pregap_ms: Option<i64>,
+    /// Track duration from metadata
+    duration: std::time::Duration,
+}
+
 /// Playback service that manages audio playback
 pub struct PlaybackService {
     library_manager: LibraryManager,
@@ -137,53 +162,32 @@ pub struct PlaybackService {
     progress_tx: tokio_mpsc::UnboundedSender<PlaybackProgress>,
     queue: VecDeque<String>,
     previous_track_id: Option<String>,
-    current_track: Option<DbTrack>,
-    current_position: Option<std::time::Duration>,
-    /// Track duration from metadata (excludes pregap). Used for UI display only.
-    /// May be slightly inaccurate depending on import source (CUE has ~13ms precision,
-    /// other sources like Discogs/MusicBrainz may be less accurate).
-    current_duration: Option<std::time::Duration>,
-    /// Actual PCM audio duration (includes pregap). This is ground truth - use for
-    /// seek validation, progress calculations, and anything requiring accuracy.
-    current_decoded_duration: Option<std::time::Duration>,
-    /// Pre-gap duration for CUE/FLAC tracks (None for regular tracks)
-    current_pregap_ms: Option<i64>,
     is_paused: bool,
     current_position_shared: Arc<std::sync::Mutex<Option<std::time::Duration>>>,
     /// Generation counter to invalidate old position listeners after seek
     position_generation: Arc<std::sync::atomic::AtomicU64>,
     audio_output: AudioOutput,
     stream: Option<cpal::Stream>,
-    /// Preloaded next track state (for gapless playback)
-    next_track_id: Option<String>,
-    next_duration: Option<std::time::Duration>,
-    next_pregap_ms: Option<i64>,
-    next_streaming_source: Option<Arc<Mutex<StreamingPcmSource>>>,
-    next_sparse_buffer: Option<SharedSparseBuffer>,
-    next_streaming_file_size: Option<u64>,
-    next_streaming_source_path: Option<String>,
-    next_flac_headers: Option<Vec<u8>>,
-    next_sample_rate: Option<u32>,
-    next_seektable_json: Option<String>,
-    next_audio_data_start: Option<u64>,
-    /// Current streaming source (if using streaming playback)
+    /// Current track prepared data and streaming state
+    current_prepared: Option<PreparedTrack>,
+    /// Current streaming source (decoder output)
     current_streaming_source: Option<Arc<Mutex<StreamingPcmSource>>>,
-    /// Current sparse buffer for seek support
-    current_sparse_buffer: Option<SharedSparseBuffer>,
-    /// File size or byte range size for current streaming track (for seek calculations)
-    current_streaming_file_size: Option<u64>,
-    /// Source path for current streaming track (for starting new downloads on seek)
-    current_streaming_source_path: Option<String>,
-    /// FLAC headers for current streaming track (prepended on decoder restart after seek)
-    current_flac_headers: Option<Vec<u8>>,
-    /// Sample rate for current streaming track (for time-to-sample conversion)
-    current_sample_rate: Option<u32>,
-    /// Seektable JSON for current streaming track (for frame-accurate seek)
-    current_seektable_json: Option<String>,
-    /// Audio data start offset for current streaming track (seektable byte offsets are relative to this)
-    current_audio_data_start: Option<u64>,
+    /// Preloaded next track prepared data
+    next_prepared: Option<PreparedTrack>,
+    /// Preloaded next track streaming source (decoder already started)
+    next_streaming_source: Option<Arc<Mutex<StreamingPcmSource>>>,
 }
+
 impl PlaybackService {
+    // Helper accessors for current/next track state
+    fn current_track_id(&self) -> Option<&str> {
+        self.current_prepared.as_ref().map(|p| p.track.id.as_str())
+    }
+
+    fn next_track_id(&self) -> Option<&str> {
+        self.next_prepared.as_ref().map(|p| p.track.id.as_str())
+    }
+
     pub fn start(
         library_manager: LibraryManager,
         encryption_service: EncryptionService,
@@ -227,35 +231,15 @@ impl PlaybackService {
                     progress_tx,
                     queue: VecDeque::new(),
                     previous_track_id: None,
-                    current_track: None,
-                    current_position: None,
-                    current_duration: None,
-                    current_decoded_duration: None,
-                    current_pregap_ms: None,
                     is_paused: false,
                     current_position_shared: Arc::new(std::sync::Mutex::new(None)),
                     position_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
                     audio_output,
                     stream: None,
-                    next_track_id: None,
-                    next_duration: None,
-                    next_pregap_ms: None,
-                    next_streaming_source: None,
-                    next_sparse_buffer: None,
-                    next_streaming_file_size: None,
-                    next_streaming_source_path: None,
-                    next_flac_headers: None,
-                    next_sample_rate: None,
-                    next_seektable_json: None,
-                    next_audio_data_start: None,
+                    current_prepared: None,
                     current_streaming_source: None,
-                    current_sparse_buffer: None,
-                    current_streaming_file_size: None,
-                    current_streaming_source_path: None,
-                    current_flac_headers: None,
-                    current_sample_rate: None,
-                    current_seektable_json: None,
-                    current_audio_data_start: None,
+                    next_prepared: None,
+                    next_streaming_source: None,
                 };
                 service.run().await;
             });
@@ -273,8 +257,8 @@ impl PlaybackService {
                     self.audio_output
                         .send_command(crate::playback::cpal_output::AudioCommand::Stop);
                     self.clear_next_track_state();
-                    if let Some(current_track) = &self.current_track {
-                        self.previous_track_id = Some(current_track.id.clone());
+                    if let Some(id) = self.current_track_id() {
+                        self.previous_track_id = Some(id.to_string());
                     }
                     self.queue.clear();
                     self.emit_queue_update();
@@ -325,8 +309,8 @@ impl PlaybackService {
                     self.play_track(&track_id, false).await; // Direct selection: skip pregap
                 }
                 PlaybackCommand::PlayAlbum(track_ids) => {
-                    if let Some(current_track) = &self.current_track {
-                        self.previous_track_id = Some(current_track.id.clone());
+                    if let Some(id) = self.current_track_id() {
+                        self.previous_track_id = Some(id.to_string());
                     }
                     self.queue.clear();
                     for track_id in track_ids {
@@ -351,11 +335,11 @@ impl PlaybackService {
                 }
                 PlaybackCommand::Next => {
                     info!("Next command received, queue length: {}", self.queue.len());
-                    if let Some(preloaded_track_id) = self.next_track_id.clone() {
+                    if let Some(preloaded_track_id) = self.next_track_id().map(|s| s.to_string()) {
                         if self.next_streaming_source.is_some() {
                             info!("Using preloaded track: {}", preloaded_track_id);
-                            if let Some(current_track) = &self.current_track {
-                                self.previous_track_id = Some(current_track.id.clone());
+                            if let Some(id) = self.current_track_id() {
+                                self.previous_track_id = Some(id.to_string());
                             }
                             if self
                                 .queue
@@ -366,23 +350,7 @@ impl PlaybackService {
                                 self.queue.pop_front();
                                 self.emit_queue_update();
                             }
-                            let track =
-                                match self.library_manager.get_track(&preloaded_track_id).await {
-                                    Ok(Some(track)) => track,
-                                    Ok(None) => {
-                                        error!("Preloaded track not found: {}", preloaded_track_id);
-                                        self.stop().await;
-                                        continue;
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to get preloaded track metadata: {}", e);
-                                        self.stop().await;
-                                        continue;
-                                    }
-                                };
                             self.play_preloaded_track(
-                                &preloaded_track_id,
-                                track,
                                 false, // Manual next: skip pregap
                             )
                             .await;
@@ -394,8 +362,8 @@ impl PlaybackService {
                     } else if let Some(next_track) = self.queue.pop_front() {
                         info!("No preloaded track, playing from queue: {}", next_track);
                         self.emit_queue_update();
-                        if let Some(current_track) = &self.current_track {
-                            self.previous_track_id = Some(current_track.id.clone());
+                        if let Some(id) = self.current_track_id() {
+                            self.previous_track_id = Some(id.to_string());
                         }
                         self.play_track(&next_track, false).await;
                     } else {
@@ -410,11 +378,11 @@ impl PlaybackService {
                         self.queue.len()
                     );
                     self.is_paused = false; // Natural transition continues playing
-                    if let Some(preloaded_track_id) = self.next_track_id.clone() {
+                    if let Some(preloaded_track_id) = self.next_track_id().map(|s| s.to_string()) {
                         if self.next_streaming_source.is_some() {
                             info!("Using preloaded track: {}", preloaded_track_id);
-                            if let Some(current_track) = &self.current_track {
-                                self.previous_track_id = Some(current_track.id.clone());
+                            if let Some(id) = self.current_track_id() {
+                                self.previous_track_id = Some(id.to_string());
                             }
                             if self
                                 .queue
@@ -425,23 +393,7 @@ impl PlaybackService {
                                 self.queue.pop_front();
                                 self.emit_queue_update();
                             }
-                            let track =
-                                match self.library_manager.get_track(&preloaded_track_id).await {
-                                    Ok(Some(track)) => track,
-                                    Ok(None) => {
-                                        error!("Preloaded track not found: {}", preloaded_track_id);
-                                        self.stop().await;
-                                        continue;
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to get preloaded track metadata: {}", e);
-                                        self.stop().await;
-                                        continue;
-                                    }
-                                };
                             self.play_preloaded_track(
-                                &preloaded_track_id,
-                                track,
                                 true, // Natural transition: play pregap
                             )
                             .await;
@@ -453,8 +405,8 @@ impl PlaybackService {
                     } else if let Some(next_track) = self.queue.pop_front() {
                         info!("No preloaded track, playing from queue: {}", next_track);
                         self.emit_queue_update();
-                        if let Some(current_track) = &self.current_track {
-                            self.previous_track_id = Some(current_track.id.clone());
+                        if let Some(id) = self.current_track_id() {
+                            self.previous_track_id = Some(id.to_string());
                         }
                         self.play_track(&next_track, true).await;
                     } else {
@@ -464,7 +416,7 @@ impl PlaybackService {
                     }
                 }
                 PlaybackCommand::Previous => {
-                    if let Some(track) = &self.current_track {
+                    if let Some(current_track_id) = self.current_track_id().map(|s| s.to_string()) {
                         let current_position = self
                             .current_position_shared
                             .lock()
@@ -514,14 +466,13 @@ impl PlaybackService {
                             // Direct selection
                             } else {
                                 info!("No previous track, restarting current track");
-                                let track_id = track.id.clone();
-                                self.play_track(&track_id, false).await; // Direct selection
+                                self.play_track(&current_track_id, false).await;
+                                // Direct selection
                             }
                         } else {
                             info!("Restarting current track from beginning");
-                            let track_id = track.id.clone();
                             let saved_previous = self.previous_track_id.clone();
-                            self.play_track(&track_id, false).await; // Direct selection
+                            self.play_track(&current_track_id, false).await; // Direct selection
                             if saved_previous.is_some() {
                                 self.previous_track_id = saved_previous;
                             }
@@ -549,10 +500,12 @@ impl PlaybackService {
                 PlaybackCommand::RemoveFromQueue(index) => {
                     if index < self.queue.len() {
                         if let Some(removed_track_id) = self.queue.remove(index) {
-                            if let Some(current_track) = &self.current_track {
-                                if removed_track_id == current_track.id {
-                                    self.stop().await;
-                                }
+                            if self
+                                .current_track_id()
+                                .map(|id| id == removed_track_id)
+                                .unwrap_or(false)
+                            {
+                                self.stop().await;
                             }
                         }
                         self.emit_queue_update();
@@ -797,28 +750,40 @@ impl PlaybackService {
             }
         });
 
-        // Store state for seek support
-        self.current_sparse_buffer = Some(buffer);
-        self.current_streaming_file_size = Some(file_size + headers_len);
-        self.current_streaming_source_path = Some(source_path.clone());
-        self.current_flac_headers = all_flac_headers; // Always store headers for seek
-        self.current_sample_rate = audio_format
-            .as_ref()
-            .and_then(|af| af.sample_rate.map(|r| r as u32));
-        // Store original seektable - not adjusted, so seeks can go anywhere including pregap
-        self.current_seektable_json = audio_format
-            .as_ref()
-            .and_then(|af| af.seektable_json.clone());
-        // For seek calculations, audio_data_start is where audio begins in our playback buffer.
+        // Determine audio_data_start for seek calculations
         // - CUE/FLAC (needs_headers=true): We prepend headers, so audio starts at headers_len
         // - Regular FLAC: Buffer contains full file, use stored audio_data_start
-        self.current_audio_data_start = if needs_headers {
-            Some(headers_len)
+        let audio_data_start = if needs_headers {
+            headers_len
         } else {
             audio_format
                 .as_ref()
                 .and_then(|af| af.audio_data_start.map(|s| s as u64))
+                .unwrap_or(0)
         };
+
+        let track_duration = track
+            .duration_ms
+            .map(|ms| std::time::Duration::from_millis(ms as u64))
+            .unwrap_or(std::time::Duration::from_secs(300));
+
+        // Store prepared track state for seek support
+        self.current_prepared = Some(PreparedTrack {
+            track: track.clone(),
+            buffer,
+            flac_headers: all_flac_headers,
+            seektable_json: audio_format
+                .as_ref()
+                .and_then(|af| af.seektable_json.clone()),
+            sample_rate: audio_format
+                .as_ref()
+                .and_then(|af| af.sample_rate.map(|r| r as u32)),
+            audio_data_start,
+            file_size: file_size + headers_len,
+            source_path: source_path.clone(),
+            pregap_ms,
+            duration: track_duration,
+        });
 
         let source = Arc::new(Mutex::new(source));
         let (source_sample_rate, source_channels) = {
@@ -897,19 +862,9 @@ impl PlaybackService {
         }
 
         self.stream = Some(stream);
-        self.current_track = Some(track.clone());
         self.current_streaming_source = Some(source);
         // Position starts at position_offset (pregap_ms if skipped, 0 if natural transition)
-        self.current_position = Some(position_offset);
-        self.current_pregap_ms = pregap_ms;
         *self.current_position_shared.lock().unwrap() = Some(position_offset);
-
-        let track_duration = track
-            .duration_ms
-            .map(|ms| std::time::Duration::from_millis(ms as u64))
-            .unwrap_or(std::time::Duration::from_secs(300));
-        self.current_duration = Some(track_duration);
-        self.current_decoded_duration = Some(track_duration);
 
         if self.is_paused {
             self.audio_output
@@ -1145,54 +1100,59 @@ impl PlaybackService {
 
         let source = Arc::new(Mutex::new(source));
 
-        // Store preloaded state
-        self.next_sparse_buffer = Some(buffer);
-        self.next_streaming_file_size = Some(file_size + headers_len);
-        self.next_streaming_source_path = Some(source_path);
-        self.next_flac_headers = all_flac_headers;
-        self.next_sample_rate = audio_format
-            .as_ref()
-            .and_then(|af| af.sample_rate.map(|r| r as u32));
-        self.next_seektable_json = audio_format
-            .as_ref()
-            .and_then(|af| af.seektable_json.clone());
-        self.next_audio_data_start = if needs_headers {
-            Some(headers_len)
+        // Determine audio_data_start for seek calculations
+        let audio_data_start = if needs_headers {
+            headers_len
         } else {
             audio_format
                 .as_ref()
                 .and_then(|af| af.audio_data_start.map(|s| s as u64))
+                .unwrap_or(0)
         };
-        self.next_streaming_source = Some(source);
 
         let duration = track
             .duration_ms
             .map(|ms| std::time::Duration::from_millis(ms as u64))
             .unwrap_or_else(|| panic!("Cannot preload track {} without duration", track_id));
-        self.next_track_id = Some(track_id.to_string());
-        self.next_duration = Some(duration);
-        self.next_pregap_ms = pregap_ms;
+
+        // Store preloaded state
+        self.next_prepared = Some(PreparedTrack {
+            track,
+            buffer,
+            flac_headers: all_flac_headers,
+            seektable_json: audio_format
+                .as_ref()
+                .and_then(|af| af.seektable_json.clone()),
+            sample_rate: audio_format
+                .as_ref()
+                .and_then(|af| af.sample_rate.map(|r| r as u32)),
+            audio_data_start,
+            file_size: file_size + headers_len,
+            source_path,
+            pregap_ms,
+            duration,
+        });
+        self.next_streaming_source = Some(source);
 
         info!("Preloaded next track (streaming): {}", track_id);
     }
     async fn pause(&mut self) {
         self.audio_output
             .send_command(crate::playback::cpal_output::AudioCommand::Pause);
-        if let Some(track) = &self.current_track {
+        if let Some(prepared) = &self.current_prepared {
             let position = self
                 .current_position_shared
                 .lock()
                 .unwrap()
                 .unwrap_or(std::time::Duration::ZERO);
-            let duration = self.current_duration;
-            let decoded_duration = self
-                .current_decoded_duration
-                .unwrap_or(std::time::Duration::ZERO);
+            let duration = Some(prepared.duration);
+            let decoded_duration = prepared.duration;
+            let pregap_ms = prepared.pregap_ms;
+            let track = prepared.track.clone();
             self.is_paused = true;
-            let pregap_ms = self.current_pregap_ms;
             let _ = self.progress_tx.send(PlaybackProgress::StateChanged {
                 state: PlaybackState::Paused {
-                    track: track.clone(),
+                    track,
                     position,
                     duration,
                     decoded_duration,
@@ -1201,24 +1161,24 @@ impl PlaybackService {
             });
         }
     }
+
     async fn resume(&mut self) {
         self.audio_output
             .send_command(crate::playback::cpal_output::AudioCommand::Resume);
-        if let Some(track) = &self.current_track {
+        if let Some(prepared) = &self.current_prepared {
             let position = self
                 .current_position_shared
                 .lock()
                 .unwrap()
                 .unwrap_or(std::time::Duration::ZERO);
-            let duration = self.current_duration;
-            let decoded_duration = self
-                .current_decoded_duration
-                .unwrap_or(std::time::Duration::ZERO);
-            let pregap_ms = self.current_pregap_ms;
+            let duration = Some(prepared.duration);
+            let decoded_duration = prepared.duration;
+            let pregap_ms = prepared.pregap_ms;
+            let track = prepared.track.clone();
             self.is_paused = false;
             let _ = self.progress_tx.send(PlaybackProgress::StateChanged {
                 state: PlaybackState::Playing {
-                    track: track.clone(),
+                    track,
                     position,
                     duration,
                     decoded_duration,
@@ -1236,46 +1196,43 @@ impl PlaybackService {
             }
         }
         // Cancel any active sparse buffer for the next track
-        if let Some(buffer) = &self.next_sparse_buffer {
-            buffer.cancel();
+        if let Some(prepared) = &self.next_prepared {
+            prepared.buffer.cancel();
         }
-        self.next_track_id = None;
-        self.next_duration = None;
-        self.next_pregap_ms = None;
-        self.next_streaming_source = None;
-        self.next_sparse_buffer = None;
-        self.next_streaming_file_size = None;
-        self.next_streaming_source_path = None;
-        self.next_flac_headers = None;
-        self.next_sample_rate = None;
-        self.next_seektable_json = None;
-        self.next_audio_data_start = None;
+        self.next_prepared = None;
     }
 
-    /// Play a preloaded track by swapping next_* state to current_* and starting the audio stream.
-    async fn play_preloaded_track(
-        &mut self,
-        track_id: &str,
-        track: DbTrack,
-        is_natural_transition: bool,
-    ) {
-        let pregap_ms = self.next_pregap_ms;
+    /// Play a preloaded track by swapping next state to current and starting the audio stream.
+    async fn play_preloaded_track(&mut self, is_natural_transition: bool) {
+        let next_prepared = match self.next_prepared.take() {
+            Some(p) => p,
+            None => {
+                error!("play_preloaded_track called but no next_prepared");
+                return;
+            }
+        };
+
+        let pregap_ms = next_prepared.pregap_ms;
+        let track_id = next_prepared.track.id.clone();
 
         // If we need to skip pregap (direct selection), the preloaded state won't work
         // because it was set up for auto-advance (starting at byte 0).
         // Fall back to play_track which handles pregap at decoder start.
         if !is_natural_transition && pregap_ms.is_some_and(|p| p > 0) {
             info!("Pregap skip needed for preloaded track - falling back to play_track");
-            self.clear_next_track_state();
-            self.play_track(track_id, is_natural_transition).await;
+            // Cancel the preloaded buffer
+            next_prepared.buffer.cancel();
+            if let Some(source) = self.next_streaming_source.take() {
+                if let Ok(guard) = source.lock() {
+                    guard.cancel();
+                }
+            }
+            self.play_track(&track_id, is_natural_transition).await;
             return;
         }
 
-        self.next_pregap_ms = None;
-        let duration = self
-            .next_duration
-            .take()
-            .expect("Preloaded track has no duration");
+        let duration = next_prepared.duration;
+        let track = next_prepared.track.clone();
 
         // Cancel current streaming source if active
         if let Some(source) = self.current_streaming_source.take() {
@@ -1283,27 +1240,19 @@ impl PlaybackService {
                 guard.cancel();
             }
         }
-        if let Some(buffer) = &self.current_sparse_buffer {
-            buffer.cancel();
+        if let Some(prepared) = &self.current_prepared {
+            prepared.buffer.cancel();
         }
         if let Some(stream) = self.stream.take() {
             drop(stream);
         }
 
-        // Swap next_* to current_*
-        self.current_sparse_buffer = self.next_sparse_buffer.take();
-        self.current_streaming_file_size = self.next_streaming_file_size.take();
-        self.current_streaming_source_path = self.next_streaming_source_path.take();
-        self.current_flac_headers = self.next_flac_headers.take();
-        self.current_sample_rate = self.next_sample_rate.take();
-        self.current_seektable_json = self.next_seektable_json.take();
-        self.current_audio_data_start = self.next_audio_data_start.take();
-
+        // Swap next to current
+        self.current_prepared = Some(next_prepared);
         let source = self
             .next_streaming_source
             .take()
             .expect("Preloaded track has no streaming source");
-        self.next_track_id = None;
 
         let (source_sample_rate, source_channels) = {
             let guard = source.lock().unwrap();
@@ -1378,15 +1327,9 @@ impl PlaybackService {
         }
 
         self.stream = Some(stream);
-        self.current_track = Some(track.clone());
         self.current_streaming_source = Some(source);
         // Natural transition: start at position 0 (INDEX 00, pregap plays)
-        self.current_position = Some(start_position);
-        self.current_pregap_ms = pregap_ms;
         *self.current_position_shared.lock().unwrap() = Some(start_position);
-
-        self.current_duration = Some(duration);
-        self.current_decoded_duration = Some(duration);
 
         if self.is_paused {
             self.audio_output
@@ -1490,21 +1433,13 @@ impl PlaybackService {
         }
 
         // Cancel sparse buffer if active
-        if let Some(buffer) = &self.current_sparse_buffer {
-            buffer.cancel();
+        if let Some(prepared) = &self.current_prepared {
+            prepared.buffer.cancel();
         }
 
-        self.current_track = None;
-        self.current_position = None;
-        self.current_duration = None;
+        self.current_prepared = None;
         self.clear_next_track_state();
-        self.current_sparse_buffer = None;
-        self.current_streaming_file_size = None;
-        self.current_streaming_source_path = None;
-        self.current_flac_headers = None;
-        self.current_sample_rate = None;
-        self.current_seektable_json = None;
-        self.current_audio_data_start = None;
+        *self.current_position_shared.lock().unwrap() = None;
         self.audio_output
             .send_command(crate::playback::cpal_output::AudioCommand::Stop);
         let _ = self.progress_tx.send(PlaybackProgress::StateChanged {
@@ -1518,17 +1453,17 @@ impl PlaybackService {
             return;
         }
 
-        let (buffer, file_size, track) = match (
-            &self.current_sparse_buffer,
-            self.current_streaming_file_size,
-            &self.current_track,
-        ) {
-            (Some(b), Some(fs), Some(t)) => (b, fs, t),
-            _ => {
-                error!("Cannot seek: missing buffer, file_size, or track");
+        let prepared = match &self.current_prepared {
+            Some(p) => p,
+            None => {
+                error!("Cannot seek: no current_prepared");
                 return;
             }
         };
+
+        let buffer = &prepared.buffer;
+        let file_size = prepared.file_size;
+        let track = &prepared.track;
 
         // Check for same-position seek (difference < 100ms)
         let current_position = self
@@ -1549,15 +1484,13 @@ impl PlaybackService {
             return;
         }
 
-        let track_duration = self
-            .current_decoded_duration
-            .unwrap_or_else(|| std::time::Duration::from_secs(300));
+        let track_duration = prepared.duration;
 
         // Try frame-accurate seek using seektable, fall back to linear interpolation
         // Seektable byte offsets are relative to audio_data_start, so add it to get file offset
-        let audio_data_start = self.current_audio_data_start.unwrap_or(0);
+        let audio_data_start = prepared.audio_data_start;
         let (target_byte, _sample_offset) = if let (Some(sample_rate), Some(ref seektable)) =
-            (self.current_sample_rate, &self.current_seektable_json)
+            (prepared.sample_rate, &prepared.seektable_json)
         {
             if let Some((frame_byte, offset)) =
                 find_frame_boundary_for_seek(position, sample_rate, seektable)
@@ -1614,7 +1547,7 @@ impl PlaybackService {
 
             // Prepend FLAC headers if available
             let mut write_pos = 0u64;
-            if let Some(ref headers) = self.current_flac_headers {
+            if let Some(ref headers) = prepared.flac_headers {
                 seek_buffer.append_at(0, headers);
                 write_pos = headers.len() as u64;
             }
@@ -1660,8 +1593,8 @@ impl PlaybackService {
             seek_buffer.mark_eof();
 
             // Check first bytes of audio data to verify sync code
-            let audio_start_pos = self
-                .current_flac_headers
+            let audio_start_pos = prepared
+                .flac_headers
                 .as_ref()
                 .map(|h| h.len() as u64)
                 .unwrap_or(0);
@@ -1685,8 +1618,8 @@ impl PlaybackService {
             // Parse and adjust seektable for seek position
             // target_byte is absolute file offset, seektable offsets are relative to audio_data_start
             let rel_seek_byte = target_byte.saturating_sub(audio_data_start);
-            let original_seektable: Vec<crate::audio_codec::SeekEntry> = self
-                .current_seektable_json
+            let original_seektable: Vec<crate::audio_codec::SeekEntry> = prepared
+                .seektable_json
                 .as_ref()
                 .and_then(|json| serde_json::from_str(json).ok())
                 .unwrap_or_default();
@@ -1858,7 +1791,8 @@ impl PlaybackService {
             );
 
             // Start new download at target byte (if we have source path)
-            if let Some(source_path) = &self.current_streaming_source_path {
+            let source_path = &prepared.source_path;
+            {
                 let read_buffer = buffer.clone();
                 let read_path = source_path.clone();
                 let start_offset = target_byte;
@@ -1923,7 +1857,7 @@ impl PlaybackService {
                 // Create seek buffer with headers prepended
                 let seek_buffer = create_sparse_buffer();
                 let mut write_pos = 0u64;
-                if let Some(ref headers) = self.current_flac_headers {
+                if let Some(ref headers) = prepared.flac_headers {
                     seek_buffer.append_at(0, headers);
                     write_pos = headers.len() as u64;
                 }
