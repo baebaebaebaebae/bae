@@ -141,6 +141,7 @@ fn main() {
     let media_controls = match media_controls::setup_media_controls(
         playback_handle.clone(),
         library_manager.clone(),
+        encryption_service.clone(),
         runtime_handle.clone(),
     ) {
         Ok(controls) => {

@@ -1,6 +1,5 @@
 use crate::encryption::EncryptionService;
 use crate::library::SharedLibraryManager;
-use crate::storage::create_storage_reader;
 use crate::ui::components::import::ImportWorkflowManager;
 use crate::ui::components::*;
 #[cfg(target_os = "macos")]
@@ -128,6 +127,8 @@ async fn serve_image(
     services: &ImageServices,
 ) -> Result<(Vec<u8>, &'static str), String> {
     debug!("Serving image: {}", image_id);
+
+    // Get image metadata for mime type
     let image = services
         .library_manager
         .get()
@@ -135,68 +136,23 @@ async fn serve_image(
         .await
         .map_err(|e| format!("Database error: {}", e))?
         .ok_or_else(|| format!("Image not found: {}", image_id))?;
-    let filename_only = std::path::Path::new(&image.filename)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(&image.filename);
-    let file = services
+
+    let data = services
         .library_manager
         .get()
-        .get_file_by_release_and_filename(&image.release_id, filename_only)
+        .fetch_image_bytes(image_id, &services.encryption_service)
         .await
-        .map_err(|e| format!("Database error: {}", e))?
-        .ok_or_else(|| format!("File not found for image: {}", image.filename))?;
-    if let Some(ref source_path) = file.source_path {
-        debug!("Serving image from storage: {}", source_path);
-        let storage_profile = services
-            .library_manager
-            .get()
-            .get_storage_profile_for_release(&image.release_id)
-            .await
-            .map_err(|e| format!("Database error: {}", e))?;
-        let raw_data = if source_path.starts_with("s3://") {
-            let profile = storage_profile
-                .as_ref()
-                .ok_or_else(|| "No storage profile for cloud image".to_string())?;
-            let storage = create_storage_reader(profile)
-                .await
-                .map_err(|e| format!("Failed to create storage reader: {}", e))?;
-            storage
-                .download(source_path)
-                .await
-                .map_err(|e| format!("Failed to download image from cloud: {}", e))?
-        } else {
-            tokio::fs::read(source_path)
-                .await
-                .map_err(|e| format!("Failed to read image file: {}", e))?
-        };
-        let data = if storage_profile
-            .as_ref()
-            .map(|p| p.encrypted)
-            .unwrap_or(false)
-        {
-            services
-                .encryption_service
-                .decrypt(&raw_data)
-                .map_err(|e| format!("Failed to decrypt image: {}", e))?
-        } else {
-            raw_data
-        };
-        let mime_type = match image.filename.rsplit('.').next() {
-            Some("jpg") | Some("jpeg") => "image/jpeg",
-            Some("png") => "image/png",
-            Some("gif") => "image/gif",
-            Some("webp") => "image/webp",
-            _ => "application/octet-stream",
-        };
-        return Ok((data, mime_type));
-    }
+        .map_err(|e| format!("Failed to fetch image: {}", e))?;
 
-    // File has no source_path, which shouldn't happen
-    Err(format!(
-        "File {} has no source_path",
-        file.original_filename
-    ))
+    let mime_type = match image.filename.rsplit('.').next() {
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("png") => "image/png",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        _ => "application/octet-stream",
+    };
+
+    Ok((data, mime_type))
 }
 fn make_window() -> WindowBuilder {
     WindowBuilder::new()

@@ -1,8 +1,10 @@
+use crate::encryption::EncryptionService;
 use crate::library::SharedLibraryManager;
 use crate::playback::{PlaybackHandle, PlaybackProgress, PlaybackState};
 use souvlaki::{
     MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig,
 };
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tracing::{error, info, trace};
 /// Initialize media controls for macOS
@@ -11,6 +13,7 @@ use tracing::{error, info, trace};
 pub fn setup_media_controls(
     playback_handle: PlaybackHandle,
     library_manager: SharedLibraryManager,
+    encryption_service: EncryptionService,
     runtime_handle: tokio::runtime::Handle,
 ) -> Result<Arc<Mutex<MediaControls>>, souvlaki::Error> {
     let current_state = Arc::new(Mutex::new(PlaybackState::Stopped));
@@ -19,6 +22,7 @@ pub fn setup_media_controls(
     let library_manager_for_metadata = library_manager.clone();
     let current_state_for_controls = current_state.clone();
     let current_state_for_progress = current_state.clone();
+    let encryption_service_for_metadata = encryption_service;
     let config = PlatformConfig {
         dbus_name: "com.bae.app",
         display_name: "bae",
@@ -107,6 +111,7 @@ pub fn setup_media_controls(
             let mut progress_rx = playback_handle_for_progress.subscribe_progress();
             let current_state = current_state_for_progress;
             let library_manager = library_manager_for_metadata;
+            let encryption_service = encryption_service_for_metadata;
             while let Some(progress) = progress_rx.recv().await {
                 match progress {
                     PlaybackProgress::StateChanged { state } => {
@@ -152,6 +157,7 @@ pub fn setup_media_controls(
                                 update_media_metadata(
                                     &controls_shared,
                                     &library_manager,
+                                    &encryption_service,
                                     track,
                                     duration,
                                 )
@@ -212,6 +218,7 @@ fn update_playback_position(
 async fn update_media_metadata(
     controls: &Arc<Mutex<MediaControls>>,
     library_manager: &SharedLibraryManager,
+    encryption_service: &EncryptionService,
     track: &crate::db::DbTrack,
     duration: Option<std::time::Duration>,
 ) {
@@ -236,23 +243,23 @@ async fn update_media_metadata(
             None
         }
     };
-    let album_name = match library_manager
+    let (album_name, cover_image_id) = match library_manager
         .get()
         .get_album_id_for_release(&track.release_id)
         .await
     {
         Ok(album_id) => match library_manager.get().get_album_by_id(&album_id).await {
-            Ok(Some(album)) => Some(album.title),
+            Ok(Some(album)) => (Some(album.title), album.cover_image_id),
             Ok(None) => {
                 error!(
                     "Album {} not found for release {}",
                     album_id, track.release_id
                 );
-                None
+                (None, None)
             }
             Err(e) => {
                 error!("Failed to fetch album {}: {}", album_id, e);
-                None
+                (None, None)
             }
         },
         Err(e) => {
@@ -260,10 +267,17 @@ async fn update_media_metadata(
                 "Failed to get album ID for release {}: {}",
                 track.release_id, e
             );
-            None
+            (None, None)
         }
     };
-    let cover_url: Option<String> = None;
+
+    let cover_url = resolve_cover_file_url(
+        library_manager,
+        encryption_service,
+        &track.release_id,
+        cover_image_id,
+    )
+    .await;
     let title = track.title.clone();
     let artist_str = artist_name.as_deref();
     let album_str = album_name.as_deref();
@@ -287,4 +301,110 @@ async fn update_media_metadata(
             cover_url
         );
     }
+}
+
+/// Resolve cover art to a file:// URL for macOS media controls.
+/// Downloads from cloud and/or decrypts if needed, caching the result.
+async fn resolve_cover_file_url(
+    library_manager: &SharedLibraryManager,
+    encryption_service: &EncryptionService,
+    release_id: &str,
+    cover_image_id: Option<String>,
+) -> Option<String> {
+    let image_id = cover_image_id?;
+
+    // Check if we can use the file directly (local unencrypted)
+    if let Some(path) = get_direct_file_path(library_manager, release_id, &image_id).await {
+        return Some(format!("file://{}", path));
+    }
+
+    // For cloud or encrypted files, we need to cache a decrypted copy
+    let cover_path = get_media_cover_cache_path(&image_id);
+
+    // Check if already cached
+    if cover_path.exists() {
+        return Some(format!("file://{}", cover_path.display()));
+    }
+
+    // Fetch bytes (handles S3 download + decryption)
+    let data = match library_manager
+        .get()
+        .fetch_image_bytes(&image_id, encryption_service)
+        .await
+    {
+        Ok(d) => d,
+        Err(e) => {
+            error!("Failed to fetch cover image: {}", e);
+            return None;
+        }
+    };
+
+    // Write to cache
+    if let Some(parent) = cover_path.parent() {
+        if let Err(e) = tokio::fs::create_dir_all(parent).await {
+            error!("Failed to create cover cache dir: {}", e);
+            return None;
+        }
+    }
+
+    if let Err(e) = tokio::fs::write(&cover_path, &data).await {
+        error!("Failed to write cover to cache: {}", e);
+        return None;
+    }
+
+    Some(format!("file://{}", cover_path.display()))
+}
+
+/// Check if the image can be served directly from a local unencrypted file.
+/// Returns the file path if so, None otherwise.
+async fn get_direct_file_path(
+    library_manager: &SharedLibraryManager,
+    release_id: &str,
+    image_id: &str,
+) -> Option<String> {
+    let image = library_manager
+        .get()
+        .get_image_by_id(image_id)
+        .await
+        .ok()??;
+
+    let filename_only = std::path::Path::new(&image.filename)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(&image.filename);
+
+    let file = library_manager
+        .get()
+        .get_file_by_release_and_filename(release_id, filename_only)
+        .await
+        .ok()??;
+
+    let source_path = file.source_path?;
+
+    // Cloud storage needs download
+    if source_path.starts_with("s3://") {
+        return None;
+    }
+
+    // Check if encrypted
+    if let Ok(Some(profile)) = library_manager
+        .get()
+        .get_storage_profile_for_release(release_id)
+        .await
+    {
+        if profile.encrypted {
+            return None;
+        }
+    }
+
+    Some(source_path)
+}
+
+/// Get the cache path for a media control cover image
+fn get_media_cover_cache_path(image_id: &str) -> PathBuf {
+    dirs::home_dir()
+        .expect("Failed to get home directory")
+        .join(".bae")
+        .join("media-covers")
+        .join(image_id)
 }

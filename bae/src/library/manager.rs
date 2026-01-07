@@ -22,6 +22,8 @@ pub enum LibraryError {
     TrackMapping(String),
     #[error("Cloud storage error: {0}")]
     CloudStorage(#[from] CloudStorageError),
+    #[error("Encryption error: {0}")]
+    Encryption(#[from] crate::encryption::EncryptionError),
 }
 /// The main library manager for database operations and entity persistence
 ///
@@ -318,6 +320,64 @@ impl LibraryManager {
             .get_file_by_release_and_filename(release_id, filename)
             .await?)
     }
+
+    /// Fetch image bytes from storage, handling S3 download and decryption as needed
+    pub async fn fetch_image_bytes(
+        &self,
+        image_id: &str,
+        encryption_service: &EncryptionService,
+    ) -> Result<Vec<u8>, LibraryError> {
+        let image = self
+            .get_image_by_id(image_id)
+            .await?
+            .ok_or_else(|| LibraryError::Import(format!("Image not found: {}", image_id)))?;
+
+        let filename_only = std::path::Path::new(&image.filename)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&image.filename);
+
+        let file = self
+            .get_file_by_release_and_filename(&image.release_id, filename_only)
+            .await?
+            .ok_or_else(|| {
+                LibraryError::Import(format!("File not found for image: {}", image.filename))
+            })?;
+
+        let source_path = file.source_path.ok_or_else(|| {
+            LibraryError::Import(format!(
+                "File {} has no source_path",
+                file.original_filename
+            ))
+        })?;
+
+        let storage_profile = self
+            .get_storage_profile_for_release(&image.release_id)
+            .await?;
+
+        let raw_data = if source_path.starts_with("s3://") {
+            let profile = storage_profile
+                .as_ref()
+                .ok_or_else(|| LibraryError::Import("No storage profile for cloud image".into()))?;
+            let storage = crate::storage::create_storage_reader(profile).await?;
+            storage.download(&source_path).await?
+        } else {
+            tokio::fs::read(&source_path).await?
+        };
+
+        let data = if storage_profile
+            .as_ref()
+            .map(|p| p.encrypted)
+            .unwrap_or(false)
+        {
+            encryption_service.decrypt(&raw_data)?
+        } else {
+            raw_data
+        };
+
+        Ok(data)
+    }
+
     /// Set an album's cover image
     pub async fn set_album_cover_image(
         &self,
