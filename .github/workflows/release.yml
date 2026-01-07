@@ -32,8 +32,11 @@ jobs:
       run: |
         COMMIT="${{ inputs.commit || github.sha }}"
         
-        # Check GitHub Actions check runs (not the older status API)
-        CHECKS=$(gh api repos/${{ github.repository }}/commits/${COMMIT}/check-runs --jq '.check_runs')
+        # Check GitHub Actions check runs, filtering to only CI workflow (Test + Security)
+        # Exclude Release workflow checks to avoid checking ourselves
+        CHECKS=$(gh api repos/${{ github.repository }}/commits/${COMMIT}/check-runs --jq '
+          .check_runs | [.[] | select(.name | test("^Test|^Security"))]
+        ')
         TOTAL=$(echo "$CHECKS" | jq 'length')
         
         if [[ "$TOTAL" == "0" ]]; then
