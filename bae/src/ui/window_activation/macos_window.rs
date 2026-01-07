@@ -70,11 +70,15 @@ unsafe fn setup_app_menu(app: id) {
 pub fn setup_transparent_titlebar() {
     unsafe {
         let app = NSApplication::sharedApplication(nil);
-        let window: id = msg_send![app, keyWindow];
-        if window == nil {
-            info!("Warning: No key window found for transparent titlebar setup");
+        let windows: id = msg_send![app, windows];
+        let count: usize = msg_send![windows, count];
+
+        if count == 0 {
+            info!("Warning: No window found for transparent titlebar setup");
             return;
         }
+
+        let window: id = msg_send![windows, objectAtIndex: 0usize];
         window.setTitlebarAppearsTransparent_(YES);
         window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
         let current_style_mask: NSWindowStyleMask = window.styleMask();
@@ -87,6 +91,7 @@ pub fn setup_transparent_titlebar() {
         ];
         let _: () = msg_send![toolbar, setShowsBaselineSeparator : NO];
         let _: () = msg_send![window, setToolbar : toolbar];
+
         info!("macOS transparent titlebar configured");
     }
 }
