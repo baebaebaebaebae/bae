@@ -1489,15 +1489,17 @@ unsafe fn decode_audio_streaming_avio(
             let frame_samples = extract_samples_from_raw_frame(frame, channels as usize);
 
             // Skip samples if needed (for frame-accurate seeking)
-            let samples_to_output = if samples_skipped < samples_to_skip {
-                let remaining_to_skip = samples_to_skip - samples_skipped;
+            // samples_to_skip is in frame samples; frame_samples.len() is interleaved (samples * channels)
+            let interleaved_to_skip = samples_to_skip * channels as u64;
+            let samples_to_output = if samples_skipped < interleaved_to_skip {
+                let remaining_to_skip = interleaved_to_skip - samples_skipped;
                 if (frame_samples.len() as u64) <= remaining_to_skip {
                     // Skip entire frame
                     samples_skipped += frame_samples.len() as u64;
                     continue;
                 } else {
                     // Skip partial frame, output the rest
-                    samples_skipped = samples_to_skip;
+                    samples_skipped = interleaved_to_skip;
                     &frame_samples[remaining_to_skip as usize..]
                 }
             } else {
@@ -1531,13 +1533,14 @@ unsafe fn decode_audio_streaming_avio(
         let frame_samples = extract_samples_from_raw_frame(frame, channels as usize);
 
         // Skip samples if needed (for frame-accurate seeking)
-        let samples_to_output = if samples_skipped < samples_to_skip {
-            let remaining_to_skip = samples_to_skip - samples_skipped;
+        let interleaved_to_skip = samples_to_skip * channels as u64;
+        let samples_to_output = if samples_skipped < interleaved_to_skip {
+            let remaining_to_skip = interleaved_to_skip - samples_skipped;
             if (frame_samples.len() as u64) <= remaining_to_skip {
                 samples_skipped += frame_samples.len() as u64;
                 continue;
             } else {
-                samples_skipped = samples_to_skip;
+                samples_skipped = interleaved_to_skip;
                 &frame_samples[remaining_to_skip as usize..]
             }
         } else {
