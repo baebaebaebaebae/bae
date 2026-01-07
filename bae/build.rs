@@ -1,6 +1,8 @@
 use std::path::Path;
 use std::process::Command;
+
 fn main() {
+    set_version_env();
     compile_cpp_storage();
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let tailwind_input = Path::new(manifest_dir).join("tailwind.css");
@@ -42,6 +44,25 @@ fn main() {
     println!("cargo:rustc-link-search=native=/usr/local/lib");
     println!("cargo:rustc-link-lib=sodium");
 }
+
+fn set_version_env() {
+    // For local dev builds, derive version from git.
+    // CI sets BAE_VERSION env var before building releases.
+    let version = std::env::var("BAE_VERSION").unwrap_or_else(|_| {
+        Command::new("git")
+            .args(["describe", "--tags", "--always"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| "dev".to_string())
+    });
+
+    println!("cargo:rustc-env=BAE_VERSION={}", version);
+    println!("cargo:rerun-if-env-changed=BAE_VERSION");
+}
+
 fn compile_cpp_storage() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let cpp_dir = Path::new(manifest_dir).join("cpp");

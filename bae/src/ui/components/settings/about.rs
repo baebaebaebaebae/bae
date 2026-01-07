@@ -1,6 +1,7 @@
 use crate::library::use_library_manager;
 use dioxus::prelude::*;
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+const VERSION: &str = env!("BAE_VERSION");
 /// About section - version info and library stats
 #[component]
 pub fn AboutSection() -> Element {

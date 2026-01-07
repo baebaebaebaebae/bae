@@ -5,49 +5,50 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+  workflow_dispatch:  # Manual release trigger
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
-  # Check if this push should trigger a release
-  check-version:
-    name: Check Version
+  # Calculate next version for releases (workflow_dispatch only)
+  calculate-version:
+    name: Calculate Version
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
-      should_release: ${{ steps.check.outputs.should_release }}
-      version: ${{ steps.check.outputs.version }}
+      version: ${{ steps.calc.outputs.version }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
-    - name: Check if version already released
-      id: check
-      if: github.ref == 'refs/heads/main'
+    - name: Calculate next version from tags and date
+      id: calc
       run: |
-        VERSION=$(grep '^version' bae/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        YEAR=$(date +%Y)
+        MONTH=$(date +%-m)
         
-        if git tag -l "v$VERSION" | grep -q .; then
-          echo "::notice::Version $VERSION already released"
-          echo "should_release=false" >> $GITHUB_OUTPUT
+        # Get latest tag for this year.month
+        LATEST=$(git tag -l "v${YEAR}.${MONTH}.*" | sort -V | tail -1)
+        
+        if [[ -z "$LATEST" ]]; then
+          # First release this month
+          VERSION="${YEAR}.${MONTH}.0"
         else
-          echo "::notice::New version $VERSION will be released"
-          echo "should_release=true" >> $GITHUB_OUTPUT
+          # Increment patch from latest tag
+          PATCH=$(echo "$LATEST" | sed "s/v${YEAR}\.${MONTH}\.\([0-9]*\)/\1/")
+          VERSION="${YEAR}.${MONTH}.$((PATCH + 1))"
         fi
-
-    - name: Set defaults for non-main branches
-      if: github.ref != 'refs/heads/main'
-      run: |
-        echo "should_release=false" >> $GITHUB_OUTPUT
-        echo "version=" >> $GITHUB_OUTPUT
+        
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "::notice::Next version will be $VERSION"
 
   # Check if website files changed
   check-website:
@@ -252,12 +253,15 @@ jobs:
       working-directory: ./bae
       run: cargo audit --ignore RUSTSEC-2023-0071
 
-  # Release job - only runs on main when version is new
+  # Release job - only runs on manual workflow_dispatch
   release:
     name: Release
-    if: github.ref == 'refs/heads/main' && needs.check-version.outputs.should_release == 'true'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
-    needs: [check-version, test, security]
+    needs: [calculate-version, test, security]
+    concurrency:
+      group: release
+      cancel-in-progress: false
     permissions:
       contents: write
 
@@ -301,6 +305,14 @@ jobs:
         if ! command -v dx &> /dev/null; then
           cargo install dioxus-cli
         fi
+
+    - name: Set release version
+      run: |
+        VERSION="${{ needs.calculate-version.outputs.version }}"
+        echo "BAE_VERSION=$VERSION" >> $GITHUB_ENV
+        # Patch Cargo.toml for bundle metadata (not committed)
+        sed -i '' "s/^version = .*/version = \"$VERSION\"/" bae/Cargo.toml
+        echo "Building version $VERSION"
 
     - name: Build app bundle
       working-directory: ./bae
@@ -413,7 +425,7 @@ jobs:
 
     - name: Create git tag
       run: |
-        VERSION="${{ needs.check-version.outputs.version }}"
+        VERSION="${{ needs.calculate-version.outputs.version }}"
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
         git tag "v$VERSION"
@@ -438,7 +450,7 @@ jobs:
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: v${{ needs.check-version.outputs.version }}
+        tag_name: v${{ needs.calculate-version.outputs.version }}
         files: |
           bae/target/bae.dmg
           # bae/screenshots/*.png  # Screenshots disabled
@@ -452,7 +464,7 @@ jobs:
     name: Generate Screenshots
     if: false  # Disabled - uncomment condition above to re-enable
     runs-on: macos-latest
-    needs: [check-website, check-version]
+    needs: [check-website]
     permissions:
       contents: read
 
@@ -510,10 +522,10 @@ jobs:
     if: |
       always() &&
       github.ref == 'refs/heads/main' &&
-      (needs.check-website.outputs.changed == 'true' || needs.check-version.outputs.should_release == 'true') &&
+      (needs.check-website.outputs.changed == 'true' || github.event_name == 'workflow_dispatch') &&
       (needs.generate-screenshots.result == 'success' || needs.generate-screenshots.result == 'skipped')
     runs-on: ubuntu-latest
-    needs: [check-website, check-version, generate-screenshots]
+    needs: [check-website, generate-screenshots]
     permissions:
       contents: read
 
