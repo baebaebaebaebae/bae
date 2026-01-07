@@ -1742,7 +1742,7 @@ mod tests {
 
         // Create streaming infrastructure with sparse buffer
         let buffer = create_sparse_buffer();
-        let (mut sink, mut source) = create_streaming_pair_with_capacity(44100, 1, 100000);
+        let (mut sink, mut source, _ready) = create_streaming_pair_with_capacity(44100, 1, 100000);
 
         // Spawn decoder thread using new AVIO-based streaming decode
         let decoder_buffer = buffer.clone();
@@ -1845,7 +1845,7 @@ mod tests {
         seek_buffer.set_total_size((headers.len() + flac_data.len() - file_byte as usize) as u64);
         seek_buffer.mark_eof();
 
-        let (mut sink, mut source) =
+        let (mut sink, mut source, _ready) =
             create_streaming_pair_with_capacity(sample_rate, channels, 500000);
         let decoder_handle = thread::spawn(move || {
             decode_audio_streaming_simple(seek_buffer, &mut sink, sample_offset)

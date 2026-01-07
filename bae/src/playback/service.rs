@@ -848,7 +848,7 @@ impl PlaybackService {
         });
 
         // Create decoder sink/source with track's actual sample rate
-        let (mut sink, source) = create_streaming_pair(prepared.sample_rate, 2);
+        let (mut sink, source, _ready) = create_streaming_pair(prepared.sample_rate, 2);
 
         // Spawn decoder thread
         let decoder_buffer = prepared.buffer.clone();
@@ -932,7 +932,7 @@ impl PlaybackService {
             };
 
         // Create decoder sink/source and start decoder eagerly for gapless playback
-        let (mut sink, source) = create_streaming_pair(prepared.sample_rate, 2);
+        let (mut sink, source, _ready) = create_streaming_pair(prepared.sample_rate, 2);
         let decoder_buffer = prepared.buffer.clone();
         std::thread::spawn(move || {
             if let Err(e) =
@@ -1212,7 +1212,7 @@ impl PlaybackService {
 
         // Spawn decoder on the seek buffer, skipping sample_offset samples
         // to reach the exact seek position (not just the frame boundary)
-        let (mut sink, source) = create_streaming_pair(prepared.sample_rate, 2);
+        let (mut sink, source, ready_rx) = create_streaming_pair(prepared.sample_rate, 2);
         std::thread::spawn(move || {
             if let Err(e) = crate::audio_codec::decode_audio_streaming_simple(
                 seek_buffer,
@@ -1223,8 +1223,21 @@ impl PlaybackService {
             }
         });
 
-        // Wait for decoder to start
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        // Wait for buffer to be ready (50% full or finished)
+        // Timeout after 5s to prevent hangs on broken streams
+        match tokio::time::timeout(std::time::Duration::from_secs(5), ready_rx).await {
+            Ok(Ok(())) => {} // Buffer ready
+            Ok(Err(_)) => {
+                // Sender dropped without sending - decoder thread crashed
+                error!("Seek decoder failed to signal ready");
+                return;
+            }
+            Err(_) => {
+                // Timeout - something is very wrong
+                error!("Seek buffer ready timeout after 5s");
+                return;
+            }
+        }
 
         // Increment generation to invalidate old position listeners
         self.position_generation
@@ -1309,9 +1322,6 @@ impl PlaybackService {
             }
             seek_buffer_clone.mark_eof();
         });
-
-        // Give the background task a moment to start
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         seek_buffer
     }

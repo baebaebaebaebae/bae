@@ -9,6 +9,7 @@
 use rtrb::{Consumer, Producer, RingBuffer};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
+use tokio::sync::oneshot;
 
 /// Default ring buffer duration in milliseconds.
 /// Buffer holds this much audio regardless of sample rate.
@@ -88,6 +89,12 @@ impl StreamingState {
 pub struct StreamingPcmSink {
     producer: Producer<f32>,
     state: Arc<StreamingState>,
+    /// One-shot sender to notify when buffer is ready for playback (50% full)
+    ready_tx: Option<oneshot::Sender<()>>,
+    /// Buffer capacity (needed to calculate 50% threshold)
+    capacity: usize,
+    /// Samples pushed so far (to know when we hit threshold)
+    samples_pushed: usize,
 }
 
 impl StreamingPcmSink {
@@ -117,6 +124,8 @@ impl StreamingPcmSink {
     /// ring buffer fills up, we sleep to avoid busy-waiting. The audio callback
     /// drains the buffer every ~10-20ms, so 1ms sleeps give responsive backpressure
     /// without spinning the CPU. Using yield_now() here would cause 100%+ CPU usage.
+    ///
+    /// Signals readiness (via oneshot) when buffer reaches 50% capacity.
     pub fn push_samples_blocking(&mut self, samples: &[f32]) -> usize {
         let mut pushed = 0;
         for &sample in samples {
@@ -127,6 +136,14 @@ impl StreamingPcmSink {
                 match self.producer.push(sample) {
                     Ok(()) => {
                         pushed += 1;
+                        self.samples_pushed += 1;
+
+                        // Signal ready when buffer is 50% full
+                        if self.ready_tx.is_some() && self.samples_pushed >= self.capacity / 2 {
+                            if let Some(tx) = self.ready_tx.take() {
+                                let _ = tx.send(()); // Ignore error if receiver dropped
+                            }
+                        }
                         break;
                     }
                     Err(_) => {
@@ -139,7 +156,12 @@ impl StreamingPcmSink {
     }
 
     /// Signal that all samples have been pushed (EOF).
-    pub fn mark_finished(&self) {
+    /// Also signals ready if we haven't already (for short files).
+    pub fn mark_finished(&mut self) {
+        // Signal ready if we haven't already (file might be shorter than 50% buffer)
+        if let Some(tx) = self.ready_tx.take() {
+            let _ = tx.send(());
+        }
         self.state.finished.store(true, Ordering::Release);
     }
 
@@ -251,12 +273,17 @@ impl StreamingPcmSource {
     }
 }
 
+/// Receiver for buffer readiness notification.
+/// Resolves when buffer is 50% full or producer finishes (whichever comes first).
+pub type ReadyReceiver = oneshot::Receiver<()>;
+
 /// Create a streaming source/sink pair with capacity based on sample rate.
 /// Buffer holds DEFAULT_BUFFER_MS milliseconds of audio regardless of sample rate.
+/// Returns a ready receiver that resolves when buffer is 50% full.
 pub fn create_streaming_pair(
     sample_rate: u32,
     channels: u32,
-) -> (StreamingPcmSink, StreamingPcmSource) {
+) -> (StreamingPcmSink, StreamingPcmSource, ReadyReceiver) {
     // Calculate capacity for DEFAULT_BUFFER_MS milliseconds of audio
     let capacity_samples =
         (sample_rate as usize * channels as usize * DEFAULT_BUFFER_MS as usize) / 1000;
@@ -264,22 +291,27 @@ pub fn create_streaming_pair(
 }
 
 /// Create a streaming source/sink pair with specified capacity.
+/// Returns a ready receiver that resolves when buffer is 50% full.
 pub fn create_streaming_pair_with_capacity(
     sample_rate: u32,
     channels: u32,
     capacity_samples: usize,
-) -> (StreamingPcmSink, StreamingPcmSource) {
+) -> (StreamingPcmSink, StreamingPcmSource, ReadyReceiver) {
     let (producer, consumer) = RingBuffer::new(capacity_samples);
     let state = Arc::new(StreamingState::new(sample_rate, channels));
+    let (ready_tx, ready_rx) = oneshot::channel();
 
     let sink = StreamingPcmSink {
         producer,
         state: state.clone(),
+        ready_tx: Some(ready_tx),
+        capacity: capacity_samples,
+        samples_pushed: 0,
     };
 
     let source = StreamingPcmSource { consumer, state };
 
-    (sink, source)
+    (sink, source, ready_rx)
 }
 
 #[cfg(test)]
@@ -288,7 +320,7 @@ mod tests {
 
     #[test]
     fn test_push_pull_samples() {
-        let (mut sink, mut source) = create_streaming_pair(44100, 2);
+        let (mut sink, mut source, _ready) = create_streaming_pair(44100, 2);
 
         let samples = vec![0.1, 0.2, 0.3, 0.4];
         let pushed = sink.push_samples(&samples);
@@ -302,7 +334,7 @@ mod tests {
 
     #[test]
     fn test_finished_flag() {
-        let (sink, source) = create_streaming_pair(44100, 2);
+        let (mut sink, source, _ready) = create_streaming_pair(44100, 2);
 
         assert!(!source.is_finished());
         assert!(!source.producer_finished());
@@ -315,7 +347,7 @@ mod tests {
 
     #[test]
     fn test_position_tracking() {
-        let (mut sink, mut source) = create_streaming_pair_with_capacity(44100, 2, 10000);
+        let (mut sink, mut source, _ready) = create_streaming_pair_with_capacity(44100, 2, 10000);
 
         // Push 1000 stereo samples (500 frames)
         let samples: Vec<f32> = (0..1000).map(|i| i as f32 * 0.001).collect();
@@ -335,7 +367,7 @@ mod tests {
 
     #[test]
     fn test_cancel() {
-        let (sink, source) = create_streaming_pair(44100, 2);
+        let (sink, source, _ready) = create_streaming_pair(44100, 2);
 
         assert!(!sink.is_cancelled());
         assert!(!source.is_cancelled());
@@ -348,7 +380,7 @@ mod tests {
 
     #[test]
     fn test_buffer_full() {
-        let (mut sink, _source) = create_streaming_pair_with_capacity(44100, 2, 10);
+        let (mut sink, _source, _ready) = create_streaming_pair_with_capacity(44100, 2, 10);
 
         // Try to push more than capacity
         let samples = vec![0.5; 20];
@@ -360,11 +392,52 @@ mod tests {
 
     #[test]
     fn test_buffer_empty() {
-        let (_sink, mut source) = create_streaming_pair(44100, 2);
+        let (_sink, mut source, _ready) = create_streaming_pair(44100, 2);
 
         let mut output = vec![0.0; 10];
         let pulled = source.pull_samples(&mut output);
 
         assert_eq!(pulled, 0);
+    }
+
+    #[tokio::test]
+    async fn test_ready_signal_fires_at_threshold() {
+        use std::thread;
+        use std::time::Duration;
+
+        let (mut sink, _source, ready_rx) = create_streaming_pair_with_capacity(44100, 2, 100);
+
+        // Spawn thread to push samples
+        thread::spawn(move || {
+            // Push samples up to 50% threshold
+            let samples: Vec<f32> = (0..50).map(|i| i as f32 * 0.01).collect();
+            sink.push_samples_blocking(&samples);
+        });
+
+        // Should receive ready signal within reasonable time
+        let result = tokio::time::timeout(Duration::from_millis(100), ready_rx).await;
+        assert!(result.is_ok(), "Ready signal should fire at 50%");
+        assert!(result.unwrap().is_ok(), "Oneshot should succeed");
+    }
+
+    #[tokio::test]
+    async fn test_ready_signal_on_finish() {
+        use std::thread;
+        use std::time::Duration;
+
+        // Create buffer with capacity 1000 (50% = 500)
+        let (mut sink, _source, ready_rx) = create_streaming_pair_with_capacity(44100, 2, 1000);
+
+        thread::spawn(move || {
+            // Push only 100 samples (< 50%), then finish
+            let samples: Vec<f32> = (0..100).map(|i| i as f32 * 0.001).collect();
+            sink.push_samples_blocking(&samples);
+            sink.mark_finished();
+        });
+
+        // Should still receive ready signal (because mark_finished sends it)
+        let result = tokio::time::timeout(Duration::from_millis(100), ready_rx).await;
+        assert!(result.is_ok(), "Ready signal should fire on finish");
+        assert!(result.unwrap().is_ok(), "Oneshot should succeed");
     }
 }
