@@ -852,7 +852,7 @@ impl PlaybackService {
                 decoder_buffer.seek(skip_position);
             }
             if let Err(e) =
-                crate::audio_codec::decode_audio_streaming_simple(decoder_buffer, &mut sink)
+                crate::audio_codec::decode_audio_streaming_simple(decoder_buffer, &mut sink, 0)
             {
                 error!("Streaming decode failed: {}", e);
             }
@@ -930,7 +930,7 @@ impl PlaybackService {
         let decoder_buffer = prepared.buffer.clone();
         std::thread::spawn(move || {
             if let Err(e) =
-                crate::audio_codec::decode_audio_streaming_simple(decoder_buffer, &mut sink)
+                crate::audio_codec::decode_audio_streaming_simple(decoder_buffer, &mut sink, 0)
             {
                 error!("Preload streaming decode failed: {}", e);
             }
@@ -1167,7 +1167,7 @@ impl PlaybackService {
 
         // Try frame-accurate seek using seektable, fall back to linear interpolation
         let audio_data_start = prepared.audio_data_start;
-        let (target_byte, _sample_offset) = if let Some((frame_byte, offset)) =
+        let (target_byte, sample_offset) = if let Some((frame_byte, offset)) =
             find_frame_boundary_for_seek(position, prepared.sample_rate, &prepared.seektable_json)
         {
             let file_byte = audio_data_start + frame_byte;
@@ -1191,12 +1191,15 @@ impl PlaybackService {
             .create_seek_buffer(prepared, &buffer, target_byte)
             .await;
 
-        // Spawn decoder on the seek buffer
+        // Spawn decoder on the seek buffer, skipping sample_offset samples
+        // to reach the exact seek position (not just the frame boundary)
         let (mut sink, source) = create_streaming_pair(prepared.sample_rate, 2);
         std::thread::spawn(move || {
-            if let Err(e) =
-                crate::audio_codec::decode_audio_streaming_simple(seek_buffer, &mut sink)
-            {
+            if let Err(e) = crate::audio_codec::decode_audio_streaming_simple(
+                seek_buffer,
+                &mut sink,
+                sample_offset,
+            ) {
                 error!("Seek decode failed: {}", e);
             }
         });
@@ -1771,5 +1774,121 @@ mod tests {
                 byte_offset
             );
         }
+    }
+
+    #[test]
+    fn test_find_frame_boundary_returns_sample_offset() {
+        use crate::audio_codec::SeekEntry;
+
+        // Create seektable with frames at known positions
+        // Frame 0: sample 0, byte 0
+        // Frame 1: sample 4096, byte 10000
+        // Frame 2: sample 8192, byte 20000
+        let entries = vec![
+            SeekEntry { sample: 0, byte: 0 },
+            SeekEntry {
+                sample: 4096,
+                byte: 10000,
+            },
+            SeekEntry {
+                sample: 8192,
+                byte: 20000,
+            },
+        ];
+
+        let sample_rate = 44100;
+
+        // Seek to exactly frame 1 boundary - sample_offset should be 0
+        let target_sample_1 = 4096;
+        let seek_time_1 =
+            std::time::Duration::from_secs_f64(target_sample_1 as f64 / sample_rate as f64);
+        let (byte_offset_1, sample_offset_1) =
+            find_frame_boundary(&entries, seek_time_1, sample_rate).unwrap();
+        assert_eq!(byte_offset_1, 10000, "Should seek to frame 1 byte offset");
+        assert_eq!(
+            sample_offset_1, 0,
+            "Seeking exactly to frame boundary should have 0 sample offset"
+        );
+
+        // Seek to 500 samples after frame 1 - sample_offset should be ~500
+        // (small rounding due to time<->sample conversion)
+        let target_sample_2 = 4096 + 500;
+        let seek_time_2 =
+            std::time::Duration::from_secs_f64(target_sample_2 as f64 / sample_rate as f64);
+        let (byte_offset_2, sample_offset_2) =
+            find_frame_boundary(&entries, seek_time_2, sample_rate).unwrap();
+        assert_eq!(
+            byte_offset_2, 10000,
+            "Should still seek to frame 1 byte offset"
+        );
+        assert!(
+            (499..=501).contains(&sample_offset_2),
+            "sample_offset should be ~500 (got {})",
+            sample_offset_2
+        );
+
+        // Seek to 1000 samples after frame 2 - sample_offset should be ~1000
+        let target_sample_3 = 8192 + 1000;
+        let seek_time_3 =
+            std::time::Duration::from_secs_f64(target_sample_3 as f64 / sample_rate as f64);
+        let (byte_offset_3, sample_offset_3) =
+            find_frame_boundary(&entries, seek_time_3, sample_rate).unwrap();
+        assert_eq!(byte_offset_3, 20000, "Should seek to frame 2 byte offset");
+        assert!(
+            (998..=1002).contains(&sample_offset_3),
+            "sample_offset should be ~1000 (got {})",
+            sample_offset_3
+        );
+    }
+
+    /// Test that demonstrates sample_offset must be used to avoid audio glitches.
+    ///
+    /// When seeking:
+    /// 1. find_frame_boundary returns (byte_offset, sample_offset)
+    /// 2. byte_offset is the frame BEFORE or AT the target
+    /// 3. sample_offset is how many samples to SKIP to reach exact target
+    ///
+    /// If sample_offset is ignored:
+    /// - Audio plays from frame boundary (earlier than requested)
+    /// - Position reports the seek target
+    /// - Result: audio/position mismatch, potential pops/clicks
+    ///
+    /// The fix: pass sample_offset to decoder or streaming sink to skip those samples.
+    #[test]
+    fn test_sample_offset_represents_samples_to_skip() {
+        use crate::audio_codec::SeekEntry;
+
+        let entries = vec![
+            SeekEntry { sample: 0, byte: 0 },
+            SeekEntry {
+                sample: 96000, // 1 second at 96kHz
+                byte: 100000,
+            },
+        ];
+
+        let sample_rate = 96000; // 96kHz
+
+        // Seek to 1.5 seconds
+        let seek_time = std::time::Duration::from_secs_f64(1.5);
+        let (byte_offset, sample_offset) =
+            find_frame_boundary(&entries, seek_time, sample_rate).unwrap();
+
+        // Should seek to frame at 1 second (byte 100000)
+        assert_eq!(byte_offset, 100000);
+
+        // sample_offset should be 48000 samples (0.5 seconds worth)
+        // This tells us: after seeking to byte 100000 and decoding,
+        // skip the first 48000 samples to reach the exact 1.5s position
+        assert_eq!(
+            sample_offset, 48000,
+            "sample_offset should be 48000 (0.5s at 96kHz)"
+        );
+
+        // If this sample_offset is NOT used:
+        // - Audio starts at 1.0s (frame boundary)
+        // - Position reports 1.5s
+        // - User hears 0.5s of audio they shouldn't (glitch)
+        //
+        // Current bug: sample_offset is computed but stored in _sample_offset (ignored)
     }
 }

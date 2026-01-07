@@ -1952,3 +1952,115 @@ async fn test_high_sample_rate_position_calculation() {
         position_secs
     );
 }
+
+// ============================================================================
+// Sample offset tests (frame-accurate seeking)
+// ============================================================================
+
+/// Test that seeking skips sample_offset samples to reach exact position.
+///
+/// Bug: After seeking, find_frame_boundary returns (byte_offset, sample_offset) where:
+/// - byte_offset: frame boundary BEFORE or AT seek target
+/// - sample_offset: samples to SKIP to reach exact target
+///
+/// Previously, sample_offset was computed but stored in `_sample_offset` (ignored).
+/// This caused extra samples to be decoded (from frame boundary instead of exact position).
+///
+/// This test:
+/// 1. Plays a track and seeks to 2.5 seconds
+/// 2. Checks samples_decoded after completion
+/// 3. Expected: ~2.5s worth of samples (seek position to end)
+/// 4. Bug: More samples decoded (frame boundary to end)
+#[tokio::test]
+async fn test_seek_uses_sample_offset_to_skip_samples() {
+    if should_skip_audio_tests() {
+        debug!("Skipping audio test - no audio device available");
+        return;
+    }
+
+    let mut fixture = match PlaybackTestFixture::new().await {
+        Ok(f) => f,
+        Err(e) => {
+            debug!("Failed to set up test fixture: {}", e);
+            return;
+        }
+    };
+
+    if fixture.track_ids.is_empty() {
+        debug!("No tracks available for testing");
+        return;
+    }
+
+    let track_id = fixture.track_ids[0].clone();
+
+    // Play the track (5 seconds at 44.1kHz mono = 220500 total samples)
+    fixture.playback_handle.play(track_id.clone());
+
+    // Wait for playback to start
+    let playing_state = fixture
+        .wait_for_state(
+            |s| matches!(s, PlaybackState::Playing { .. }),
+            Duration::from_secs(5),
+        )
+        .await;
+    assert!(playing_state.is_some(), "Should start playing");
+
+    // Seek to 2.5 seconds
+    // This should land mid-frame, so sample_offset will be non-zero
+    let seek_position = Duration::from_millis(2500);
+    fixture.playback_handle.seek(seek_position);
+
+    // Wait for seek to complete
+    let seeked = fixture.wait_for_seeked(Duration::from_secs(3)).await;
+    assert!(seeked.is_some(), "Should receive Seeked event");
+
+    // Wait for track to complete and get decode stats
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut decode_stats: Option<(u32, u64)> = None;
+
+    while Instant::now() < deadline {
+        let remaining = deadline - Instant::now();
+        match timeout(remaining, fixture.progress_rx.recv()).await {
+            Ok(Some(PlaybackProgress::DecodeStats {
+                error_count,
+                samples_decoded,
+                track_id: stats_track_id,
+            })) => {
+                if stats_track_id == track_id {
+                    decode_stats = Some((error_count, samples_decoded));
+                    break;
+                }
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) | Err(_) => break,
+        }
+    }
+
+    let (_error_count, samples_decoded) =
+        decode_stats.expect("Should receive DecodeStats after track completes");
+
+    // Track is 5 seconds at 44.1kHz mono = 220500 total samples
+    // After seeking to 2.5s, remaining = 2.5s = 110250 samples
+    //
+    // With the bug (sample_offset ignored):
+    // - Seek finds frame boundary BEFORE 2.5s
+    // - Decodes from frame boundary to end = 110250 + sample_offset samples
+    // - Observed: sample_offset=4266, samples_decoded=114516
+    //
+    // With the fix (sample_offset used):
+    // - Seek to frame boundary, skip sample_offset samples
+    // - Outputs exactly 110250 samples
+    let expected_samples: u64 = 110250; // 2.5s at 44.1kHz mono
+
+    // This assertion FAILS until we fix the sample_offset bug
+    assert_eq!(
+        samples_decoded,
+        expected_samples,
+        "After seeking to 2.5s in a 5s track, expected exactly {} samples but got {}. \
+         Extra samples: {}. \
+         This indicates sample_offset is not being used to skip samples after seek.",
+        expected_samples,
+        samples_decoded,
+        samples_decoded as i64 - expected_samples as i64
+    );
+}

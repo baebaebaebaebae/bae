@@ -1294,20 +1294,25 @@ fn compute_flac_crc8(data: &[u8]) -> u8 {
 ///
 /// FFmpeg handles all frame boundary detection internally.
 /// Seektable is NOT needed - just feed bytes, get samples.
+///
+/// `samples_to_skip`: Number of samples to discard before outputting.
+/// Used after seeking to a frame boundary to reach the exact seek position.
 pub fn decode_audio_streaming_simple(
     buffer: SharedSparseBuffer,
     sink: &mut StreamingPcmSink,
+    samples_to_skip: u64,
 ) -> Result<(), String> {
     install_ffmpeg_log_callback();
     reset_ffmpeg_errors();
 
-    unsafe { decode_audio_streaming_avio(buffer, sink) }
+    unsafe { decode_audio_streaming_avio(buffer, sink, samples_to_skip) }
 }
 
 /// Internal AVIO-based streaming decode
 unsafe fn decode_audio_streaming_avio(
     buffer: SharedSparseBuffer,
     sink: &mut StreamingPcmSink,
+    samples_to_skip: u64,
 ) -> Result<(), String> {
     use ffmpeg_sys_next::*;
 
@@ -1454,6 +1459,7 @@ unsafe fn decode_audio_streaming_avio(
     };
 
     let mut samples_output: u64 = 0;
+    let mut samples_skipped: u64 = 0;
 
     // Read and decode packets
     while av_read_frame(fmt_ctx, packet) >= 0 {
@@ -1481,10 +1487,30 @@ unsafe fn decode_audio_streaming_avio(
             }
 
             let frame_samples = extract_samples_from_raw_frame(frame, channels as usize);
-            samples_output += frame_samples.len() as u64;
+
+            // Skip samples if needed (for frame-accurate seeking)
+            let samples_to_output = if samples_skipped < samples_to_skip {
+                let remaining_to_skip = samples_to_skip - samples_skipped;
+                if (frame_samples.len() as u64) <= remaining_to_skip {
+                    // Skip entire frame
+                    samples_skipped += frame_samples.len() as u64;
+                    continue;
+                } else {
+                    // Skip partial frame, output the rest
+                    samples_skipped = samples_to_skip;
+                    &frame_samples[remaining_to_skip as usize..]
+                }
+            } else {
+                &frame_samples[..]
+            };
+
+            samples_output += samples_to_output.len() as u64;
 
             // Convert to f32 and push to sink
-            let f32_samples: Vec<f32> = frame_samples.iter().map(|&s| s as f32 * scale).collect();
+            let f32_samples: Vec<f32> = samples_to_output
+                .iter()
+                .map(|&s| s as f32 * scale)
+                .collect();
 
             if !f32_samples.is_empty() {
                 if let Err(e) = push_samples_to_sink(sink, &f32_samples) {
@@ -1503,9 +1529,27 @@ unsafe fn decode_audio_streaming_avio(
         }
 
         let frame_samples = extract_samples_from_raw_frame(frame, channels as usize);
-        samples_output += frame_samples.len() as u64;
 
-        let f32_samples: Vec<f32> = frame_samples.iter().map(|&s| s as f32 * scale).collect();
+        // Skip samples if needed (for frame-accurate seeking)
+        let samples_to_output = if samples_skipped < samples_to_skip {
+            let remaining_to_skip = samples_to_skip - samples_skipped;
+            if (frame_samples.len() as u64) <= remaining_to_skip {
+                samples_skipped += frame_samples.len() as u64;
+                continue;
+            } else {
+                samples_skipped = samples_to_skip;
+                &frame_samples[remaining_to_skip as usize..]
+            }
+        } else {
+            &frame_samples[..]
+        };
+
+        samples_output += samples_to_output.len() as u64;
+
+        let f32_samples: Vec<f32> = samples_to_output
+            .iter()
+            .map(|&s| s as f32 * scale)
+            .collect();
 
         if !f32_samples.is_empty() {
             let _ = push_samples_to_sink(sink, &f32_samples);
@@ -1691,7 +1735,7 @@ mod tests {
         // Spawn decoder thread using new AVIO-based streaming decode
         let decoder_buffer = buffer.clone();
         let decoder_handle =
-            thread::spawn(move || decode_audio_streaming_simple(decoder_buffer, &mut sink));
+            thread::spawn(move || decode_audio_streaming_simple(decoder_buffer, &mut sink, 0));
 
         // Feed data to buffer (simulating download)
         buffer.append_at(0, &flac_data);
