@@ -10,8 +10,9 @@ use rtrb::{Consumer, Producer, RingBuffer};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
-/// Default ring buffer capacity: ~100ms at 44.1kHz stereo
-const DEFAULT_CAPACITY_SAMPLES: usize = 44100 * 2 / 10;
+/// Default ring buffer duration in milliseconds.
+/// Buffer holds this much audio regardless of sample rate.
+const DEFAULT_BUFFER_MS: u32 = 100;
 
 /// Shared state between sink and source
 pub struct StreamingState {
@@ -250,12 +251,16 @@ impl StreamingPcmSource {
     }
 }
 
-/// Create a streaming source/sink pair with default capacity.
+/// Create a streaming source/sink pair with capacity based on sample rate.
+/// Buffer holds DEFAULT_BUFFER_MS milliseconds of audio regardless of sample rate.
 pub fn create_streaming_pair(
     sample_rate: u32,
     channels: u32,
 ) -> (StreamingPcmSink, StreamingPcmSource) {
-    create_streaming_pair_with_capacity(sample_rate, channels, DEFAULT_CAPACITY_SAMPLES)
+    // Calculate capacity for DEFAULT_BUFFER_MS milliseconds of audio
+    let capacity_samples =
+        (sample_rate as usize * channels as usize * DEFAULT_BUFFER_MS as usize) / 1000;
+    create_streaming_pair_with_capacity(sample_rate, channels, capacity_samples)
 }
 
 /// Create a streaming source/sink pair with specified capacity.
