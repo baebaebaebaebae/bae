@@ -1777,4 +1777,196 @@ mod tests {
             samples.len()
         );
     }
+
+    /// Helper: test seek produces correct samples for given audio parameters
+    fn check_seek_produces_correct_samples(sample_rate: u32, channels: u32, bits_per_sample: u32) {
+        use crate::playback::create_streaming_pair_with_capacity;
+        use crate::playback::sparse_buffer::create_sparse_buffer;
+        use std::thread;
+
+        let duration_secs = 2;
+        let frame_samples = sample_rate as usize * duration_secs;
+        let max_val = (1i32 << (bits_per_sample - 1)) - 1;
+
+        // Create interleaved samples with frequency sweep
+        let mut original: Vec<i32> = Vec::with_capacity(frame_samples * channels as usize);
+        for i in 0..frame_samples {
+            let t = i as f64 / sample_rate as f64;
+            let freq = 200.0 + (t / duration_secs as f64) * 1800.0;
+            let sample =
+                ((max_val as f64 * 0.8) * (2.0 * std::f64::consts::PI * freq * t).sin()) as i32;
+            original.push(sample); // first channel
+            if channels == 2 {
+                original.push(-sample); // second channel inverted
+            }
+        }
+
+        let flac_data = encode_to_flac(&original, sample_rate, channels, bits_per_sample).unwrap();
+        let seektable = build_seektable(&flac_data).unwrap();
+        let seektable_json = serde_json::to_string(&seektable).unwrap();
+
+        // Find audio data start
+        let audio_data_start = {
+            let mut pos = 4;
+            loop {
+                let is_last = (flac_data[pos] & 0x80) != 0;
+                let block_size = u32::from_be_bytes([
+                    0,
+                    flac_data[pos + 1],
+                    flac_data[pos + 2],
+                    flac_data[pos + 3],
+                ]) as usize;
+                pos += 4 + block_size;
+                if is_last {
+                    break pos;
+                }
+            }
+        };
+
+        let ground_truth = decode_audio(&flac_data, None, None).unwrap();
+
+        // Seek to 1 second
+        let seek_time_secs = 1.0;
+        let seek_sample = (seek_time_secs * sample_rate as f64) as u64;
+
+        let (frame_byte, sample_offset) = crate::playback::service::find_frame_boundary_for_seek(
+            std::time::Duration::from_secs_f64(seek_time_secs),
+            sample_rate,
+            &seektable_json,
+        )
+        .expect("Should find frame boundary");
+
+        let file_byte = audio_data_start as u64 + frame_byte;
+
+        let seek_buffer = create_sparse_buffer();
+        let headers = &flac_data[..audio_data_start];
+        seek_buffer.append_at(0, headers);
+        seek_buffer.append_at(headers.len() as u64, &flac_data[file_byte as usize..]);
+        seek_buffer.set_total_size((headers.len() + flac_data.len() - file_byte as usize) as u64);
+        seek_buffer.mark_eof();
+
+        let (mut sink, mut source) =
+            create_streaming_pair_with_capacity(sample_rate, channels, 500000);
+        let decoder_handle = thread::spawn(move || {
+            decode_audio_streaming_simple(seek_buffer, &mut sink, sample_offset)
+        });
+
+        let result = decoder_handle.join().unwrap();
+        assert!(result.is_ok(), "Seek decode failed: {:?}", result.err());
+
+        let mut seeked_samples = Vec::new();
+        let mut buf = [0.0f32; 1024];
+        loop {
+            let n = source.pull_samples(&mut buf);
+            if n == 0 && source.is_finished() {
+                break;
+            }
+            seeked_samples.extend_from_slice(&buf[..n]);
+        }
+
+        let expected_start = (seek_sample as usize) * (channels as usize);
+        let expected_samples = &ground_truth.samples[expected_start..];
+
+        let compare_len = 1000.min(seeked_samples.len()).min(expected_samples.len());
+        assert!(compare_len > 100, "Not enough samples: {}", compare_len);
+
+        // Scale by container format (matches streaming decode)
+        let scale = if bits_per_sample <= 16 {
+            i16::MAX as f32
+        } else {
+            i32::MAX as f32
+        };
+        let mut mismatches = 0;
+        let mut max_diff = 0.0f32;
+        let mut first_mismatch_idx = None;
+
+        for i in 0..compare_len {
+            let seeked = seeked_samples[i];
+            let expected = expected_samples[i] as f32 / scale;
+            let diff = (seeked - expected).abs();
+
+            if diff > 0.01 {
+                mismatches += 1;
+                if first_mismatch_idx.is_none() {
+                    first_mismatch_idx = Some(i);
+                }
+                max_diff = max_diff.max(diff);
+            }
+        }
+
+        if mismatches > 0 {
+            let first_idx = first_mismatch_idx.unwrap();
+            panic!(
+                "Seek mismatch! {}Hz {}ch {}bit\n\
+                 Seek: {} samples ({}s), frame_byte {}, sample_offset {}\n\
+                 First mismatch at {}: seeked={:.4}, expected={:.4}\n\
+                 Mismatches: {}/{}, max_diff: {:.4}",
+                sample_rate,
+                channels,
+                bits_per_sample,
+                seek_sample,
+                seek_time_secs,
+                frame_byte,
+                sample_offset,
+                first_idx,
+                seeked_samples[first_idx],
+                expected_samples[first_idx] as f32 / scale,
+                mismatches,
+                compare_len,
+                max_diff,
+            );
+        }
+    }
+
+    // Mono 44.1kHz
+    #[test]
+    fn test_seek_mono_44100_16bit() {
+        init();
+        check_seek_produces_correct_samples(44100, 1, 16);
+    }
+
+    #[test]
+    fn test_seek_mono_44100_24bit() {
+        init();
+        check_seek_produces_correct_samples(44100, 1, 24);
+    }
+
+    // Stereo 44.1kHz
+    #[test]
+    fn test_seek_stereo_44100_16bit() {
+        init();
+        check_seek_produces_correct_samples(44100, 2, 16);
+    }
+
+    #[test]
+    fn test_seek_stereo_44100_24bit() {
+        init();
+        check_seek_produces_correct_samples(44100, 2, 24);
+    }
+
+    // Mono 96kHz
+    #[test]
+    fn test_seek_mono_96000_16bit() {
+        init();
+        check_seek_produces_correct_samples(96000, 1, 16);
+    }
+
+    #[test]
+    fn test_seek_mono_96000_24bit() {
+        init();
+        check_seek_produces_correct_samples(96000, 1, 24);
+    }
+
+    // Stereo 96kHz
+    #[test]
+    fn test_seek_stereo_96000_16bit() {
+        init();
+        check_seek_produces_correct_samples(96000, 2, 16);
+    }
+
+    #[test]
+    fn test_seek_stereo_96000_24bit() {
+        init();
+        check_seek_produces_correct_samples(96000, 2, 24);
+    }
 }

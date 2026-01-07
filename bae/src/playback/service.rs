@@ -1354,7 +1354,7 @@ fn calculate_byte_offset_for_seek(
 /// Returns (byte_offset, sample_offset) where:
 /// - byte: frame-aligned position in the file
 /// - sample_offset: samples to skip after decoding to reach exact target
-fn find_frame_boundary_for_seek(
+pub(crate) fn find_frame_boundary_for_seek(
     seek_time: std::time::Duration,
     sample_rate: u32,
     seektable_json: &str,
