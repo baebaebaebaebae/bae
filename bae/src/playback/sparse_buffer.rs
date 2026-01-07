@@ -145,6 +145,7 @@ impl SparseStreamingBuffer {
     }
 
     /// Check if a position is within any buffered range.
+    #[cfg(test)]
     pub fn is_buffered(&self, pos: u64) -> bool {
         let inner = self.inner.lock().unwrap();
         inner.ranges.iter().any(|r| r.contains(pos))
@@ -266,6 +267,7 @@ impl SparseStreamingBuffer {
     }
 
     /// Get buffered byte ranges (for debugging/testing).
+    #[cfg(test)]
     pub fn get_ranges(&self) -> Vec<(u64, u64)> {
         let inner = self.inner.lock().unwrap();
         inner.ranges.iter().map(|r| (r.start, r.end())).collect()

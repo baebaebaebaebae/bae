@@ -153,6 +153,8 @@ struct PreparedTrack {
     pregap_ms: Option<i64>,
     /// Track duration from metadata
     duration: std::time::Duration,
+    /// True if this track uses local file storage (fast seek via direct file read)
+    is_local_storage: bool,
 }
 
 /// Fetch track metadata, create buffer, start reading audio data.
@@ -231,23 +233,26 @@ async fn prepare_track(
     };
 
     // Create appropriate data reader based on storage profile
-    let reader: Box<dyn AudioDataReader> = match &storage_profile {
-        None => Box::new(LocalFileReader::new(read_config)),
+    let (reader, is_local_storage): (Box<dyn AudioDataReader>, bool) = match &storage_profile {
+        None => (Box::new(LocalFileReader::new(read_config)), true),
         Some(profile)
             if !profile.encrypted && profile.location == crate::db::StorageLocation::Local =>
         {
-            Box::new(LocalFileReader::new(read_config))
+            (Box::new(LocalFileReader::new(read_config)), true)
         }
         Some(profile) => {
             let storage = create_storage_reader(profile)
                 .await
                 .map_err(PlaybackError::cloud)?;
-            Box::new(CloudStorageReader::new(
-                read_config,
-                storage,
-                Arc::new(encryption_service.clone()),
-                profile.encrypted,
-            ))
+            (
+                Box::new(CloudStorageReader::new(
+                    read_config,
+                    storage,
+                    Arc::new(encryption_service.clone()),
+                    profile.encrypted,
+                )),
+                false,
+            )
         }
     };
 
@@ -277,6 +282,7 @@ async fn prepare_track(
         source_path,
         pregap_ms,
         duration,
+        is_local_storage,
     })
 }
 
@@ -1140,7 +1146,6 @@ impl PlaybackService {
             }
         };
 
-        let buffer = prepared.buffer.clone();
         let file_size = prepared.file_size;
         let track_id = prepared.track.id.clone();
 
@@ -1165,6 +1170,17 @@ impl PlaybackService {
 
         let track_duration = prepared.duration;
 
+        // STOP OLD AUDIO IMMEDIATELY - don't let it play during seek buffer creation
+        // This prevents the "multiple streams" issue where old audio continues during seek
+        self.audio_output
+            .send_command(crate::playback::cpal_output::AudioCommand::Stop);
+
+        if let Some(old_source) = &self.current_streaming_source {
+            if let Ok(guard) = old_source.lock() {
+                guard.cancel();
+            }
+        }
+
         // Try frame-accurate seek using seektable, fall back to linear interpolation
         let audio_data_start = prepared.audio_data_start;
         let (target_byte, sample_offset) = if let Some((frame_byte, offset)) =
@@ -1182,14 +1198,17 @@ impl PlaybackService {
         };
 
         info!(
-            "Seek: position {:?}, target_byte {}, file_size {}, audio_data_start {}",
-            position, target_byte, file_size, audio_data_start
+            "Seek: position {:?}, target_byte {}, file_size {}, audio_data_start {}, local={}",
+            position, target_byte, file_size, audio_data_start, prepared.is_local_storage
         );
 
-        // Create seek buffer with headers + audio data from target position
-        let seek_buffer = self
-            .create_seek_buffer(prepared, &buffer, target_byte)
-            .await;
+        // Create seek buffer - fast path for local files, slow path for cloud
+        let seek_buffer = if prepared.is_local_storage {
+            self.create_seek_buffer_for_local(prepared, target_byte)
+        } else {
+            self.create_seek_buffer_from_existing(prepared, target_byte)
+                .await
+        };
 
         // Spawn decoder on the seek buffer, skipping sample_offset samples
         // to reach the exact seek position (not just the frame boundary)
@@ -1211,13 +1230,6 @@ impl PlaybackService {
         self.position_generation
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-        // Cancel old streaming state
-        if let Some(source) = &self.current_streaming_source {
-            if let Ok(guard) = source.lock() {
-                guard.cancel();
-            }
-        }
-
         let was_paused = self.is_paused;
         let source = Arc::new(Mutex::new(source));
 
@@ -1236,90 +1248,70 @@ impl PlaybackService {
         });
     }
 
-    /// Create a seek buffer with headers prepended and audio data from target_byte onwards.
-    async fn create_seek_buffer(
+    /// Create a seek buffer for local files by starting a new reader at target_byte.
+    /// This avoids blocking on the existing buffer and is much faster.
+    fn create_seek_buffer_for_local(
         &self,
         prepared: &PreparedTrack,
-        buffer: &SharedSparseBuffer,
         target_byte: u64,
     ) -> SharedSparseBuffer {
         let seek_buffer = create_sparse_buffer();
-        let mut write_pos = 0u64;
 
-        // Prepend FLAC headers if available
-        if let Some(ref headers) = prepared.flac_headers {
-            seek_buffer.append_at(0, headers);
-            write_pos = headers.len() as u64;
-        }
+        // Create a new reader starting at target_byte
+        let config = AudioReadConfig {
+            path: prepared.source_path.clone(),
+            flac_headers: prepared.flac_headers.clone(),
+            start_byte: Some(target_byte),
+            end_byte: None,
+        };
 
-        // Handle unbuffered data: start download and wait
-        if !buffer.is_buffered(target_byte) {
-            info!(
-                "Seek past buffer: byte {} not buffered, buffered ranges: {:?}",
-                target_byte,
-                buffer.get_ranges()
-            );
-            let read_buffer = buffer.clone();
-            let read_path = prepared.source_path.clone();
-            let start_offset = target_byte;
+        let reader = Box::new(LocalFileReader::new(config));
+        reader.start_reading(seek_buffer.clone());
 
-            tokio::spawn(async move {
-                use tokio::io::{AsyncReadExt, AsyncSeekExt};
+        seek_buffer
+    }
 
-                let mut file = match tokio::fs::File::open(&read_path).await {
-                    Ok(f) => f,
-                    Err(e) => {
-                        error!("Failed to open file for seek download {}: {}", read_path, e);
-                        return;
-                    }
-                };
+    /// Create a seek buffer by copying from the existing buffer.
+    /// Used for cloud storage where we can't create a new reader easily.
+    /// This blocks until enough data is available but runs in a background task.
+    async fn create_seek_buffer_from_existing(
+        &self,
+        prepared: &PreparedTrack,
+        target_byte: u64,
+    ) -> SharedSparseBuffer {
+        let seek_buffer = create_sparse_buffer();
+        let source_buffer = prepared.buffer.clone();
+        let flac_headers = prepared.flac_headers.clone();
 
-                if let Err(e) = file.seek(std::io::SeekFrom::Start(start_offset)).await {
-                    error!("Failed to seek for download: {}", e);
-                    return;
-                }
+        // Spawn a task to copy data from source to seek buffer
+        let seek_buffer_clone = seek_buffer.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut write_pos = 0u64;
 
-                let mut buffer_pos = start_offset;
-                let mut chunk = vec![0u8; 65536];
-
-                loop {
-                    if read_buffer.is_cancelled() {
-                        return;
-                    }
-
-                    match file.read(&mut chunk).await {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            read_buffer.append_at(buffer_pos, &chunk[..n]);
-                            buffer_pos += n as u64;
-                        }
-                        Err(e) => {
-                            error!("Read error during seek download: {}", e);
-                            break;
-                        }
-                    }
-                }
-            });
-
-            // Wait for download to start buffering
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
-
-        // Copy audio data from target_byte onwards
-        buffer.seek(target_byte);
-        let mut temp_buf = vec![0u8; 65536];
-        loop {
-            match buffer.read(&mut temp_buf) {
-                Some(0) => break,
-                Some(n) => {
-                    seek_buffer.append_at(write_pos, &temp_buf[..n]);
-                    write_pos += n as u64;
-                }
-                None => break,
+            // Prepend FLAC headers if available
+            if let Some(ref headers) = flac_headers {
+                seek_buffer_clone.append_at(0, headers);
+                write_pos = headers.len() as u64;
             }
-        }
-        seek_buffer.mark_eof();
-        seek_buffer.seek(0);
+
+            // Copy audio data from target_byte onwards
+            source_buffer.seek(target_byte);
+            let mut temp_buf = vec![0u8; 65536];
+            loop {
+                match source_buffer.read(&mut temp_buf) {
+                    Some(0) => break,
+                    Some(n) => {
+                        seek_buffer_clone.append_at(write_pos, &temp_buf[..n]);
+                        write_pos += n as u64;
+                    }
+                    None => break, // cancelled
+                }
+            }
+            seek_buffer_clone.mark_eof();
+        });
+
+        // Give the background task a moment to start
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         seek_buffer
     }
