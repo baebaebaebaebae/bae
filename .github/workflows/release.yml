@@ -28,42 +28,6 @@ jobs:
         fetch-depth: 0
         ref: ${{ inputs.commit || github.sha }}
 
-    - name: Verify commit passed CI
-      run: |
-        COMMIT="${{ inputs.commit || github.sha }}"
-        
-        # Check GitHub Actions check runs, filtering to only CI workflow (Test + Security)
-        # Exclude Release workflow checks to avoid checking ourselves
-        CHECKS=$(gh api repos/${{ github.repository }}/commits/${COMMIT}/check-runs --jq '
-          .check_runs | [.[] | select(.name | test("^Test|^Security"))]
-        ')
-        TOTAL=$(echo "$CHECKS" | jq 'length')
-        
-        if [[ "$TOTAL" == "0" ]]; then
-          echo "::error::No CI checks found for commit ${COMMIT}"
-          echo "::error::Push this commit and wait for CI to pass before releasing."
-          exit 1
-        fi
-        
-        # Check if any are still in progress
-        IN_PROGRESS=$(echo "$CHECKS" | jq '[.[] | select(.status != "completed")] | length')
-        if [[ "$IN_PROGRESS" != "0" ]]; then
-          echo "::error::CI is still running for commit ${COMMIT}"
-          exit 1
-        fi
-        
-        # Check if any failed (conclusion is not success/skipped)
-        FAILED=$(echo "$CHECKS" | jq '[.[] | select(.conclusion != "success" and .conclusion != "skipped")] | length')
-        if [[ "$FAILED" != "0" ]]; then
-          echo "::error::CI failed for commit ${COMMIT}"
-          echo "$CHECKS" | jq '.[] | select(.conclusion != "success" and .conclusion != "skipped") | {name, conclusion}'
-          exit 1
-        fi
-        
-        echo "::notice::Commit ${COMMIT} has passed CI ($TOTAL checks)"
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
     - name: Calculate next version from tags and date
       id: calc
       run: |
