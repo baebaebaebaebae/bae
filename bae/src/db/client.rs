@@ -1979,6 +1979,17 @@ impl Database {
             .await?;
         Ok(())
     }
+
+    /// Delete an import record from the database.
+    /// Used by UI to dismiss stuck imports so they don't reappear after restart.
+    pub async fn delete_import(&self, id: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM imports WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     fn row_to_import(&self, row: &sqlx::sqlite::SqliteRow) -> DbImport {
         let status_str: String = row.get("status");
         let status = match status_str.as_str() {

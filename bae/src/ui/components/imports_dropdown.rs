@@ -1,13 +1,15 @@
 use super::active_imports_context::{use_active_imports, ActiveImport};
 use crate::db::ImportOperationStatus;
-use crate::ui::{image_url, Route};
+use crate::ui::{image_url, AppContext, Route};
 use dioxus::prelude::*;
+
 /// Dropdown showing list of active imports with progress
 #[component]
 pub fn ImportsDropdown(mut is_open: Signal<bool>) -> Element {
     let active_imports = use_active_imports();
     let imports = active_imports.imports.read();
     let navigator = use_navigator();
+    let app_context = use_context::<AppContext>();
     let import_count = imports.len();
     if !*is_open.read() {
         return rsx! {};
@@ -40,9 +42,25 @@ pub fn ImportsDropdown(mut is_open: Signal<bool>) -> Element {
                         class: "text-xs text-gray-400 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-gray-700/50",
                         onclick: {
                             let mut imports_signal = active_imports.imports;
+                            let library_manager = app_context.library_manager.clone();
                             move |e: Event<MouseData>| {
                                 e.stop_propagation();
+                                // Collect IDs before clearing the list
+                                let import_ids: Vec<String> = imports_signal
+                                    // Delete all from DB
+                                    .read()
+                                    .iter()
+                                    .map(|i| i.import_id.clone())
+                                    .collect();
                                 imports_signal.with_mut(|list| list.clear());
+                                let library_manager = library_manager.clone();
+                                spawn(async move {
+                                    for id in import_ids {
+                                        if let Err(e) = library_manager.get().delete_import(&id).await {
+                                            tracing::warn!("Failed to delete import {} from DB: {}", id, e);
+                                        }
+                                    }
+                                });
                             }
                         },
                         "Clear all"
@@ -90,8 +108,17 @@ pub fn ImportsDropdown(mut is_open: Signal<bool>) -> Element {
                                     },
                                     on_dismiss: {
                                         let import_id = import_id.clone();
+                                        let library_manager = app_context.library_manager.clone();
                                         move |_| {
                                             active_imports.dismiss(&import_id);
+                                            // Also delete from DB so it doesn't reappear after restart
+                                            let library_manager = library_manager.clone();
+                                            let import_id = import_id.clone();
+                                            spawn(async move {
+                                                if let Err(e) = library_manager.get().delete_import(&import_id).await {
+                                                    tracing::warn!("Failed to delete import from DB: {}", e);
+                                                }
+                                            });
                                         }
                                     },
                                 }
