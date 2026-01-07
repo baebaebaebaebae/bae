@@ -699,11 +699,13 @@ unsafe fn encode_to_flac_avio(
     };
 
     // Set sample format based on bits per sample
+    // 24-bit uses S32 container with bits_per_raw_sample=24
     (*codec_ctx).sample_fmt = match bits_per_sample {
         16 => AVSampleFormat::AV_SAMPLE_FMT_S16,
-        32 => AVSampleFormat::AV_SAMPLE_FMT_S32,
+        24 | 32 => AVSampleFormat::AV_SAMPLE_FMT_S32,
         _ => AVSampleFormat::AV_SAMPLE_FMT_S16,
     };
+    (*codec_ctx).bits_per_raw_sample = bits_per_sample as c_int;
 
     // Set channel layout
     let mut ch_layout: AVChannelLayout = std::mem::zeroed();
@@ -826,12 +828,20 @@ unsafe fn encode_to_flac_avio(
         }
 
         // Copy samples to frame (interleaved format)
+        // For 24-bit, left-shift by 8 to fill S32 (matches FFmpeg's internal format)
         let frame_data = (*frame).data[0];
         match bits_per_sample {
             16 => {
                 let dst = frame_data as *mut i16;
                 for i in 0..chunk_samples {
                     *dst.add(i) = samples[sample_offset + i] as i16;
+                }
+            }
+            24 => {
+                // 24-bit uses S32 container, values left-shifted by 8
+                let dst = frame_data as *mut i32;
+                for i in 0..chunk_samples {
+                    *dst.add(i) = samples[sample_offset + i] << 8;
                 }
             }
             32 => {
@@ -1445,16 +1455,15 @@ unsafe fn decode_audio_streaming_avio(
         return Err("Failed to allocate frame/packet".to_string());
     }
 
-    // Scaling factor for sample conversion
-    let bits_per_sample = match (*codec_ctx).sample_fmt {
-        AVSampleFormat::AV_SAMPLE_FMT_S16 | AVSampleFormat::AV_SAMPLE_FMT_S16P => 16,
-        AVSampleFormat::AV_SAMPLE_FMT_S32 | AVSampleFormat::AV_SAMPLE_FMT_S32P => 32,
-        _ => 16,
-    };
-    let scale = match bits_per_sample {
-        16 => 1.0 / (i16::MAX as f32),
-        24 => 1.0 / 8388607.0,
-        32 => 1.0 / (i32::MAX as f32),
+    // Scale by container format. FFmpeg left-shifts samples to fill the container
+    // (e.g., 24-bit values are shifted left by 8 to fill S32).
+    let scale = match (*codec_ctx).sample_fmt {
+        AVSampleFormat::AV_SAMPLE_FMT_S16 | AVSampleFormat::AV_SAMPLE_FMT_S16P => {
+            1.0 / (i16::MAX as f32)
+        }
+        AVSampleFormat::AV_SAMPLE_FMT_S32 | AVSampleFormat::AV_SAMPLE_FMT_S32P => {
+            1.0 / (i32::MAX as f32)
+        }
         _ => 1.0 / (i16::MAX as f32),
     };
 
