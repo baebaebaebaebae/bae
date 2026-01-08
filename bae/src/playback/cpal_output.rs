@@ -2,18 +2,36 @@ use crate::playback::streaming_source::StreamingPcmSource;
 use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::{Device, Stream, StreamConfig};
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::sync::{mpsc, Mutex};
 use tracing::{error, info, trace, warn};
-#[derive(Debug, Clone)]
-pub enum AudioCommand {
-    Play,
-    Pause,
-    Resume,
-    Stop,
-    SetVolume(f32),
+
+/// Audio output state - directly controls what the audio callback does.
+///
+/// This is a shared atomic that both the service and audio callback access.
+/// No command channel needed - just set the state directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum AudioState {
+    /// Output silence, stream inactive
+    Stopped = 0,
+    /// Output samples from buffer
+    Playing = 1,
+    /// Output silence, but stream remains ready
+    Paused = 2,
 }
+
+impl AudioState {
+    fn from_u8(v: u8) -> Self {
+        match v {
+            1 => AudioState::Playing,
+            2 => AudioState::Paused,
+            _ => AudioState::Stopped,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum AudioError {
     DeviceNotFound,
@@ -32,15 +50,17 @@ impl Display for AudioError {
     }
 }
 impl std::error::Error for AudioError {}
-/// Audio output manager using CPAL
+
+/// Audio output manager using CPAL.
+///
+/// State and volume are shared atomics - set them directly, no command channel needed.
 pub struct AudioOutput {
     device: Device,
     stream_config: StreamConfig,
-    command_tx: mpsc::Sender<AudioCommand>,
-    is_playing: Arc<AtomicBool>,
-    is_paused: Arc<AtomicBool>,
+    state: Arc<AtomicU8>,
     volume: Arc<AtomicU32>,
 }
+
 impl AudioOutput {
     /// Create a new audio output manager
     pub fn new() -> Result<Self, AudioError> {
@@ -57,7 +77,6 @@ impl AudioOutput {
             "Audio device: {} channels, {} Hz, {:?}",
             stream_config.channels, stream_config.sample_rate.0, sample_format
         );
-        let (command_tx, _command_rx) = mpsc::channel();
         let initial_volume = if std::env::var("SKIP_AUDIO_TESTS").is_ok()
             || std::env::var("MUTE_TEST_AUDIO").is_ok()
         {
@@ -68,9 +87,7 @@ impl AudioOutput {
         Ok(Self {
             device,
             stream_config,
-            command_tx,
-            is_playing: Arc::new(AtomicBool::new(false)),
-            is_paused: Arc::new(AtomicBool::new(false)),
+            state: Arc::new(AtomicU8::new(AudioState::Stopped as u8)),
             volume: Arc::new(AtomicU32::new(initial_volume)),
         })
     }
@@ -92,12 +109,8 @@ impl AudioOutput {
         let source_channels = source_channels as usize;
         let sample_rate_ratio = source_sample_rate as f64 / output_sample_rate as f64;
 
-        let is_playing = self.is_playing.clone();
-        let is_paused = self.is_paused.clone();
+        let state = self.state.clone();
         let volume = self.volume.clone();
-
-        let (command_tx_for_stream, command_rx) = mpsc::channel();
-        self.command_tx = command_tx_for_stream;
 
         let mut resample_buffer: Vec<f32> = Vec::new();
         let mut resample_pos = 0usize;
@@ -110,33 +123,8 @@ impl AudioOutput {
             .build_output_stream(
                 &self.stream_config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                    // Process commands
-                    while let Ok(cmd) = command_rx.try_recv() {
-                        match cmd {
-                            AudioCommand::Play => {
-                                is_playing.store(true, Ordering::Relaxed);
-                                is_paused.store(false, Ordering::Relaxed);
-                            }
-                            AudioCommand::Pause => {
-                                is_paused.store(true, Ordering::Relaxed);
-                            }
-                            AudioCommand::Resume => {
-                                is_paused.store(false, Ordering::Relaxed);
-                            }
-                            AudioCommand::Stop => {
-                                is_playing.store(false, Ordering::Relaxed);
-                                is_paused.store(false, Ordering::Relaxed);
-                            }
-                            AudioCommand::SetVolume(vol) => {
-                                volume.store(
-                                    (vol.clamp(0.0, 1.0) * 10000.0) as u32,
-                                    Ordering::Relaxed,
-                                );
-                            }
-                        }
-                    }
-
-                    if !is_playing.load(Ordering::Relaxed) || is_paused.load(Ordering::Relaxed) {
+                    // Check state - only output samples when Playing
+                    if AudioState::from_u8(state.load(Ordering::Relaxed)) != AudioState::Playing {
                         data.fill(0.0);
                         return;
                     }
@@ -167,7 +155,7 @@ impl AudioOutput {
                                     // End of stream
                                     if !completion_sent {
                                         info!("Streaming audio callback: End of stream");
-                                        is_playing.store(false, Ordering::Relaxed);
+                                        state.store(AudioState::Stopped as u8, Ordering::Relaxed);
                                         if completion_tx.send(()).is_err() {
                                             warn!("Failed to send completion signal");
                                         }
@@ -262,12 +250,25 @@ impl AudioOutput {
         Ok(stream)
     }
 
-    pub fn send_command(&self, cmd: AudioCommand) {
-        let _ = self.command_tx.send(cmd);
+    /// Set the audio output state directly
+    pub fn set_state(&self, new_state: AudioState) {
+        self.state.store(new_state as u8, Ordering::Relaxed);
     }
 
+    /// Get the current audio output state
+    pub fn get_state(&self) -> AudioState {
+        AudioState::from_u8(self.state.load(Ordering::Relaxed))
+    }
+
+    /// Check if currently paused
+    pub fn is_paused(&self) -> bool {
+        self.get_state() == AudioState::Paused
+    }
+
+    /// Set volume (0.0 to 1.0)
     pub fn set_volume(&self, volume: f32) {
-        self.send_command(AudioCommand::SetVolume(volume));
+        self.volume
+            .store((volume.clamp(0.0, 1.0) * 10000.0) as u32, Ordering::Relaxed);
     }
 }
 impl Default for AudioOutput {

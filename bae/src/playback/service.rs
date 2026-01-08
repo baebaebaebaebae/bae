@@ -1,3 +1,25 @@
+//! # Playback Service
+//!
+//! The playback service manages audio playback through a command-based architecture.
+//! It runs in its own thread and processes commands from a channel.
+//!
+//! ## Audio State
+//!
+//! Audio state is a shared atomic (`AudioState` enum: `Stopped`, `Playing`, `Paused`).
+//! The audio callback reads it on every iteration and outputs samples if `Playing`,
+//! silence otherwise. Infrastructure (streams, buffers, decoders) is set up
+//! separately via `init_streaming()`.
+//!
+//! ## Seek Flow
+//!
+//! 1. Cancel old streaming source (makes callback output silence)
+//! 2. Create new seek buffer (local: fresh file reader, cloud: fresh range request)
+//! 3. Spawn decoder on seek buffer
+//! 4. Wait for buffer to be 50% full
+//! 5. Call `init_streaming()` which drops old stream and creates new one
+//! 6. State remains unchanged (Playing or Paused) - new stream inherits it
+//! 7. Send `Seeked` progress event
+
 use crate::cloud_storage::CloudStorage;
 use crate::db::DbTrack;
 use crate::encryption::EncryptionService;
@@ -334,7 +356,6 @@ pub struct PlaybackService {
     progress_tx: tokio_mpsc::UnboundedSender<PlaybackProgress>,
     queue: VecDeque<String>,
     previous_track_id: Option<String>,
-    is_paused: bool,
     current_position_shared: Arc<std::sync::Mutex<Option<std::time::Duration>>>,
     /// Generation counter to invalidate old position listeners after seek
     position_generation: Arc<std::sync::atomic::AtomicU64>,
@@ -360,11 +381,14 @@ impl PlaybackService {
         self.next_prepared.as_ref().map(|p| p.track.id.as_str())
     }
 
-    /// Create audio stream, start playback, and spawn position/completion listener.
-    /// This is the common streaming setup used by play_track, seek, and play_preloaded_track.
+    /// Initialize streaming infrastructure without changing audio state.
     ///
-    /// Returns true if streaming started successfully, false on error.
-    async fn start_streaming(
+    /// Sets up the cpal stream, position listeners, and completion handlers.
+    /// The audio output state remains unchanged - caller must explicitly
+    /// call `audio_output.set_state(Playing)` to start audio output.
+    ///
+    /// Returns true if initialization succeeded, false on error.
+    async fn init_streaming(
         &mut self,
         source: Arc<Mutex<StreamingPcmSource>>,
         position_offset: std::time::Duration,
@@ -441,15 +465,6 @@ impl PlaybackService {
         self.stream = Some(stream);
         self.current_streaming_source = Some(source.clone());
         *self.current_position_shared.lock().unwrap() = Some(position_offset);
-
-        // Send play/pause command based on current state
-        if self.is_paused {
-            self.audio_output
-                .send_command(crate::playback::cpal_output::AudioCommand::Pause);
-        } else {
-            self.audio_output
-                .send_command(crate::playback::cpal_output::AudioCommand::Play);
-        }
 
         // Spawn position/completion listener
         let progress_tx = self.progress_tx.clone();
@@ -543,7 +558,6 @@ impl PlaybackService {
                     progress_tx,
                     queue: VecDeque::new(),
                     previous_track_id: None,
-                    is_paused: false,
                     current_position_shared: Arc::new(std::sync::Mutex::new(None)),
                     position_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
                     audio_output,
@@ -567,7 +581,7 @@ impl PlaybackService {
                         drop(stream);
                     }
                     self.audio_output
-                        .send_command(crate::playback::cpal_output::AudioCommand::Stop);
+                        .set_state(crate::playback::cpal_output::AudioState::Stopped);
                     self.clear_next_track_state();
                     if let Some(id) = self.current_track_id() {
                         self.previous_track_id = Some(id.to_string());
@@ -617,8 +631,7 @@ impl PlaybackService {
                             self.emit_queue_update();
                         }
                     }
-                    self.is_paused = false;
-                    self.play_track(&track_id, false).await; // Direct selection: skip pregap
+                    self.play_track(&track_id, false, false).await; // Direct selection: skip pregap, start playing
                 }
                 PlaybackCommand::PlayAlbum(track_ids) => {
                     if let Some(id) = self.current_track_id() {
@@ -630,8 +643,7 @@ impl PlaybackService {
                     }
                     if let Some(first_track) = self.queue.pop_front() {
                         self.emit_queue_update();
-                        self.is_paused = false;
-                        self.play_track(&first_track, false).await; // Direct selection: skip pregap
+                        self.play_track(&first_track, false, false).await; // Direct selection: skip pregap, start playing
                     } else {
                         self.emit_queue_update();
                     }
@@ -662,14 +674,12 @@ impl PlaybackService {
                                 self.queue.pop_front();
                                 self.emit_queue_update();
                             }
-                            self.play_preloaded_track(
-                                false, // Manual next: skip pregap
-                            )
-                            .await;
+                            self.play_preloaded_track(false, true).await; // skip pregap, preserve paused
                         } else {
                             // Preload started but streaming source not ready yet
                             self.clear_next_track_state();
-                            self.play_track(&preloaded_track_id, false).await;
+                            self.play_track(&preloaded_track_id, false, true).await;
+                            // preserve paused
                         }
                     } else if let Some(next_track) = self.queue.pop_front() {
                         info!("No preloaded track, playing from queue: {}", next_track);
@@ -677,7 +687,7 @@ impl PlaybackService {
                         if let Some(id) = self.current_track_id() {
                             self.previous_track_id = Some(id.to_string());
                         }
-                        self.play_track(&next_track, false).await;
+                        self.play_track(&next_track, false, true).await; // preserve paused
                     } else {
                         info!("No next track available, stopping");
                         self.emit_queue_update();
@@ -689,7 +699,6 @@ impl PlaybackService {
                         "AutoAdvance command received (natural transition), queue length: {}",
                         self.queue.len()
                     );
-                    self.is_paused = false; // Natural transition continues playing
                     if let Some(preloaded_track_id) = self.next_track_id().map(|s| s.to_string()) {
                         if self.next_streaming_source.is_some() {
                             info!("Using preloaded track: {}", preloaded_track_id);
@@ -705,14 +714,12 @@ impl PlaybackService {
                                 self.queue.pop_front();
                                 self.emit_queue_update();
                             }
-                            self.play_preloaded_track(
-                                true, // Natural transition: play pregap
-                            )
-                            .await;
+                            self.play_preloaded_track(true, false).await; // natural transition, start playing
                         } else {
                             // Preload started but streaming source not ready yet
                             self.clear_next_track_state();
-                            self.play_track(&preloaded_track_id, true).await;
+                            self.play_track(&preloaded_track_id, true, false).await;
+                            // start playing
                         }
                     } else if let Some(next_track) = self.queue.pop_front() {
                         info!("No preloaded track, playing from queue: {}", next_track);
@@ -720,7 +727,7 @@ impl PlaybackService {
                         if let Some(id) = self.current_track_id() {
                             self.previous_track_id = Some(id.to_string());
                         }
-                        self.play_track(&next_track, true).await;
+                        self.play_track(&next_track, true, false).await; // start playing
                     } else {
                         info!("No next track available, stopping");
                         self.emit_queue_update();
@@ -774,17 +781,17 @@ impl PlaybackService {
                                     }
                                 }
                                 self.clear_next_track_state();
-                                self.play_track(&previous_track_id, false).await;
-                            // Direct selection
+                                self.play_track(&previous_track_id, false, true).await;
+                            // preserve paused
                             } else {
                                 info!("No previous track, restarting current track");
-                                self.play_track(&current_track_id, false).await;
-                                // Direct selection
+                                self.play_track(&current_track_id, false, true).await;
+                                // preserve paused
                             }
                         } else {
                             info!("Restarting current track from beginning");
                             let saved_previous = self.previous_track_id.clone();
-                            self.play_track(&current_track_id, false).await; // Direct selection
+                            self.play_track(&current_track_id, false, true).await; // preserve paused
                             if saved_previous.is_some() {
                                 self.previous_track_id = saved_previous;
                             }
@@ -846,10 +853,18 @@ impl PlaybackService {
         }
         info!("PlaybackService stopped");
     }
-    async fn play_track(&mut self, track_id: &str, is_natural_transition: bool) {
+    /// Play a track.
+    /// - `is_natural_transition`: if true, plays from INDEX 00 (pregap included)
+    /// - `preserve_paused`: if true, inherits current paused state; if false, always starts playing
+    async fn play_track(
+        &mut self,
+        track_id: &str,
+        is_natural_transition: bool,
+        preserve_paused: bool,
+    ) {
         info!(
-            "Playing track: {} (natural_transition: {}, is_paused: {})",
-            track_id, is_natural_transition, self.is_paused
+            "Playing track: {} (natural_transition: {}, preserve_paused: {})",
+            track_id, is_natural_transition, preserve_paused
         );
 
         let _ = self.progress_tx.send(PlaybackProgress::StateChanged {
@@ -918,18 +933,24 @@ impl PlaybackService {
         // Store prepared track state
         self.current_prepared = Some(prepared);
 
-        // Start streaming
+        // Initialize streaming
         let source = Arc::new(Mutex::new(source));
         if !self
-            .start_streaming(source, position_offset, track_id.to_string())
+            .init_streaming(source, position_offset, track_id.to_string())
             .await
         {
             self.stop().await;
             return;
         }
 
+        // Set audio state: always Playing unless preserving paused state
+        if !preserve_paused {
+            self.audio_output
+                .set_state(crate::playback::cpal_output::AudioState::Playing);
+        }
+
         // Send state notification
-        let state = if self.is_paused {
+        let state = if self.audio_output.is_paused() {
             PlaybackState::Paused {
                 track: track.clone(),
                 position: position_offset,
@@ -990,7 +1011,7 @@ impl PlaybackService {
     }
     async fn pause(&mut self) {
         self.audio_output
-            .send_command(crate::playback::cpal_output::AudioCommand::Pause);
+            .set_state(crate::playback::cpal_output::AudioState::Paused);
         if let Some(prepared) = &self.current_prepared {
             let position = self
                 .current_position_shared
@@ -1001,7 +1022,6 @@ impl PlaybackService {
             let decoded_duration = prepared.duration;
             let pregap_ms = prepared.pregap_ms;
             let track = prepared.track.clone();
-            self.is_paused = true;
             let _ = self.progress_tx.send(PlaybackProgress::StateChanged {
                 state: PlaybackState::Paused {
                     track,
@@ -1016,7 +1036,7 @@ impl PlaybackService {
 
     async fn resume(&mut self) {
         self.audio_output
-            .send_command(crate::playback::cpal_output::AudioCommand::Resume);
+            .set_state(crate::playback::cpal_output::AudioState::Playing);
         if let Some(prepared) = &self.current_prepared {
             let position = self
                 .current_position_shared
@@ -1027,7 +1047,6 @@ impl PlaybackService {
             let decoded_duration = prepared.duration;
             let pregap_ms = prepared.pregap_ms;
             let track = prepared.track.clone();
-            self.is_paused = false;
             let _ = self.progress_tx.send(PlaybackProgress::StateChanged {
                 state: PlaybackState::Playing {
                     track,
@@ -1056,7 +1075,10 @@ impl PlaybackService {
 
     /// Play a preloaded track by swapping next state to current and starting the audio stream.
     /// Play a preloaded track. The decoder is already running from preload_next_track.
-    async fn play_preloaded_track(&mut self, is_natural_transition: bool) {
+    /// Play the preloaded next track.
+    /// - `is_natural_transition`: if true, plays from INDEX 00 (pregap included)
+    /// - `preserve_paused`: if true, inherits current paused state; if false, always starts playing
+    async fn play_preloaded_track(&mut self, is_natural_transition: bool, preserve_paused: bool) {
         let next_prepared = match self.next_prepared.take() {
             Some(p) => p,
             None => {
@@ -1079,7 +1101,8 @@ impl PlaybackService {
                     guard.cancel();
                 }
             }
-            self.play_track(&track_id, is_natural_transition).await;
+            self.play_track(&track_id, is_natural_transition, preserve_paused)
+                .await;
             return;
         }
 
@@ -1106,17 +1129,23 @@ impl PlaybackService {
         // Natural transition: start at position 0 (INDEX 00, pregap plays)
         let start_position = std::time::Duration::ZERO;
 
-        // Start streaming with the preloaded source
+        // Initialize streaming with the preloaded source
         if !self
-            .start_streaming(source, start_position, track_id.clone())
+            .init_streaming(source, start_position, track_id.clone())
             .await
         {
             self.stop().await;
             return;
         }
 
+        // Set audio state: always Playing unless preserving paused state
+        if !preserve_paused {
+            self.audio_output
+                .set_state(crate::playback::cpal_output::AudioState::Playing);
+        }
+
         // Send state notification
-        let state = if self.is_paused {
+        let state = if self.audio_output.is_paused() {
             PlaybackState::Paused {
                 track: track.clone(),
                 position: start_position,
@@ -1164,7 +1193,7 @@ impl PlaybackService {
         self.clear_next_track_state();
         *self.current_position_shared.lock().unwrap() = None;
         self.audio_output
-            .send_command(crate::playback::cpal_output::AudioCommand::Stop);
+            .set_state(crate::playback::cpal_output::AudioState::Stopped);
         let _ = self.progress_tx.send(PlaybackProgress::StateChanged {
             state: PlaybackState::Stopped,
         });
@@ -1208,11 +1237,7 @@ impl PlaybackService {
 
         let track_duration = prepared.duration;
 
-        // STOP OLD AUDIO IMMEDIATELY - don't let it play during seek buffer creation
-        // This prevents the "multiple streams" issue where old audio continues during seek
-        self.audio_output
-            .send_command(crate::playback::cpal_output::AudioCommand::Stop);
-
+        // Cancel old source (makes callback output silence until stream is dropped)
         if let Some(old_source) = &self.current_streaming_source {
             if let Ok(guard) = old_source.lock() {
                 guard.cancel();
@@ -1293,12 +1318,12 @@ impl PlaybackService {
         self.position_generation
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-        let was_paused = self.is_paused;
         let source = Arc::new(Mutex::new(source));
 
-        // Start streaming (position offset = seek target, so positions are relative to seek point)
+        // Initialize streaming (position offset = seek target, so positions are relative to seek point)
+        // State remains unchanged (Playing or Paused) - new stream inherits it
         if !self
-            .start_streaming(source, position, track_id.clone())
+            .init_streaming(source, position, track_id.clone())
             .await
         {
             return;
@@ -1307,7 +1332,7 @@ impl PlaybackService {
         let _ = self.progress_tx.send(PlaybackProgress::Seeked {
             position,
             track_id,
-            was_paused,
+            was_paused: self.audio_output.is_paused(),
         });
     }
 

@@ -501,6 +501,168 @@ async fn test_next_while_paused_stays_paused() {
 }
 
 #[tokio::test]
+async fn test_next_while_playing_stays_playing() {
+    // When playing and pressing Next, the next track should start playing
+    if should_skip_audio_tests() {
+        debug!("Skipping audio test - no audio device available");
+        return;
+    }
+
+    let mut fixture = match PlaybackTestFixture::new().await {
+        Ok(f) => f,
+        Err(e) => {
+            debug!("Failed to set up test fixture: {}", e);
+            return;
+        }
+    };
+
+    if fixture.track_ids.len() < 2 {
+        debug!("Need at least 2 tracks for next-while-playing test");
+        return;
+    }
+
+    let first_track_id = fixture.track_ids[0].clone();
+    let second_track_id = fixture.track_ids[1].clone();
+
+    // Start playing first track
+    fixture.playback_handle.play(first_track_id.clone());
+    let _playing_state = fixture
+        .wait_for_state(
+            |s| matches!(s, PlaybackState::Playing { .. }),
+            Duration::from_secs(5),
+        )
+        .await;
+
+    // Press Next while playing
+    fixture.playback_handle.next();
+
+    // Should transition to second track in Playing state
+    let next_track_state = fixture
+        .wait_for_state(
+            |s| {
+                if let PlaybackState::Playing { track, .. } = s {
+                    track.id == second_track_id
+                } else {
+                    false
+                }
+            },
+            Duration::from_secs(5),
+        )
+        .await;
+
+    assert!(
+        next_track_state.is_some(),
+        "Next while playing should switch to next track and keep playing"
+    );
+}
+
+/// Test that seeking while paused and then resuming works correctly.
+///
+/// Regression test for: is_playing flag not set after seek-while-paused.
+/// The bug was that seek sends Stop (which clears is_playing), then when
+/// seeking while paused, only Pause is sent (not Play first), so is_playing
+/// stays false and audio doesn't play after resume.
+#[tokio::test]
+async fn test_pause_seek_resume_advances_position() {
+    if should_skip_audio_tests() {
+        debug!("Skipping audio test - no audio device available");
+        return;
+    }
+
+    let mut fixture = match PlaybackTestFixture::new().await {
+        Ok(f) => f,
+        Err(e) => {
+            debug!("Failed to set up test fixture: {}", e);
+            return;
+        }
+    };
+
+    let track_id = fixture.track_ids[0].clone();
+
+    // Start playing
+    fixture.playback_handle.play(track_id.clone());
+    let playing_state = fixture
+        .wait_for_state(
+            |s| matches!(s, PlaybackState::Playing { .. }),
+            Duration::from_secs(5),
+        )
+        .await;
+    assert!(playing_state.is_some(), "Should start playing");
+
+    // Pause
+    fixture.playback_handle.pause();
+    let paused_state = fixture
+        .wait_for_state(
+            |s| matches!(s, PlaybackState::Paused { .. }),
+            Duration::from_secs(2),
+        )
+        .await;
+    assert!(paused_state.is_some(), "Should be paused");
+
+    // Seek while paused (to 2 seconds)
+    let seek_target = Duration::from_secs(2);
+    fixture.playback_handle.seek(seek_target);
+
+    // Wait for seek to complete
+    let seeked_position = fixture.wait_for_seeked(Duration::from_secs(5)).await;
+    assert!(
+        seeked_position.is_some(),
+        "Should receive Seeked event after seeking while paused"
+    );
+    let seeked_position = seeked_position.unwrap();
+    assert!(
+        seeked_position >= Duration::from_millis(1900),
+        "Seeked position should be near 2s, got {:?}",
+        seeked_position
+    );
+
+    // Verify still paused after seek (shouldn't auto-play)
+    let auto_played = fixture
+        .wait_for_state(
+            |s| matches!(s, PlaybackState::Playing { .. }),
+            Duration::from_millis(200),
+        )
+        .await;
+    assert!(
+        auto_played.is_none(),
+        "Should still be paused after seek, not auto-playing"
+    );
+
+    // Resume
+    fixture.playback_handle.resume();
+
+    // Wait for playing state
+    let resumed_state = fixture
+        .wait_for_state(
+            |s| matches!(s, PlaybackState::Playing { .. }),
+            Duration::from_secs(2),
+        )
+        .await;
+    assert!(resumed_state.is_some(), "Should resume playing");
+
+    // Wait a bit and check that position is advancing
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Get position updates - should be advancing past the seek position
+    let position_update = fixture
+        .wait_for_position_update(Duration::from_secs(2))
+        .await;
+
+    assert!(
+        position_update.is_some(),
+        "Should receive position updates after resume (indicates audio is actually playing)"
+    );
+
+    let final_position = position_update.unwrap();
+    assert!(
+        final_position > seeked_position,
+        "Position should advance after resume. Seeked to {:?}, but position is {:?}",
+        seeked_position,
+        final_position
+    );
+}
+
+#[tokio::test]
 async fn test_previous_while_paused_stays_paused() {
     // When paused and pressing Previous, the previous track should start paused
     if should_skip_audio_tests() {
@@ -573,6 +735,68 @@ async fn test_previous_while_paused_stays_paused() {
 }
 
 #[tokio::test]
+async fn test_previous_while_playing_stays_playing() {
+    // When playing and pressing Previous, the previous track should start playing
+    if should_skip_audio_tests() {
+        debug!("Skipping audio test - no audio device available");
+        return;
+    }
+
+    let mut fixture = match PlaybackTestFixture::new().await {
+        Ok(f) => f,
+        Err(e) => {
+            debug!("Failed to set up test fixture: {}", e);
+            return;
+        }
+    };
+
+    if fixture.track_ids.len() < 2 {
+        debug!("Need at least 2 tracks for previous-while-playing test");
+        return;
+    }
+
+    let first_track_id = fixture.track_ids[0].clone();
+    let second_track_id = fixture.track_ids[1].clone();
+
+    // Start on second track
+    fixture.playback_handle.play(second_track_id.clone());
+    let _playing_state = fixture
+        .wait_for_state(
+            |s| {
+                if let PlaybackState::Playing { track, .. } = s {
+                    track.id == second_track_id
+                } else {
+                    false
+                }
+            },
+            Duration::from_secs(5),
+        )
+        .await;
+
+    // Press Previous while playing (within 3 seconds, so goes to previous track)
+    fixture.playback_handle.previous();
+
+    // Should transition to first track in Playing state
+    let previous_track_state = fixture
+        .wait_for_state(
+            |s| {
+                if let PlaybackState::Playing { track, .. } = s {
+                    track.id == first_track_id
+                } else {
+                    false
+                }
+            },
+            Duration::from_secs(5),
+        )
+        .await;
+
+    assert!(
+        previous_track_state.is_some(),
+        "Previous while playing should switch to previous track and keep playing"
+    );
+}
+
+#[tokio::test]
 async fn test_fresh_play_always_starts_playing() {
     // Fresh play should always start playing, even if previously paused
     if should_skip_audio_tests() {
@@ -637,12 +861,17 @@ async fn test_fresh_play_always_starts_playing() {
     );
 }
 
+/// Test that seeking while playing continues playback and advances position.
+///
+/// This is the counterpart to test_pause_seek_resume_advances_position.
+/// When seeking while playing, playback should continue and position should advance.
 #[tokio::test]
-async fn test_pause_then_seek_stays_paused() {
+async fn test_seek_while_playing_advances_position() {
     if should_skip_audio_tests() {
         debug!("Skipping audio test - no audio device available");
         return;
     }
+
     let mut fixture = match PlaybackTestFixture::new().await {
         Ok(f) => f,
         Err(e) => {
@@ -650,11 +879,10 @@ async fn test_pause_then_seek_stays_paused() {
             return;
         }
     };
-    if fixture.track_ids.is_empty() {
-        debug!("No tracks available for testing");
-        return;
-    }
-    let track_id = &fixture.track_ids[0];
+
+    let track_id = fixture.track_ids[0].clone();
+
+    // Start playing
     fixture.playback_handle.play(track_id.clone());
     let playing_state = fixture
         .wait_for_state(
@@ -662,82 +890,47 @@ async fn test_pause_then_seek_stays_paused() {
             Duration::from_secs(5),
         )
         .await;
-    if playing_state.is_none() {
-        debug!("Failed to start playback");
-        return;
-    }
-    fixture.playback_handle.pause();
-    let paused_state = fixture
-        .wait_for_state(
-            |s| matches!(s, PlaybackState::Paused { .. }),
-            Duration::from_secs(2),
-        )
-        .await;
-    assert!(
-        paused_state.is_some(),
-        "Should be paused after pause command"
-    );
-    fixture.playback_handle.seek(Duration::from_secs(5));
-    let seeked_position = fixture.wait_for_seeked(Duration::from_secs(3)).await;
+    assert!(playing_state.is_some(), "Should start playing");
+
+    // Seek while playing (to 2 seconds)
+    let seek_target = Duration::from_secs(2);
+    fixture.playback_handle.seek(seek_target);
+
+    // Wait for seek to complete
+    let seeked_position = fixture.wait_for_seeked(Duration::from_secs(5)).await;
     assert!(
         seeked_position.is_some(),
-        "Should receive Seeked event after seeking"
+        "Should receive Seeked event after seeking while playing"
     );
-    let final_state = fixture
-        .wait_for_state(
-            |s| matches!(s, PlaybackState::Paused { .. }),
-            Duration::from_millis(100),
-        )
-        .await;
-    if final_state.is_none() {
-        debug!("No state change after seek, stayed paused");
-    }
-}
-#[tokio::test]
-async fn test_play_then_seek_continues_playing() {
-    if should_skip_audio_tests() {
-        debug!("Skipping audio test - no audio device available");
-        return;
-    }
-    let mut fixture = match PlaybackTestFixture::new().await {
-        Ok(f) => f,
-        Err(e) => {
-            debug!("Failed to set up test fixture: {}", e);
-            return;
-        }
-    };
-    if fixture.track_ids.is_empty() {
-        debug!("No tracks available for testing");
-        return;
-    }
-    let track_id = &fixture.track_ids[0];
-    fixture.playback_handle.play(track_id.clone());
-    let playing_state = fixture
-        .wait_for_state(
-            |s| matches!(s, PlaybackState::Playing { .. }),
-            Duration::from_secs(5),
-        )
-        .await;
+    let seeked_position = seeked_position.unwrap();
     assert!(
-        playing_state.is_some(),
-        "Should be playing after play command"
+        seeked_position >= Duration::from_millis(1900),
+        "Seeked position should be near 2s, got {:?}",
+        seeked_position
     );
-    fixture.playback_handle.seek(Duration::from_secs(3));
-    let seeked_position = fixture.wait_for_seeked(Duration::from_secs(3)).await;
-    assert!(
-        seeked_position.is_some(),
-        "Should receive Seeked event after seeking"
-    );
-    let final_state = fixture
-        .wait_for_state(
-            |s| matches!(s, PlaybackState::Playing { .. }),
-            Duration::from_millis(100),
-        )
+
+    // Wait a bit and check that position is advancing
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Get position updates - should be advancing past the seek position
+    let position_update = fixture
+        .wait_for_position_update(Duration::from_secs(2))
         .await;
-    if final_state.is_none() {
-        debug!("No state change after seek, stayed playing");
-    }
+
+    assert!(
+        position_update.is_some(),
+        "Should receive position updates after seek while playing (indicates audio is actually playing)"
+    );
+
+    let final_position = position_update.unwrap();
+    assert!(
+        final_position > seeked_position,
+        "Position should advance after seek while playing. Seeked to {:?}, but position is {:?}",
+        seeked_position,
+        final_position
+    );
 }
+
 #[tokio::test]
 async fn test_auto_advance_to_next_track() {
     if should_skip_audio_tests() {
@@ -2360,4 +2553,400 @@ fn get_process_cpu_time() -> Duration {
     {
         Duration::ZERO
     }
+}
+
+/// Test seeking while paused in a CUE/FLAC track.
+///
+/// Bug: When paused and seeking 10 minutes into track 3 of a CUE/FLAC album,
+/// audio doesn't play and position doesn't advance, even though state shows "playing".
+///
+/// The issue: file_byte calculation is wrong for CUE/FLAC tracks. The seektable gives
+/// file-absolute positions, but we're incorrectly adding track_start_byte_offset.
+///
+/// Run with: cargo test --test test_playback_behavior test_pause_seek_cue_flac -- --nocapture --ignored
+#[tokio::test]
+#[ignore = "Requires real library with CUE/FLAC album"]
+async fn test_pause_seek_cue_flac() {
+    use bae::db::Database;
+    use bae::library::LibraryManager;
+
+    tracing_init();
+
+    let db_path = dirs::home_dir()
+        .expect("home dir")
+        .join(".bae")
+        .join("library.db");
+
+    if !db_path.exists() {
+        eprintln!("No library at {:?} - import an album first", db_path);
+        return;
+    }
+
+    eprintln!("Using library: {:?}", db_path);
+
+    let database = Database::new(db_path.to_str().unwrap())
+        .await
+        .expect("open db");
+    let encryption_service = test_encryption_service();
+    let library_manager = LibraryManager::new(database.clone(), encryption_service.clone());
+
+    // Get albums and find Electric Wizard - Dopethrone (or first CUE/FLAC album)
+    let albums = library_manager.get_albums().await.expect("get albums");
+    if albums.is_empty() {
+        eprintln!("No albums in library");
+        return;
+    }
+
+    // Find Dopethrone or use first album
+    let album = albums
+        .iter()
+        .find(|a| a.title.contains("Dopethrone"))
+        .unwrap_or(&albums[0]);
+    eprintln!("Using album: {}", album.title);
+
+    let releases = library_manager
+        .get_releases_for_album(&album.id)
+        .await
+        .expect("get releases");
+    if releases.is_empty() {
+        eprintln!("No releases");
+        return;
+    }
+
+    let tracks = library_manager
+        .get_tracks(&releases[0].id)
+        .await
+        .expect("get tracks");
+
+    // Use track 3 (or last track if fewer)
+    let track_idx = std::cmp::min(2, tracks.len().saturating_sub(1));
+    let track = &tracks[track_idx];
+    eprintln!(
+        "Playing track {}: {} (duration: {:?})",
+        track.track_number.unwrap_or(0),
+        track.title,
+        track.duration_ms
+    );
+
+    let runtime_handle = tokio::runtime::Handle::current();
+    eprintln!("Starting PlaybackService...");
+    let playback_handle = bae::playback::PlaybackService::start(
+        library_manager.clone(),
+        encryption_service,
+        runtime_handle,
+    );
+    playback_handle.set_volume(0.0); // Mute for test
+    let mut progress_rx = playback_handle.subscribe_progress();
+
+    // Give the service time to initialize
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Start playback
+    eprintln!("Calling play()...");
+    playback_handle.play(track.id.clone());
+
+    // Wait for playback to start
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut started = false;
+    let mut _initial_position = Duration::ZERO;
+    while Instant::now() < deadline && !started {
+        match timeout(Duration::from_millis(200), progress_rx.recv()).await {
+            Ok(Some(PlaybackProgress::StateChanged { state })) => {
+                eprintln!("StateChanged: {:?}", state);
+                if let PlaybackState::Playing { position, .. } = state {
+                    started = true;
+                    _initial_position = position;
+                    eprintln!("Playback started at position {:?}", position);
+                }
+            }
+            Ok(Some(other)) => {
+                eprintln!("Other progress: {:?}", other);
+                continue;
+            }
+            Ok(None) => {
+                eprintln!("Progress channel closed");
+                break;
+            }
+            Err(_) => continue, // Timeout, keep waiting
+        }
+    }
+    assert!(started, "Playback should start");
+
+    // Let it play briefly
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // PAUSE
+    eprintln!("Pausing...");
+    playback_handle.pause();
+
+    // Wait for pause state
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut paused = false;
+    while Instant::now() < deadline && !paused {
+        match timeout(Duration::from_millis(100), progress_rx.recv()).await {
+            Ok(Some(PlaybackProgress::StateChanged { state })) => {
+                if matches!(state, PlaybackState::Paused { .. }) {
+                    paused = true;
+                    eprintln!("Paused");
+                }
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) | Err(_) => break,
+        }
+    }
+    assert!(paused, "Should be paused");
+
+    // SEEK while paused - 10 minutes (600 seconds) into track
+    let seek_position = Duration::from_secs(600);
+    eprintln!("Seeking to {:?} while paused...", seek_position);
+    playback_handle.seek(seek_position);
+
+    // Wait for Seeked event to confirm seek completed
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut seek_completed = false;
+    let mut position_after_seek = Duration::ZERO;
+    while Instant::now() < deadline {
+        match timeout(Duration::from_millis(100), progress_rx.recv()).await {
+            Ok(Some(PlaybackProgress::Seeked { position, .. })) => {
+                seek_completed = true;
+                position_after_seek = position;
+                eprintln!("Seek completed at position {:?}", position);
+                break;
+            }
+            Ok(Some(other)) => {
+                eprintln!("Got event: {:?}", other);
+                continue;
+            }
+            Ok(None) | Err(_) => break,
+        }
+    }
+    assert!(seek_completed, "Seek should complete");
+    assert!(
+        position_after_seek >= Duration::from_secs(590),
+        "Position after seek should be near 600s, got {:?}",
+        position_after_seek
+    );
+
+    // RESUME
+    eprintln!("Resuming...");
+    playback_handle.resume();
+
+    // Wait for playing state
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut resumed = false;
+    let mut position_after_resume = Duration::ZERO;
+    while Instant::now() < deadline {
+        match timeout(Duration::from_millis(100), progress_rx.recv()).await {
+            Ok(Some(PlaybackProgress::StateChanged { state })) => {
+                if let PlaybackState::Playing { position, .. } = state {
+                    resumed = true;
+                    position_after_resume = position;
+                    eprintln!("Resumed at position {:?}", position);
+                    break;
+                }
+            }
+            Ok(Some(PlaybackProgress::PositionUpdate { position, .. })) => {
+                position_after_resume = position;
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) | Err(_) => break,
+        }
+    }
+    assert!(resumed, "Should resume playing");
+
+    // Wait and verify position advances via PositionUpdate events
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut final_position = position_after_resume;
+    while Instant::now() < deadline {
+        match timeout(Duration::from_millis(100), progress_rx.recv()).await {
+            Ok(Some(PlaybackProgress::PositionUpdate { position, .. })) => {
+                final_position = position;
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) | Err(_) => break,
+        }
+    }
+
+    let position_advanced = final_position > position_after_seek;
+    eprintln!(
+        "Position after 2s: {:?} (advanced: {})",
+        final_position, position_advanced
+    );
+
+    assert!(
+        position_advanced,
+        "Position should advance after resume. Seek position: {:?}, Final: {:?}",
+        position_after_seek, final_position
+    );
+
+    playback_handle.stop();
+    eprintln!("✅ Test passed: pause-seek-resume works correctly");
+}
+
+/// Test seeking while playing (not paused) in a CUE/FLAC track.
+///
+/// This test checks if large seeks work while audio is actively playing.
+/// Compare with test_pause_seek_cue_flac to see if the bug is pause-specific.
+///
+/// Run with: cargo test --test test_playback_behavior test_playing_seek_cue_flac -- --nocapture --ignored
+#[tokio::test]
+#[ignore = "Requires real library with CUE/FLAC album"]
+async fn test_playing_seek_cue_flac() {
+    use bae::db::Database;
+    use bae::library::LibraryManager;
+
+    tracing_init();
+
+    let db_path = dirs::home_dir()
+        .expect("home dir")
+        .join(".bae")
+        .join("library.db");
+
+    if !db_path.exists() {
+        eprintln!("No library at {:?} - import an album first", db_path);
+        return;
+    }
+
+    eprintln!("Using library: {:?}", db_path);
+
+    let database = Database::new(db_path.to_str().unwrap())
+        .await
+        .expect("open db");
+    let encryption_service = test_encryption_service();
+    let library_manager = LibraryManager::new(database.clone(), encryption_service.clone());
+
+    let albums = library_manager.get_albums().await.expect("get albums");
+    if albums.is_empty() {
+        eprintln!("No albums in library");
+        return;
+    }
+
+    let album = albums
+        .iter()
+        .find(|a| a.title.contains("Dopethrone"))
+        .unwrap_or(&albums[0]);
+    eprintln!("Using album: {}", album.title);
+
+    let releases = library_manager
+        .get_releases_for_album(&album.id)
+        .await
+        .expect("get releases");
+    if releases.is_empty() {
+        eprintln!("No releases");
+        return;
+    }
+
+    let tracks = library_manager
+        .get_tracks(&releases[0].id)
+        .await
+        .expect("get tracks");
+
+    let track_idx = std::cmp::min(2, tracks.len().saturating_sub(1));
+    let track = &tracks[track_idx];
+    eprintln!(
+        "Playing track {}: {} (duration: {:?})",
+        track.track_number.unwrap_or(0),
+        track.title,
+        track.duration_ms
+    );
+
+    let runtime_handle = tokio::runtime::Handle::current();
+    let playback_handle = bae::playback::PlaybackService::start(
+        library_manager.clone(),
+        encryption_service,
+        runtime_handle,
+    );
+    playback_handle.set_volume(0.0);
+    let mut progress_rx = playback_handle.subscribe_progress();
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    eprintln!("Starting playback...");
+    playback_handle.play(track.id.clone());
+
+    // Wait for playback to start
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut started = false;
+    while Instant::now() < deadline && !started {
+        match timeout(Duration::from_millis(200), progress_rx.recv()).await {
+            Ok(Some(PlaybackProgress::StateChanged { state })) => {
+                if let PlaybackState::Playing { position, .. } = state {
+                    started = true;
+                    eprintln!("Playback started at position {:?}", position);
+                }
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) => break,
+            Err(_) => continue,
+        }
+    }
+    assert!(started, "Playback should start");
+
+    // Let it play for just 500ms, then seek WHILE PLAYING (no pause!)
+    eprintln!("Playing for 500ms...");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // SEEK while playing - 10 minutes (600 seconds) into track
+    let seek_position = Duration::from_secs(600);
+    eprintln!("Seeking to {:?} WHILE PLAYING (no pause)...", seek_position);
+    playback_handle.seek(seek_position);
+
+    // Wait for Seeked event (not StateChanged!) to confirm seek completed
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut position_after_seek = Duration::ZERO;
+    while Instant::now() < deadline {
+        match timeout(Duration::from_millis(200), progress_rx.recv()).await {
+            Ok(Some(PlaybackProgress::Seeked { position, .. })) => {
+                position_after_seek = position;
+                eprintln!("Seeked event received: position = {:?}", position);
+                break;
+            }
+            Ok(Some(other)) => {
+                eprintln!("Got other event: {:?}", other);
+                continue;
+            }
+            Ok(None) => break,
+            Err(_) => continue,
+        }
+    }
+
+    assert!(
+        position_after_seek >= Duration::from_secs(590),
+        "Position after seek should be near 600s, got {:?}",
+        position_after_seek
+    );
+
+    // Wait and verify position advances via PositionUpdate events
+    eprintln!("Waiting 2s to check if position advances...");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut final_position = position_after_seek;
+    while Instant::now() < deadline {
+        match timeout(Duration::from_millis(100), progress_rx.recv()).await {
+            Ok(Some(PlaybackProgress::PositionUpdate { position, .. })) => {
+                final_position = position;
+                eprintln!("Position update: {:?}", position);
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) | Err(_) => break,
+        }
+    }
+
+    let position_advanced = final_position > position_after_seek;
+    eprintln!(
+        "Position after 2s: {:?} (advanced: {})",
+        final_position, position_advanced
+    );
+
+    assert!(
+        position_advanced,
+        "Position should advance after seek while playing. Started at {:?}, ended at {:?}",
+        position_after_seek, final_position
+    );
+
+    playback_handle.stop();
+    eprintln!("✅ Test passed: seek while playing works correctly");
 }
