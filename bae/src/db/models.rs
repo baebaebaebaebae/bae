@@ -222,6 +222,10 @@ pub struct DbFile {
     /// For local imports: user's original file path.
     /// For torrent imports: temp folder path (ephemeral).
     pub source_path: Option<String>,
+    /// Encryption nonce (24 bytes) for efficient range decryption.
+    /// Only set when file is encrypted with chunked encryption.
+    /// Stored at import time, used during seek to avoid fetching nonce from cloud.
+    pub encryption_nonce: Option<Vec<u8>>,
     pub created_at: DateTime<Utc>,
 }
 /// Audio format metadata for a track
@@ -507,13 +511,22 @@ impl DbFile {
             file_size,
             format: format.to_string(),
             source_path: None,
+            encryption_nonce: None,
             created_at: Utc::now(),
         }
     }
+
     /// Set the source path for None storage mode.
     /// This is the actual file location on disk for direct playback.
     pub fn with_source_path(mut self, path: &str) -> Self {
         self.source_path = Some(path.to_string());
+        self
+    }
+
+    /// Set the encryption nonce for efficient encrypted range requests.
+    /// The nonce is the first 24 bytes of the encrypted file.
+    pub fn with_encryption_nonce(mut self, nonce: Vec<u8>) -> Self {
+        self.encryption_nonce = Some(nonce);
         self
     }
 }

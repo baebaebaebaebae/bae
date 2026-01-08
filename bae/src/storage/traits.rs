@@ -191,6 +191,12 @@ impl ReleaseStorage for ReleaseStorageImpl {
 
             let mut db_file = DbFile::new(release_id, filename, data.len() as i64, &format);
             db_file.source_path = Some(storage_path);
+
+            // Extract and store encryption nonce for efficient range requests
+            if self.profile.encrypted && data_to_store.len() >= 24 {
+                db_file.encryption_nonce = Some(data_to_store[..24].to_vec());
+            }
+
             db.insert_file(&db_file)
                 .await
                 .map_err(|e| StorageError::Database(e.to_string()))?;

@@ -301,6 +301,118 @@ impl EncryptionService {
 
         Ok(plaintext[offset_in_first_chunk..end].to_vec())
     }
+
+    /// Decrypt a plaintext byte range using nonce from DB and partial chunk data.
+    ///
+    /// This is the efficient method for encrypted range requests:
+    /// - `nonce`: 24-byte nonce stored in DB at import time
+    /// - `encrypted_chunks`: Raw encrypted chunk bytes (NO nonce prefix)
+    /// - `first_chunk_index`: Which chunk index the encrypted_chunks starts at
+    /// - `plaintext_start`, `plaintext_end`: Absolute byte positions in original file
+    ///
+    /// Example: To read plaintext bytes 500,000-600,000:
+    /// 1. Calculate needed chunks: `encrypted_chunk_range(500000, 600000)` → chunks 7-9
+    /// 2. Fetch encrypted bytes from cloud at those positions
+    /// 3. Call `decrypt_range_with_offset(nonce, chunks, 7, 500000, 600000)`
+    pub fn decrypt_range_with_offset(
+        &self,
+        nonce: &[u8],
+        encrypted_chunks: &[u8],
+        first_chunk_index: u64,
+        plaintext_start: u64,
+        plaintext_end: u64,
+    ) -> Result<Vec<u8>, EncryptionError> {
+        ensure_sodium_init();
+
+        if nonce.len() != sodium_ffi::NPUBBYTES {
+            return Err(EncryptionError::Decryption(format!(
+                "Invalid nonce length: expected {}, got {}",
+                sodium_ffi::NPUBBYTES,
+                nonce.len()
+            )));
+        }
+
+        if plaintext_start >= plaintext_end {
+            return Err(EncryptionError::Decryption(format!(
+                "Invalid range: start ({}) >= end ({})",
+                plaintext_start, plaintext_end
+            )));
+        }
+
+        let base_nonce: [u8; sodium_ffi::NPUBBYTES] = nonce
+            .try_into()
+            .map_err(|_| EncryptionError::Decryption("Invalid nonce".to_string()))?;
+
+        let start_chunk = plaintext_start / CHUNK_SIZE as u64;
+        let end_chunk = (plaintext_end.saturating_sub(1)) / CHUNK_SIZE as u64;
+
+        let mut plaintext = Vec::new();
+
+        for absolute_chunk_idx in start_chunk..=end_chunk {
+            // Convert absolute chunk index to position in encrypted_chunks
+            let relative_idx = absolute_chunk_idx - first_chunk_index;
+            let chunk_start = (relative_idx as usize) * ENCRYPTED_CHUNK_SIZE;
+
+            // Handle last chunk which may be smaller
+            let chunk_end = if chunk_start + ENCRYPTED_CHUNK_SIZE > encrypted_chunks.len() {
+                encrypted_chunks.len()
+            } else {
+                chunk_start + ENCRYPTED_CHUNK_SIZE
+            };
+
+            if chunk_start >= encrypted_chunks.len() {
+                return Err(EncryptionError::Decryption(format!(
+                    "Chunk {} not in provided data (first_chunk_index={})",
+                    absolute_chunk_idx, first_chunk_index
+                )));
+            }
+
+            let chunk_data = &encrypted_chunks[chunk_start..chunk_end];
+            let nonce = chunk_nonce(&base_nonce, absolute_chunk_idx);
+
+            let mut decrypted = vec![0u8; chunk_data.len() - sodium_ffi::ABYTES];
+            let mut decrypted_len: u64 = 0;
+
+            let result = unsafe {
+                sodium_ffi::crypto_aead_xchacha20poly1305_ietf_decrypt(
+                    decrypted.as_mut_ptr(),
+                    &mut decrypted_len,
+                    ptr::null_mut(),
+                    chunk_data.as_ptr(),
+                    chunk_data.len() as u64,
+                    ptr::null(),
+                    0,
+                    nonce.as_ptr(),
+                    self.key.as_ptr(),
+                )
+            };
+
+            if result != 0 {
+                return Err(EncryptionError::Decryption(format!(
+                    "Authentication failed for chunk {}",
+                    absolute_chunk_idx
+                )));
+            }
+
+            decrypted.truncate(decrypted_len as usize);
+            plaintext.extend(decrypted);
+        }
+
+        // Slice to exact range within the decrypted chunks
+        let offset_in_first_chunk = (plaintext_start % CHUNK_SIZE as u64) as usize;
+        let len = (plaintext_end - plaintext_start) as usize;
+        let end = offset_in_first_chunk + len;
+
+        if end > plaintext.len() {
+            return Err(EncryptionError::Decryption(format!(
+                "Decrypted data too short: need {} bytes, got {}",
+                end,
+                plaintext.len()
+            )));
+        }
+
+        Ok(plaintext[offset_in_first_chunk..end].to_vec())
+    }
 }
 
 /// Derive nonce for chunk i: base_nonce XOR i (little-endian)
@@ -314,6 +426,23 @@ fn chunk_nonce(
         nonce[i] ^= index_bytes[i];
     }
     nonce
+}
+
+/// Calculate the encrypted byte range for a plaintext byte range.
+///
+/// Returns `(chunk_start, chunk_end)` - the byte positions in the encrypted file
+/// where the needed chunks are located. Does NOT include the nonce (first 24 bytes).
+///
+/// Use this for efficient range requests: fetch nonce separately (or from DB),
+/// then fetch just `chunk_start..chunk_end` from storage.
+pub fn encrypted_chunk_range(plaintext_start: u64, plaintext_end: u64) -> (u64, u64) {
+    let start_chunk = plaintext_start / CHUNK_SIZE as u64;
+    let end_chunk = (plaintext_end.saturating_sub(1)) / CHUNK_SIZE as u64;
+
+    let chunk_start = sodium_ffi::NPUBBYTES as u64 + start_chunk * ENCRYPTED_CHUNK_SIZE as u64;
+    let chunk_end = sodium_ffi::NPUBBYTES as u64 + (end_chunk + 1) * ENCRYPTED_CHUNK_SIZE as u64;
+
+    (chunk_start, chunk_end)
 }
 
 #[cfg(test)]
@@ -600,6 +729,119 @@ mod tests {
             .unwrap();
 
         assert_eq!(decrypted.len(), 100);
+        assert_eq!(
+            decrypted,
+            &plaintext[plaintext_start as usize..plaintext_end as usize]
+        );
+    }
+
+    #[test]
+    fn test_encrypted_chunk_range_returns_actual_bounds() {
+        // For plaintext in chunk 5, should return just chunk 5's encrypted bytes
+        // NOT starting from 0
+        let chunk5_start = CHUNK_SIZE as u64 * 5;
+        let chunk5_end = chunk5_start + 1000;
+
+        let (enc_start, enc_end) = encrypted_chunk_range(chunk5_start, chunk5_end);
+
+        // Should start at chunk 5's position, not 0
+        let expected_start = sodium_ffi::NPUBBYTES as u64 + 5 * ENCRYPTED_CHUNK_SIZE as u64;
+        let expected_end = sodium_ffi::NPUBBYTES as u64 + 6 * ENCRYPTED_CHUNK_SIZE as u64;
+
+        assert_eq!(
+            enc_start, expected_start,
+            "encrypted_chunk_range should return actual chunk start, not 0"
+        );
+        assert_eq!(enc_end, expected_end);
+    }
+
+    #[test]
+    fn test_encrypted_chunk_range_spanning_multiple_chunks() {
+        // Range spanning chunks 3-5
+        let start = CHUNK_SIZE as u64 * 3 + 100;
+        let end = CHUNK_SIZE as u64 * 5 + 500;
+
+        let (enc_start, enc_end) = encrypted_chunk_range(start, end);
+
+        let expected_start = sodium_ffi::NPUBBYTES as u64 + 3 * ENCRYPTED_CHUNK_SIZE as u64;
+        let expected_end = sodium_ffi::NPUBBYTES as u64 + 6 * ENCRYPTED_CHUNK_SIZE as u64;
+
+        assert_eq!(enc_start, expected_start);
+        assert_eq!(enc_end, expected_end);
+    }
+
+    #[test]
+    fn test_decrypt_range_with_separate_nonce() {
+        // This simulates production flow: nonce from DB + chunks from range request
+        let service = create_test_service();
+
+        // Create 10-chunk plaintext with recognizable pattern
+        let plaintext: Vec<u8> = (0..CHUNK_SIZE * 10).map(|i| (i % 256) as u8).collect();
+        let full_ciphertext = service.encrypt(&plaintext);
+
+        // Extract nonce (this would come from DB in production)
+        let nonce = &full_ciphertext[..sodium_ffi::NPUBBYTES];
+
+        // We want plaintext bytes in chunk 7
+        let plaintext_start = CHUNK_SIZE as u64 * 7 + 100;
+        let plaintext_end = CHUNK_SIZE as u64 * 7 + 500;
+
+        // Get the encrypted chunk range (NOT starting from 0)
+        let (chunk_start, chunk_end) = encrypted_chunk_range(plaintext_start, plaintext_end);
+
+        // Fetch just the needed chunks (simulating range request)
+        let chunks_only = &full_ciphertext[chunk_start as usize..chunk_end as usize];
+
+        // First chunk index is 7 (the chunk our range starts in)
+        let first_chunk_index = plaintext_start / CHUNK_SIZE as u64;
+
+        // Use the new method that handles offset chunks
+        let decrypted = service
+            .decrypt_range_with_offset(
+                nonce,
+                chunks_only,
+                first_chunk_index,
+                plaintext_start,
+                plaintext_end,
+            )
+            .unwrap();
+
+        assert_eq!(decrypted.len(), 400);
+        assert_eq!(
+            decrypted,
+            &plaintext[plaintext_start as usize..plaintext_end as usize]
+        );
+    }
+
+    #[test]
+    fn test_decrypt_range_with_offset_spanning_chunks() {
+        // Test decrypting a range that spans multiple chunks
+        let service = create_test_service();
+
+        let plaintext: Vec<u8> = (0..CHUNK_SIZE * 10).map(|i| (i % 256) as u8).collect();
+        let full_ciphertext = service.encrypt(&plaintext);
+        let nonce = &full_ciphertext[..sodium_ffi::NPUBBYTES];
+
+        // Range spanning chunks 3, 4, 5
+        let plaintext_start = CHUNK_SIZE as u64 * 3 + 1000;
+        let plaintext_end = CHUNK_SIZE as u64 * 5 + 2000;
+
+        let (chunk_start, chunk_end) = encrypted_chunk_range(plaintext_start, plaintext_end);
+        let chunks_only = &full_ciphertext[chunk_start as usize..chunk_end as usize];
+        let first_chunk_index = plaintext_start / CHUNK_SIZE as u64;
+
+        let decrypted = service
+            .decrypt_range_with_offset(
+                nonce,
+                chunks_only,
+                first_chunk_index,
+                plaintext_start,
+                plaintext_end,
+            )
+            .unwrap();
+
+        let expected_len = (plaintext_end - plaintext_start) as usize;
+        assert_eq!(decrypted.len(), expected_len);
         assert_eq!(
             decrypted,
             &plaintext[plaintext_start as usize..plaintext_end as usize]

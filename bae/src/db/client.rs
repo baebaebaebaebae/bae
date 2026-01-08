@@ -162,6 +162,7 @@ impl Database {
                 file_size INTEGER NOT NULL,
                 format TEXT NOT NULL,
                 source_path TEXT,
+                encryption_nonce BLOB,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (release_id) REFERENCES releases (id) ON DELETE CASCADE
             )
@@ -985,8 +986,8 @@ impl Database {
         sqlx::query(
             r#"
             INSERT INTO files (
-                id, release_id, original_filename, file_size, format, source_path, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                id, release_id, original_filename, file_size, format, source_path, encryption_nonce, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&file.id)
@@ -995,6 +996,7 @@ impl Database {
         .bind(file.file_size)
         .bind(&file.format)
         .bind(&file.source_path)
+        .bind(&file.encryption_nonce)
         .bind(file.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
@@ -1018,6 +1020,7 @@ impl Database {
                 file_size: row.get("file_size"),
                 format: row.get("format"),
                 source_path: row.get("source_path"),
+                encryption_nonce: row.get("encryption_nonce"),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
@@ -1039,6 +1042,7 @@ impl Database {
                 file_size: row.get("file_size"),
                 format: row.get("format"),
                 source_path: row.get("source_path"),
+                encryption_nonce: row.get("encryption_nonce"),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
@@ -1688,6 +1692,7 @@ impl Database {
             file_size: row.get("file_size"),
             format: row.get("format"),
             source_path: row.get("source_path"),
+            encryption_nonce: row.get("encryption_nonce"),
             created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                 .unwrap()
                 .with_timezone(&Utc),

@@ -166,6 +166,9 @@ struct PreparedTrack {
     cloud_storage: Option<Arc<dyn CloudStorage>>,
     /// Whether cloud storage is encrypted
     cloud_encrypted: bool,
+    /// Encryption nonce (24 bytes) for efficient encrypted range requests.
+    /// Stored in DB at import time, used during seek to avoid fetching nonce from cloud.
+    encryption_nonce: Option<Vec<u8>>,
 }
 
 /// Fetch track metadata, create buffer, start reading audio data.
@@ -319,6 +322,7 @@ async fn prepare_track(
         track_end_byte_offset: end_byte,
         cloud_storage,
         cloud_encrypted,
+        encryption_nonce: audio_file.encryption_nonce,
     })
 }
 
@@ -1354,12 +1358,15 @@ impl PlaybackService {
 
         // Create a new cloud reader at the seek position
         if let Some(storage) = &prepared.cloud_storage {
-            let reader = Box::new(CloudStorageReader::new(
-                config,
-                storage.clone(),
-                Arc::new(self.encryption_service.clone()),
-                prepared.cloud_encrypted,
-            ));
+            let reader = Box::new(
+                CloudStorageReader::new(
+                    config,
+                    storage.clone(),
+                    Arc::new(self.encryption_service.clone()),
+                    prepared.cloud_encrypted,
+                )
+                .with_encryption_nonce(prepared.encryption_nonce.clone()),
+            );
             reader.start_reading(seek_buffer.clone());
         } else {
             // Fallback: shouldn't happen, but cancel the buffer if no storage
