@@ -1,3 +1,4 @@
+use crate::cloud_storage::CloudStorage;
 use crate::db::DbTrack;
 use crate::encryption::EncryptionService;
 use crate::library::LibraryManager;
@@ -161,6 +162,10 @@ struct PreparedTrack {
     /// For CUE/FLAC: track's end byte position in original file.
     /// Used to limit reading when seeking so track doesn't play into next track.
     track_end_byte_offset: Option<u64>,
+    /// Cloud storage instance for creating new readers on seek (None for local files)
+    cloud_storage: Option<Arc<dyn CloudStorage>>,
+    /// Whether cloud storage is encrypted
+    cloud_encrypted: bool,
 }
 
 /// Fetch track metadata, create buffer, start reading audio data.
@@ -239,28 +244,49 @@ async fn prepare_track(
     };
 
     // Create appropriate data reader based on storage profile
-    let (reader, is_local_storage): (Box<dyn AudioDataReader>, bool) = match &storage_profile {
-        None => (Box::new(LocalFileReader::new(read_config)), true),
-        Some(profile)
-            if !profile.encrypted && profile.location == crate::db::StorageLocation::Local =>
-        {
-            (Box::new(LocalFileReader::new(read_config)), true)
-        }
-        Some(profile) => {
-            let storage = create_storage_reader(profile)
-                .await
-                .map_err(PlaybackError::cloud)?;
-            (
-                Box::new(CloudStorageReader::new(
-                    read_config,
-                    storage,
-                    Arc::new(encryption_service.clone()),
-                    profile.encrypted,
-                )),
+    // Also capture cloud storage info for seek support
+    type ReaderInfo = (
+        Box<dyn AudioDataReader>,
+        bool,
+        Option<Arc<dyn CloudStorage>>,
+        bool,
+    );
+    let (reader, is_local_storage, cloud_storage, cloud_encrypted): ReaderInfo =
+        match &storage_profile {
+            None => (
+                Box::new(LocalFileReader::new(read_config)),
+                true,
+                None,
                 false,
-            )
-        }
-    };
+            ),
+            Some(profile)
+                if !profile.encrypted && profile.location == crate::db::StorageLocation::Local =>
+            {
+                (
+                    Box::new(LocalFileReader::new(read_config)),
+                    true,
+                    None,
+                    false,
+                )
+            }
+            Some(profile) => {
+                let storage = create_storage_reader(profile)
+                    .await
+                    .map_err(PlaybackError::cloud)?;
+                let encrypted = profile.encrypted;
+                (
+                    Box::new(CloudStorageReader::new(
+                        read_config,
+                        storage.clone(),
+                        Arc::new(encryption_service.clone()),
+                        encrypted,
+                    )),
+                    false,
+                    Some(storage),
+                    encrypted,
+                )
+            }
+        };
 
     // Start reading data into buffer
     reader.start_reading(buffer.clone());
@@ -291,6 +317,8 @@ async fn prepare_track(
         is_local_storage,
         track_start_byte_offset: start_byte,
         track_end_byte_offset: end_byte,
+        cloud_storage,
+        cloud_encrypted,
     })
 }
 
@@ -1223,14 +1251,13 @@ impl PlaybackService {
             position, buffer_byte, file_byte, file_size, prepared.is_local_storage, prepared.track_start_byte_offset
         );
 
-        // Create seek buffer - fast path for local files, slow path for cloud
+        // Create seek buffer - both local and cloud now use fresh readers at seek position
         let seek_buffer = if prepared.is_local_storage {
-            // Local files: seek directly in file using file_byte
+            // Local files: seek directly in file
             self.create_seek_buffer_for_local(prepared, file_byte)
         } else {
-            // Cloud: read from existing buffer using buffer_byte
-            self.create_seek_buffer_from_existing(prepared, buffer_byte)
-                .await
+            // Cloud: start fresh range request at seek position
+            self.create_seek_buffer_for_cloud(prepared, file_byte)
         };
 
         // Spawn decoder on the seek buffer, skipping sample_offset samples
@@ -1307,44 +1334,38 @@ impl PlaybackService {
         seek_buffer
     }
 
-    /// Create a seek buffer by copying from the existing buffer.
-    /// Used for cloud storage where we can't create a new reader easily.
-    /// This blocks until enough data is available but runs in a background task.
-    async fn create_seek_buffer_from_existing(
+    /// Create a seek buffer for cloud storage by starting a fresh range request.
+    /// This creates a new CloudStorageReader at target_byte, avoiding the need to
+    /// wait for data to download sequentially.
+    fn create_seek_buffer_for_cloud(
         &self,
         prepared: &PreparedTrack,
         target_byte: u64,
     ) -> SharedSparseBuffer {
         let seek_buffer = create_sparse_buffer();
-        let source_buffer = prepared.buffer.clone();
-        let flac_headers = prepared.flac_headers.clone();
 
-        // Spawn a task to copy data from source to seek buffer
-        let seek_buffer_clone = seek_buffer.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut write_pos = 0u64;
+        // Create config for new reader starting at target_byte
+        let config = AudioReadConfig {
+            path: prepared.source_path.clone(),
+            flac_headers: prepared.flac_headers.clone(),
+            start_byte: Some(target_byte),
+            end_byte: prepared.track_end_byte_offset,
+        };
 
-            // Prepend FLAC headers if available
-            if let Some(ref headers) = flac_headers {
-                seek_buffer_clone.append_at(0, headers);
-                write_pos = headers.len() as u64;
-            }
-
-            // Copy audio data from target_byte onwards
-            source_buffer.seek(target_byte);
-            let mut temp_buf = vec![0u8; 65536];
-            loop {
-                match source_buffer.read(&mut temp_buf) {
-                    Some(0) => break,
-                    Some(n) => {
-                        seek_buffer_clone.append_at(write_pos, &temp_buf[..n]);
-                        write_pos += n as u64;
-                    }
-                    None => break, // cancelled
-                }
-            }
-            seek_buffer_clone.mark_eof();
-        });
+        // Create a new cloud reader at the seek position
+        if let Some(storage) = &prepared.cloud_storage {
+            let reader = Box::new(CloudStorageReader::new(
+                config,
+                storage.clone(),
+                Arc::new(self.encryption_service.clone()),
+                prepared.cloud_encrypted,
+            ));
+            reader.start_reading(seek_buffer.clone());
+        } else {
+            // Fallback: shouldn't happen, but cancel the buffer if no storage
+            error!("create_seek_buffer_for_cloud called but no cloud_storage available");
+            seek_buffer.cancel();
+        }
 
         seek_buffer
     }

@@ -270,17 +270,20 @@ async fn download_encrypted_to_buffer(
     end: Option<u64>,
     flac_headers: Option<&[u8]>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Download encrypted data
-    let encrypted_data = if let Some(end) = end {
-        storage.download_range(path, start, end - start).await?
-    } else {
-        storage.download(path).await?
-    };
+    // For encrypted files, we must download and decrypt the entire file
+    // since we can't decrypt partial data. The start/end offsets are applied
+    // to the decrypted data.
+    let encrypted_data = storage.download(path).await?;
 
     // Decrypt
     let decrypted = encryption_service
         .decrypt(&encrypted_data)
         .map_err(|e| format!("Decryption failed: {}", e))?;
+
+    // Apply start/end offsets to the decrypted data
+    let start_offset = start as usize;
+    let end_offset = end.map(|e| e as usize).unwrap_or(decrypted.len());
+    let slice = &decrypted[start_offset.min(decrypted.len())..end_offset.min(decrypted.len())];
 
     let mut buffer_pos: u64 = 0;
 
@@ -289,12 +292,14 @@ async fn download_encrypted_to_buffer(
         buffer_pos += headers.len() as u64;
     }
 
-    buffer.append_at(buffer_pos, &decrypted);
-    buffer_pos += decrypted.len() as u64;
+    buffer.append_at(buffer_pos, slice);
+    buffer_pos += slice.len() as u64;
 
     info!(
-        "CloudStorageReader: decrypted {} bytes -> {} bytes (headers prepended: {})",
+        "CloudStorageReader: decrypted {} bytes, sliced [{}, {}) -> {} bytes (headers prepended: {})",
         encrypted_data.len(),
+        start_offset,
+        end_offset,
         buffer_pos,
         flac_headers.is_some()
     );
