@@ -2064,3 +2064,124 @@ async fn test_seek_uses_sample_offset_to_skip_samples() {
         samples_decoded as i64 - expected_samples as i64
     );
 }
+
+/// Test that CUE/FLAC track doesn't play past its end boundary after seeking.
+///
+/// This is a regression test for a bug where seeking in a CUE/FLAC track would
+/// read past the track's end_byte_offset, causing it to play into the next track.
+/// For example, seeking in track 4 "Barbarian" (6:29) would play past 6:29 into
+/// track 5 "I, the Witchfinder".
+///
+/// The bug: create_seek_buffer_for_local sets start_byte but not end_byte,
+/// so LocalFileReader reads until EOF instead of until track end.
+#[tokio::test]
+async fn test_cue_flac_seek_respects_track_end_boundary() {
+    if should_skip_audio_tests() {
+        debug!("Skipping audio test - no audio device available");
+        return;
+    }
+
+    let mut fixture = match CueFlacTestFixture::new().await {
+        Ok(f) => f,
+        Err(e) => {
+            debug!("Failed to set up CUE/FLAC test fixture: {}", e);
+            return;
+        }
+    };
+
+    assert_eq!(fixture.track_ids.len(), 3, "Should have 3 tracks");
+    // Use track 2 (not last track, so there's a track 3 to potentially play into)
+    let track_id = fixture.track_ids[1].clone();
+
+    // Track 2 in fixture: INDEX 00 at 00:08, INDEX 01 at 00:10, ends at 00:20
+    // Total duration including pregap: 12 seconds (8s to 20s in file)
+    // After pregap skip: 10 seconds (10s to 20s in file)
+    // But seek is relative to pregap start, not audio start
+    let track_duration_ms = 12_000u64; // Full track duration including pregap
+    let sample_rate = 44100u64;
+    let channels = 2u64;
+
+    // Seek to 5s into the track (from pregap start at 00:08)
+    let seek_position_ms = 5_000u64;
+
+    // Play track 2
+    fixture.playback_handle.play(track_id.clone());
+
+    // Wait for playback to start
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut started = false;
+    while Instant::now() < deadline && !started {
+        let remaining = deadline - Instant::now();
+        match timeout(remaining, fixture.progress_rx.recv()).await {
+            Ok(Some(PlaybackProgress::StateChanged { state })) => {
+                if matches!(state, PlaybackState::Playing { .. }) {
+                    started = true;
+                }
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) | Err(_) => break,
+        }
+    }
+    assert!(started, "Playback should start");
+
+    // Seek forward
+    fixture
+        .playback_handle
+        .seek(Duration::from_millis(seek_position_ms));
+
+    // Wait for track to complete and get decode stats
+    let mut deadline = Instant::now() + Duration::from_secs(30);
+    let mut decode_stats: Option<(u32, u64)> = None;
+
+    while Instant::now() < deadline {
+        let remaining = deadline - Instant::now();
+        match timeout(remaining, fixture.progress_rx.recv()).await {
+            Ok(Some(PlaybackProgress::DecodeStats {
+                error_count,
+                samples_decoded,
+                track_id: stats_track_id,
+            })) => {
+                if stats_track_id == track_id {
+                    decode_stats = Some((error_count, samples_decoded));
+                    break;
+                }
+            }
+            Ok(Some(PlaybackProgress::TrackCompleted {
+                track_id: completed_track_id,
+            })) => {
+                if completed_track_id == track_id {
+                    deadline = Instant::now() + Duration::from_secs(2);
+                }
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) | Err(_) => break,
+        }
+    }
+
+    let (_error_count, samples_decoded) =
+        decode_stats.expect("Should receive DecodeStats for track 2");
+
+    // Calculate maximum expected samples:
+    // After seeking to 5s in a 10s track, we should have at most ~5s of audio
+    // Add 10% tolerance for frame alignment and pregap
+    let remaining_duration_ms = track_duration_ms - seek_position_ms;
+    let max_expected_samples = (remaining_duration_ms * sample_rate * channels / 1000) * 110 / 100;
+
+    // The bug would cause us to decode way more - e.g., all of track 3 too
+    // Track 3 is also 10s, so buggy behavior would give ~15s of samples instead of ~5s
+    assert!(
+        samples_decoded <= max_expected_samples,
+        "Track played past its end boundary! Decoded {} samples, max expected {} \
+         (remaining {}ms of audio = {} samples + 10% tolerance).\n\
+         This indicates the seek buffer doesn't respect track end_byte_offset.",
+        samples_decoded,
+        max_expected_samples,
+        remaining_duration_ms,
+        remaining_duration_ms * sample_rate * channels / 1000
+    );
+
+    debug!(
+        "✅ Track ended correctly: {} samples decoded, max was {}",
+        samples_decoded, max_expected_samples
+    );
+}

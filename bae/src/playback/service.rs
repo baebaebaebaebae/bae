@@ -158,6 +158,9 @@ struct PreparedTrack {
     /// For CUE/FLAC: track's start byte position in original file.
     /// Used to convert buffer-relative seek position to file-absolute position.
     track_start_byte_offset: Option<u64>,
+    /// For CUE/FLAC: track's end byte position in original file.
+    /// Used to limit reading when seeking so track doesn't play into next track.
+    track_end_byte_offset: Option<u64>,
 }
 
 /// Fetch track metadata, create buffer, start reading audio data.
@@ -287,6 +290,7 @@ async fn prepare_track(
         duration,
         is_local_storage,
         track_start_byte_offset: start_byte,
+        track_end_byte_offset: end_byte,
     })
 }
 
@@ -1289,12 +1293,12 @@ impl PlaybackService {
     ) -> SharedSparseBuffer {
         let seek_buffer = create_sparse_buffer();
 
-        // Create a new reader starting at target_byte
+        // Create a new reader starting at target_byte, ending at track end
         let config = AudioReadConfig {
             path: prepared.source_path.clone(),
             flac_headers: prepared.flac_headers.clone(),
             start_byte: Some(target_byte),
-            end_byte: None,
+            end_byte: prepared.track_end_byte_offset,
         };
 
         let reader = Box::new(LocalFileReader::new(config));
