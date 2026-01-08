@@ -28,43 +28,78 @@ fn should_skip_audio_tests() -> bool {
     cpal::default_host().default_output_device().is_none()
 }
 
-/// Copy pre-generated CUE/FLAC fixtures to test directory
-fn generate_cue_flac_files(dir: &std::path::Path) {
+/// Generate a large CUE/FLAC fixture on-the-fly for CPU stress testing.
+/// Creates a 5-minute 96kHz stereo 24-bit FLAC (~75MB) to stress the buffer.
+fn generate_large_cue_flac_files(dir: &std::path::Path) {
     use std::fs;
-    let fixture_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("cue_flac");
+    use std::process::Command;
 
-    // Copy FLAC file
-    let flac_src = fixture_dir.join("Test Album.flac");
-    let flac_dst = dir.join("Test Album.flac");
-    let flac_data = fs::read(&flac_src).unwrap_or_else(|_| {
-        panic!(
-            "CUE/FLAC fixture not found: {}\n\
-             Run: ./scripts/generate_cue_flac_fixture.sh",
-            flac_src.display(),
-        );
-    });
-    fs::write(&flac_dst, &flac_data).expect("Failed to copy FLAC fixture");
+    let flac_path = dir.join("Test Album.flac");
+    let cue_path = dir.join("Test Album.cue");
 
-    // Copy CUE file
-    let cue_src = fixture_dir.join("Test Album.cue");
-    let cue_dst = dir.join("Test Album.cue");
-    let cue_data = fs::read(&cue_src).unwrap_or_else(|_| {
+    // Generate 5 minutes of audio at 96kHz/24-bit stereo (~75MB FLAC)
+    // Using brown noise which compresses reasonably
+    let output = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "anoisesrc=d=300:c=brown:r=96000", // 300 seconds (5 min) brown noise at 96kHz
+            "-ac",
+            "2", // Stereo
+            "-sample_fmt",
+            "s32", // 24-bit in 32-bit container
+            "-c:a",
+            "flac",
+            "-compression_level",
+            "0", // Fast compression
+            flac_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to run ffmpeg");
+
+    if !output.status.success() {
         panic!(
-            "CUE fixture not found: {}\n\
-             Run: ./scripts/generate_cue_flac_fixture.sh",
-            cue_src.display(),
+            "ffmpeg failed to generate FLAC:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
         );
-    });
-    fs::write(&cue_dst, &cue_data).expect("Failed to copy CUE fixture");
+    }
+
+    let file_size = fs::metadata(&flac_path).unwrap().len();
+    eprintln!(
+        "Generated FLAC: {} bytes ({:.1} MB)",
+        file_size,
+        file_size as f64 / 1_000_000.0
+    );
+
+    // Generate CUE sheet with 3 tracks of ~100 seconds each
+    let cue_content = r#"REM GENRE Test
+REM DATE 2024
+PERFORMER "Test Artist"
+TITLE "Test Album"
+FILE "Test Album.flac" WAVE
+  TRACK 01 AUDIO
+    TITLE "Track One"
+    PERFORMER "Test Artist"
+    INDEX 01 00:00:00
+  TRACK 02 AUDIO
+    TITLE "Track Two"
+    PERFORMER "Test Artist"
+    INDEX 01 01:40:00
+  TRACK 03 AUDIO
+    TITLE "Track Three"
+    PERFORMER "Test Artist"
+    INDEX 01 03:20:00
+"#;
+    fs::write(&cue_path, cue_content).expect("Failed to write CUE file");
 }
 
-/// Create test album metadata for CUE/FLAC
+/// Create test album metadata for CUE/FLAC (matches generated 2-minute file)
 fn create_cue_flac_test_album() -> DiscogsRelease {
     DiscogsRelease {
-        id: "cue-flac-test-release".to_string(),
+        id: "cue-flac-cpu-test".to_string(),
         title: "Test Album".to_string(),
         year: Some(2024),
         genre: vec!["Test".to_string()],
@@ -81,18 +116,18 @@ fn create_cue_flac_test_album() -> DiscogsRelease {
         tracklist: vec![
             DiscogsTrack {
                 position: "1".to_string(),
-                title: "Track One (Silence)".to_string(),
-                duration: Some("0:10".to_string()),
+                title: "Track One".to_string(),
+                duration: Some("1:40".to_string()), // 100 seconds
             },
             DiscogsTrack {
                 position: "2".to_string(),
-                title: "Track Two (White Noise)".to_string(),
-                duration: Some("0:10".to_string()),
+                title: "Track Two".to_string(),
+                duration: Some("1:40".to_string()), // 100 seconds
             },
             DiscogsTrack {
                 position: "3".to_string(),
-                title: "Track Three (Brown Noise)".to_string(),
-                duration: Some("0:10".to_string()),
+                title: "Track Three".to_string(),
+                duration: Some("1:40".to_string()), // 100 seconds
             },
         ],
         master_id: "test-master".to_string(),
@@ -132,9 +167,9 @@ impl CueFlacTestFixture {
         let library_manager_arc = Arc::new(library_manager);
         let runtime_handle = tokio::runtime::Handle::current();
 
-        // Use CUE/FLAC fixtures
+        // Generate large CUE/FLAC fixture for CPU stress testing
         let discogs_release = create_cue_flac_test_album();
-        generate_cue_flac_files(&album_dir);
+        generate_large_cue_flac_files(&album_dir);
 
         let torrent_manager = LazyTorrentManager::new_noop(runtime_handle.clone());
         let import_handle = bae::import::ImportService::start(
@@ -271,17 +306,17 @@ async fn test_playback_cpu_usage_is_reasonable() {
     }
     assert!(started, "Playback should start");
 
-    // Seek forward to trigger seek code path (this is where high CPU was observed)
-    fixture.playback_handle.seek(Duration::from_secs(3));
-
-    // Wait a moment for seek to complete
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    // Measure CPU during steady-state playback (after startup/seek are done)
+    // Measure CPU during seek (includes buffering phase where O(n²) bug manifests)
     let measure_start = Instant::now();
     let initial_cpu = get_process_cpu_time();
+
+    // Seek forward to trigger new buffering (this is where high CPU was observed)
+    fixture.playback_handle.seek(Duration::from_secs(3));
+
+    // Let playback and buffering run for measurement period
     let measure_duration = Duration::from_secs(3);
     tokio::time::sleep(measure_duration).await;
+
     let final_cpu = get_process_cpu_time();
     let wall_time = measure_start.elapsed();
     let cpu_time = final_cpu.saturating_sub(initial_cpu);
