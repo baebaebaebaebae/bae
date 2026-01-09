@@ -153,7 +153,7 @@ impl CueFlacTestFixture {
         std::fs::create_dir_all(&album_dir)?;
 
         let database = Database::new(db_path.to_str().unwrap()).await?;
-        let encryption_service = EncryptionService::new_with_key(&[0u8; 32]);
+        let encryption_service = Some(EncryptionService::new_with_key(&[0u8; 32]));
         let cache_config = CacheConfig {
             cache_dir,
             max_size_bytes: 1024 * 1024 * 1024,

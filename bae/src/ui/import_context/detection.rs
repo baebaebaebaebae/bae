@@ -282,13 +282,15 @@ async fn handle_discid_lookup_result(
         return DiscIdLookupResult::NoMatches;
     }
     info!("Found {} exact matches", releases.len());
+    // Get discogs client if available (for cover art fallback)
+    let discogs_client = ctx.get_discogs_client().ok();
     let cover_art_futures: Vec<_> = releases
         .iter()
         .map(|mb_release| {
             cover_art::fetch_cover_art_for_mb_release(
                 mb_release,
                 &external_urls,
-                Some(&ctx.discogs_client),
+                discogs_client.as_ref(),
             )
         })
         .collect();

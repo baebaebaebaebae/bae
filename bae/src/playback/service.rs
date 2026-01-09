@@ -197,7 +197,7 @@ struct PreparedTrack {
 /// This is the common preparation logic used by both play_track and preload_next_track.
 async fn prepare_track(
     library_manager: &LibraryManager,
-    encryption_service: &EncryptionService,
+    encryption_service: Option<&EncryptionService>,
     track_id: &str,
 ) -> Result<PreparedTrack, PlaybackError> {
     let track = library_manager
@@ -303,7 +303,7 @@ async fn prepare_track(
                     Box::new(CloudStorageReader::new(
                         read_config,
                         storage.clone(),
-                        Arc::new(encryption_service.clone()),
+                        encryption_service.map(|e| Arc::new(e.clone())),
                         encrypted,
                     )),
                     false,
@@ -351,7 +351,7 @@ async fn prepare_track(
 /// Playback service that manages audio playback
 pub struct PlaybackService {
     library_manager: LibraryManager,
-    encryption_service: EncryptionService,
+    encryption_service: Option<EncryptionService>,
     command_rx: tokio_mpsc::UnboundedReceiver<PlaybackCommand>,
     progress_tx: tokio_mpsc::UnboundedSender<PlaybackProgress>,
     queue: VecDeque<String>,
@@ -517,7 +517,7 @@ impl PlaybackService {
 
     pub fn start(
         library_manager: LibraryManager,
-        encryption_service: EncryptionService,
+        encryption_service: Option<EncryptionService>,
         runtime_handle: tokio::runtime::Handle,
     ) -> PlaybackHandle {
         let (command_tx, command_rx) = tokio_mpsc::unbounded_channel();
@@ -874,15 +874,20 @@ impl PlaybackService {
         });
 
         // Prepare track: fetch metadata, create buffer, start reading
-        let prepared =
-            match prepare_track(&self.library_manager, &self.encryption_service, track_id).await {
-                Ok(p) => p,
-                Err(e) => {
-                    error!("Failed to prepare track {}: {}", track_id, e);
-                    self.stop().await;
-                    return;
-                }
-            };
+        let prepared = match prepare_track(
+            &self.library_manager,
+            self.encryption_service.as_ref(),
+            track_id,
+        )
+        .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                error!("Failed to prepare track {}: {}", track_id, e);
+                self.stop().await;
+                return;
+            }
+        };
 
         // Calculate pregap byte offset if needed (direct selection skips pregap)
         let pregap_skip_duration = pregap_seek_position(prepared.pregap_ms, is_natural_transition);
@@ -982,14 +987,19 @@ impl PlaybackService {
     /// This eagerly starts the decoder so samples are ready when we switch tracks.
     async fn preload_next_track(&mut self, track_id: &str) {
         // Prepare track: fetch metadata, create buffer, start reading
-        let prepared =
-            match prepare_track(&self.library_manager, &self.encryption_service, track_id).await {
-                Ok(p) => p,
-                Err(e) => {
-                    error!("Failed to preload track {}: {}", track_id, e);
-                    return;
-                }
-            };
+        let prepared = match prepare_track(
+            &self.library_manager,
+            self.encryption_service.as_ref(),
+            track_id,
+        )
+        .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                error!("Failed to preload track {}: {}", track_id, e);
+                return;
+            }
+        };
 
         // Create decoder sink/source and start decoder eagerly for gapless playback
         let (mut sink, source, _ready) = create_streaming_pair(prepared.sample_rate, 2);
@@ -1383,7 +1393,9 @@ impl PlaybackService {
                 CloudStorageReader::new(
                     config,
                     storage.clone(),
-                    Arc::new(self.encryption_service.clone()),
+                    self.encryption_service
+                        .as_ref()
+                        .map(|e| Arc::new(e.clone())),
                     prepared.cloud_encrypted,
                 )
                 .with_encryption_nonce(prepared.encryption_nonce.clone()),

@@ -10,6 +10,6 @@ pub fn tracing_init() {
 }
 
 /// Create a test encryption service with a zero key
-pub fn test_encryption_service() -> bae::encryption::EncryptionService {
-    bae::encryption::EncryptionService::new_with_key(&[0u8; 32])
+pub fn test_encryption_service() -> Option<bae::encryption::EncryptionService> {
+    Some(bae::encryption::EncryptionService::new_with_key(&[0u8; 32]))
 }

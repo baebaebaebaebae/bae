@@ -45,8 +45,8 @@ pub struct ImportService {
     commands_rx: mpsc::UnboundedReceiver<ImportCommand>,
     /// Channel for sending progress updates to subscribers
     progress_tx: mpsc::UnboundedSender<ImportProgress>,
-    /// Service for encrypting files before upload
-    encryption_service: EncryptionService,
+    /// Service for encrypting files before upload (None if not configured)
+    encryption_service: Option<EncryptionService>,
     /// Shared manager for library database operations
     library_manager: SharedLibraryManager,
     /// Lazy-initialized torrent manager for torrent operations
@@ -67,7 +67,7 @@ impl ImportService {
     pub fn start(
         runtime_handle: tokio::runtime::Handle,
         library_manager: SharedLibraryManager,
-        encryption_service: EncryptionService,
+        encryption_service: Option<EncryptionService>,
         torrent_manager: LazyTorrentManager,
         database: Arc<Database>,
     ) -> ImportServiceHandle {
@@ -122,7 +122,7 @@ impl ImportService {
     pub fn start_with_cloud(
         _runtime_handle: tokio::runtime::Handle,
         library_manager: SharedLibraryManager,
-        encryption_service: EncryptionService,
+        encryption_service: Option<EncryptionService>,
         torrent_manager: LazyTorrentManager,
         database: Arc<Database>,
         cloud: Arc<dyn crate::cloud_storage::CloudStorage>,
@@ -345,7 +345,7 @@ impl ImportService {
         if let Some(ref cloud) = self.injected_cloud {
             return Ok(ReleaseStorageImpl::with_cloud(
                 profile,
-                Some(self.encryption_service.clone()),
+                self.encryption_service.clone(),
                 cloud.clone(),
                 self.database.clone(),
             ));
@@ -353,7 +353,7 @@ impl ImportService {
 
         ReleaseStorageImpl::from_profile(
             profile,
-            Some(self.encryption_service.clone()),
+            self.encryption_service.clone(),
             self.database.clone(),
         )
         .await

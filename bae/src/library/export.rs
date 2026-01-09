@@ -21,7 +21,7 @@ impl ExportService {
         target_dir: &Path,
         library_manager: &LibraryManager,
         _cache: &CacheManager,
-        encryption_service: &EncryptionService,
+        encryption_service: Option<&EncryptionService>,
     ) -> Result<(), String> {
         info!(
             "Exporting release {} to {}",
@@ -60,7 +60,11 @@ impl ExportService {
 
                 // Decrypt if profile has encryption enabled
                 if storage_profile.encrypted {
-                    let enc_service = encryption_service.clone();
+                    let enc_service = encryption_service
+                        .ok_or_else(|| {
+                            "Cannot export encrypted files: encryption not configured".to_string()
+                        })?
+                        .clone();
                     tokio::task::spawn_blocking(move || {
                         enc_service
                             .decrypt(&data)
@@ -113,7 +117,7 @@ impl ExportService {
         library_manager: &LibraryManager,
         storage: Arc<dyn CloudStorage>,
         cache: &CacheManager,
-        encryption_service: &EncryptionService,
+        encryption_service: Option<&EncryptionService>,
     ) -> Result<(), String> {
         info!("Exporting track {} to {}", track_id, output_path.display());
 

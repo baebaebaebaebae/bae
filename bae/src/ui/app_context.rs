@@ -13,6 +13,6 @@ pub struct AppContext {
     pub import_handle: import::ImportServiceHandle,
     pub playback_handle: playback::PlaybackHandle,
     pub cache: cache::CacheManager,
-    pub encryption_service: encryption::EncryptionService,
+    pub encryption_service: Option<encryption::EncryptionService>,
     pub torrent_manager: torrent::LazyTorrentManager,
 }

@@ -129,7 +129,7 @@ impl AudioDataReader for LocalFileReader {
 pub struct CloudStorageReader {
     config: AudioReadConfig,
     storage: Arc<dyn crate::cloud_storage::CloudStorage>,
-    encryption_service: Arc<EncryptionService>,
+    encryption_service: Option<Arc<EncryptionService>>,
     encrypted: bool,
     /// Encryption nonce from DB for efficient range requests.
     /// When set with start/end byte range, uses chunked decryption
@@ -141,7 +141,7 @@ impl CloudStorageReader {
     pub fn new(
         config: AudioReadConfig,
         storage: Arc<dyn crate::cloud_storage::CloudStorage>,
-        encryption_service: Arc<EncryptionService>,
+        encryption_service: Option<Arc<EncryptionService>>,
         encrypted: bool,
     ) -> Self {
         Self {
@@ -309,18 +309,22 @@ async fn download_encrypted_to_buffer(
     storage: Arc<dyn crate::cloud_storage::CloudStorage>,
     path: &str,
     buffer: SharedSparseBuffer,
-    encryption_service: &EncryptionService,
+    encryption_service: &Option<Arc<EncryptionService>>,
     start: u64,
     end: Option<u64>,
     flac_headers: Option<&[u8]>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let enc = encryption_service
+        .as_ref()
+        .ok_or("Cannot play encrypted files: encryption not configured")?;
+
     // For encrypted files, we must download and decrypt the entire file
     // since we can't decrypt partial data. The start/end offsets are applied
     // to the decrypted data.
     let encrypted_data = storage.download(path).await?;
 
     // Decrypt
-    let decrypted = encryption_service
+    let decrypted = enc
         .decrypt(&encrypted_data)
         .map_err(|e| format!("Decryption failed: {}", e))?;
 
@@ -365,7 +369,7 @@ pub async fn download_encrypted_range_to_buffer(
     storage: Arc<dyn crate::cloud_storage::CloudStorage>,
     path: &str,
     buffer: SharedSparseBuffer,
-    encryption_service: &EncryptionService,
+    encryption_service: &Option<Arc<EncryptionService>>,
     nonce: &[u8],
     plaintext_start: u64,
     plaintext_end: u64,
@@ -373,6 +377,10 @@ pub async fn download_encrypted_range_to_buffer(
     chunk_end: u64,
     flac_headers: Option<&[u8]>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let enc = encryption_service
+        .as_ref()
+        .ok_or("Cannot play encrypted files: encryption not configured")?;
+
     use crate::encryption::CHUNK_SIZE;
 
     // Download only the needed encrypted chunks via range request
@@ -382,7 +390,7 @@ pub async fn download_encrypted_range_to_buffer(
     let first_chunk_index = plaintext_start / CHUNK_SIZE as u64;
 
     // Decrypt using nonce from DB + partial chunks
-    let decrypted = encryption_service
+    let decrypted = enc
         .decrypt_range_with_offset(
             nonce,
             &encrypted_chunks,
@@ -651,6 +659,7 @@ mod tests {
         let encryption_service = EncryptionService::new_with_key(&[0x42; 32]);
         let encrypted_data = encryption_service.encrypt(&plaintext);
         let nonce = encrypted_data[..24].to_vec();
+        let encryption_service = Some(std::sync::Arc::new(encryption_service));
 
         let storage = std::sync::Arc::new(RangeTrackingStorage {
             encrypted_data: encrypted_data.clone(),

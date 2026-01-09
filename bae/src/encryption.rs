@@ -57,10 +57,10 @@ impl std::fmt::Debug for EncryptionService {
     }
 }
 impl EncryptionService {
-    /// Create a new encryption service, loading the key from config
-    pub fn new(config: &crate::config::Config) -> Result<Self, EncryptionError> {
+    /// Create a new encryption service from a hex-encoded key string
+    pub fn new(key_hex: &str) -> Result<Self, EncryptionError> {
         info!("Loading master key...");
-        let key_bytes = hex::decode(&config.encryption_key)
+        let key_bytes = hex::decode(key_hex)
             .map_err(|e| EncryptionError::KeyManagement(format!("Invalid key format: {}", e)))?;
         if key_bytes.len() != 32 {
             return Err(EncryptionError::KeyManagement(

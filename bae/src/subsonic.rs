@@ -16,7 +16,7 @@ use tracing::{debug, error, info};
 #[derive(Clone)]
 pub struct SubsonicState {
     pub library_manager: SharedLibraryManager,
-    pub encryption_service: crate::encryption::EncryptionService,
+    pub encryption_service: Option<crate::encryption::EncryptionService>,
 }
 /// Common query parameters for Subsonic API
 #[derive(Debug, Deserialize)]
@@ -123,7 +123,7 @@ pub struct AlbumList {
 /// Create the Subsonic API router
 pub fn create_router(
     library_manager: SharedLibraryManager,
-    encryption_service: crate::encryption::EncryptionService,
+    encryption_service: Option<crate::encryption::EncryptionService>,
 ) -> Router {
     let state = SubsonicState {
         library_manager,
@@ -538,9 +538,11 @@ async fn stream_track_audio(
 
     // Decrypt if needed
     let decrypted = if storage_profile.map(|p| p.encrypted).unwrap_or(false) {
-        state
+        let enc = state
             .encryption_service
-            .decrypt(&file_data)
+            .as_ref()
+            .ok_or("Cannot stream encrypted files: encryption not configured")?;
+        enc.decrypt(&file_data)
             .map_err(|e| format!("Failed to decrypt file: {}", e))?
     } else {
         file_data

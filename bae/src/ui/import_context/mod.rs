@@ -4,7 +4,6 @@ pub mod navigation;
 pub mod search;
 pub mod state;
 pub mod types;
-use crate::config::use_config;
 use crate::ui::components::dialog_context::DialogContext;
 use crate::ui::AppContext;
 use dioxus::prelude::*;
@@ -14,11 +13,9 @@ pub use types::ImportPhase;
 /// Provider component to make search context available throughout the app
 #[component]
 pub fn ImportContextProvider(children: Element) -> Element {
-    let config = use_config();
     let app_context = use_context::<AppContext>();
     let dialog = use_context::<DialogContext>();
     let import_ctx = ImportContext::new(
-        &config,
         app_context.library_manager.clone(),
         app_context.import_handle.clone(),
         dialog,

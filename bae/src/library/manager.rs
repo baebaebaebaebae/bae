@@ -35,20 +35,29 @@ pub enum LibraryError {
 #[derive(Debug, Clone)]
 pub struct LibraryManager {
     database: Database,
-    encryption_service: EncryptionService,
+    encryption_service: Option<EncryptionService>,
 }
 impl LibraryManager {
     /// Create a new library manager
-    pub fn new(database: Database, encryption_service: EncryptionService) -> Self {
+    pub fn new(database: Database, encryption_service: Option<EncryptionService>) -> Self {
         LibraryManager {
             database,
             encryption_service,
         }
     }
 
-    /// Get a reference to the encryption service
-    pub fn encryption_service(&self) -> &EncryptionService {
-        &self.encryption_service
+    /// Get a reference to the encryption service (if configured)
+    pub fn encryption_service(&self) -> Option<&EncryptionService> {
+        self.encryption_service.as_ref()
+    }
+
+    /// Get encryption service, returning error if not configured
+    fn require_encryption(&self) -> Result<&EncryptionService, LibraryError> {
+        self.encryption_service.as_ref().ok_or_else(|| {
+            LibraryError::Import(
+                "Encryption not configured. Create an encrypted storage profile first.".into(),
+            )
+        })
     }
     /// Get a reference to the database
     pub fn database(&self) -> &Database {
@@ -375,7 +384,7 @@ impl LibraryManager {
             .map(|p| p.encrypted)
             .unwrap_or(false)
         {
-            self.encryption_service.decrypt(&raw_data)?
+            self.require_encryption()?.decrypt(&raw_data)?
         } else {
             raw_data
         };
@@ -480,7 +489,7 @@ impl LibraryManager {
             target_dir,
             self,
             cache,
-            &self.encryption_service,
+            self.encryption_service.as_ref(),
         )
         .await
         .map_err(LibraryError::Import)
@@ -515,7 +524,7 @@ impl LibraryManager {
             self,
             storage,
             cache,
-            &self.encryption_service,
+            self.encryption_service.as_ref(),
         )
         .await
         .map_err(LibraryError::Import)
@@ -643,7 +652,7 @@ mod tests {
         let db_path = temp_dir.path().join("test.db");
         let database = Database::new(db_path.to_str().unwrap()).await.unwrap();
         let encryption_service = EncryptionService::new_with_key(&[0u8; 32]);
-        let manager = LibraryManager::new(database, encryption_service);
+        let manager = LibraryManager::new(database, Some(encryption_service));
         (manager, temp_dir)
     }
 

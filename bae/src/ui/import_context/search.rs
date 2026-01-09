@@ -33,6 +33,7 @@ impl ImportContext {
                 search_mb_and_rank(params, metadata).await
             }
             SearchSource::Discogs => {
+                let client = self.get_discogs_client()?;
                 let params = DiscogsSearchParams {
                     artist: non_empty(artist),
                     release_title: non_empty(album),
@@ -44,7 +45,7 @@ impl ImportContext {
                     country: None,
                 };
                 info!("🔍 Discogs general search: {:?}", params);
-                search_discogs_and_rank(&self.discogs_client, params, metadata).await
+                search_discogs_and_rank(&client, params, metadata).await
             }
         }
     }
@@ -71,6 +72,7 @@ impl ImportContext {
                 search_mb_and_rank(params, metadata).await
             }
             SearchSource::Discogs => {
+                let client = self.get_discogs_client()?;
                 let params = DiscogsSearchParams {
                     artist: None,
                     release_title: None,
@@ -82,7 +84,7 @@ impl ImportContext {
                     country: None,
                 };
                 info!("🔍 Discogs catalog number search: {:?}", params);
-                search_discogs_and_rank(&self.discogs_client, params, metadata).await
+                search_discogs_and_rank(&client, params, metadata).await
             }
         }
     }
@@ -109,6 +111,7 @@ impl ImportContext {
                 search_mb_and_rank(params, metadata).await
             }
             SearchSource::Discogs => {
+                let client = self.get_discogs_client()?;
                 let params = DiscogsSearchParams {
                     artist: None,
                     release_title: None,
@@ -120,7 +123,7 @@ impl ImportContext {
                     country: None,
                 };
                 info!("🔍 Discogs barcode search: {:?}", params);
-                search_discogs_and_rank(&self.discogs_client, params, metadata).await
+                search_discogs_and_rank(&client, params, metadata).await
             }
         }
     }

@@ -53,8 +53,10 @@ pub struct ConfigYaml {
 #[derive(Clone, Debug)]
 pub struct Config {
     pub library_id: String,
+    /// Discogs API key - loaded lazily from keyring when needed
     pub discogs_api_key: Option<String>,
-    pub encryption_key: String,
+    /// Encryption key - loaded lazily from keyring when needed (when creating encrypted storage profile)
+    pub encryption_key: Option<String>,
     pub torrent_bind_interface: Option<String>,
     pub torrent_listen_port: Option<u16>,
     pub torrent_enable_upnp: bool,
@@ -65,12 +67,6 @@ pub struct Config {
     pub torrent_max_uploads_per_torrent: Option<i32>,
     pub subsonic_enabled: bool,
     pub subsonic_port: u16,
-}
-
-#[derive(Debug, Clone, Default)]
-struct CredentialData {
-    discogs_api_key: Option<String>,
-    encryption_key: Option<String>,
 }
 
 impl Config {
@@ -91,9 +87,9 @@ impl Config {
             warn!("No BAE_LIBRARY_ID in .env, generated new ID: {}", id);
             id
         });
+        // Load from env if present, otherwise will be loaded lazily from keyring
         let discogs_api_key = std::env::var("BAE_DISCOGS_API_KEY").ok();
-        let encryption_key = std::env::var("BAE_ENCRYPTION_KEY")
-            .unwrap_or_else(|_| hex::encode(crate::encryption::generate_random_key()));
+        let encryption_key = std::env::var("BAE_ENCRYPTION_KEY").ok();
         let torrent_bind_interface = std::env::var("BAE_TORRENT_BIND_INTERFACE")
             .ok()
             .filter(|s| !s.is_empty());
@@ -116,7 +112,7 @@ impl Config {
     }
 
     fn from_config_file() -> Self {
-        let credentials = Self::load_from_keyring();
+        // Don't load from keyring on startup - credentials loaded lazily when needed
         let home_dir = dirs::home_dir().expect("Failed to get home directory");
         let config_path = home_dir.join(".bae").join("config.yaml");
         let yaml_config: ConfigYaml = if config_path.exists() {
@@ -129,18 +125,11 @@ impl Config {
         let library_id = yaml_config
             .library_id
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let encryption_key = credentials.encryption_key.unwrap_or_else(|| {
-            let key_hex = hex::encode(crate::encryption::generate_random_key());
-            if let Ok(entry) = keyring::Entry::new("bae", "encryption_master_key") {
-                let _ = entry.set_password(&key_hex);
-            }
-            key_hex
-        });
 
         Self {
             library_id,
-            discogs_api_key: credentials.discogs_api_key,
-            encryption_key,
+            discogs_api_key: None,
+            encryption_key: None,
             torrent_bind_interface: yaml_config.torrent_bind_interface,
             torrent_listen_port: yaml_config.torrent_listen_port,
             torrent_enable_upnp: yaml_config.torrent_enable_upnp,
@@ -188,7 +177,9 @@ impl Config {
         if let Some(key) = &self.discogs_api_key {
             new_values.insert("BAE_DISCOGS_API_KEY", key.clone());
         }
-        new_values.insert("BAE_ENCRYPTION_KEY", self.encryption_key.clone());
+        if let Some(key) = &self.encryption_key {
+            new_values.insert("BAE_ENCRYPTION_KEY", key.clone());
+        }
         if let Some(iface) = &self.torrent_bind_interface {
             new_values.insert("BAE_TORRENT_BIND_INTERFACE", iface.clone());
         }
@@ -219,7 +210,9 @@ impl Config {
         if let Some(key) = &self.discogs_api_key {
             keyring::Entry::new("bae", "discogs_api_key")?.set_password(key)?;
         }
-        keyring::Entry::new("bae", "encryption_master_key")?.set_password(&self.encryption_key)?;
+        if let Some(key) = &self.encryption_key {
+            keyring::Entry::new("bae", "encryption_master_key")?.set_password(key)?;
+        }
         Ok(())
     }
 
@@ -246,14 +239,31 @@ impl Config {
         Ok(())
     }
 
-    fn load_from_keyring() -> CredentialData {
-        CredentialData {
-            discogs_api_key: keyring::Entry::new("bae", "discogs_api_key")
+    /// Load discogs API key from keyring (call when Discogs API is needed)
+    pub fn load_discogs_key(&mut self) {
+        if self.discogs_api_key.is_none() {
+            self.discogs_api_key = keyring::Entry::new("bae", "discogs_api_key")
                 .ok()
-                .and_then(|e| e.get_password().ok()),
-            encryption_key: keyring::Entry::new("bae", "encryption_master_key")
+                .and_then(|e| e.get_password().ok());
+        }
+    }
+
+    /// Load or create encryption key from keyring (call when creating encrypted storage profile)
+    pub fn load_or_create_encryption_key(&mut self) {
+        if self.encryption_key.is_none() {
+            // Try to load existing key from keyring
+            let existing = keyring::Entry::new("bae", "encryption_master_key")
                 .ok()
-                .and_then(|e| e.get_password().ok()),
+                .and_then(|e| e.get_password().ok());
+
+            self.encryption_key = Some(existing.unwrap_or_else(|| {
+                // Generate new key and save to keyring
+                let key_hex = hex::encode(crate::encryption::generate_random_key());
+                if let Ok(entry) = keyring::Entry::new("bae", "encryption_master_key") {
+                    let _ = entry.set_password(&key_hex);
+                }
+                key_hex
+            }));
         }
     }
 }

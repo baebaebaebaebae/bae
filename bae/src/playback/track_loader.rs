@@ -16,7 +16,7 @@ pub async fn load_track_audio(
     library_manager: &LibraryManager,
     storage: Option<Arc<dyn CloudStorage>>,
     cache: &CacheManager,
-    encryption_service: &EncryptionService,
+    encryption_service: Option<&EncryptionService>,
 ) -> Result<Arc<PcmSource>, PlaybackError> {
     info!("Loading audio for track: {}", track_id);
 
@@ -85,7 +85,13 @@ pub async fn load_track_audio(
 
         // Decrypt if profile has encryption enabled
         if storage_profile.map(|p| p.encrypted).unwrap_or(false) {
-            let encryption_service = encryption_service.clone();
+            let encryption_service = encryption_service
+                .ok_or_else(|| {
+                    PlaybackError::decrypt(crate::encryption::EncryptionError::KeyManagement(
+                        "Cannot play encrypted files: encryption not configured".into(),
+                    ))
+                })?
+                .clone();
             tokio::task::spawn_blocking(move || {
                 encryption_service
                     .decrypt(&encrypted_data)

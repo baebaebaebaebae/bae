@@ -114,7 +114,8 @@ pub struct ImportContext {
     pub(crate) search_source: Signal<SearchSource>,
     pub(crate) manual_match_candidates: Signal<Vec<MatchCandidate>>,
     pub(crate) dialog: DialogContext,
-    pub(crate) discogs_client: DiscogsClient,
+    /// Discogs client - created lazily when user selects Discogs search
+    pub(crate) discogs_client: Signal<Option<DiscogsClient>>,
     /// Handle to library manager for duplicate checking and import operations
     pub(crate) library_manager: SharedLibraryManager,
     /// Handle to import service for submitting import requests
@@ -122,7 +123,6 @@ pub struct ImportContext {
 }
 impl ImportContext {
     pub fn new(
-        config: &crate::config::Config,
         library_manager: SharedLibraryManager,
         import_service: ImportServiceHandle,
         dialog: DialogContext,
@@ -175,11 +175,41 @@ impl ImportContext {
             search_source: Signal::new(SearchSource::MusicBrainz),
             manual_match_candidates: Signal::new(Vec::new()),
             dialog,
-            discogs_client: DiscogsClient::new(config.discogs_api_key.clone().unwrap_or_default()),
+            // Discogs client created lazily when user selects Discogs search
+            discogs_client: Signal::new(None),
             library_manager,
             import_service,
         }
     }
+
+    /// Get or create the Discogs client.
+    /// Returns error if no API key is configured (prompts user to go to Settings).
+    /// This triggers the keychain prompt if a key exists in keyring but wasn't loaded.
+    pub fn get_discogs_client(&self) -> Result<DiscogsClient, String> {
+        // If already created, return it
+        if let Some(client) = self.discogs_client.read().clone() {
+            return Ok(client);
+        }
+
+        // Try to load key from keyring
+        let api_key = keyring::Entry::new("bae", "discogs_api_key")
+            .ok()
+            .and_then(|e| e.get_password().ok());
+
+        match api_key {
+            Some(key) if !key.is_empty() => {
+                let client = DiscogsClient::new(key);
+                let mut signal = self.discogs_client;
+                signal.set(Some(client.clone()));
+                Ok(client)
+            }
+            _ => Err(
+                "Discogs API key not configured. Go to Settings → API Keys to add your key."
+                    .to_string(),
+            ),
+        }
+    }
+
     pub fn search_artist(&self) -> Signal<String> {
         self.search_artist
     }

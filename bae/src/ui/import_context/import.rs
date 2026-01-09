@@ -14,7 +14,8 @@ pub async fn import_release(
     master_id: String,
 ) -> Result<DiscogsRelease, String> {
     ctx.set_error_message(None);
-    match ctx.discogs_client.get_release(&release_id).await {
+    let client = ctx.get_discogs_client()?;
+    match client.get_release(&release_id).await {
         Ok(release) => {
             let mut release = release;
             release.master_id = master_id;

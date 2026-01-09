@@ -56,7 +56,7 @@ async fn create_database(config: &config::Config) -> Database {
 /// Initialize library manager with all dependencies
 fn create_library_manager(
     database: Database,
-    encryption_service: encryption::EncryptionService,
+    encryption_service: Option<encryption::EncryptionService>,
 ) -> SharedLibraryManager {
     let library_manager = library::LibraryManager::new(database, encryption_service);
     info!("Library manager created");
@@ -112,9 +112,11 @@ fn main() {
     info!("Building dependencies...");
     let cache_manager = runtime_handle.block_on(create_cache_manager());
     let database = runtime_handle.block_on(create_database(&config));
-    let encryption_service = encryption::EncryptionService::new(&config).expect(
-        "Failed to initialize encryption service. Check your encryption key configuration.",
-    );
+    // Create encryption service only if key is configured (loaded lazily from keyring)
+    let encryption_service = config
+        .encryption_key
+        .as_ref()
+        .and_then(|key| encryption::EncryptionService::new(key).ok());
     let library_manager = create_library_manager(database.clone(), encryption_service.clone());
 
     let torrent_manager = if screenshot_mode {
@@ -182,7 +184,7 @@ fn main() {
 /// Start the Subsonic API server
 async fn start_subsonic_server(
     library_manager: SharedLibraryManager,
-    encryption_service: encryption::EncryptionService,
+    encryption_service: Option<encryption::EncryptionService>,
     port: u16,
 ) {
     info!("Starting Subsonic API server...");
