@@ -185,10 +185,11 @@ pub fn QueueSidebar() -> Element {
     });
 
     // Load album info for current track
-    let mut current_track_album = use_signal(|| Option::<DbAlbum>::None);
+    let current_track_album = use_signal(|| Option::<DbAlbum>::None);
     use_effect({
         let library_manager = library_manager.clone();
         move || {
+            let mut current_track_album = current_track_album;
             if let Some(track) = current_db_track() {
                 let track_id = track.id.clone();
                 let library_manager = library_manager.clone();
@@ -215,13 +216,14 @@ pub fn QueueSidebar() -> Element {
     let queue_track_ids = queue_hook.tracks;
 
     // Load track/album details for queue
-    let mut queue_details =
+    let queue_details =
         use_signal(std::collections::HashMap::<String, (DbTrack, Option<DbAlbum>)>::new);
     use_effect({
         let library_manager = library_manager.clone();
         move || {
             let library_manager = library_manager.clone();
             let queue_val = queue_track_ids.read().clone();
+            let mut queue_details = queue_details;
             spawn(async move {
                 let mut details = std::collections::HashMap::new();
                 for track_id in queue_val.iter() {

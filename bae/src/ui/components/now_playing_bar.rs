@@ -252,25 +252,30 @@ fn PositionView(
     pregap_ms: Option<i64>,
     on_seek: EventHandler<u64>,
 ) -> Element {
-    let mut local_position_ms = use_signal(|| position_ms);
+    // Local position used during and briefly after seeking to prevent flicker
+    let mut seek_position_ms = use_signal(|| None::<u64>);
     let mut is_seeking = use_signal(|| false);
 
-    use_effect(move || {
-        if !is_seeking() {
-            local_position_ms.set(position_ms);
+    // Clear seek position once the actual position catches up (within 500ms tolerance)
+    if let Some(seek_pos) = seek_position_ms() {
+        if !is_seeking() && (position_ms as i64 - seek_pos as i64).abs() < 500 {
+            seek_position_ms.set(None);
         }
-    });
+    }
+
+    // Use seek position if set, otherwise use the prop
+    let display_position_ms = seek_position_ms().unwrap_or(position_ms);
 
     let has_position = position_ms > 0 || duration_ms > 0;
 
     rsx! {
         if has_position {
             div { class: "flex items-center gap-2 text-sm text-gray-400",
-                span { class: "w-12 text-right", "{format_display_time(local_position_ms(), pregap_ms)}" }
+                span { class: "w-12 text-right", "{format_display_time(display_position_ms, pregap_ms)}" }
                 if duration_ms > 0 {
                     {
                         let pregap = pregap_ms.unwrap_or(0).max(0) as u64;
-                        let adjusted_pos = local_position_ms().saturating_sub(pregap);
+                        let adjusted_pos = display_position_ms.saturating_sub(pregap);
                         let progress_percent = if duration_ms > 0 {
                             (adjusted_pos as f64 / duration_ms as f64 * 100.0).min(100.0)
                         } else {
@@ -285,17 +290,23 @@ fn PositionView(
                                 min: "0",
                                 max: "{duration_ms / 1000}",
                                 value: "{adjusted_pos / 1000}",
-                                onmousedown: move |_| is_seeking.set(true),
+                                onmousedown: move |_| {
+                                    is_seeking.set(true);
+                                    seek_position_ms.set(Some(position_ms));
+                                },
                                 onmouseup: move |_| {
                                     if is_seeking() {
-                                        on_seek.call(local_position_ms());
+                                        if let Some(pos) = seek_position_ms() {
+                                            on_seek.call(pos);
+                                        }
                                         is_seeking.set(false);
+                                        // Keep seek_position_ms set - it will clear once position catches up
                                     }
                                 },
                                 oninput: move |evt| {
                                     if let Ok(secs) = evt.value().parse::<u64>() {
                                         let pregap_ms_val = pregap_ms.unwrap_or(0).max(0) as u64;
-                                        local_position_ms.set(secs * 1000 + pregap_ms_val);
+                                        seek_position_ms.set(Some(secs * 1000 + pregap_ms_val));
                                     }
                                 },
                             }
@@ -338,9 +349,9 @@ use crate::ui::{image_url, Route};
 pub fn NowPlayingBar() -> Element {
     let playback = use_playback_service();
     let library_manager = use_library_manager();
-    let mut state = use_signal(|| PlaybackState::Stopped);
-    let mut current_artist = use_signal(|| "Unknown Artist".to_string());
-    let mut cover_art_url = use_signal(|| Option::<String>::None);
+    let state = use_signal(|| PlaybackState::Stopped);
+    let current_artist = use_signal(|| "Unknown Artist".to_string());
+    let cover_art_url = use_signal(|| Option::<String>::None);
     let mut playback_error = use_signal(|| Option::<String>::None);
 
     // Subscribe to playback progress
@@ -350,6 +361,11 @@ pub fn NowPlayingBar() -> Element {
         move || {
             let playback = playback.clone();
             let library_manager = library_manager.clone();
+            // Explicitly capture signals for the async block
+            let mut state = state;
+            let mut current_artist = current_artist;
+            let mut cover_art_url = cover_art_url;
+            let playback_error = playback_error;
             spawn(async move {
                 let mut progress_rx = playback.subscribe_progress();
                 while let Some(progress) = progress_rx.recv().await {
@@ -371,6 +387,7 @@ pub fn NowPlayingBar() -> Element {
                             update_position(&mut state, position);
                         }
                         PlaybackProgress::PlaybackError { message } => {
+                            let mut playback_error = playback_error;
                             playback_error.set(Some(message.clone()));
                             spawn(async move {
                                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
