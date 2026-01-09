@@ -98,6 +98,7 @@ fn get_demo_data() -> &'static DemoData {
                 title: album_data.title.clone(),
                 year: Some(album_data.year),
                 cover_url: Some(cover_url(&album_data.artist, &album_data.title)),
+                is_compilation: false,
             });
 
             // Link artist to album

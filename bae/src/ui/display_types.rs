@@ -15,6 +15,7 @@ pub struct Album {
     pub title: String,
     pub year: Option<i32>,
     pub cover_url: Option<String>,
+    pub is_compilation: bool,
 }
 
 impl From<DbAlbum> for Album {
@@ -30,6 +31,7 @@ impl From<DbAlbum> for Album {
             title: db.title,
             year: db.year,
             cover_url,
+            is_compilation: db.is_compilation,
         }
     }
 }
@@ -47,6 +49,7 @@ impl From<&DbAlbum> for Album {
             title: db.title.clone(),
             year: db.year,
             cover_url,
+            is_compilation: db.is_compilation,
         }
     }
 }

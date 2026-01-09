@@ -10,6 +10,8 @@ pub fn TrackRow(
     track: Track,
     artists: Vec<Artist>,
     release_id: String,
+    // Album context
+    is_compilation: bool,
     // Playback state
     is_playing: bool,
     is_paused: bool,
@@ -96,7 +98,7 @@ pub fn TrackRow(
                         class: if is_importing { "text-gray-500" } else if is_active { "text-blue-300" } else { "text-white group-hover:text-blue-300" },
                         "{track.title}"
                     }
-                    if !artists.is_empty() {
+                    if is_compilation && !artists.is_empty() {
                         p {
                             class: "text-sm",
                             class: if is_importing { "text-gray-600" } else { "text-gray-400" },
