@@ -1,15 +1,13 @@
-use crate::library::use_library_manager;
 use dioxus::prelude::*;
-use tracing::error;
+
 #[component]
 pub fn DeleteReleaseDialog(
     release_id: String,
     is_last_release: bool,
     is_deleting: Signal<bool>,
-    on_confirm: EventHandler<()>,
+    on_confirm: EventHandler<String>, // Pass release_id to caller
     on_cancel: EventHandler<()>,
 ) -> Element {
-    let library_manager = use_library_manager();
     rsx! {
         div {
             class: "fixed inset-0 bg-black/50 flex items-center justify-center z-50",
@@ -46,26 +44,10 @@ pub fn DeleteReleaseDialog(
                         disabled: is_deleting(),
                         onclick: {
                             let release_id = release_id.clone();
-                            let library_manager = library_manager.clone();
                             move |_| {
-                                if is_deleting() {
-                                    return;
+                                if !is_deleting() {
+                                    on_confirm.call(release_id.clone());
                                 }
-                                is_deleting.set(true);
-                                let release_id = release_id.clone();
-                                let library_manager = library_manager.clone();
-                                spawn(async move {
-                                    match library_manager.get().delete_release(&release_id).await {
-                                        Ok(_) => {
-                                            is_deleting.set(false);
-                                            on_confirm.call(());
-                                        }
-                                        Err(e) => {
-                                            error!("Failed to delete release: {}", e);
-                                            is_deleting.set(false);
-                                        }
-                                    }
-                                });
                             }
                         },
                         if is_deleting() {

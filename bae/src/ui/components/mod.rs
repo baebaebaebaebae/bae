@@ -16,7 +16,6 @@ pub mod app;
 pub mod dialog;
 pub mod dialog_context;
 pub mod import;
-pub mod import_hooks;
 pub mod library;
 pub mod navbar;
 pub mod now_playing_bar;
@@ -27,7 +26,6 @@ pub mod torrent_hooks;
 
 pub use album_detail::AlbumDetail;
 pub use app::App;
-pub use import_hooks::use_track_progress;
 pub use library::Library;
 #[cfg(target_os = "macos")]
 pub use library_search_context::use_library_search;

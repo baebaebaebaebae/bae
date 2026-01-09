@@ -97,6 +97,7 @@ required-features = ["test-utils"]
 default = ["desktop"]
 desktop = ["dioxus/desktop"]
 web = ["dioxus/web"]
+demo = []  # Static fixture data for UI screenshots
 test-utils = []  # Feature for test helper APIs
 
 [lints.clippy]

@@ -1,9 +1,11 @@
 use super::release_action_menu::ReleaseActionMenu;
-use crate::db::{DbRelease, DbTorrent};
+use crate::db::DbTorrent;
+use crate::ui::display_types::Release;
 use dioxus::prelude::*;
+
 #[component]
 pub fn ReleaseTabsSection(
-    releases: Vec<DbRelease>,
+    releases: Vec<Release>,
     selected_release_id: Option<String>,
     on_release_select: EventHandler<String>,
     is_deleting: ReadSignal<bool>,
@@ -11,8 +13,11 @@ pub fn ReleaseTabsSection(
     export_error: Signal<Option<String>>,
     on_view_files: EventHandler<String>,
     on_delete_release: EventHandler<String>,
-    torrents_resource: Resource<
-        Result<std::collections::HashMap<String, DbTorrent>, crate::library::LibraryError>,
+    // Optional torrent data - if None, action menu is hidden
+    #[props(default)] torrents_resource: Option<
+        Resource<
+            Result<std::collections::HashMap<String, DbTorrent>, crate::library::LibraryError>,
+        >,
     >,
 ) -> Element {
     let mut show_release_dropdown = use_signal(|| None::<String>);
@@ -42,55 +47,58 @@ pub fn ReleaseTabsSection(
                                         }
                                     }
                                 }
-                                div { class: "relative",
-                                    button {
-                                        class: "px-2 py-1 text-sm text-gray-400 hover:text-gray-300 hover:bg-gray-700 rounded",
-                                        disabled: is_deleting(),
-                                        onclick: {
-                                            let release_id = release_id_for_menu.clone();
-                                            move |evt| {
-                                                evt.stop_propagation();
-                                                if !is_deleting() {
-                                                    let current = show_release_dropdown();
-                                                    if current.as_ref() == Some(&release_id) {
-                                                        show_release_dropdown.set(None);
-                                                    } else {
-                                                        show_release_dropdown.set(Some(release_id.clone()));
+                                // Only show action menu if torrents_resource is provided
+                                if let Some(ref torrents_res) = torrents_resource {
+                                    div { class: "relative",
+                                        button {
+                                            class: "px-2 py-1 text-sm text-gray-400 hover:text-gray-300 hover:bg-gray-700 rounded",
+                                            disabled: is_deleting(),
+                                            onclick: {
+                                                let release_id = release_id_for_menu.clone();
+                                                move |evt| {
+                                                    evt.stop_propagation();
+                                                    if !is_deleting() {
+                                                        let current = show_release_dropdown();
+                                                        if current.as_ref() == Some(&release_id) {
+                                                            show_release_dropdown.set(None);
+                                                        } else {
+                                                            show_release_dropdown.set(Some(release_id.clone()));
+                                                        }
                                                     }
                                                 }
-                                            }
-                                        },
-                                        "⋮"
-                                    }
-                                    if show_release_dropdown().as_ref() == Some(&release_id_for_menu) {
-                                        {
-                                            let torrents = torrents_resource
-                                                .value()
-                                                .read()
-                                                .as_ref()
-                                                .and_then(|r| r.as_ref().ok())
-                                                .cloned()
-                                                .unwrap_or_default();
-                                            let torrent = torrents.get(&release_id_for_menu);
-                                            let has_torrent = torrent.is_some();
-                                            let is_seeding = torrent.map(|t| t.is_seeding).unwrap_or(false);
-                                            rsx! {
-                                                ReleaseActionMenu {
-                                                    release_id: release_id_for_menu.clone(),
-                                                    has_torrent,
-                                                    is_seeding,
-                                                    is_deleting,
-                                                    is_exporting,
-                                                    export_error,
-                                                    on_view_files: move |id| {
-                                                        show_release_dropdown.set(None);
-                                                        on_view_files.call(id);
-                                                    },
-                                                    on_delete: move |id| {
-                                                        show_release_dropdown.set(None);
-                                                        on_delete_release.call(id);
-                                                    },
-                                                    torrents_resource,
+                                            },
+                                            "⋮"
+                                        }
+                                        if show_release_dropdown().as_ref() == Some(&release_id_for_menu) {
+                                            {
+                                                let torrents = torrents_res
+                                                    .value()
+                                                    .read()
+                                                    .as_ref()
+                                                    .and_then(|r| r.as_ref().ok())
+                                                    .cloned()
+                                                    .unwrap_or_default();
+                                                let torrent = torrents.get(&release_id_for_menu);
+                                                let has_torrent = torrent.is_some();
+                                                let is_seeding = torrent.map(|t| t.is_seeding).unwrap_or(false);
+                                                rsx! {
+                                                    ReleaseActionMenu {
+                                                        release_id: release_id_for_menu.clone(),
+                                                        has_torrent,
+                                                        is_seeding,
+                                                        is_deleting,
+                                                        is_exporting,
+                                                        export_error,
+                                                        on_view_files: move |id| {
+                                                            show_release_dropdown.set(None);
+                                                            on_view_files.call(id);
+                                                        },
+                                                        on_delete: move |id| {
+                                                            show_release_dropdown.set(None);
+                                                            on_delete_release.call(id);
+                                                        },
+                                                        torrents_resource: *torrents_res,
+                                                    }
                                                 }
                                             }
                                         }

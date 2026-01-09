@@ -6,48 +6,65 @@ use super::play_album_button::PlayAlbumButton;
 use super::release_tabs_section::ReleaseTabsSection;
 use super::track_row::TrackRow;
 use super::ReleaseInfoModal;
-use crate::db::{DbAlbum, DbArtist, DbRelease, DbTrack};
-use crate::library::use_library_manager;
+use crate::ui::display_types::{Album, Artist, File, Image, PlaybackDisplay, Release, Track};
 use dioxus::prelude::*;
-/// Album detail view component
+
+/// Album detail view component (pure, props-based)
 #[component]
 pub fn AlbumDetailView(
-    album: DbAlbum,
-    releases: Vec<DbRelease>,
-    artists: Vec<DbArtist>,
+    // Album data (display types)
+    album: Album,
+    releases: Vec<Release>,
+    artists: Vec<Artist>,
+    tracks: Vec<Track>,
     selected_release_id: Option<String>,
-    on_release_select: EventHandler<String>,
-    tracks: Vec<DbTrack>,
+    // UI state
     import_progress: ReadSignal<Option<u8>>,
     import_error: ReadSignal<Option<String>>,
-    on_album_deleted: EventHandler<()>,
+    // Playback state for highlighting current track
+    #[props(default)] playback: PlaybackDisplay,
+    // Navigation callback
+    on_release_select: EventHandler<String>,
+    // Album-level callbacks (all optional - None in demo mode)
+    #[props(into)] on_album_deleted: Option<EventHandler<()>>,
+    #[props(into)] on_export_release: Option<EventHandler<String>>,
+    #[props(into)] on_delete_album: Option<EventHandler<String>>,
+    #[props(into)] on_delete_release: Option<EventHandler<String>>,
+    // Track playback callbacks (all optional - None in demo mode)
+    #[props(into)] on_track_play: Option<EventHandler<String>>,
+    #[props(into)] on_track_pause: Option<EventHandler<()>>,
+    #[props(into)] on_track_resume: Option<EventHandler<()>>,
+    #[props(into)] on_track_add_next: Option<EventHandler<String>>,
+    #[props(into)] on_track_add_to_queue: Option<EventHandler<String>>,
+    #[props(into)] on_track_export: Option<EventHandler<String>>,
+    // Album playback callbacks
+    #[props(into)] on_play_album: Option<EventHandler<Vec<String>>>,
+    #[props(into)] on_add_album_to_queue: Option<EventHandler<Vec<String>>>,
+    // Release info modal data (loaded by page, passed here)
+    #[props(default)] modal_files: Vec<File>,
+    #[props(default)] modal_images: Vec<Image>,
+    #[props(default)] modal_loading_files: bool,
+    #[props(default)] modal_loading_images: bool,
+    #[props(default)] modal_files_error: Option<String>,
+    #[props(default)] modal_images_error: Option<String>,
 ) -> Element {
-    let library_manager = use_library_manager();
     let is_deleting = use_signal(|| false);
-    let mut show_release_delete_confirm = use_signal(|| None::<String>);
-    let mut show_release_info_modal = use_signal(|| None::<String>);
     let is_exporting = use_signal(|| false);
     let mut export_error = use_signal(|| None::<String>);
-    let library_manager_for_torrents = library_manager.clone();
-    let releases_for_torrents = releases.clone();
-    let torrents_resource = use_resource(move || {
-        let library_manager = library_manager_for_torrents.clone();
-        let releases = releases_for_torrents.clone();
-        async move {
-            let mut torrents = std::collections::HashMap::new();
-            for release in &releases {
-                if let Ok(Some(torrent)) = library_manager
-                    .get()
-                    .database()
-                    .get_torrent_by_release(&release.id)
-                    .await
-                {
-                    torrents.insert(release.id.clone(), torrent);
-                }
-            }
-            Ok::<_, crate::library::LibraryError>(torrents)
-        }
-    });
+    let mut show_release_delete_confirm = use_signal(|| None::<String>);
+    let mut show_release_info_modal = use_signal(|| None::<String>);
+
+    // Extract current track ID from playback state
+    let current_track_id = match &playback {
+        PlaybackDisplay::Playing { track_id, .. } => Some(track_id.clone()),
+        PlaybackDisplay::Paused { track_id, .. } => Some(track_id.clone()),
+        PlaybackDisplay::Loading { track_id } => Some(track_id.clone()),
+        PlaybackDisplay::Stopped => None,
+    };
+
+    // Track IDs for play album button
+    let track_ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
+
     rsx! {
         div { class: "grid grid-cols-1 lg:grid-cols-3 gap-8",
             div { class: "lg:col-span-1",
@@ -57,10 +74,13 @@ pub fn AlbumDetailView(
                         import_progress,
                         is_deleting,
                         is_exporting,
-                        export_error,
-                        on_album_deleted,
                         first_release_id: releases.first().map(|r| r.id.clone()),
                         has_single_release: releases.len() == 1,
+                        on_export: on_export_release,
+                        on_delete: on_delete_album,
+                        on_view_release_info: EventHandler::new(move |id: String| {
+                            show_release_info_modal.set(Some(id));
+                        }),
                     }
                     AlbumMetadata {
                         album: album.clone(),
@@ -69,11 +89,12 @@ pub fn AlbumDetailView(
                         selected_release: releases.iter().find(|r| Some(r.id.clone()) == selected_release_id).cloned(),
                     }
                     PlayAlbumButton {
-                        album_id: album.id.clone(),
-                        tracks: tracks.clone(),
+                        track_ids: track_ids.clone(),
                         import_progress,
                         import_error,
                         is_deleting,
+                        on_play_album,
+                        on_add_to_queue: on_add_album_to_queue,
                     }
                 }
             }
@@ -89,7 +110,6 @@ pub fn AlbumDetailView(
                             export_error,
                             on_view_files: move |id| show_release_info_modal.set(Some(id)),
                             on_delete_release: move |id| show_release_delete_confirm.set(Some(id)),
-                            torrents_resource,
                         }
                     }
                     h2 { class: "text-xl font-bold text-white mb-4", "Tracklist" }
@@ -104,6 +124,7 @@ pub fn AlbumDetailView(
                                 .filter_map(|t| t.disc_number)
                                 .collect::<std::collections::HashSet<_>>()
                                 .len() > 1;
+                            let release_id = selected_release_id.clone().unwrap_or_default();
                             if has_multiple_discs {
                                 let mut current_disc: Option<i32> = None;
                                 rsx! {
@@ -123,9 +144,31 @@ pub fn AlbumDetailView(
                                                     }
                                                 }
                                             }
-                                            TrackRow {
-                                                track: track.clone(),
-                                                release_id: selected_release_id.clone().unwrap_or_default(),
+                                            {
+                                                let is_this_track = current_track_id.as_ref() == Some(&track.id);
+                                                let is_playing = is_this_track
+                                                    && matches!(playback, PlaybackDisplay::Playing { .. });
+                                                let is_paused = is_this_track
+                                                    && matches!(playback, PlaybackDisplay::Paused { .. });
+                                                let is_loading = is_this_track
+                                                    && matches!(playback, PlaybackDisplay::Loading { .. });
+                                                rsx! {
+                                                    TrackRow {
+                                                        track: track.clone(),
+                                                        artists: artists.clone(),
+                                                        release_id: release_id.clone(),
+                                                        is_playing,
+                                                        is_paused,
+                                                        is_loading,
+                                                        show_spinner: is_loading,
+                                                        on_play: on_track_play,
+                                                        on_pause: on_track_pause,
+                                                        on_resume: on_track_resume,
+                                                        on_add_next: on_track_add_next,
+                                                        on_add_to_queue: on_track_add_to_queue,
+                                                        on_export: on_track_export,
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -134,9 +177,31 @@ pub fn AlbumDetailView(
                                 rsx! {
                                     div { class: "space-y-2",
                                         for track in &tracks {
-                                            TrackRow {
-                                                track: track.clone(),
-                                                release_id: selected_release_id.clone().unwrap_or_default(),
+                                            {
+                                                let is_this_track = current_track_id.as_ref() == Some(&track.id);
+                                                let is_playing = is_this_track
+                                                    && matches!(playback, PlaybackDisplay::Playing { .. });
+                                                let is_paused = is_this_track
+                                                    && matches!(playback, PlaybackDisplay::Paused { .. });
+                                                let is_loading = is_this_track
+                                                    && matches!(playback, PlaybackDisplay::Loading { .. });
+                                                rsx! {
+                                                    TrackRow {
+                                                        track: track.clone(),
+                                                        artists: artists.clone(),
+                                                        release_id: release_id.clone(),
+                                                        is_playing,
+                                                        is_paused,
+                                                        is_loading,
+                                                        show_spinner: is_loading,
+                                                        on_play: on_track_play,
+                                                        on_pause: on_track_pause,
+                                                        on_resume: on_track_resume,
+                                                        on_add_next: on_track_add_next,
+                                                        on_add_to_queue: on_track_add_to_queue,
+                                                        on_export: on_track_export,
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -147,25 +212,46 @@ pub fn AlbumDetailView(
                 }
             }
         }
+        // Delete release dialog
         if let Some(release_id_to_delete) = show_release_delete_confirm() {
             if releases.iter().any(|r| r.id == release_id_to_delete) {
                 DeleteReleaseDialog {
                     release_id: release_id_to_delete.clone(),
                     is_last_release: releases.len() == 1,
                     is_deleting,
-                    on_confirm: move |_| {
-                        show_release_delete_confirm.set(None);
-                        on_album_deleted.call(());
+                    on_confirm: {
+                        let on_delete_release = on_delete_release;
+                        let on_album_deleted = on_album_deleted;
+                        let is_last = releases.len() == 1;
+                        move |release_id: String| {
+                            show_release_delete_confirm.set(None);
+                            if let Some(ref handler) = on_delete_release {
+                                handler.call(release_id);
+                            }
+                            // If last release, also trigger album deleted
+                            if is_last {
+                                if let Some(ref handler) = on_album_deleted {
+                                    handler.call(());
+                                }
+                            }
+                        }
                     },
                     on_cancel: move |_| show_release_delete_confirm.set(None),
                 }
             }
         }
         if let Some(release_id) = show_release_info_modal() {
-            ReleaseInfoModal {
-                album: album.clone(),
-                release_id: release_id.clone(),
-                on_close: move |_| show_release_info_modal.set(None),
+            if let Some(release) = releases.iter().find(|r| r.id == release_id) {
+                ReleaseInfoModal {
+                    release: release.clone(),
+                    on_close: move |_| show_release_info_modal.set(None),
+                    files: modal_files.clone(),
+                    images: modal_images.clone(),
+                    is_loading_files: modal_loading_files,
+                    is_loading_images: modal_loading_images,
+                    files_error: modal_files_error.clone(),
+                    images_error: modal_images_error.clone(),
+                }
             }
         }
         if let Some(ref error) = export_error() {

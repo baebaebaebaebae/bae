@@ -1,22 +1,194 @@
+//! Queue Sidebar component
+//!
+//! Props-based component for displaying the playback queue.
+
 use super::album_detail::utils::format_duration;
-use super::playback_hooks::{use_playback_queue, use_playback_service, use_playback_state};
-use crate::db::{DbAlbum, DbTrack};
-use crate::library::use_library_manager;
-use crate::playback::PlaybackState;
-use crate::ui::{image_url, Route};
+use crate::ui::display_types::{QueueItem, Track};
 use dioxus::prelude::*;
+
 /// Shared state for queue sidebar visibility
 #[derive(Clone)]
 pub struct QueueSidebarState {
     pub is_open: Signal<bool>,
 }
-/// Track info with album details
-#[derive(Clone, Debug)]
-struct TrackWithAlbum {
-    track: DbTrack,
-    album: Option<DbAlbum>,
+
+/// Queue sidebar view (pure, props-based)
+#[component]
+pub fn QueueSidebarView(
+    is_open: bool,
+    current_track: Option<QueueItem>,
+    queue: Vec<QueueItem>,
+    current_track_id: Option<String>,
+    // Callbacks (optional for demo mode)
+    #[props(into)] on_close: Option<EventHandler<()>>,
+    #[props(into)] on_clear: Option<EventHandler<()>>,
+    #[props(into)] on_remove: Option<EventHandler<usize>>,
+    #[props(into)] on_track_click: Option<EventHandler<String>>, // album_id
+) -> Element {
+    if !is_open {
+        return rsx! {};
+    }
+
+    let has_actions = on_clear.is_some();
+
+    rsx! {
+        div { class: "fixed top-0 right-0 h-full w-80 bg-gray-900 border-l border-gray-700 z-50 flex flex-col shadow-2xl",
+            div { class: "flex-1 overflow-y-auto",
+                // Now playing section
+                div {
+                    div { class: "px-4 pt-4 pb-2",
+                        h3 { class: "text-sm font-semibold text-gray-400 uppercase tracking-wide",
+                            "Now playing"
+                        }
+                    }
+                    if let Some(ref item) = current_track {
+                        QueueItemView {
+                            item: item.clone(),
+                            index: 0,
+                            is_current: true,
+                            on_click: on_track_click,
+                        }
+                    } else {
+                        div { class: "px-4 py-3 text-gray-500 text-sm", "Nothing playing" }
+                    }
+                }
+                // Up next section
+                div {
+                    div { class: "px-4 pt-4 pb-2",
+                        h3 { class: "text-sm font-semibold text-gray-400 uppercase tracking-wide",
+                            "Up next"
+                        }
+                    }
+                    if !queue.is_empty() {
+                        for (index , item) in queue.iter().enumerate() {
+                            QueueItemView {
+                                item: item.clone(),
+                                index,
+                                is_current: false,
+                                on_click: on_track_click,
+                                on_remove,
+                            }
+                        }
+                    } else {
+                        div { class: "px-4 py-3 text-gray-500 text-sm", "No tracks queued" }
+                    }
+                }
+            }
+            // Footer with controls
+            if has_actions {
+                div { class: "flex items-center justify-between p-4 border-t border-gray-700",
+                    button {
+                        class: "px-3 py-2 bg-gray-700 rounded hover:bg-gray-600 text-sm",
+                        onclick: move |_| {
+                            if let Some(ref h) = on_clear {
+                                h.call(());
+                            }
+                        },
+                        "Clear"
+                    }
+                    button {
+                        class: "px-3 py-2 bg-gray-700 rounded hover:bg-gray-600",
+                        onclick: move |_| {
+                            if let Some(ref h) = on_close {
+                                h.call(());
+                            }
+                        },
+                        "☰"
+                    }
+                }
+            }
+        }
+    }
 }
-/// Queue sidebar component - toggleable right sidebar showing playback queue
+
+#[component]
+fn QueueItemView(
+    item: QueueItem,
+    index: usize,
+    is_current: bool,
+    #[props(into)] on_click: Option<EventHandler<String>>,
+    #[props(into)] on_remove: Option<EventHandler<usize>>,
+) -> Element {
+    let clickable = on_click.is_some();
+
+    rsx! {
+        div { class: if is_current { "flex items-center gap-3 p-3 border-b border-gray-700 bg-blue-500/10 hover:bg-blue-500/15 group" } else { "flex items-center gap-3 p-3 border-b border-gray-700 hover:bg-gray-800 group" },
+            // Album cover
+            div { class: "w-12 h-12 flex-shrink-0 bg-gray-700 rounded overflow-hidden",
+                if let Some(ref url) = item.cover_url {
+                    img {
+                        src: "{url}",
+                        alt: "Album cover",
+                        class: "w-full h-full object-cover",
+                    }
+                } else {
+                    div { class: "w-full h-full flex items-center justify-center text-gray-500 text-xl",
+                        "🎵"
+                    }
+                }
+            }
+            // Track info
+            div { class: "flex-1 min-w-0",
+                div { class: "flex items-center gap-2",
+                    button {
+                        class: if is_current { "font-medium text-blue-300 hover:text-blue-200 text-left truncate flex-1" } else if clickable { "font-medium text-white hover:text-blue-300 text-left truncate flex-1" } else { "font-medium text-white text-left truncate flex-1" },
+                        disabled: !clickable,
+                        onclick: {
+                            let on_click = on_click;
+                            let track_id = item.track.id.clone();
+                            move |_| {
+                                if let Some(ref h) = on_click {
+                                    h.call(track_id.clone());
+                                }
+                            }
+                        },
+                        "{item.track.title}"
+                    }
+                    span { class: "text-sm text-gray-400 flex-shrink-0",
+                        if let Some(duration_ms) = item.track.duration_ms {
+                            {format_duration(duration_ms)}
+                        } else {
+                            "—:—"
+                        }
+                    }
+                }
+                div { class: "text-sm text-gray-400 truncate", "{item.album_title}" }
+            }
+            // Remove button (only for non-current tracks)
+            if !is_current && on_remove.is_some() {
+                button {
+                    class: "px-2 py-1 text-sm text-gray-400 hover:text-red-400 rounded opacity-0 group-hover:opacity-100 transition-opacity",
+                    onclick: {
+                        let on_remove = on_remove;
+                        move |_| {
+                            if let Some(ref h) = on_remove {
+                                h.call(index);
+                            }
+                        }
+                    },
+                    "✕"
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Real mode wrapper - handles state subscription and data loading
+// ============================================================================
+
+#[cfg(not(feature = "demo"))]
+use super::playback_hooks::{use_playback_queue, use_playback_service, use_playback_state};
+#[cfg(not(feature = "demo"))]
+use crate::db::{DbAlbum, DbTrack};
+#[cfg(not(feature = "demo"))]
+use crate::library::use_library_manager;
+#[cfg(not(feature = "demo"))]
+use crate::playback::PlaybackState;
+#[cfg(not(feature = "demo"))]
+use crate::ui::{image_url, Route};
+
+#[cfg(not(feature = "demo"))]
 #[component]
 pub fn QueueSidebar() -> Element {
     let sidebar_state = use_context::<QueueSidebarState>();
@@ -24,52 +196,25 @@ pub fn QueueSidebar() -> Element {
     let queue_hook = use_playback_queue();
     let playback_state = use_playback_state();
     let library_manager = use_library_manager();
-    let current_track = use_memo(move || match playback_state() {
+    let playback = use_playback_service();
+    let clear_fn = queue_hook.clear;
+
+    // Current track from playback state
+    let current_db_track = use_memo(move || match playback_state() {
         PlaybackState::Playing { ref track, .. } | PlaybackState::Paused { ref track, .. } => {
             Some(track.clone())
         }
         _ => None,
     });
-    let queue = queue_hook.tracks;
-    let playback = use_playback_service();
-    let clear_fn = queue_hook.clear;
-    let track_details = use_signal(std::collections::HashMap::<String, TrackWithAlbum>::new);
-    use_effect({
-        let library_manager = library_manager.clone();
-        move || {
-            let library_manager = library_manager.clone();
-            let queue_val = queue.read().clone();
-            let mut track_details = track_details;
-            spawn(async move {
-                let mut new_details = std::collections::HashMap::<String, TrackWithAlbum>::new();
-                for track_id in queue_val.iter() {
-                    if let Ok(Some(track)) = library_manager.get().get_track(track_id).await {
-                        new_details.insert(track_id.clone(), TrackWithAlbum { track, album: None });
-                    }
-                }
-                for (track_id, track_with_album) in new_details.iter_mut() {
-                    if let Ok(album_id) =
-                        library_manager.get().get_album_id_for_track(track_id).await
-                    {
-                        if let Ok(Some(album)) =
-                            library_manager.get().get_album_by_id(&album_id).await
-                        {
-                            track_with_album.album = Some(album);
-                        }
-                    }
-                }
-                track_details.set(new_details);
-            });
-        }
-    });
+
+    // Load album info for current track
     let mut current_track_album = use_signal(|| Option::<DbAlbum>::None);
     use_effect({
         let library_manager = library_manager.clone();
         move || {
-            if let Some(track) = current_track() {
+            if let Some(track) = current_db_track() {
                 let track_id = track.id.clone();
                 let library_manager = library_manager.clone();
-                let mut current_track_album = current_track_album;
                 spawn(async move {
                     if let Ok(album_id) = library_manager
                         .get()
@@ -88,154 +233,139 @@ pub fn QueueSidebar() -> Element {
             }
         }
     });
-    rsx! {
-        if is_open() {
-            div { class: "fixed top-0 right-0 h-full w-80 bg-gray-900 border-l border-gray-700 z-50 flex flex-col shadow-2xl",
-                div { class: "flex-1 overflow-y-auto",
-                    div {
-                        div { class: "px-4 pt-4 pb-2",
-                            h3 { class: "text-sm font-semibold text-gray-400 uppercase tracking-wide",
-                                "Now playing"
-                            }
-                        }
-                        if let Some(ref current_track_val) = current_track() {
-                            QueueItem {
-                                track_id: current_track_val.id.clone(),
-                                index: 0,
-                                is_current: true,
-                                track: current_track_val.clone(),
-                                album: current_track_album(),
-                                on_remove: move |_| {},
-                            }
+
+    // Queue track IDs
+    let queue_track_ids = queue_hook.tracks;
+
+    // Load track/album details for queue
+    let mut queue_details =
+        use_signal(std::collections::HashMap::<String, (DbTrack, Option<DbAlbum>)>::new);
+    use_effect({
+        let library_manager = library_manager.clone();
+        move || {
+            let library_manager = library_manager.clone();
+            let queue_val = queue_track_ids.read().clone();
+            spawn(async move {
+                let mut details = std::collections::HashMap::new();
+                for track_id in queue_val.iter() {
+                    if let Ok(Some(track)) = library_manager.get().get_track(track_id).await {
+                        let album = if let Ok(album_id) =
+                            library_manager.get().get_album_id_for_track(track_id).await
+                        {
+                            library_manager
+                                .get()
+                                .get_album_by_id(&album_id)
+                                .await
+                                .ok()
+                                .flatten()
                         } else {
-                            div { class: "px-4 py-3 text-gray-500 text-sm", "Nothing playing" }
-                        }
-                    }
-                    div {
-                        div { class: "px-4 pt-4 pb-2",
-                            h3 { class: "text-sm font-semibold text-gray-400 uppercase tracking-wide",
-                                "Up next"
-                            }
-                        }
-                        if !queue.read().is_empty() {
-                            for (index , track_id) in queue.read().iter().enumerate() {
-                                if let Some(track_with_album) = track_details.read().get(track_id).cloned() {
-                                    QueueItem {
-                                        track_id: track_id.clone(),
-                                        index,
-                                        is_current: false,
-                                        track: track_with_album.track,
-                                        album: track_with_album.album,
-                                        on_remove: {
-                                            let playback_clone = playback.clone();
-                                            move |idx| {
-                                                playback_clone.remove_from_queue(idx);
-                                            }
-                                        },
-                                    }
-                                }
-                            }
-                        } else {
-                            div { class: "px-4 py-3 text-gray-500 text-sm", "No tracks queued" }
-                        }
+                            None
+                        };
+                        details.insert(track_id.clone(), (track, album));
                     }
                 }
-                div { class: "flex items-center justify-between p-4 border-t border-gray-700",
-                    button {
-                        class: "px-3 py-2 bg-gray-700 rounded hover:bg-gray-600 text-sm",
-                        onclick: move |_| (clear_fn)(),
-                        "Clear"
-                    }
-                    button {
-                        class: "px-3 py-2 bg-gray-700 rounded hover:bg-gray-600",
-                        onclick: move |_| {
-                            is_open.set(false);
-                        },
-                        "☰"
-                    }
-                }
+                queue_details.set(details);
+            });
+        }
+    });
+
+    // Convert to display types
+    let current_track = use_memo(move || {
+        current_db_track().map(|track| {
+            let album = current_track_album();
+            let cover_url = album.as_ref().and_then(|a| {
+                a.cover_image_id
+                    .as_ref()
+                    .map(|id| image_url(id))
+                    .or_else(|| a.cover_art_url.clone())
+            });
+            QueueItem {
+                track: Track::from(&track),
+                album_title: album
+                    .map(|a| a.title)
+                    .unwrap_or_else(|| "Unknown Album".to_string()),
+                cover_url,
             }
+        })
+    });
+
+    let queue_items = use_memo(move || {
+        let ids = queue_track_ids.read();
+        let details = queue_details.read();
+        ids.iter()
+            .filter_map(|id| {
+                details.get(id).map(|(track, album)| {
+                    let cover_url = album.as_ref().and_then(|a| {
+                        a.cover_image_id
+                            .as_ref()
+                            .map(|id| image_url(id))
+                            .or_else(|| a.cover_art_url.clone())
+                    });
+                    QueueItem {
+                        track: Track::from(track),
+                        album_title: album
+                            .as_ref()
+                            .map(|a| a.title.clone())
+                            .unwrap_or_else(|| "Unknown Album".to_string()),
+                        cover_url,
+                    }
+                })
+            })
+            .collect::<Vec<_>>()
+    });
+
+    let current_track_id = use_memo(move || current_db_track().map(|t| t.id));
+
+    // Navigation callback
+    let on_track_click = {
+        let library_manager = library_manager.clone();
+        move |track_id: String| {
+            let library_manager = library_manager.clone();
+            spawn(async move {
+                if let Ok(album_id) = library_manager
+                    .get()
+                    .get_album_id_for_track(&track_id)
+                    .await
+                {
+                    navigator().push(Route::AlbumDetail {
+                        album_id,
+                        release_id: String::new(),
+                    });
+                }
+            });
+        }
+    };
+
+    rsx! {
+        QueueSidebarView {
+            is_open: is_open(),
+            current_track: current_track(),
+            queue: queue_items(),
+            current_track_id: current_track_id(),
+            on_close: move |_| is_open.set(false),
+            on_clear: move |_| (clear_fn)(),
+            on_remove: move |idx: usize| playback.remove_from_queue(idx),
+            on_track_click,
         }
     }
 }
-/// Individual queue item component
+
+// ============================================================================
+// Demo mode - render empty queue
+// ============================================================================
+
+#[cfg(feature = "demo")]
 #[component]
-fn QueueItem(
-    track_id: String,
-    index: usize,
-    is_current: bool,
-    track: DbTrack,
-    album: Option<DbAlbum>,
-    on_remove: EventHandler<usize>,
-) -> Element {
+pub fn QueueSidebar() -> Element {
+    let sidebar_state = use_context::<QueueSidebarState>();
+    let is_open = sidebar_state.is_open;
+
     rsx! {
-        div { class: if is_current { "flex items-center gap-3 p-3 border-b border-gray-700 bg-blue-500/10 hover:bg-blue-500/15 group" } else { "flex items-center gap-3 p-3 border-b border-gray-700 hover:bg-gray-800 group" },
-            div { class: "w-12 h-12 flex-shrink-0 bg-gray-700 rounded overflow-hidden",
-                if let Some(album) = &album {
-                    {
-                        let cover_url = album
-                            .cover_image_id
-                            .as_ref()
-                            .map(|id| image_url(id))
-                            .or_else(|| album.cover_art_url.clone());
-                        if let Some(url) = cover_url {
-                            rsx! {
-                                img { src: "{url}", alt: "Album cover", class: "w-full h-full object-cover" }
-                            }
-                        } else {
-                            rsx! {
-                                div { class: "w-full h-full flex items-center justify-center text-gray-500 text-xl",
-                                    "🎵"
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    div { class: "w-full h-full flex items-center justify-center text-gray-500 text-xl",
-                        "🎵"
-                    }
-                }
-            }
-            div { class: "flex-1 min-w-0",
-                div { class: "flex items-center gap-2",
-                    button {
-                        class: if is_current { "font-medium text-blue-300 hover:text-blue-200 text-left truncate flex-1" } else { "font-medium text-white hover:text-blue-300 text-left truncate flex-1" },
-                        onclick: {
-                            let album_id = album.as_ref().map(|a| a.id.clone());
-                            let navigator = navigator();
-                            move |_| {
-                                if let Some(album_id_clone) = album_id.clone() {
-                                    navigator
-                                        .push(Route::AlbumDetail {
-                                            album_id: album_id_clone,
-                                            release_id: String::new(),
-                                        });
-                                }
-                            }
-                        },
-                        "{track.title}"
-                    }
-                    span { class: "text-sm text-gray-400 flex-shrink-0",
-                        if let Some(duration_ms) = track.duration_ms {
-                            {format_duration(duration_ms)}
-                        } else {
-                            "—:—"
-                        }
-                    }
-                }
-                if let Some(album) = &album {
-                    div { class: "text-sm text-gray-400 truncate", "{album.title}" }
-                } else {
-                    div { class: "text-sm text-gray-400 truncate", "Loading..." }
-                }
-            }
-            if !is_current {
-                button {
-                    class: "px-2 py-1 text-sm text-gray-400 hover:text-red-400 rounded opacity-0 group-hover:opacity-100 transition-opacity",
-                    onclick: move |_| on_remove.call(index),
-                    "✕"
-                }
-            }
+        QueueSidebarView {
+            is_open: is_open(),
+            current_track: None,
+            queue: Vec::new(),
+            current_track_id: None,
         }
     }
 }

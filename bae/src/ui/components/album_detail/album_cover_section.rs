@@ -1,35 +1,26 @@
-use super::super::dialog_context::DialogContext;
 use super::album_art::AlbumArt;
-use crate::db::DbAlbum;
-use crate::library::use_library_manager;
-use crate::ui::image_url;
-use crate::AppContext;
+use crate::ui::display_types::Album;
 use dioxus::prelude::*;
-use rfd::AsyncFileDialog;
-use tracing::error;
+
 #[component]
 pub fn AlbumCoverSection(
-    album: DbAlbum,
+    album: Album,
     import_progress: ReadSignal<Option<u8>>,
     is_deleting: Signal<bool>,
     is_exporting: Signal<bool>,
-    export_error: Signal<Option<String>>,
-    on_album_deleted: EventHandler<()>,
     first_release_id: Option<String>,
     has_single_release: bool,
+    // Callbacks (all optional - if None, actions are hidden)
+    #[props(into)] on_export: Option<EventHandler<String>>,
+    #[props(into)] on_delete: Option<EventHandler<String>>,
+    #[props(into)] on_view_release_info: Option<EventHandler<String>>,
 ) -> Element {
-    let library_manager = use_library_manager();
-    let app_context = use_context::<AppContext>();
-    let dialog = use_context::<DialogContext>();
     let mut show_dropdown = use_signal(|| false);
     let mut hover_cover = use_signal(|| false);
-    let mut show_release_info_modal = use_signal(|| None::<String>);
-    let cover_url = album
-        .cover_image_id
-        .as_ref()
-        .map(|id| image_url(id))
-        .or_else(|| album.cover_art_url.clone());
-    let is_ephemeral_cover = album.cover_image_id.is_none() && album.cover_art_url.is_some();
+
+    // Check if we have any actions to show
+    let has_actions = on_export.is_some() || on_delete.is_some() || on_view_release_info.is_some();
+
     rsx! {
         div {
             class: "mb-6 relative",
@@ -37,11 +28,12 @@ pub fn AlbumCoverSection(
             onmouseleave: move |_| hover_cover.set(false),
             AlbumArt {
                 title: album.title.clone(),
-                cover_url,
+                cover_url: album.cover_url.clone(),
                 import_progress,
-                is_ephemeral: is_ephemeral_cover,
+                is_ephemeral: false,
             }
-            if hover_cover() || show_dropdown() {
+            // Only show dropdown button if we have actions
+            if has_actions && (hover_cover() || show_dropdown()) {
                 div { class: "absolute top-2 right-2 z-10",
                     button {
                         class: "w-8 h-8 bg-gray-800/40 hover:bg-gray-800/60 text-white rounded-lg flex items-center justify-center transition-colors",
@@ -61,121 +53,62 @@ pub fn AlbumCoverSection(
                     }
                     if show_dropdown() {
                         div { class: "absolute top-full right-0 mt-2 bg-gray-700 rounded-lg shadow-lg overflow-hidden z-20 border border-gray-600 min-w-[160px]",
+                            // Release Info - only for single release
                             if has_single_release {
                                 if let Some(ref release_id) = first_release_id {
-                                    button {
-                                        class: "w-full px-4 py-3 text-left text-white hover:bg-gray-600 transition-colors flex items-center gap-2",
-                                        disabled: is_deleting() || is_exporting(),
-                                        onclick: {
-                                            let release_id = release_id.clone();
-                                            move |evt| {
-                                                evt.stop_propagation();
-                                                show_dropdown.set(false);
-                                                if !is_deleting() && !is_exporting() {
-                                                    show_release_info_modal.set(Some(release_id.clone()));
+                                    if let Some(ref handler) = on_view_release_info {
+                                        button {
+                                            class: "w-full px-4 py-3 text-left text-white hover:bg-gray-600 transition-colors flex items-center gap-2",
+                                            disabled: is_deleting() || is_exporting(),
+                                            onclick: {
+                                                let release_id = release_id.clone();
+                                                let handler = *handler;
+                                                move |evt| {
+                                                    evt.stop_propagation();
+                                                    show_dropdown.set(false);
+                                                    handler.call(release_id.clone());
                                                 }
-                                            }
-                                        },
-                                        "Release Info"
+                                            },
+                                            "Release Info"
+                                        }
                                     }
-                                    button {
-                                        class: "w-full px-4 py-3 text-left text-white hover:bg-gray-600 transition-colors flex items-center gap-2",
-                                        disabled: is_deleting() || is_exporting(),
-                                        onclick: {
-                                            let release_id = release_id.clone();
-                                            let library_manager = library_manager.clone();
-                                            let cache = app_context.cache.clone();
-                                            move |evt| {
-                                                evt.stop_propagation();
-                                                show_dropdown.set(false);
-                                                if !is_deleting() && !is_exporting() {
-                                                    let release_id = release_id.clone();
-                                                    let library_manager = library_manager.clone();
-                                                    let cache = cache.clone();
-                                                    spawn(async move {
-                                                        is_exporting.set(true);
-                                                        export_error.set(None);
-                                                        if let Some(folder_handle) = AsyncFileDialog::new()
-                                                            .set_title("Select Export Directory")
-                                                            .pick_folder()
-                                                            .await
-                                                        {
-                                                            let target_dir = folder_handle.path().to_path_buf();
-                                                            match library_manager
-                                                                .get()
-                                                                .export_release(&release_id, &target_dir, &cache)
-                                                                .await
-                                                            {
-                                                                Ok(_) => {
-                                                                    is_exporting.set(false);
-                                                                }
-                                                                Err(e) => {
-                                                                    error!("Failed to export release: {}", e);
-                                                                    export_error.set(Some(format!("Export failed: {}", e)));
-                                                                    is_exporting.set(false);
-                                                                }
-                                                            }
-                                                        } else {
-                                                            is_exporting.set(false);
-                                                        }
-                                                    });
+                                    if let Some(ref handler) = on_export {
+                                        button {
+                                            class: "w-full px-4 py-3 text-left text-white hover:bg-gray-600 transition-colors flex items-center gap-2",
+                                            disabled: is_deleting() || is_exporting(),
+                                            onclick: {
+                                                let release_id = release_id.clone();
+                                                let handler = *handler;
+                                                move |evt| {
+                                                    evt.stop_propagation();
+                                                    show_dropdown.set(false);
+                                                    handler.call(release_id.clone());
                                                 }
+                                            },
+                                            if is_exporting() {
+                                                "Exporting..."
+                                            } else {
+                                                "Export"
                                             }
-                                        },
-                                        if is_exporting() {
-                                            "Exporting..."
-                                        } else {
-                                            "Export"
                                         }
                                     }
                                 }
                             }
-                            button {
-                                class: "w-full px-4 py-3 text-left text-red-400 hover:bg-gray-600 transition-colors flex items-center gap-2",
-                                disabled: is_deleting(),
-                                onclick: {
-                                    let album_id = album.id.clone();
-                                    let album_title = album.title.clone();
-                                    let dialog = dialog.clone();
-                                    let library_manager = library_manager.clone();
-                                    move |evt| {
-                                        evt.stop_propagation();
-                                        show_dropdown.set(false);
-                                        if is_deleting() {
-                                            return;
+                            if let Some(ref handler) = on_delete {
+                                button {
+                                    class: "w-full px-4 py-3 text-left text-red-400 hover:bg-gray-600 transition-colors flex items-center gap-2",
+                                    disabled: is_deleting(),
+                                    onclick: {
+                                        let album_id = album.id.clone();
+                                        let handler = *handler;
+                                        move |evt| {
+                                            evt.stop_propagation();
+                                            show_dropdown.set(false);
+                                            handler.call(album_id.clone());
                                         }
-                                        let album_id = album_id.clone();
-                                        let library_manager = library_manager.clone();
-                                        dialog
-                                            .show_with_callback(
-                                                "Delete Album?".to_string(),
-                                                format!(
-                                                    "Are you sure you want to delete \"{}\"? This will delete all releases, tracks, and associated data. This action cannot be undone.",
-                                                    album_title,
-                                                ),
-                                                "Delete".to_string(),
-                                                "Cancel".to_string(),
-                                                move || {
-                                                    let album_id = album_id.clone();
-                                                    let library_manager = library_manager.clone();
-                                                    spawn(async move {
-                                                        is_deleting.set(true);
-                                                        match library_manager.get().delete_album(&album_id).await {
-                                                            Ok(_) => {
-                                                                is_deleting.set(false);
-                                                                on_album_deleted.call(());
-                                                            }
-                                                            Err(e) => {
-                                                                error!("Failed to delete album: {}", e);
-                                                                is_deleting.set(false);
-                                                            }
-                                                        }
-                                                    });
-                                                },
-                                            );
-                                    }
-                                },
-                                "Delete Album"
+                                    },
+                                    "Delete Album"
+                                }
                             }
                         }
                     }
@@ -186,13 +119,6 @@ pub fn AlbumCoverSection(
             div {
                 class: "fixed inset-0 z-[5]",
                 onclick: move |_| show_dropdown.set(false),
-            }
-        }
-        if let Some(release_id) = show_release_info_modal() {
-            super::ReleaseInfoModal {
-                album: album.clone(),
-                release_id: release_id.clone(),
-                on_close: move |_| show_release_info_modal.set(None),
             }
         }
     }

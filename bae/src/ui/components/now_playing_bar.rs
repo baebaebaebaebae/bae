@@ -1,33 +1,126 @@
+//! Now Playing Bar component
+//!
+//! Props-based component for displaying current playback state.
+
 use super::super::LOADING_SPINNER_DELAY_MS;
 use super::queue_sidebar::QueueSidebarState;
-use super::use_playback_service;
-use crate::db::DbTrack;
-use crate::library::use_library_manager;
-use crate::playback::{PlaybackProgress, PlaybackState};
-use crate::ui::{image_url, Route};
+use crate::ui::display_types::{PlaybackDisplay, Track};
 use dioxus::prelude::*;
 
+/// Now playing bar view (pure, props-based)
 #[component]
-fn PlaybackControlsZone(
-    on_previous: EventHandler<()>,
-    on_pause: EventHandler<()>,
-    on_resume: EventHandler<()>,
-    on_next: EventHandler<()>,
-    is_playing: ReadSignal<bool>,
-    is_paused: ReadSignal<bool>,
-    is_loading: ReadSignal<bool>,
-    is_stopped: ReadSignal<bool>,
+pub fn NowPlayingBarView(
+    // Track info
+    track: Option<Track>,
+    artist_name: String,
+    cover_url: Option<String>,
+    // Playback state
+    playback: PlaybackDisplay,
+    position_ms: u64,
+    duration_ms: u64,
+    #[props(default)] pregap_ms: Option<i64>,
+    // Callbacks (optional for demo mode)
+    #[props(into)] on_previous: Option<EventHandler<()>>,
+    #[props(into)] on_pause: Option<EventHandler<()>>,
+    #[props(into)] on_resume: Option<EventHandler<()>>,
+    #[props(into)] on_next: Option<EventHandler<()>>,
+    #[props(into)] on_seek: Option<EventHandler<u64>>,
+    #[props(into)] on_toggle_queue: Option<EventHandler<()>>,
+    #[props(into)] on_track_click: Option<EventHandler<String>>,
 ) -> Element {
-    // Delayed loading state - only show spinner after delay to avoid flicker
+    let is_playing = matches!(playback, PlaybackDisplay::Playing { .. });
+    let is_paused = matches!(playback, PlaybackDisplay::Paused { .. });
+    let is_loading = matches!(playback, PlaybackDisplay::Loading { .. });
+    let is_stopped = matches!(playback, PlaybackDisplay::Stopped);
+
+    let has_controls = on_previous.is_some();
+
+    rsx! {
+        div { class: "fixed bottom-0 left-0 right-0 bg-gray-800 text-white p-4 border-t border-gray-700",
+            div { class: "flex items-center gap-4",
+                PlaybackControlsView {
+                    is_playing,
+                    is_paused,
+                    is_loading,
+                    is_stopped,
+                    on_previous,
+                    on_pause,
+                    on_resume,
+                    on_next,
+                }
+
+                AlbumCoverThumbnailView {
+                    cover_url: cover_url.clone(),
+                    on_click: on_track_click
+                        .map(|h| {
+                            let track_id = track.as_ref().map(|t| t.id.clone());
+                            EventHandler::new(move |_: ()| {
+                                if let Some(ref id) = track_id {
+                                    h.call(id.clone());
+                                }
+                            })
+                        }),
+                }
+
+                TrackInfoView {
+                    track: track.clone(),
+                    artist_name: artist_name.clone(),
+                    is_loading,
+                    on_click: on_track_click
+                        .map(|h| {
+                            let track_id = track.as_ref().map(|t| t.id.clone());
+                            EventHandler::new(move |_: ()| {
+                                if let Some(ref id) = track_id {
+                                    h.call(id.clone());
+                                }
+                            })
+                        }),
+                }
+
+                PositionView {
+                    position_ms,
+                    duration_ms,
+                    pregap_ms,
+                    on_seek,
+                }
+
+                if has_controls {
+                    button {
+                        class: "px-3 py-2 bg-gray-700 rounded hover:bg-gray-600",
+                        onclick: move |_| {
+                            if let Some(ref h) = on_toggle_queue {
+                                h.call(());
+                            }
+                        },
+                        "☰"
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn PlaybackControlsView(
+    is_playing: bool,
+    is_paused: bool,
+    is_loading: bool,
+    is_stopped: bool,
+    #[props(into)] on_previous: Option<EventHandler<()>>,
+    #[props(into)] on_pause: Option<EventHandler<()>>,
+    #[props(into)] on_resume: Option<EventHandler<()>>,
+    #[props(into)] on_next: Option<EventHandler<()>>,
+) -> Element {
     let mut show_spinner = use_signal(|| false);
+    let is_loading_signal = use_signal(move || is_loading);
 
     use_effect(move || {
-        let loading = is_loading();
-        if loading {
+        if is_loading {
+            let is_loading_signal = is_loading_signal;
             spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(LOADING_SPINNER_DELAY_MS))
                     .await;
-                if is_loading() {
+                if is_loading_signal() {
                     show_spinner.set(true);
                 }
             });
@@ -36,18 +129,22 @@ fn PlaybackControlsZone(
         }
     });
 
-    // Fixed-size button class for consistent dimensions
     let main_btn_base = "w-10 h-10 rounded flex items-center justify-center";
+    let has_controls = on_previous.is_some();
 
     rsx! {
         div { class: "flex items-center gap-2",
             button {
-                class: if is_loading() { "px-3 py-2 bg-gray-700 rounded opacity-50" } else { "px-3 py-2 bg-gray-700 rounded hover:bg-gray-600" },
-                disabled: is_loading(),
-                onclick: move |_| on_previous.call(()),
+                class: if is_loading || !has_controls { "px-3 py-2 bg-gray-700 rounded opacity-50" } else { "px-3 py-2 bg-gray-700 rounded hover:bg-gray-600" },
+                disabled: is_loading || !has_controls,
+                onclick: move |_| {
+                    if let Some(ref h) = on_previous {
+                        h.call(());
+                    }
+                },
                 "⏮"
             }
-            if is_playing() {
+            if is_playing {
                 if show_spinner() {
                     button {
                         class: "{main_btn_base} bg-blue-600 opacity-50",
@@ -57,12 +154,17 @@ fn PlaybackControlsZone(
                 } else {
                     button {
                         class: "{main_btn_base} bg-blue-600 hover:bg-blue-500",
-                        onclick: move |_| on_pause.call(()),
+                        disabled: !has_controls,
+                        onclick: move |_| {
+                            if let Some(ref h) = on_pause {
+                                h.call(());
+                            }
+                        },
                         "⏸"
                     }
                 }
             } else {
-                if is_stopped() {
+                if is_stopped {
                     button {
                         class: "{main_btn_base} bg-gray-700 opacity-50",
                         disabled: true,
@@ -77,54 +179,45 @@ fn PlaybackControlsZone(
                 } else {
                     button {
                         class: "{main_btn_base} bg-green-600 hover:bg-green-500",
-                        onclick: move |_| on_resume.call(()),
+                        disabled: !has_controls,
+                        onclick: move |_| {
+                            if let Some(ref h) = on_resume {
+                                h.call(());
+                            }
+                        },
                         "▶"
                     }
                 }
             }
             button {
-                class: if is_loading() { "px-3 py-2 bg-gray-700 rounded opacity-50" } else { "px-3 py-2 bg-gray-700 rounded hover:bg-gray-600" },
-                disabled: is_loading(),
-                onclick: move |_| on_next.call(()),
+                class: if is_loading || !has_controls { "px-3 py-2 bg-gray-700 rounded opacity-50" } else { "px-3 py-2 bg-gray-700 rounded hover:bg-gray-600" },
+                disabled: is_loading || !has_controls,
+                onclick: move |_| {
+                    if let Some(ref h) = on_next {
+                        h.call(());
+                    }
+                },
                 "⏭"
             }
         }
     }
 }
+
 #[component]
-fn AlbumCoverThumbnail(
-    cover_url: ReadSignal<Option<String>>,
-    track: ReadSignal<Option<DbTrack>>,
+fn AlbumCoverThumbnailView(
+    cover_url: Option<String>,
+    #[props(into)] on_click: Option<EventHandler<()>>,
 ) -> Element {
-    let library_manager = use_library_manager();
+    let clickable = on_click.is_some();
     rsx! {
         div {
-            class: "w-10 h-10 bg-gray-700 rounded-sm flex items-center justify-center overflow-hidden flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity",
-            onclick: {
-                let library_manager = library_manager.clone();
-                let navigator = navigator();
-                move |_| {
-                    let track = track();
-                    if let Some(track) = track {
-                        let track = track.clone();
-                        let library_manager = library_manager.clone();
-                        spawn(async move {
-                            if let Ok(album_id) = library_manager
-                                .get()
-                                .get_album_id_for_release(&track.release_id)
-                                .await
-                            {
-                                navigator
-                                    .push(Route::AlbumDetail {
-                                        album_id,
-                                        release_id: track.release_id.clone(),
-                                    });
-                            }
-                        });
-                    }
+            class: if clickable { "w-10 h-10 bg-gray-700 rounded-sm flex items-center justify-center overflow-hidden flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity" } else { "w-10 h-10 bg-gray-700 rounded-sm flex items-center justify-center overflow-hidden flex-shrink-0" },
+            onclick: move |_| {
+                if let Some(ref h) = on_click {
+                    h.call(());
                 }
             },
-            if let Some(url) = cover_url() {
+            if let Some(ref url) = cover_url {
                 img {
                     src: "{url}",
                     alt: "Album cover",
@@ -136,44 +229,29 @@ fn AlbumCoverThumbnail(
         }
     }
 }
+
 #[component]
-fn TrackInfoZone(
-    track: ReadSignal<Option<DbTrack>>,
-    artist_name: ReadSignal<String>,
-    is_loading: ReadSignal<bool>,
+fn TrackInfoView(
+    track: Option<Track>,
+    artist_name: String,
+    is_loading: bool,
+    #[props(into)] on_click: Option<EventHandler<()>>,
 ) -> Element {
-    let library_manager = use_library_manager();
+    let clickable = on_click.is_some();
     rsx! {
         div { class: "flex-1",
-            if let Some(track) = track() {
+            if let Some(ref track) = track {
                 div {
-                    class: "font-semibold cursor-pointer hover:text-blue-300 transition-colors",
-                    onclick: {
-                        let track = track.clone();
-                        let library_manager = library_manager.clone();
-                        let navigator = navigator();
-                        move |_| {
-                            let track = track.clone();
-                            let library_manager = library_manager.clone();
-                            spawn(async move {
-                                if let Ok(album_id) = library_manager
-                                    .get()
-                                    .get_album_id_for_release(&track.release_id)
-                                    .await
-                                {
-                                    navigator
-                                        .push(Route::AlbumDetail {
-                                            album_id,
-                                            release_id: track.release_id.clone(),
-                                        });
-                                }
-                            });
+                    class: if clickable { "font-semibold cursor-pointer hover:text-blue-300 transition-colors" } else { "font-semibold" },
+                    onclick: move |_| {
+                        if let Some(ref h) = on_click {
+                            h.call(());
                         }
                     },
                     "{track.title}"
                 }
-                div { class: "text-sm text-gray-400", "{artist_name()}" }
-            } else if is_loading() {
+                div { class: "text-sm text-gray-400", "{artist_name}" }
+            } else if is_loading {
                 div { class: "font-semibold text-gray-400", "Loading..." }
                 div { class: "text-sm text-gray-500", "Loading" }
             } else {
@@ -183,25 +261,23 @@ fn TrackInfoZone(
         }
     }
 }
-fn format_duration(duration: std::time::Duration) -> String {
-    let total_secs = duration.as_secs();
+
+fn format_duration_ms(ms: u64) -> String {
+    let total_secs = ms / 1000;
     let mins = total_secs / 60;
     let secs = total_secs % 60;
     format!("{:02}:{:02}", mins, secs)
 }
 
-/// Format duration with pregap support (shows negative time during pregap)
 fn format_display_time(position_ms: u64, pregap_ms: Option<i64>) -> String {
-    let pregap = pregap_ms.unwrap_or(0) as u64;
+    let pregap = pregap_ms.unwrap_or(0).max(0) as u64;
     if position_ms < pregap {
-        // In pregap: show negative time
         let remaining_ms = pregap - position_ms;
         let total_secs = remaining_ms / 1000;
         let mins = total_secs / 60;
         let secs = total_secs % 60;
         format!("-{:02}:{:02}", mins, secs)
     } else {
-        // Past pregap: show normal time (position - pregap)
         let adjusted_ms = position_ms - pregap;
         let total_secs = adjusted_ms / 1000;
         let mins = total_secs / 60;
@@ -211,33 +287,32 @@ fn format_display_time(position_ms: u64, pregap_ms: Option<i64>) -> String {
 }
 
 #[component]
-fn PositionZone(
-    position: ReadSignal<Option<std::time::Duration>>,
-    duration: ReadSignal<Option<std::time::Duration>>,
-    pregap_ms: ReadSignal<Option<i64>>,
-    is_paused: ReadSignal<bool>,
-    on_seek: EventHandler<std::time::Duration>,
-    is_seeking: Signal<bool>,
+fn PositionView(
+    position_ms: u64,
+    duration_ms: u64,
+    pregap_ms: Option<i64>,
+    #[props(into)] on_seek: Option<EventHandler<u64>>,
 ) -> Element {
-    let mut local_position = use_signal(|| *position.read());
+    let mut local_position_ms = use_signal(|| position_ms);
+    let mut is_seeking = use_signal(|| false);
+
     use_effect(move || {
         if !is_seeking() {
-            local_position.set(*position.read());
+            local_position_ms.set(position_ms);
         }
     });
+
+    let has_position = position_ms > 0 || duration_ms > 0;
+    let has_seek = on_seek.is_some();
+
     rsx! {
-        if let Some(pos) = local_position() {
+        if has_position {
             div { class: "flex items-center gap-2 text-sm text-gray-400",
-                span { class: "w-12 text-right",
-                    "{format_display_time(pos.as_millis() as u64, pregap_ms())}"
-                }
-                if let Some(duration) = duration() {
+                span { class: "w-12 text-right", "{format_display_time(local_position_ms(), pregap_ms)}" }
+                if duration_ms > 0 {
                     {
-                        // Calculate progress bar position with pregap offset
-                        let pregap = pregap_ms().unwrap_or(0).max(0) as u64;
-                        let pos_ms = pos.as_millis() as u64;
-                        let adjusted_pos = pos_ms.saturating_sub(pregap);
-                        let duration_ms = duration.as_millis() as u64;
+                        let pregap = pregap_ms.unwrap_or(0).max(0) as u64;
+                        let adjusted_pos = local_position_ms().saturating_sub(pregap);
                         let progress_percent = if duration_ms > 0 {
                             (adjusted_pos as f64 / duration_ms as f64 * 100.0).min(100.0)
                         } else {
@@ -250,32 +325,28 @@ fn PositionZone(
                                 class: "w-64 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer",
                                 style: "background: linear-gradient(to right, #3b82f6 0%, #3b82f6 {progress_percent}%, #374151 {progress_percent}%, #374151 100%);",
                                 min: "0",
-                                max: "{duration.as_secs()}",
+                                max: "{duration_ms / 1000}",
                                 value: "{adjusted_pos / 1000}",
+                                disabled: !has_seek,
                                 onmousedown: move |_| {
                                     is_seeking.set(true);
                                 },
                                 onmouseup: move |_| {
                                     if is_seeking() {
-                                        // Trigger seek with current local_position
-                                        // (onchange doesn't fire reliably for range inputs in Dioxus)
-                                        if let Some(pos) = local_position() {
-                                            on_seek.call(pos);
+                                        if let Some(ref h) = on_seek {
+                                            h.call(local_position_ms());
                                         }
-                                        // Don't clear is_seeking here - the Seeked/SeekError/SeekSkipped
-                                        // event from the playback service will clear it once the seek
-                                        // actually completes.
+                                        is_seeking.set(false);
                                     }
                                 },
                                 oninput: move |evt| {
                                     if let Ok(secs) = evt.value().parse::<u64>() {
-                                        // Add pregap back when user scrubs
-                                        let pregap_secs = pregap_ms().unwrap_or(0).max(0) as u64 / 1000;
-                                        local_position.set(Some(std::time::Duration::from_secs(secs + pregap_secs)));
+                                        let pregap_ms_val = pregap_ms.unwrap_or(0).max(0) as u64;
+                                        local_position_ms.set(secs * 1000 + pregap_ms_val);
                                     }
                                 },
                             }
-                            span { class: "w-12", "{format_duration(duration)}" }
+                            span { class: "w-12", "{format_duration_ms(duration_ms)}" }
                         }
                     }
                 } else {
@@ -293,6 +364,23 @@ fn PositionZone(
         }
     }
 }
+
+// ============================================================================
+// Real mode wrapper - handles state subscription
+// ============================================================================
+
+#[cfg(not(feature = "demo"))]
+use super::use_playback_service;
+#[cfg(not(feature = "demo"))]
+use crate::db::DbTrack;
+#[cfg(not(feature = "demo"))]
+use crate::library::use_library_manager;
+#[cfg(not(feature = "demo"))]
+use crate::playback::{PlaybackProgress, PlaybackState};
+#[cfg(not(feature = "demo"))]
+use crate::ui::{image_url, Route};
+
+#[cfg(not(feature = "demo"))]
 #[component]
 pub fn NowPlayingBar() -> Element {
     let playback = use_playback_service();
@@ -300,8 +388,9 @@ pub fn NowPlayingBar() -> Element {
     let mut state = use_signal(|| PlaybackState::Stopped);
     let mut current_artist = use_signal(|| "Unknown Artist".to_string());
     let mut cover_art_url = use_signal(|| Option::<String>::None);
-    let mut is_seeking = use_signal(|| false);
     let mut playback_error = use_signal(|| Option::<String>::None);
+
+    // Subscribe to playback progress
     use_effect({
         let playback = playback.clone();
         let library_manager = library_manager.clone();
@@ -312,162 +401,22 @@ pub fn NowPlayingBar() -> Element {
                 let mut progress_rx = playback.subscribe_progress();
                 while let Some(progress) = progress_rx.recv().await {
                     match progress {
-                        PlaybackProgress::SeekError {
-                            requested_position: _,
-                            track_duration: _,
-                        } => {
-                            if is_seeking() {
-                                is_seeking.set(false);
-                            }
-                            tracing::warn!("Seek failed: requested position past track end");
-                        }
-                        PlaybackProgress::Seeked {
-                            position,
-                            track_id: _,
-                            was_paused,
-                        } => {
-                            if is_seeking() {
-                                is_seeking.set(false);
-                            }
-                            match state() {
-                                PlaybackState::Playing {
-                                    ref track,
-                                    duration,
-                                    decoded_duration,
-                                    pregap_ms,
-                                    ..
-                                }
-                                | PlaybackState::Paused {
-                                    ref track,
-                                    duration,
-                                    decoded_duration,
-                                    pregap_ms,
-                                    ..
-                                } => {
-                                    let new_state = if was_paused {
-                                        PlaybackState::Paused {
-                                            track: track.clone(),
-                                            position,
-                                            duration,
-                                            decoded_duration,
-                                            pregap_ms,
-                                        }
-                                    } else {
-                                        PlaybackState::Playing {
-                                            track: track.clone(),
-                                            position,
-                                            duration,
-                                            decoded_duration,
-                                            pregap_ms,
-                                        }
-                                    };
-                                    state.set(new_state);
-                                }
-                                _ => {}
-                            }
-                        }
-                        PlaybackProgress::SeekSkipped {
-                            requested_position: _,
-                            current_position: _,
-                        } => {
-                            if is_seeking() {
-                                is_seeking.set(false);
-                            }
-                        }
                         PlaybackProgress::StateChanged { state: new_state } => {
                             state.set(new_state.clone());
-                            if is_seeking() {
-                                is_seeking.set(false);
-                            }
                             if let PlaybackState::Playing { ref track, .. }
                             | PlaybackState::Paused { ref track, .. } = new_state
                             {
-                                let release_id = track.release_id.clone();
-                                let library_manager_for_artist = library_manager.clone();
-                                spawn(async move {
-                                    match library_manager_for_artist
-                                        .get()
-                                        .get_album_id_for_release(&release_id)
-                                        .await
-                                    {
-                                        Ok(album_id) => {
-                                            match library_manager_for_artist
-                                                .get()
-                                                .get_artists_for_album(&album_id)
-                                                .await
-                                            {
-                                                Ok(artists) => {
-                                                    if !artists.is_empty() {
-                                                        let artist_names: Vec<_> = artists
-                                                            .iter()
-                                                            .map(|a| a.name.as_str())
-                                                            .collect();
-                                                        current_artist.set(artist_names.join(", "));
-                                                    } else {
-                                                        current_artist
-                                                            .set("Unknown Artist".to_string());
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    tracing::error!(
-                                                        "Failed to fetch album artists for album {}: {}", album_id,
-                                                        e
-                                                    );
-                                                    current_artist
-                                                        .set("Unknown Artist".to_string());
-                                                }
-                                            }
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(
-                                                "No album found for release {}: {}",
-                                                release_id,
-                                                e
-                                            );
-                                            current_artist.set("Unknown Artist".to_string());
-                                        }
-                                    }
-                                });
+                                load_track_metadata(
+                                    &library_manager,
+                                    track,
+                                    &mut current_artist,
+                                    &mut cover_art_url,
+                                );
                             }
                         }
                         PlaybackProgress::PositionUpdate { position, .. } => {
-                            if is_seeking() {
-                                continue;
-                            }
-                            if let PlaybackState::Playing {
-                                ref track,
-                                duration,
-                                decoded_duration,
-                                pregap_ms,
-                                ..
-                            } = state()
-                            {
-                                state.set(PlaybackState::Playing {
-                                    track: track.clone(),
-                                    position,
-                                    duration,
-                                    decoded_duration,
-                                    pregap_ms,
-                                });
-                            } else if let PlaybackState::Paused {
-                                ref track,
-                                duration,
-                                decoded_duration,
-                                pregap_ms,
-                                ..
-                            } = state()
-                            {
-                                state.set(PlaybackState::Paused {
-                                    track: track.clone(),
-                                    position,
-                                    duration,
-                                    decoded_duration,
-                                    pregap_ms,
-                                });
-                            }
+                            update_position(&mut state, position);
                         }
-                        PlaybackProgress::TrackCompleted { .. } => {}
-                        PlaybackProgress::QueueUpdated { .. } => {}
                         PlaybackProgress::PlaybackError { message } => {
                             playback_error.set(Some(message.clone()));
                             spawn(async move {
@@ -475,193 +424,104 @@ pub fn NowPlayingBar() -> Element {
                                 playback_error.set(None);
                             });
                         }
-                        PlaybackProgress::DecodeStats { error_count, .. } => {
-                            // Log decode errors for debugging, could show in UI later
-                            if error_count > 0 {
-                                tracing::warn!(
-                                    "Track had {} decode errors (audio may be corrupted)",
-                                    error_count
-                                );
-                            }
+                        PlaybackProgress::Seeked {
+                            position,
+                            was_paused,
+                            ..
+                        } => {
+                            update_position_after_seek(&mut state, position, was_paused);
                         }
+                        _ => {}
                     }
                 }
             });
         }
     });
-    // Use signals to preserve track info during Loading state transitions.
-    // This prevents the flickery "Loading..." flash when changing tracks.
-    let mut track = use_signal(|| None::<DbTrack>);
-    let mut position = use_signal(|| None::<std::time::Duration>);
-    let mut duration = use_signal(|| None::<std::time::Duration>);
-    let mut pregap_ms = use_signal(|| None::<i64>);
 
-    // Update signals based on state, preserving values during Loading
-    use_effect(move || {
-        match state() {
-            PlaybackState::Playing {
-                track: ref t,
-                position: pos,
-                duration: dur,
-                pregap_ms: pregap,
-                ..
-            }
-            | PlaybackState::Paused {
-                track: ref t,
-                position: pos,
-                duration: dur,
-                pregap_ms: pregap,
-                ..
-            } => {
-                track.set(Some(t.clone()));
-                position.set(Some(pos));
-                duration.set(dur);
-                pregap_ms.set(pregap);
-            }
-            PlaybackState::Loading { .. } => {
-                // Keep previous values - don't update anything
-            }
-            PlaybackState::Stopped => {
-                track.set(None);
-                position.set(None);
-                duration.set(None);
-                pregap_ms.set(None);
-            }
+    // Extract values from state for props
+    let track = use_memo(move || match state() {
+        PlaybackState::Playing { ref track, .. } | PlaybackState::Paused { ref track, .. } => {
+            Some(Track::from(track))
         }
+        _ => None,
     });
 
-    let is_playing = use_memo(move || matches!(state(), PlaybackState::Playing { .. }));
-    let is_paused = use_memo(move || matches!(state(), PlaybackState::Paused { .. }));
-    let is_loading = use_memo(move || matches!(state(), PlaybackState::Loading { .. }));
-    let is_stopped = use_memo(move || matches!(state(), PlaybackState::Stopped));
-    use_effect({
-        let library_manager = library_manager.clone();
-        move || {
-            let library_manager = library_manager.clone();
-            let track_val = track();
-            if let Some(track) = track_val {
-                let release_id = track.release_id.clone();
-                spawn(async move {
-                    match library_manager
-                        .get()
-                        .get_album_id_for_release(&release_id)
-                        .await
-                    {
-                        Ok(album_id) => {
-                            match library_manager.get().get_artists_for_album(&album_id).await {
-                                Ok(artists) => {
-                                    if !artists.is_empty() {
-                                        let artist_names: Vec<_> =
-                                            artists.iter().map(|a| a.name.as_str()).collect();
-                                        current_artist.set(artist_names.join(", "));
-                                    } else {
-                                        current_artist.set("Unknown Artist".to_string());
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::error!(
-                                        "Failed to fetch album artists for album {}: {}",
-                                        album_id,
-                                        e
-                                    );
-                                    current_artist.set("Unknown Artist".to_string());
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tracing::warn!("No album found for release {}: {}", release_id, e);
-                            current_artist.set("Unknown Artist".to_string());
-                        }
-                    }
-                });
-            } else {
-                current_artist.set("Unknown Artist".to_string());
-            }
+    let playback_display = use_memo(move || PlaybackDisplay::from(&state()));
+
+    let position_ms = use_memo(move || match state() {
+        PlaybackState::Playing { position, .. } | PlaybackState::Paused { position, .. } => {
+            position.as_millis() as u64
         }
+        _ => 0,
     });
-    let artist_name = use_memo(move || current_artist.read().clone());
-    use_effect({
-        let library_manager = library_manager.clone();
-        move || {
-            let library_manager = library_manager.clone();
-            let track_val = track();
-            if let Some(track) = track_val {
-                let release_id = track.release_id.clone();
-                spawn(async move {
-                    match library_manager
-                        .get()
-                        .get_album_id_for_release(&release_id)
-                        .await
-                    {
-                        Ok(album_id) => {
-                            match library_manager.get().get_album_by_id(&album_id).await {
-                                Ok(Some(album)) => {
-                                    let url = album
-                                        .cover_image_id
-                                        .as_ref()
-                                        .map(|id| image_url(id))
-                                        .or_else(|| album.cover_art_url.clone());
-                                    cover_art_url.set(url);
-                                }
-                                Ok(None) => {
-                                    cover_art_url.set(None);
-                                }
-                                Err(e) => {
-                                    tracing::error!("Failed to fetch album {}: {}", album_id, e);
-                                    cover_art_url.set(None);
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tracing::warn!("No album found for release {}: {}", release_id, e);
-                            cover_art_url.set(None);
-                        }
-                    }
-                });
-            } else {
-                cover_art_url.set(None);
-            }
+
+    let duration_ms = use_memo(move || match state() {
+        PlaybackState::Playing { duration, .. } | PlaybackState::Paused { duration, .. } => {
+            duration.map(|d| d.as_millis() as u64).unwrap_or(0)
         }
+        _ => 0,
     });
-    let cover_url = use_memo(move || cover_art_url.read().clone());
-    let playback_prev = playback.clone();
-    let playback_pause = playback.clone();
-    let playback_resume = playback.clone();
-    let playback_next = playback.clone();
-    let playback_seek = playback.clone();
+
+    let pregap_ms = use_memo(move || match state() {
+        PlaybackState::Playing { pregap_ms, .. } | PlaybackState::Paused { pregap_ms, .. } => {
+            pregap_ms
+        }
+        _ => None,
+    });
+
+    // Callbacks
+    let playback_for_prev = playback.clone();
+    let playback_for_pause = playback.clone();
+    let playback_for_resume = playback.clone();
+    let playback_for_next = playback.clone();
+    let playback_for_seek = playback.clone();
+
     let mut queue_sidebar_open = use_context::<QueueSidebarState>();
-    rsx! {
-        div { class: "fixed bottom-0 left-0 right-0 bg-gray-800 text-white p-4 border-t border-gray-700",
-            div { class: "flex items-center gap-4",
-                PlaybackControlsZone {
-                    on_previous: move |_| playback_prev.previous(),
-                    on_pause: move |_| playback_pause.pause(),
-                    on_resume: move |_| playback_resume.resume(),
-                    on_next: move |_| playback_next.next(),
-                    is_playing,
-                    is_paused,
-                    is_loading,
-                    is_stopped,
-                }
-                AlbumCoverThumbnail { cover_url, track }
-                TrackInfoZone { track, artist_name, is_loading }
-                PositionZone {
-                    position,
-                    duration,
-                    pregap_ms,
-                    is_paused,
-                    on_seek: move |duration| playback_seek.seek(duration),
-                    is_seeking,
-                }
-                button {
-                    class: "px-3 py-2 bg-gray-700 rounded hover:bg-gray-600",
-                    onclick: move |_| {
-                        let current = *queue_sidebar_open.is_open.read();
-                        queue_sidebar_open.is_open.set(!current);
-                    },
-                    "☰"
-                }
+
+    let on_track_click = {
+        let library_manager = library_manager.clone();
+        move |_track_id: String| {
+            let state_val = state();
+            if let PlaybackState::Playing { ref track, .. }
+            | PlaybackState::Paused { ref track, .. } = state_val
+            {
+                let release_id = track.release_id.clone();
+                let library_manager = library_manager.clone();
+                spawn(async move {
+                    if let Ok(album_id) = library_manager
+                        .get()
+                        .get_album_id_for_release(&release_id)
+                        .await
+                    {
+                        navigator().push(Route::AlbumDetail {
+                            album_id,
+                            release_id,
+                        });
+                    }
+                });
             }
+        }
+    };
+
+    rsx! {
+        NowPlayingBarView {
+            track: track(),
+            artist_name: current_artist(),
+            cover_url: cover_art_url(),
+            playback: playback_display(),
+            position_ms: position_ms(),
+            duration_ms: duration_ms(),
+            pregap_ms: pregap_ms(),
+            on_previous: move |_| playback_for_prev.previous(),
+            on_pause: move |_| playback_for_pause.pause(),
+            on_resume: move |_| playback_for_resume.resume(),
+            on_next: move |_| playback_for_next.next(),
+            on_seek: move |ms: u64| playback_for_seek.seek(std::time::Duration::from_millis(ms)),
+            on_toggle_queue: move |_| {
+                let current = *queue_sidebar_open.is_open.read();
+                queue_sidebar_open.is_open.set(!current);
+            },
+            on_track_click,
         }
         if let Some(error) = playback_error() {
             div { class: "fixed bottom-20 right-4 bg-red-600 text-white px-6 py-4 rounded-lg shadow-lg z-50 max-w-md",
@@ -674,6 +534,145 @@ pub fn NowPlayingBar() -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+#[cfg(not(feature = "demo"))]
+fn load_track_metadata(
+    library_manager: &crate::library::SharedLibraryManager,
+    track: &DbTrack,
+    current_artist: &mut Signal<String>,
+    cover_art_url: &mut Signal<Option<String>>,
+) {
+    let release_id = track.release_id.clone();
+    let library_manager = library_manager.clone();
+    let mut current_artist = *current_artist;
+    let mut cover_art_url = *cover_art_url;
+    spawn(async move {
+        if let Ok(album_id) = library_manager
+            .get()
+            .get_album_id_for_release(&release_id)
+            .await
+        {
+            if let Ok(artists) = library_manager.get().get_artists_for_album(&album_id).await {
+                if !artists.is_empty() {
+                    let names: Vec<_> = artists.iter().map(|a| a.name.as_str()).collect();
+                    current_artist.set(names.join(", "));
+                } else {
+                    current_artist.set("Unknown Artist".to_string());
+                }
+            }
+            if let Ok(Some(album)) = library_manager.get().get_album_by_id(&album_id).await {
+                let url = album
+                    .cover_image_id
+                    .as_ref()
+                    .map(|id| image_url(id))
+                    .or(album.cover_art_url);
+                cover_art_url.set(url);
+            }
+        }
+    });
+}
+
+#[cfg(not(feature = "demo"))]
+fn update_position(state: &mut Signal<PlaybackState>, position: std::time::Duration) {
+    let current = state();
+    match current {
+        PlaybackState::Playing {
+            ref track,
+            duration,
+            decoded_duration,
+            pregap_ms,
+            ..
+        } => {
+            state.set(PlaybackState::Playing {
+                track: track.clone(),
+                position,
+                duration,
+                decoded_duration,
+                pregap_ms,
+            });
+        }
+        PlaybackState::Paused {
+            ref track,
+            duration,
+            decoded_duration,
+            pregap_ms,
+            ..
+        } => {
+            state.set(PlaybackState::Paused {
+                track: track.clone(),
+                position,
+                duration,
+                decoded_duration,
+                pregap_ms,
+            });
+        }
+        _ => {}
+    }
+}
+
+#[cfg(not(feature = "demo"))]
+fn update_position_after_seek(
+    state: &mut Signal<PlaybackState>,
+    position: std::time::Duration,
+    was_paused: bool,
+) {
+    let current = state();
+    match current {
+        PlaybackState::Playing {
+            ref track,
+            duration,
+            decoded_duration,
+            pregap_ms,
+            ..
+        }
+        | PlaybackState::Paused {
+            ref track,
+            duration,
+            decoded_duration,
+            pregap_ms,
+            ..
+        } => {
+            let new_state = if was_paused {
+                PlaybackState::Paused {
+                    track: track.clone(),
+                    position,
+                    duration,
+                    decoded_duration,
+                    pregap_ms,
+                }
+            } else {
+                PlaybackState::Playing {
+                    track: track.clone(),
+                    position,
+                    duration,
+                    decoded_duration,
+                    pregap_ms,
+                }
+            };
+            state.set(new_state);
+        }
+        _ => {}
+    }
+}
+
+// ============================================================================
+// Demo mode - render view with stopped state
+// ============================================================================
+
+#[cfg(feature = "demo")]
+#[component]
+pub fn NowPlayingBar() -> Element {
+    rsx! {
+        NowPlayingBarView {
+            track: None,
+            artist_name: "".to_string(),
+            cover_url: None,
+            playback: PlaybackDisplay::Stopped,
+            position_ms: 0,
+            duration_ms: 0,
         }
     }
 }

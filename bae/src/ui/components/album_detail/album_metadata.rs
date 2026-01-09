@@ -1,11 +1,12 @@
-use crate::db::{DbAlbum, DbArtist, DbRelease};
+use crate::ui::display_types::{Album, Artist, Release};
 use dioxus::prelude::*;
+
 #[component]
 pub fn AlbumMetadata(
-    album: DbAlbum,
-    artists: Vec<DbArtist>,
+    album: Album,
+    artists: Vec<Artist>,
     track_count: usize,
-    selected_release: Option<DbRelease>,
+    selected_release: Option<Release>,
 ) -> Element {
     let artist_name = if artists.is_empty() {
         "Unknown Artist".to_string()

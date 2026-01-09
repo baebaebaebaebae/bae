@@ -1,146 +1,32 @@
-use super::super::import_hooks::TrackImportState;
-use super::super::use_track_progress;
-use super::super::{use_playback_service, use_playback_state};
+//! Track row component - displays a single track in the tracklist
+
 use super::utils::format_duration;
-use crate::db::{DbArtist, DbTrack};
-use crate::library::use_library_manager;
-use crate::playback::{PlaybackProgress, PlaybackState};
-use crate::AppContext;
+use crate::ui::display_types::{Artist, Track};
 use dioxus::prelude::*;
-use rfd::AsyncFileDialog;
-use tracing::error;
-/// Individual track row component
+
+/// Individual track row component (props-based, pure rendering)
 #[component]
-pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
-    let track_id = track.id.clone();
-    let library_manager = use_library_manager();
-    let playback = use_playback_service();
-    let playback_state = use_playback_state();
-    let app_context = use_context::<AppContext>();
-    let mut track_artists = use_signal(Vec::<DbArtist>::new);
-    let track_progress = use_track_progress(track_id.clone(), track.import_status);
-    let mut show_menu = use_signal(|| false);
-    let is_exporting = use_signal(|| false);
-    let track_id_for_playing = track_id.clone();
-    let is_currently_playing = use_signal(move || {
-        matches!(
-            playback_state(),
-            PlaybackState::Playing { track: ref playing_track, .. }
-            if playing_track.id == track_id_for_playing
-        )
-    });
-    let track_id_for_paused = track_id.clone();
-    let is_currently_paused = use_signal(move || {
-        matches!(
-            playback_state(),
-            PlaybackState::Paused { track: ref paused_track, .. }
-            if paused_track.id == track_id_for_paused
-        )
-    });
-    let track_id_for_loading = track_id.clone();
-    let is_loading = use_signal(move || {
-        matches!(
-            playback_state(),
-            PlaybackState::Loading { track_id: ref loading_track_id }
-            if loading_track_id == &track_id_for_loading
-        )
-    });
+pub fn TrackRow(
+    track: Track,
+    artists: Vec<Artist>,
+    release_id: String,
+    // Playback state
+    is_playing: bool,
+    is_paused: bool,
+    is_loading: bool,
+    show_spinner: bool,
+    // Callbacks (optional for demo mode)
+    #[props(into)] on_play: Option<EventHandler<String>>,
+    #[props(into)] on_pause: Option<EventHandler<()>>,
+    #[props(into)] on_resume: Option<EventHandler<()>>,
+    #[props(into)] on_add_next: Option<EventHandler<String>>,
+    #[props(into)] on_add_to_queue: Option<EventHandler<String>>,
+    #[props(into)] on_export: Option<EventHandler<String>>,
+) -> Element {
+    let is_active = is_playing || is_paused;
+    let is_available = track.is_available;
 
-    // Delayed spinner - only show after delay to avoid flicker on fast loads
-    let mut show_spinner = use_signal(|| false);
-    use_effect(move || {
-        let loading = is_loading();
-        if loading {
-            spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(
-                    crate::ui::LOADING_SPINNER_DELAY_MS,
-                ))
-                .await;
-                if is_loading() {
-                    show_spinner.set(true);
-                }
-            });
-        } else {
-            show_spinner.set(false);
-        }
-    });
-
-    use_effect({
-        let track_id_for_effect = track_id.clone();
-        let playback = playback.clone();
-        move || {
-            let mut progress_rx = playback.subscribe_progress();
-            let track_id_for_effect = track_id_for_effect.clone();
-            let mut is_currently_playing = is_currently_playing;
-            let mut is_currently_paused = is_currently_paused;
-            let mut is_loading = is_loading;
-            spawn(async move {
-                while let Some(progress) = progress_rx.recv().await {
-                    if let PlaybackProgress::StateChanged { state } = progress {
-                        match state {
-                            PlaybackState::Loading {
-                                track_id: loading_track_id,
-                            } => {
-                                is_loading.set(loading_track_id == track_id_for_effect);
-                            }
-                            PlaybackState::Playing {
-                                track: playing_track,
-                                ..
-                            } => {
-                                is_currently_playing.set(playing_track.id == track_id_for_effect);
-                                is_currently_paused.set(false);
-                                is_loading.set(false);
-                            }
-                            PlaybackState::Paused {
-                                track: paused_track,
-                                ..
-                            } => {
-                                is_currently_playing.set(false);
-                                is_currently_paused.set(paused_track.id == track_id_for_effect);
-                                is_loading.set(false);
-                            }
-                            _ => {
-                                is_currently_playing.set(false);
-                                is_currently_paused.set(false);
-                                is_loading.set(false);
-                            }
-                        }
-                    }
-                }
-            });
-        }
-    });
-    use_effect({
-        let track_id_for_artists = track_id.clone();
-        let library_manager_clone = library_manager.clone();
-        move || {
-            let library_manager = library_manager_clone.clone();
-            let track_id_for_artists = track_id_for_artists.clone();
-            spawn(async move {
-                if let Ok(artists) = library_manager
-                    .get()
-                    .get_artists_for_track(&track_id_for_artists)
-                    .await
-                {
-                    track_artists.set(artists);
-                }
-            });
-        }
-    });
-    let progress_state = track_progress();
-    let is_importing = matches!(
-        progress_state,
-        TrackImportState::Queued | TrackImportState::Importing { .. }
-    );
-    let is_complete = matches!(progress_state, TrackImportState::Complete);
-    let is_failed = matches!(progress_state, TrackImportState::Failed);
-    let progress_percent = if let TrackImportState::Importing { percent } = progress_state {
-        percent
-    } else {
-        0
-    };
-    let is_active = is_currently_playing() || is_currently_paused();
-    let row_class = if is_complete {
+    let row_class = if is_available {
         if is_active {
             "relative flex items-center py-3 px-4 rounded-lg group overflow-hidden bg-blue-500/10 hover:bg-blue-500/15 transition-colors"
         } else {
@@ -149,41 +35,41 @@ pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
     } else {
         "relative flex items-center py-3 px-4 rounded-lg group overflow-hidden"
     };
+
+    // For styling: unavailable tracks look like "importing"
+    let is_importing = !is_available;
+
     rsx! {
         div { class: "{row_class}",
-            if is_importing {
-                div {
-                    class: "absolute inset-0 bg-blue-500 opacity-10 transition-all duration-300",
-                    style: "width: {progress_percent}%",
-                }
-            }
-            if is_failed {
-                div { class: "absolute inset-0 bg-red-500 opacity-10" }
-            }
             div { class: "relative flex items-center w-full",
-                if is_complete {
-                    if show_spinner() {
+                // Play/pause button area
+                if is_available {
+                    if show_spinner {
                         div { class: "w-6 flex items-center justify-center",
                             div { class: "animate-spin rounded-full h-4 w-4 border-b-2 border-blue-400" }
                         }
-                    } else if is_currently_playing() {
+                    } else if is_playing {
                         button {
                             class: "w-6 h-6 rounded-full border border-blue-400 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-blue-400 hover:text-blue-300 hover:bg-blue-400/10",
                             onclick: {
-                                let playback_clone = playback.clone();
+                                let on_pause = on_pause;
                                 move |_| {
-                                    playback_clone.pause();
+                                    if let Some(handler) = &on_pause {
+                                        handler.call(());
+                                    }
                                 }
                             },
                             "⏸"
                         }
-                    } else if is_currently_paused() {
+                    } else if is_paused {
                         button {
                             class: "w-6 h-6 rounded-full border border-blue-400 flex items-center justify-center text-blue-400 hover:text-blue-300 hover:bg-blue-400/10 transition-colors",
                             onclick: {
-                                let playback_clone = playback.clone();
+                                let on_resume = on_resume;
                                 move |_| {
-                                    playback_clone.resume();
+                                    if let Some(handler) = &on_resume {
+                                        handler.call(());
+                                    }
                                 }
                             },
                             span { style: "margin-left: 2px; margin-top: 1px; font-size: 0.65rem;",
@@ -194,10 +80,12 @@ pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
                         button {
                             class: "w-6 h-6 rounded-full border border-blue-400 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-blue-400 hover:text-blue-300 hover:bg-blue-400/10",
                             onclick: {
-                                let track_id_to_play = track_id.clone();
-                                let playback_clone = playback.clone();
+                                let track_id = track.id.clone();
+                                let on_play = on_play;
                                 move |_| {
-                                    playback_clone.play(track_id_to_play.clone());
+                                    if let Some(handler) = &on_play {
+                                        handler.call(track_id.clone());
+                                    }
                                 }
                             },
                             span { style: "margin-left: 2px; margin-top: 1px; font-size: 0.65rem;",
@@ -208,27 +96,30 @@ pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
                 } else {
                     div { class: "w-6" }
                 }
+
+                // Track number
                 div {
                     class: "w-12 text-right text-sm font-mono",
-                    class: if is_failed { "text-red-400" } else if is_importing { "text-gray-600" } else { "text-gray-400" },
+                    class: if is_importing { "text-gray-600" } else { "text-gray-400" },
                     if let Some(track_num) = track.track_number {
                         "{track_num}."
                     } else {
                         "—"
                     }
                 }
+
+                // Track title and artists
                 div { class: "flex-1 ml-4",
                     h3 {
                         class: "font-medium transition-colors",
-                        class: if is_failed { "text-red-300" } else if is_importing { "text-gray-500" } else if is_active { "text-blue-300" } else { "text-white group-hover:text-blue-300" },
+                        class: if is_importing { "text-gray-500" } else if is_active { "text-blue-300" } else { "text-white group-hover:text-blue-300" },
                         "{track.title}"
                     }
-                    if !track_artists().is_empty() {
+                    if !artists.is_empty() {
                         p {
                             class: "text-sm",
-                            class: if is_failed { "text-red-400" } else if is_importing { "text-gray-600" } else { "text-gray-400" },
+                            class: if is_importing { "text-gray-600" } else { "text-gray-400" },
                             {
-                                let artists = track_artists();
                                 if artists.len() == 1 {
                                     artists[0].name.clone()
                                 } else {
@@ -238,106 +129,109 @@ pub fn TrackRow(track: DbTrack, release_id: String) -> Element {
                         }
                     }
                 }
+
+                // Duration
                 div {
                     class: "text-sm font-mono",
-                    class: if is_failed { "text-red-400" } else if is_importing { "text-gray-600" } else { "text-gray-400" },
+                    class: if is_importing { "text-gray-600" } else { "text-gray-400" },
                     if let Some(duration_ms) = track.duration_ms {
                         {format_duration(duration_ms)}
                     } else {
                         "—:—"
                     }
                 }
-                if is_complete {
-                    div { class: "relative",
+
+                // Menu (only in non-demo mode)
+                if is_available && on_export.is_some() {
+                    TrackMenu {
+                        track_id: track.id.clone(),
+                        on_export,
+                        on_add_next,
+                        on_add_to_queue,
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Track context menu (export, play next, add to queue)
+#[cfg(not(feature = "demo"))]
+#[component]
+fn TrackMenu(
+    track_id: String,
+    on_export: Option<EventHandler<String>>,
+    on_add_next: Option<EventHandler<String>>,
+    on_add_to_queue: Option<EventHandler<String>>,
+) -> Element {
+    let mut show_menu = use_signal(|| false);
+
+    rsx! {
+        div { class: "relative",
+            button {
+                class: "px-2 py-1 text-xs text-gray-400 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity",
+                onclick: move |_| show_menu.set(!show_menu()),
+                "⋯"
+            }
+            if show_menu() {
+                div { class: "absolute right-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded shadow-lg z-10 min-w-32",
+                    if let Some(ref handler) = on_export {
                         button {
-                            class: "px-2 py-1 text-xs text-gray-400 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity",
-                            onclick: move |_| show_menu.set(!show_menu()),
-                            "⋯"
+                            class: "w-full text-left px-3 py-2 text-sm hover:bg-gray-700",
+                            onclick: {
+                                let track_id = track_id.clone();
+                                let handler = *handler;
+                                move |_| {
+                                    show_menu.set(false);
+                                    handler.call(track_id.clone());
+                                }
+                            },
+                            "Export File"
                         }
-                        if show_menu() {
-                            div { class: "absolute right-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded shadow-lg z-10 min-w-32",
-                                button {
-                                    class: "w-full text-left px-3 py-2 text-sm hover:bg-gray-700",
-                                    disabled: is_exporting(),
-                                    onclick: {
-                                        let track_id_clone = track_id.clone();
-                                        let library_manager_clone = library_manager.clone();
-                                        let cache_clone = app_context.cache.clone();
-                                        let mut is_exporting_clone = is_exporting;
-                                        let mut show_menu_clone = show_menu;
-                                        move |_| {
-                                            show_menu_clone.set(false);
-                                            if !is_exporting_clone() {
-                                                let track_id = track_id_clone.clone();
-                                                let library_manager_clone = library_manager_clone.clone();
-                                                let cache_clone = cache_clone.clone();
-                                                spawn(async move {
-                                                    is_exporting_clone.set(true);
-                                                    if let Some(file_handle) = AsyncFileDialog::new()
-                                                        .set_title("Export Track")
-                                                        .set_file_name(format!("{}.flac", track_id))
-                                                        .add_filter("FLAC", &["flac"])
-                                                        .save_file()
-                                                        .await
-                                                    {
-                                                        let output_path = file_handle.path().to_path_buf();
-                                                        match library_manager_clone
-                                                            .get()
-                                                            .export_track(&track_id, &output_path, &cache_clone)
-                                                            .await
-                                                        {
-                                                            Ok(_) => {
-                                                                is_exporting_clone.set(false);
-                                                            }
-                                                            Err(e) => {
-                                                                error!("Failed to export track: {}", e);
-                                                                is_exporting_clone.set(false);
-                                                            }
-                                                        }
-                                                    } else {
-                                                        is_exporting_clone.set(false);
-                                                    }
-                                                });
-                                            }
-                                        }
-                                    },
-                                    if is_exporting() {
-                                        "Exporting..."
-                                    } else {
-                                        "Export File"
-                                    }
+                    }
+                    if let Some(ref handler) = on_add_next {
+                        button {
+                            class: "w-full text-left px-3 py-2 text-sm hover:bg-gray-700",
+                            onclick: {
+                                let track_id = track_id.clone();
+                                let handler = *handler;
+                                move |_| {
+                                    show_menu.set(false);
+                                    handler.call(track_id.clone());
                                 }
-                                button {
-                                    class: "w-full text-left px-3 py-2 text-sm hover:bg-gray-700",
-                                    onclick: {
-                                        let track_id_clone = track_id.clone();
-                                        let playback_clone = playback.clone();
-                                        let mut show_menu_clone = show_menu;
-                                        move |_| {
-                                            playback_clone.add_next(vec![track_id_clone.clone()]);
-                                            show_menu_clone.set(false);
-                                        }
-                                    },
-                                    "Play Next"
+                            },
+                            "Play Next"
+                        }
+                    }
+                    if let Some(ref handler) = on_add_to_queue {
+                        button {
+                            class: "w-full text-left px-3 py-2 text-sm hover:bg-gray-700",
+                            onclick: {
+                                let track_id = track_id.clone();
+                                let handler = *handler;
+                                move |_| {
+                                    show_menu.set(false);
+                                    handler.call(track_id.clone());
                                 }
-                                button {
-                                    class: "w-full text-left px-3 py-2 text-sm hover:bg-gray-700",
-                                    onclick: {
-                                        let track_id_clone = track_id.clone();
-                                        let playback_clone = playback.clone();
-                                        let mut show_menu_clone = show_menu;
-                                        move |_| {
-                                            playback_clone.add_to_queue(vec![track_id_clone.clone()]);
-                                            show_menu_clone.set(false);
-                                        }
-                                    },
-                                    "Add to Queue"
-                                }
-                            }
+                            },
+                            "Add to Queue"
                         }
                     }
                 }
             }
         }
     }
+}
+
+/// Stub for demo mode - menu is hidden
+#[cfg(feature = "demo")]
+#[component]
+fn TrackMenu(
+    track_id: String,
+    on_export: Option<EventHandler<String>>,
+    on_add_next: Option<EventHandler<String>>,
+    on_add_to_queue: Option<EventHandler<String>>,
+) -> Element {
+    // In demo mode, don't render the menu
+    rsx! {}
 }
