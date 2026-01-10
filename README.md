@@ -72,6 +72,23 @@ cd bae && dx serve
 
 Dev mode activates automatically when `.env` exists.
 
+## Web demo
+
+`bae-demo` is a standalone web app that showcases the UI with fixture data. Used for screenshots and development.
+
+```bash
+cd bae-demo
+npm run start    # builds and serves at http://localhost:8080
+```
+
+To run Playwright screenshot tests:
+
+```bash
+cd bae-demo/e2e
+npm install
+npx playwright test
+```
+
 ## Configuration
 
 **Dev mode** (debug builds with `.env`): loads from `.env` file in repo root.
