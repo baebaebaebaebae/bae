@@ -222,7 +222,7 @@ jobs:
         DMG_PATH="bae/target/bae.dmg"
         
         # Sign the DMG and capture the signature
-        SIGNATURE=$(echo "$SPARKLE_PRIVATE_KEY" | /tmp/sparkle/bin/sign_update "$DMG_PATH")
+        SIGNATURE=$(echo "$SPARKLE_PRIVATE_KEY" | /tmp/sparkle/bin/sign_update "$DMG_PATH" -f -)
         echo "SPARKLE_SIGNATURE=$SIGNATURE" >> $GITHUB_ENV
         
         # Get file size for appcast
