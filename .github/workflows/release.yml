@@ -292,13 +292,13 @@ jobs:
       run: dx build --release --platform web
 
     - name: Install Playwright dependencies
-      working-directory: ./website/screenshots
+      working-directory: ./bae-demo/e2e
       run: |
         npm ci
         npx playwright install chromium
 
     - name: Generate screenshots
-      working-directory: ./website/screenshots
+      working-directory: ./bae-demo/e2e
       run: npx playwright test
 
     - name: Upload screenshots

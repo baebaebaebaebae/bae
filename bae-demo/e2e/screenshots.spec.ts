@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const OUTPUT_DIR = path.join(__dirname, '../public/screenshots');
+const OUTPUT_DIR = path.join(__dirname, '../../website/public/screenshots');
 
 test.beforeAll(async () => {
   // Ensure output directory exists

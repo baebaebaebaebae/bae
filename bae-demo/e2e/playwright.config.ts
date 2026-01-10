@@ -1,10 +1,4 @@
 import { defineConfig, devices } from '@playwright/test';
-import * as path from 'path';
-
-// The demo web build output directory (relative to bae/)
-const DEMO_BUILD_DIR = path.join(__dirname, '../../bae/target/dx/demo_web/release/web/public');
-// The covers directory for demo fixtures
-const COVERS_DIR = path.join(__dirname, '../fixtures/screenshots/covers');
 
 export default defineConfig({
   testDir: '.',
