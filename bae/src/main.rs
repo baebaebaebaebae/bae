@@ -102,10 +102,7 @@ fn main() {
 
     // Initialize FFmpeg for audio processing
     audio_codec::init();
-    let screenshot_mode = std::env::var("BAE_SCREENSHOT_MODE").is_ok();
-    if screenshot_mode {
-        info!("Screenshot mode enabled - disabling network features");
-    }
+
     let runtime = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
     let runtime_handle = runtime.handle().clone();
 
@@ -119,12 +116,9 @@ fn main() {
         .and_then(|key| encryption::EncryptionService::new(key).ok());
     let library_manager = create_library_manager(database.clone(), encryption_service.clone());
 
-    let torrent_manager = if screenshot_mode {
-        torrent::LazyTorrentManager::new_noop(runtime_handle.clone())
-    } else {
-        let torrent_options = torrent_options_from_config(&config);
-        torrent::LazyTorrentManager::new(cache_manager.clone(), database.clone(), torrent_options)
-    };
+    let torrent_options = torrent_options_from_config(&config);
+    let torrent_manager =
+        torrent::LazyTorrentManager::new(cache_manager.clone(), database.clone(), torrent_options);
 
     let import_handle = import::ImportService::start(
         runtime_handle.clone(),
@@ -167,7 +161,7 @@ fn main() {
         encryption_service: encryption_service.clone(),
     };
 
-    if !screenshot_mode && config.subsonic_enabled {
+    if config.subsonic_enabled {
         let subsonic_library = library_manager.clone();
         let subsonic_encryption = encryption_service.clone();
         let subsonic_port = config.subsonic_port;
