@@ -6,9 +6,13 @@
 mod demo_data;
 
 use bae_ui::{
-    AlbumDetailView, AppLayoutView, BackButton, ErrorDisplay, LibraryView, NavItem,
-    NowPlayingBarView, PageContainer, PlaybackDisplay, QueueItem, QueueSidebarView, SearchResult,
-    TitleBarView, Track, TrackImportState,
+    AboutSectionView, AlbumDetailView, ApiKeysSectionView, AppLayoutView, BackButton,
+    BitTorrentSectionView, BitTorrentSettings, CdDriveStatus, CdSelectorView,
+    EncryptionSectionView, ErrorDisplay, FolderSelectorView, ImportSource, ImportView, LibraryView,
+    NavItem, NowPlayingBarView, PageContainer, PlaybackDisplay, QueueItem, QueueSidebarView,
+    SearchResult, SettingsTab, SettingsView, StorageLocation, StorageProfile,
+    StorageProfilesSectionView, SubsonicSectionView, TitleBarView, TorrentInputMode,
+    TorrentInputView, Track, TrackImportState,
 };
 use dioxus::prelude::*;
 
@@ -24,6 +28,10 @@ pub enum Route {
     Library {},
     #[route("/album/:album_id")]
     AlbumDetail { album_id: String },
+    #[route("/import")]
+    Import {},
+    #[route("/settings")]
+    Settings {},
 }
 
 /// Get a mock track for playback display
@@ -121,11 +129,23 @@ fn DemoLayout() -> Element {
     };
 
     // Build nav items
-    let nav_items = vec![NavItem {
-        id: "library".to_string(),
-        label: "Library".to_string(),
-        is_active: matches!(current_route, Route::Library {} | Route::AlbumDetail { .. }),
-    }];
+    let nav_items = vec![
+        NavItem {
+            id: "library".to_string(),
+            label: "Library".to_string(),
+            is_active: matches!(current_route, Route::Library {} | Route::AlbumDetail { .. }),
+        },
+        NavItem {
+            id: "import".to_string(),
+            label: "Import".to_string(),
+            is_active: matches!(current_route, Route::Import {}),
+        },
+        NavItem {
+            id: "settings".to_string(),
+            label: "Settings".to_string(),
+            is_active: matches!(current_route, Route::Settings {}),
+        },
+    ];
 
     // Mock track for playback bar
     let mock_track = mock_playing_track();
@@ -155,8 +175,13 @@ fn DemoLayout() -> Element {
             title_bar: rsx! {
                 TitleBarView {
                     nav_items,
-                    on_nav_click: move |_id: String| {
-                        navigator().push(Route::Library {});
+                    on_nav_click: move |id: String| {
+                        let _ = match id.as_str() {
+                            "library" => navigator().push(Route::Library {}),
+                            "import" => navigator().push(Route::Import {}),
+                            "settings" => navigator().push(Route::Settings {}),
+                            _ => None,
+                        };
                     },
                     search_value: search_query(),
                     on_search_change: move |value: String| {
@@ -293,6 +318,205 @@ fn AlbumDetail(album_id: String) -> Element {
             }
         }
     }
+}
+
+/// Demo import page
+#[component]
+fn Import() -> Element {
+    let mut selected_source = use_signal(|| ImportSource::Folder);
+
+    rsx! {
+        ImportView {
+            selected_source: *selected_source.read(),
+            on_source_select: move |source| selected_source.set(source),
+
+            // Demo content for the selected import source
+            match *selected_source.read() {
+                ImportSource::Folder => rsx! {
+                    FolderImportDemo {}
+                },
+                ImportSource::Torrent => rsx! {
+                    TorrentImportDemo {}
+                },
+                ImportSource::Cd => rsx! {
+                    CdImportDemo {}
+                },
+            }
+        }
+    }
+}
+
+/// Demo folder import UI
+#[component]
+fn FolderImportDemo() -> Element {
+    rsx! {
+        FolderSelectorView { on_select_click: |_| {} }
+    }
+}
+
+/// Demo torrent import UI
+#[component]
+fn TorrentImportDemo() -> Element {
+    let mut input_mode = use_signal(|| TorrentInputMode::File);
+
+    rsx! {
+        TorrentInputView {
+            input_mode: *input_mode.read(),
+            on_mode_change: move |mode| input_mode.set(mode),
+            on_select_click: |_| {},
+            on_magnet_submit: |_| {},
+        }
+    }
+}
+
+/// Demo CD import UI
+#[component]
+fn CdImportDemo() -> Element {
+    rsx! {
+        CdSelectorView { status: CdDriveStatus::NoDisc, on_rip_click: |_| {} }
+    }
+}
+
+/// Demo settings page
+#[component]
+fn Settings() -> Element {
+    let mut active_tab = use_signal(|| SettingsTab::StorageProfiles);
+
+    rsx! {
+        SettingsView {
+            active_tab: *active_tab.read(),
+            on_tab_change: move |tab| active_tab.set(tab),
+
+            match *active_tab.read() {
+                SettingsTab::StorageProfiles => rsx! {
+                    StorageProfilesSectionView {
+                        profiles: mock_storage_profiles(),
+                        is_loading: false,
+                        editing_profile: None,
+                        is_creating: false,
+                        on_create: |_| {},
+                        on_edit: |_| {},
+                        on_delete: |_| {},
+                        on_set_default: |_| {},
+                        on_save: |_| {},
+                        on_cancel_edit: |_| {},
+                    }
+                },
+                SettingsTab::ApiKeys => rsx! {
+                    ApiKeysSectionView {
+                        discogs_configured: true,
+                        discogs_key_value: String::new(),
+                        is_editing: false,
+                        is_saving: false,
+                        has_changes: false,
+                        save_error: None,
+                        on_edit_start: |_| {},
+                        on_key_change: |_| {},
+                        on_save: |_| {},
+                        on_cancel: |_| {},
+                    }
+                },
+                SettingsTab::Encryption => rsx! {
+                    EncryptionSectionView {
+                        is_configured: true,
+                        key_preview: "a1b2c3d4...x7y8z9".to_string(),
+                        key_length: 32,
+                    }
+                },
+                SettingsTab::BitTorrent => rsx! {
+                    BitTorrentSectionView {
+                        settings: BitTorrentSettings {
+                            listen_port: Some(51413),
+                            enable_upnp: true,
+                            enable_natpmp: true,
+                            max_connections: Some(200),
+                            max_connections_per_torrent: Some(50),
+                            max_uploads: Some(10),
+                            max_uploads_per_torrent: Some(5),
+                            bind_interface: None,
+                        },
+                        editing_section: None,
+                        edit_listen_port: String::new(),
+                        edit_enable_upnp: true,
+                        edit_max_connections: String::new(),
+                        edit_max_connections_per_torrent: String::new(),
+                        edit_max_uploads: String::new(),
+                        edit_max_uploads_per_torrent: String::new(),
+                        edit_bind_interface: String::new(),
+                        is_saving: false,
+                        has_changes: false,
+                        save_error: None,
+                        on_edit_section: |_| {},
+                        on_cancel_edit: |_| {},
+                        on_save: |_| {},
+                        on_listen_port_change: |_| {},
+                        on_enable_upnp_change: |_| {},
+                        on_max_connections_change: |_| {},
+                        on_max_connections_per_torrent_change: |_| {},
+                        on_max_uploads_change: |_| {},
+                        on_max_uploads_per_torrent_change: |_| {},
+                        on_bind_interface_change: |_| {},
+                    }
+                },
+                SettingsTab::Subsonic => rsx! {
+                    SubsonicSectionView {
+                        enabled: true,
+                        port: 4533,
+                        is_editing: false,
+                        edit_enabled: true,
+                        edit_port: "4533".to_string(),
+                        is_saving: false,
+                        has_changes: false,
+                        save_error: None,
+                        on_edit_start: |_| {},
+                        on_cancel: |_| {},
+                        on_save: |_| {},
+                        on_enabled_change: |_| {},
+                        on_port_change: |_| {},
+                    }
+                },
+                SettingsTab::About => rsx! {
+                    AboutSectionView {
+                        version: "0.1.0-demo".to_string(),
+                        album_count: 20,
+                        on_check_updates: |_| {},
+                    }
+                },
+            }
+        }
+    }
+}
+
+/// Mock storage profiles for demo
+fn mock_storage_profiles() -> Vec<StorageProfile> {
+    vec![
+        StorageProfile {
+            id: "profile-1".to_string(),
+            name: "Cloud Storage".to_string(),
+            location: StorageLocation::Cloud,
+            location_path: String::new(),
+            encrypted: true,
+            is_default: true,
+            cloud_bucket: Some("my-music-bucket".to_string()),
+            cloud_region: Some("us-east-1".to_string()),
+            cloud_endpoint: None,
+            cloud_access_key: Some("AKIA***".to_string()),
+            cloud_secret_key: Some("***".to_string()),
+        },
+        StorageProfile {
+            id: "profile-2".to_string(),
+            name: "Local Backup".to_string(),
+            location: StorageLocation::Local,
+            location_path: "/Users/demo/Music/bae".to_string(),
+            encrypted: false,
+            is_default: false,
+            cloud_bucket: None,
+            cloud_region: None,
+            cloud_endpoint: None,
+            cloud_access_key: None,
+            cloud_secret_key: None,
+        },
+    ]
 }
 
 /// Main demo app component
