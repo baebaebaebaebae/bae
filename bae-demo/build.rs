@@ -2,6 +2,24 @@ use std::path::Path;
 use std::process::Command;
 
 fn main() {
+    copy_shared_assets();
+    generate_tailwind();
+}
+
+fn copy_shared_assets() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let shared_main_css = Path::new(manifest_dir).join("../bae-ui/assets/main.css");
+    let local_main_css = Path::new(manifest_dir).join("assets/main.css");
+
+    println!("cargo:rerun-if-changed={}", shared_main_css.display());
+
+    if shared_main_css.exists() {
+        std::fs::copy(&shared_main_css, &local_main_css)
+            .expect("Failed to copy main.css from bae-ui");
+    }
+}
+
+fn generate_tailwind() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let tailwind_input = Path::new(manifest_dir).join("tailwind.css");
     let tailwind_output = Path::new(manifest_dir).join("assets/tailwind.css");
