@@ -2,9 +2,11 @@
 
 pub mod album_card;
 pub mod album_detail;
+pub mod app_layout;
 pub mod helpers;
 pub mod library;
 pub mod playback;
+pub mod title_bar;
 pub mod utils;
 
 pub use album_card::AlbumCard;
@@ -14,7 +16,9 @@ pub use album_detail::{
     DeleteReleaseDialog, ExportErrorToast, PlayAlbumButton, ReleaseInfoModal, ReleaseTabsSection,
     TrackRow,
 };
+pub use app_layout::AppLayoutView;
 pub use helpers::{BackButton, ErrorDisplay, LoadingSpinner, PageContainer};
 pub use library::LibraryView;
 pub use playback::{NowPlayingBarView, QueueSidebarState, QueueSidebarView};
+pub use title_bar::{NavItem, SearchResult, TitleBarView};
 pub use utils::{format_duration, format_file_size};

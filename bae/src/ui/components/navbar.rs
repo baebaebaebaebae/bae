@@ -1,30 +1,33 @@
+//! Navbar layout wrapper for desktop app
+//!
+//! Wraps the shared AppLayoutView with desktop-specific components.
+
 use super::dialog::GlobalDialog;
 use super::now_playing_bar::NowPlayingBar;
 use super::queue_sidebar::QueueSidebar;
-#[cfg(all(target_os = "macos", feature = "desktop"))]
 use super::TitleBar;
 use crate::ui::Route;
+use bae_ui::AppLayoutView;
 use dioxus::prelude::*;
 
-/// Layout component that includes title bar and content
+/// Layout component that includes title bar, content, playback bar, and sidebar
 #[component]
 pub fn Navbar() -> Element {
     rsx! {
-        {
-            #[cfg(all(target_os = "macos", feature = "desktop"))]
-            {
-                rsx! {
-                    TitleBar {}
-                }
-            }
-            #[cfg(not(all(target_os = "macos", feature = "desktop")))]
-            {
-                rsx! {}
-            }
+        AppLayoutView {
+            title_bar: rsx! {
+                TitleBar {}
+            },
+            playback_bar: rsx! {
+                NowPlayingBar {}
+            },
+            queue_sidebar: rsx! {
+                QueueSidebar {}
+            },
+            extra: rsx! {
+                GlobalDialog {}
+            },
+            Outlet::<Route> {}
         }
-        Outlet::<Route> {}
-        NowPlayingBar {}
-        QueueSidebar {}
-        GlobalDialog {}
     }
 }

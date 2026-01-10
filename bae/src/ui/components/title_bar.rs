@@ -1,9 +1,15 @@
+//! Title bar wrapper for desktop app
+//!
+//! Wraps the shared TitleBarView with desktop-specific behavior:
+//! window dragging, zoom, and database-backed search.
+
 use crate::db::{DbAlbum, DbArtist};
 use crate::library::use_library_manager;
 use crate::ui::components::imports_button::ImportsButton;
 use crate::ui::components::imports_dropdown::ImportsDropdown;
 use crate::ui::components::use_library_search;
 use crate::ui::{image_url, Route};
+use bae_ui::{NavItem, SearchResult, TitleBarView};
 #[cfg(target_os = "macos")]
 use cocoa::appkit::NSApplication;
 #[cfg(target_os = "macos")]
@@ -13,7 +19,7 @@ use dioxus::prelude::*;
 #[cfg(target_os = "macos")]
 use objc::{msg_send, sel, sel_impl};
 use std::collections::HashMap;
-use tracing::info;
+
 /// Custom title bar component with navigation (macOS: native traffic lights + nav)
 #[component]
 pub fn TitleBar() -> Element {
@@ -26,6 +32,8 @@ pub fn TitleBar() -> Element {
     let mut album_artists = use_signal(HashMap::<String, Vec<DbArtist>>::new);
     let mut filtered_albums = use_signal(Vec::<DbAlbum>::new);
     let imports_dropdown_open = use_signal(|| false);
+
+    // Load albums for search
     use_effect(move || {
         let library_manager = library_manager.clone();
         spawn(async move {
@@ -43,6 +51,8 @@ pub fn TitleBar() -> Element {
             }
         });
     });
+
+    // Filter albums based on search query
     use_effect({
         move || {
             let query = search_query().to_lowercase();
@@ -71,166 +81,102 @@ pub fn TitleBar() -> Element {
             }
         }
     });
-    rsx! {
-        if show_results() {
-            div {
-                class: "fixed inset-0 z-[1500]",
-                onclick: move |_| {
-                    info!("Click-outside handler fired");
-                    show_results.set(false);
-                },
+
+    // Build nav items
+    let nav_items = vec![
+        NavItem {
+            id: "library".to_string(),
+            label: "Library".to_string(),
+            is_active: matches!(current_route, Route::Library {} | Route::AlbumDetail { .. }),
+        },
+        NavItem {
+            id: "import".to_string(),
+            label: "Import".to_string(),
+            is_active: matches!(current_route, Route::ImportWorkflowManager {}),
+        },
+        NavItem {
+            id: "settings".to_string(),
+            label: "Settings".to_string(),
+            is_active: matches!(current_route, Route::Settings {}),
+        },
+    ];
+
+    // Convert filtered albums to search results
+    let search_results: Vec<SearchResult> = filtered_albums()
+        .iter()
+        .map(|album| {
+            let artists = album_artists().get(&album.id).cloned().unwrap_or_default();
+            let artist_name = if artists.is_empty() {
+                "Unknown Artist".to_string()
+            } else {
+                artists
+                    .iter()
+                    .map(|a| a.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let subtitle = if let Some(year) = album.year {
+                format!("{} • {}", artist_name, year)
+            } else {
+                artist_name
+            };
+            SearchResult {
+                id: album.id.clone(),
+                title: album.title.clone(),
+                subtitle,
+                cover_url: album
+                    .cover_image_id
+                    .as_ref()
+                    .map(|id| image_url(id))
+                    .or_else(|| album.cover_art_url.clone()),
             }
-        }
-        div {
-            id: "title-bar",
-            class: "fixed top-0 left-0 right-0 h-10 bg-[#1e222d] flex items-center pl-20 pr-2 cursor-move z-[1000] border-b border-[#2d3138]",
-            onmousedown: move |_| {
+        })
+        .collect();
+
+    rsx! {
+        TitleBarView {
+            nav_items,
+            on_nav_click: move |id: String| {
+                let route = match id.as_str() {
+                    "library" => Route::Library {},
+                    "import" => Route::ImportWorkflowManager {},
+                    "settings" => Route::Settings {},
+                    _ => return,
+                };
+                navigator().push(route);
+            },
+            search_value: search_query(),
+            on_search_change: move |value| search_query.set(value),
+            search_results,
+            on_search_result_click: move |album_id: String| {
+                show_results.set(false);
+                search_query.set(String::new());
+                navigator()
+                    .push(Route::AlbumDetail {
+                        album_id,
+                        release_id: String::new(),
+                    });
+            },
+            show_search_results: show_results(),
+            on_search_dismiss: move |_| show_results.set(false),
+            on_search_focus: move |_| {
+                if !search_query().is_empty() {
+                    show_results.set(true);
+                }
+            },
+            on_bar_mousedown: move |_| {
                 let _ = window.drag_window();
             },
-            ondoubleclick: move |_| {
-                perform_zoom();
-            },
-            div {
-                class: "flex gap-2 flex-none items-center",
-                style: "-webkit-app-region: no-drag;",
-                NavButton {
-                    route: Route::Library {},
-                    label: "Library",
-                    is_active: matches!(current_route, Route::Library {} | Route::AlbumDetail { .. }),
-                }
-                NavButton {
-                    route: Route::ImportWorkflowManager {},
-                    label: "Import",
-                    is_active: matches!(current_route, Route::ImportWorkflowManager {}),
-                }
-                NavButton {
-                    route: Route::Settings {},
-                    label: "Settings",
-                    is_active: matches!(current_route, Route::Settings {}),
-                }
-            }
-            div { class: "relative ml-4", style: "-webkit-app-region: no-drag;",
+            on_bar_double_click: move |_| perform_zoom(),
+            imports_indicator: rsx! {
                 ImportsButton { is_open: imports_dropdown_open }
                 ImportsDropdown { is_open: imports_dropdown_open }
-            }
-            div {
-                class: "flex-1 flex justify-end items-center relative",
-                style: "-webkit-app-region: no-drag;",
-                div { class: "relative w-64", id: "search-container",
-                    input {
-                        r#type: "text",
-                        placeholder: "Search...",
-                        autocomplete: "off",
-                        class: "w-full h-7 px-3 bg-[#2d3138] border border-[#3d4148] rounded text-white text-xs placeholder-gray-500 focus:outline-none focus:border-blue-500",
-                        value: "{search_query()}",
-                        oninput: move |evt| search_query.set(evt.value()),
-                        onfocus: move |_| {
-                            if !search_query().is_empty() {
-                                show_results.set(true);
-                            }
-                        },
-                        onkeydown: move |evt| {
-                            if evt.key() == Key::Escape {
-                                show_results.set(false);
-                            }
-                        },
-                    }
-                }
-            }
-        }
-        if show_results() && !filtered_albums().is_empty() {
-            div {
-                class: "fixed top-10 right-2 w-64 z-[2000]",
-                id: "search-popover",
-                onclick: move |evt| {
-                    info!("Popover container clicked - stopping propagation");
-                    evt.stop_propagation();
-                },
-                div { class: "mt-2 bg-[#2d3138] border border-[#3d4148] rounded-lg shadow-lg max-h-96 overflow-y-auto",
-                    for album in filtered_albums() {
-                        {
-                            let album_id = album.id.clone();
-                            let album_title = album.title.clone();
-                            let album_year = album.year;
-                            let cover_url = album
-                                .cover_image_id
-                                .as_ref()
-                                .map(|id| image_url(id))
-                                .or_else(|| album.cover_art_url.clone());
-                            let artists = album_artists().get(&album.id).cloned().unwrap_or_default();
-                            let artist_name = if artists.is_empty() {
-                                "Unknown Artist".to_string()
-                            } else {
-                                artists.iter().map(|a| a.name.as_str()).collect::<Vec<_>>().join(", ")
-                            };
-                            rsx! {
-                                div {
-                                    key: "{album_id}",
-                                    class: "flex items-center gap-3 px-3 py-2 hover:bg-[#3d4148] border-b border-[#3d4148] last:border-b-0 cursor-pointer",
-                                    onclick: {
-                                        let album_id = album_id.clone();
-                                        let navigator = navigator();
-                                        move |evt| {
-                                            info!("Search result onclick fired for album_id: {}", album_id);
-                                            evt.stop_propagation();
-                                            info!("Stopped propagation, closing popover and clearing search");
-                                            show_results.set(false);
-                                            search_query.set(String::new());
-                                            let route = Route::AlbumDetail {
-                                                album_id: album_id.clone(),
-                                                release_id: String::new(),
-                                            };
-                                            info!("Navigating to route: {:?}", route);
-                                            navigator.push(route);
-                                            info!("Navigator.push called for album_id: {}", album_id);
-                                        }
-                                    },
-                                    if let Some(url) = cover_url {
-                                        img {
-                                            src: "{url}",
-                                            class: "w-10 h-10 rounded object-cover flex-shrink-0",
-                                            alt: "{album_title}",
-                                        }
-                                    } else {
-                                        div { class: "w-10 h-10 bg-gray-700 rounded flex items-center justify-center flex-shrink-0",
-                                            div { class: "text-gray-500 text-xs", "🎵" }
-                                        }
-                                    }
-                                    div { class: "flex-1 min-w-0",
-                                        div { class: "text-white text-xs font-medium truncate", "{album_title}" }
-                                        div { class: "text-gray-400 text-xs truncate",
-                                            "{artist_name}"
-                                            if let Some(year) = album_year {
-                                                span { class: "text-gray-500", " • {year}" }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-/// Navigation button component for titlebar
-#[component]
-fn NavButton(route: Route, label: &'static str, is_active: bool) -> Element {
-    rsx! {
-        span {
-            class: "inline-block",
-            onmousedown: move |evt| {
-                evt.stop_propagation();
             },
-            Link {
-                to: route,
-                class: if is_active { "text-white no-underline text-[12px] cursor-pointer px-2 py-1 rounded bg-gray-700" } else { "text-gray-400 no-underline text-[12px] cursor-pointer px-2 py-1 rounded hover:bg-gray-800 hover:text-white transition-colors" },
-                "{label}"
-            }
+            left_padding: 80,
         }
     }
 }
+
 /// Perform window zoom (maximize/restore) using native macOS API
 #[cfg(target_os = "macos")]
 fn perform_zoom() {
@@ -244,5 +190,6 @@ fn perform_zoom() {
         }
     }
 }
+
 #[cfg(not(target_os = "macos"))]
 fn perform_zoom() {}
