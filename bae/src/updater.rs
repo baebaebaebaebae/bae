@@ -3,9 +3,13 @@
 //! This module provides FFI bindings to Sparkle.framework for automatic updates.
 //! Sparkle checks for updates on launch and provides a manual "Check for Updates" option.
 
+#[cfg(target_os = "macos")]
 use objc::runtime::{Class, Object};
+#[cfg(target_os = "macos")]
 use objc::{msg_send, sel, sel_impl};
-use tracing::{error, info};
+#[cfg(target_os = "macos")]
+use tracing::error;
+use tracing::info;
 
 /// Initialize the Sparkle updater and start background update checks.
 /// Call this early in app startup (after UI is ready to handle dialogs).
