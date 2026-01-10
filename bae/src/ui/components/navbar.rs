@@ -3,7 +3,7 @@ use super::dialog::GlobalDialog;
 use super::now_playing_bar::NowPlayingBar;
 #[cfg(not(feature = "demo"))]
 use super::queue_sidebar::QueueSidebar;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "desktop"))]
 use super::TitleBar;
 use crate::ui::Route;
 use dioxus::prelude::*;
@@ -13,13 +13,13 @@ use dioxus::prelude::*;
 pub fn Navbar() -> Element {
     rsx! {
         {
-            #[cfg(target_os = "macos")]
+            #[cfg(all(target_os = "macos", feature = "desktop"))]
             {
                 rsx! {
                     TitleBar {}
                 }
             }
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(not(all(target_os = "macos", feature = "desktop")))]
             {
                 rsx! {}
             }

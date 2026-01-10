@@ -55,9 +55,8 @@ fn cover_url(artist: &str, title: &str) -> String {
         artist.to_lowercase().replace(' ', "-").replace('\'', ""),
         title.to_lowercase().replace(' ', "-").replace('\'', "")
     );
-    // For demo mode, serve covers from the fixtures directory
-    // In web build, these would be served from a static path
-    format!("/assets/demo-covers/{}", filename)
+    // For web demo, covers are served from /covers/ by the static server
+    format!("/covers/{}", filename)
 }
 
 fn get_demo_data() -> &'static DemoData {

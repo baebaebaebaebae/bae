@@ -228,13 +228,9 @@ jobs:
         fi
         echo "✓ App bundle verification passed"
 
-    - name: Generate screenshots
+    - name: Build demo web app
       working-directory: ./bae
-      env:
-        BAE_SCREENSHOT_FIXTURES_DIR: ../website/fixtures/screenshots
-        BAE_SCREENSHOT_OUTPUT_DIR: ../website/public/screenshots
       run: |
-        set -euo pipefail
         if [[ -d "/opt/homebrew" ]]; then
           export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig"
           export LIBRARY_PATH="/opt/homebrew/lib"
@@ -242,7 +238,17 @@ jobs:
           export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig"
           export LIBRARY_PATH="/usr/local/lib"
         fi
-        cargo run --release --bin generate_screenshots
+        dx build --release --features web,demo --bin demo_web
+
+    - name: Install Playwright dependencies
+      working-directory: ./website/screenshots
+      run: |
+        npm ci
+        npx playwright install chromium
+
+    - name: Generate screenshots
+      working-directory: ./website/screenshots
+      run: npx playwright test
 
     - name: Upload screenshots
       uses: actions/upload-artifact@v4

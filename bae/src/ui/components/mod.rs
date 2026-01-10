@@ -2,12 +2,12 @@
 pub mod active_imports_context;
 pub mod library_search_context;
 
-// macOS-only modules (used by TitleBar)
-#[cfg(target_os = "macos")]
+// macOS desktop-only modules (used by TitleBar)
+#[cfg(all(target_os = "macos", feature = "desktop"))]
 pub mod imports_button;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "desktop"))]
 pub mod imports_dropdown;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "desktop"))]
 pub mod title_bar;
 
 pub mod album_card;
@@ -27,12 +27,12 @@ pub mod torrent_hooks;
 pub use album_detail::AlbumDetail;
 pub use app::App;
 pub use library::Library;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "desktop"))]
 pub use library_search_context::use_library_search;
 pub use navbar::Navbar;
 #[cfg(not(feature = "demo"))]
 pub use playback_hooks::{use_playback_service, use_playback_state};
 pub use settings::Settings;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "desktop"))]
 pub use title_bar::TitleBar;
 pub use torrent_hooks::use_torrent_manager;

@@ -2,6 +2,8 @@ pub mod app;
 pub mod app_context;
 pub mod components;
 #[cfg(feature = "demo")]
+pub mod demo_app;
+#[cfg(feature = "demo")]
 pub mod demo_data;
 pub mod display_types;
 pub mod import_context;

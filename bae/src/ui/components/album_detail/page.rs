@@ -280,7 +280,7 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
 }
 
 #[component]
-fn PageContainer(children: Element) -> Element {
+pub fn PageContainer(children: Element) -> Element {
     rsx! {
         div { class: "container mx-auto p-6", {children} }
     }

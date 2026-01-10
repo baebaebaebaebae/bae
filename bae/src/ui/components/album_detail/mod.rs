@@ -15,5 +15,16 @@ mod release_tabs_section;
 mod track_row;
 pub mod utils;
 mod view;
+
 pub use page::AlbumDetail;
 pub use release_info_modal::ReleaseInfoModal;
+
+// Re-exports for demo app
+#[cfg(feature = "demo")]
+pub use back_button::BackButton;
+#[cfg(feature = "demo")]
+pub use error::AlbumDetailError;
+#[cfg(feature = "demo")]
+pub use page::PageContainer;
+#[cfg(feature = "demo")]
+pub use view::AlbumDetailView;

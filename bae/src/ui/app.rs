@@ -1,17 +1,25 @@
+#[cfg(feature = "desktop")]
 use crate::library::SharedLibraryManager;
 use crate::ui::components::import::ImportWorkflowManager;
 use crate::ui::components::*;
-#[cfg(target_os = "macos")]
+#[cfg(all(feature = "desktop", target_os = "macos"))]
 use crate::ui::window_activation::setup_macos_window_activation;
+#[cfg(feature = "desktop")]
 use crate::ui::AppContext;
+#[cfg(feature = "desktop")]
 use dioxus::desktop::{wry, Config as DioxusConfig, WindowBuilder};
 use dioxus::prelude::*;
+#[cfg(feature = "desktop")]
 use std::borrow::Cow;
+#[cfg(feature = "desktop")]
 use tracing::{debug, warn};
+#[cfg(feature = "desktop")]
 use wry::http::Response as HttpResponse;
+
 pub const FAVICON: Asset = asset!("/assets/favicon.ico");
 pub const MAIN_CSS: Asset = asset!("/assets/main.css");
 pub const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
+
 #[derive(Debug, Clone, Routable, PartialEq)]
 #[rustfmt::skip]
 pub enum Route {
@@ -25,7 +33,9 @@ pub enum Route {
     #[route("/settings")]
     Settings {},
 }
+
 /// Get MIME type from file extension
+#[cfg(feature = "desktop")]
 fn mime_type_for_extension(ext: &str) -> &'static str {
     match ext.to_lowercase().as_str() {
         "jpg" | "jpeg" => "image/jpeg",
@@ -39,11 +49,15 @@ fn mime_type_for_extension(ext: &str) -> &'static str {
         _ => "application/octet-stream",
     }
 }
+
 /// Services needed for image retrieval
+#[cfg(feature = "desktop")]
 #[derive(Clone)]
 struct ImageServices {
     library_manager: SharedLibraryManager,
 }
+
+#[cfg(feature = "desktop")]
 pub fn make_config(context: &AppContext) -> DioxusConfig {
     let services = ImageServices {
         library_manager: context.library_manager.clone(),
@@ -118,7 +132,9 @@ pub fn make_config(context: &AppContext) -> DioxusConfig {
             }
         })
 }
+
 /// Serve an image from storage
+#[cfg(feature = "desktop")]
 async fn serve_image(
     image_id: &str,
     services: &ImageServices,
@@ -151,6 +167,8 @@ async fn serve_image(
 
     Ok((data, mime_type))
 }
+
+#[cfg(feature = "desktop")]
 fn make_window() -> WindowBuilder {
     WindowBuilder::new()
         .with_title("bae")
@@ -158,6 +176,8 @@ fn make_window() -> WindowBuilder {
         .with_decorations(true)
         .with_inner_size(dioxus::desktop::LogicalSize::new(1200, 800))
 }
+
+#[cfg(feature = "desktop")]
 pub fn launch_app(context: AppContext) {
     #[cfg(target_os = "macos")]
     setup_macos_window_activation();
