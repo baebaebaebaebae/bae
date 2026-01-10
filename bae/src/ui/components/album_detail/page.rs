@@ -263,13 +263,18 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
                         })
                         .collect();
                     // Get track signals - these are reactive per-track
-                    let track_signals: Vec<Signal<Track>> = import_state
-
+                    let mut track_signals: Vec<Signal<Track>> = import_state
                         .track_signals
                         .read()
                         .values()
                         .copied()
                         .collect();
+                    track_signals
+                        .sort_by(|a, b| {
+                            let a = a.read();
+                            let b = b.read();
+                            (a.disc_number, a.track_number).cmp(&(b.disc_number, b.track_number))
+                        });
                     rsx! {
                         AlbumDetailView {
                             album: display_album,

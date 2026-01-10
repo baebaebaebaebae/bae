@@ -18,7 +18,8 @@ pub fn AlbumDetailView(
     album: Album,
     releases: Vec<Release>,
     artists: Vec<Artist>,
-    // Per-track signals for granular reactivity
+    // Per-track signals for granular reactivity. Expected to be passed in display
+    // order (by disc/track number) - this view renders them as-is without sorting.
     track_signals: Vec<Signal<Track>>,
     selected_release_id: Option<String>,
     // UI state
