@@ -14,12 +14,8 @@ path = "src/lib.rs"
 name = "bae"
 path = "src/main.rs"
 
-[[bin]]
-name = "demo_web"
-path = "src/bin/demo_web.rs"
-required-features = ["web", "demo"]
-
 [dependencies]
+bae-ui = { path = "../bae-ui" }
 dioxus = { version = "0.7.2", features = ["router"] }
 reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -102,7 +98,6 @@ required-features = ["test-utils"]
 default = ["desktop"]
 desktop = ["dioxus/desktop"]
 web = ["dioxus/web"]
-demo = []  # Static fixture data for UI screenshots
 test-utils = []  # Feature for test helper APIs
 
 [lints.clippy]

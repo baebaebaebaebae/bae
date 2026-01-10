@@ -1,15 +1,18 @@
+//! Back button wrapper with app-specific navigation
+
 use crate::ui::Route;
+use bae_ui::BackButton as BackButtonView;
 use dioxus::prelude::*;
+
 /// Back to library navigation button
 #[component]
 pub fn BackButton() -> Element {
     rsx! {
-        div { class: "mb-6",
-            Link {
-                to: Route::Library {},
-                class: "inline-flex items-center text-blue-400 hover:text-blue-300 transition-colors",
-                "← Back to Library"
-            }
+        BackButtonView {
+            text: "Back to Library",
+            on_click: move |_| {
+                navigator().push(Route::Library {});
+            },
         }
     }
 }

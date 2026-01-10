@@ -5,8 +5,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DEMO_BUILD_DIR = path.join(__dirname, '../../bae/target/dx/demo_web/release/web/public');
-const COVERS_DIR = path.join(__dirname, '../fixtures/screenshots/covers');
+const DEMO_BUILD_DIR = path.join(__dirname, '../../bae-demo/target/dx/bae-demo/release/web/public');
+const COVERS_DIR = path.join(__dirname, '../../bae-demo/fixtures/covers');
 const PORT = 8080;
 
 const MIME_TYPES = {

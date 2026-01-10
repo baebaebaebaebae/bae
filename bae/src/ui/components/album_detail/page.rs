@@ -1,36 +1,22 @@
 use super::back_button::BackButton;
 use super::error::AlbumDetailError;
-use super::view::AlbumDetailView;
-use crate::ui::Route;
-use dioxus::prelude::*;
-
-#[cfg(not(feature = "demo"))]
 use super::loading::AlbumDetailLoading;
-#[cfg(not(feature = "demo"))]
 use super::utils::{get_selected_release_id_from_params, load_album_and_releases, maybe_not_empty};
-#[cfg(not(feature = "demo"))]
+use super::AlbumDetailView;
 use crate::db::ImportStatus;
-#[cfg(not(feature = "demo"))]
 use crate::db::{DbAlbum, DbArtist, DbRelease, DbTrack};
-#[cfg(not(feature = "demo"))]
 use crate::import::ImportProgress;
-#[cfg(not(feature = "demo"))]
 use crate::library::LibraryError;
-#[cfg(not(feature = "demo"))]
 use crate::library::{use_import_service, use_library_manager};
-#[cfg(not(feature = "demo"))]
 use crate::ui::components::{use_playback_service, use_playback_state};
-#[cfg(not(feature = "demo"))]
 use crate::ui::display_types::{Album, Artist, PlaybackDisplay, Release, Track, TrackImportState};
-#[cfg(not(feature = "demo"))]
+use crate::ui::Route;
 use crate::AppContext;
-#[cfg(not(feature = "demo"))]
+use dioxus::prelude::*;
 use rfd::AsyncFileDialog;
-#[cfg(not(feature = "demo"))]
 use tracing::error;
 
-/// Album detail page showing album info and tracklist (real mode)
-#[cfg(not(feature = "demo"))]
+/// Album detail page showing album info and tracklist
 #[component]
 pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>) -> Element {
     let maybe_release_id = use_memo(move || maybe_not_empty(release_id()));
@@ -306,14 +292,8 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
     }
 }
 
-#[component]
-pub fn PageContainer(children: Element) -> Element {
-    rsx! {
-        div { class: "container mx-auto p-6", {children} }
-    }
-}
+pub use bae_ui::PageContainer;
 
-#[cfg(not(feature = "demo"))]
 struct AlbumDetailData {
     album_resource: Resource<Result<(DbAlbum, Vec<DbRelease>), LibraryError>>,
     tracks_resource: Resource<Result<Vec<DbTrack>, LibraryError>>,
@@ -321,7 +301,6 @@ struct AlbumDetailData {
     selected_release_id: Memo<Option<String>>,
 }
 
-#[cfg(not(feature = "demo"))]
 fn use_album_detail_data(
     album_id: ReadSignal<String>,
     maybe_release_id_param: Memo<Option<String>>,
@@ -382,7 +361,6 @@ fn use_album_detail_data(
 }
 
 /// State returned by the release import hook
-#[cfg(not(feature = "demo"))]
 struct ReleaseImportState {
     /// Current import progress percentage (None if not importing)
     progress: Signal<Option<u8>>,
@@ -395,7 +373,6 @@ struct ReleaseImportState {
     track_signals: Signal<std::collections::HashMap<String, Signal<Track>>>,
 }
 
-#[cfg(not(feature = "demo"))]
 fn use_release_import_state(
     album_resource: Resource<Result<(DbAlbum, Vec<DbRelease>), LibraryError>>,
     selected_release_id: Memo<Option<String>>,
@@ -508,75 +485,5 @@ fn use_release_import_state(
         cover_image_id,
         import_error,
         track_signals,
-    }
-}
-
-/// Album detail page (demo mode) - uses static fixture data
-#[cfg(feature = "demo")]
-#[component]
-pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>) -> Element {
-    use crate::ui::demo_data;
-    use crate::ui::display_types::PlaybackDisplay;
-
-    let album_id_val = album_id();
-
-    // Get demo data
-    let album = demo_data::get_album(&album_id_val);
-    let artists = demo_data::get_artists_for_album(&album_id_val);
-    let releases = demo_data::get_releases_for_album(&album_id_val);
-    let tracks = demo_data::get_tracks_for_album(&album_id_val);
-
-    // Convert tracks to signals for the view
-    let track_signals: Vec<Signal<crate::ui::display_types::Track>> =
-        tracks.into_iter().map(Signal::new).collect();
-
-    let selected_release_id = releases.first().map(|r| r.id.clone());
-    let import_progress = use_signal(|| None::<u8>);
-    let import_error = use_signal(|| None::<String>);
-
-    // Navigation (works in demo mode too)
-    let on_release_select = move |new_release_id: String| {
-        navigator().push(Route::AlbumDetail {
-            album_id: album_id(),
-            release_id: new_release_id,
-        });
-    };
-
-    // Noop callbacks for demo mode
-    let noop = |_: ()| {};
-    let noop_string = |_: String| {};
-    let noop_vec = |_: Vec<String>| {};
-
-    rsx! {
-        PageContainer {
-            BackButton {}
-            if let Some(album) = album {
-                AlbumDetailView {
-                    album,
-                    releases,
-                    artists,
-                    tracks: track_signals.clone(),
-                    selected_release_id,
-                    import_progress,
-                    import_error,
-                    playback: PlaybackDisplay::Stopped,
-                    on_release_select,
-                    on_album_deleted: noop,
-                    on_export_release: noop_string,
-                    on_delete_album: noop_string,
-                    on_delete_release: noop_string,
-                    on_track_play: noop_string,
-                    on_track_pause: noop,
-                    on_track_resume: noop,
-                    on_track_add_next: noop_string,
-                    on_track_add_to_queue: noop_string,
-                    on_track_export: noop_string,
-                    on_play_album: noop_vec,
-                    on_add_album_to_queue: noop_vec,
-                }
-            } else {
-                AlbumDetailError { message: "Album not found in demo data".to_string() }
-            }
-        }
     }
 }

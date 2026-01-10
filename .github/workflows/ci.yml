@@ -95,7 +95,10 @@ jobs:
     - name: Cache Rust dependencies
       uses: Swatinem/rust-cache@v2
       with:
-        workspaces: bae -> target
+        workspaces: |
+          bae -> target
+          bae-ui -> target
+          bae-demo -> target
         shared-key: rust-cache
         cache-directories: ~/.cargo/bin
 
@@ -119,12 +122,24 @@ jobs:
         fi
       shell: bash
 
-    - name: Check Rust formatting
+    - name: Check Rust formatting (bae)
       working-directory: ./bae
       run: cargo fmt -- --check
 
-    - name: Check RSX formatting
+    - name: Check RSX formatting (bae)
       working-directory: ./bae
+      run: dx fmt --check
+
+    - name: Check Rust formatting (bae-ui)
+      working-directory: ./bae-ui
+      run: cargo fmt -- --check
+
+    - name: Check Rust formatting (bae-demo)
+      working-directory: ./bae-demo
+      run: cargo fmt -- --check
+
+    - name: Check RSX formatting (bae-demo)
+      working-directory: ./bae-demo
       run: dx fmt --check
 
     - name: Run Clippy (Linux/macOS)
@@ -152,6 +167,16 @@ jobs:
             cargo clippy --test "$test_name" --features test-utils -- -D warnings
           fi
         done
+
+    - name: Run Clippy on bae-ui (Linux/macOS)
+      if: runner.os != 'Windows'
+      working-directory: ./bae-ui
+      run: cargo clippy -- -D warnings
+
+    - name: Run Clippy on bae-demo (Linux/macOS)
+      if: runner.os != 'Windows'
+      working-directory: ./bae-demo
+      run: cargo clippy -- -D warnings
 
     - name: Run Clippy (Windows)
       if: runner.os == 'Windows'

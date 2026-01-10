@@ -10,7 +10,6 @@ pub mod imports_dropdown;
 #[cfg(all(target_os = "macos", feature = "desktop"))]
 pub mod title_bar;
 
-pub mod album_card;
 pub mod album_detail;
 pub mod app;
 pub mod dialog;
@@ -22,7 +21,6 @@ pub mod now_playing_bar;
 pub mod playback_hooks;
 pub mod queue_sidebar;
 pub mod settings;
-pub mod torrent_hooks;
 
 pub use album_detail::AlbumDetail;
 pub use app::App;
@@ -30,9 +28,7 @@ pub use library::Library;
 #[cfg(all(target_os = "macos", feature = "desktop"))]
 pub use library_search_context::use_library_search;
 pub use navbar::Navbar;
-#[cfg(not(feature = "demo"))]
 pub use playback_hooks::{use_playback_service, use_playback_state};
 pub use settings::Settings;
 #[cfg(all(target_os = "macos", feature = "desktop"))]
 pub use title_bar::TitleBar;
-pub use torrent_hooks::use_torrent_manager;

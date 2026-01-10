@@ -1,7 +1,5 @@
 use super::dialog::GlobalDialog;
-#[cfg(not(feature = "demo"))]
 use super::now_playing_bar::NowPlayingBar;
-#[cfg(not(feature = "demo"))]
 use super::queue_sidebar::QueueSidebar;
 #[cfg(all(target_os = "macos", feature = "desktop"))]
 use super::TitleBar;
@@ -25,15 +23,8 @@ pub fn Navbar() -> Element {
             }
         }
         Outlet::<Route> {}
-        {
-            #[cfg(not(feature = "demo"))]
-            {
-                rsx! {
-                    NowPlayingBar {}
-                    QueueSidebar {}
-                }
-            }
-        }
+        NowPlayingBar {}
+        QueueSidebar {}
         GlobalDialog {}
     }
 }

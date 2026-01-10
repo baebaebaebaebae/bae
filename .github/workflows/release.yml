@@ -78,7 +78,10 @@ jobs:
     - name: Cache Rust dependencies
       uses: Swatinem/rust-cache@v2
       with:
-        workspaces: bae -> target
+        workspaces: |
+          bae -> target
+          bae-ui -> target
+          bae-demo -> target
         shared-key: rust-cache
         cache-directories: ~/.cargo/bin
 
@@ -280,16 +283,8 @@ jobs:
         echo "✓ App bundle verification passed"
 
     - name: Build demo web app
-      working-directory: ./bae
-      run: |
-        if [[ -d "/opt/homebrew" ]]; then
-          export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig"
-          export LIBRARY_PATH="/opt/homebrew/lib"
-        else
-          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig"
-          export LIBRARY_PATH="/usr/local/lib"
-        fi
-        dx build --release --features web,demo --bin demo_web
+      working-directory: ./bae-demo
+      run: dx build --release --platform web
 
     - name: Install Playwright dependencies
       working-directory: ./website/screenshots

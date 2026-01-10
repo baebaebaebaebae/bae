@@ -1,13 +1,7 @@
 use crate::db::{DbAlbum, DbRelease};
 use crate::library::{LibraryError, SharedLibraryManager};
 use dioxus::prelude::*;
-/// Format duration from milliseconds to MM:SS
-pub fn format_duration(duration_ms: i64) -> String {
-    let total_seconds = duration_ms / 1000;
-    let minutes = total_seconds / 60;
-    let seconds = total_seconds % 60;
-    format!("{}:{:02}", minutes, seconds)
-}
+
 /// Load album and its releases from the database
 pub async fn load_album_and_releases(
     library_manager: &SharedLibraryManager,

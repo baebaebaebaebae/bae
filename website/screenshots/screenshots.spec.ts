@@ -31,7 +31,7 @@ test('capture album detail view', async ({ page }) => {
   await page.waitForSelector('.grid', { timeout: 10000 });
   
   // Click on the first album card to navigate to detail view
-  const firstAlbumCard = page.locator('.grid > div').first();
+  const firstAlbumCard = page.locator('.grid > a').first();
   await firstAlbumCard.click();
   
   // Wait for album detail to load

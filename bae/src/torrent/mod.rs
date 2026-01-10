@@ -8,7 +8,6 @@ pub mod piece_mapper;
 pub mod progress;
 pub mod storage;
 pub use lazy::LazyTorrentManager;
-pub use manager::TorrentManagerHandle;
 pub use metadata_detector::detect_metadata_from_torrent_file;
 pub use parser::parse_torrent_info;
 pub use piece_mapper::TorrentPieceMapper;
