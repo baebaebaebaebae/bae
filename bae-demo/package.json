@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "build": "dx build --release --platform web",
+    "serve": "node e2e/serve.mjs",
+    "start": "npm run build && npm run serve",
     "tailwind:watch": "npx tailwindcss -i tailwind.css -o assets/tailwind.css --watch"
   },
   "dependencies": {
