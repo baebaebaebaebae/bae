@@ -20,7 +20,7 @@ pub fn AlbumDetailView(
     artists: Vec<Artist>,
     // Per-track signals for granular reactivity. Expected to be passed in display
     // order (by disc/track number) - this view renders them as-is without sorting.
-    track_signals: Vec<Signal<Track>>,
+    tracks: Vec<Signal<Track>>,
     selected_release_id: Option<String>,
     // UI state
     import_progress: ReadSignal<Option<u8>>,
@@ -68,7 +68,7 @@ pub fn AlbumDetailView(
     };
 
     // Track IDs for play album button (read from signals)
-    let track_ids: Vec<String> = track_signals.iter().map(|s| s().id.clone()).collect();
+    let track_ids: Vec<String> = tracks.iter().map(|s| s().id.clone()).collect();
 
     rsx! {
         div { class: "grid grid-cols-1 lg:grid-cols-3 gap-8",
@@ -92,7 +92,7 @@ pub fn AlbumDetailView(
                     AlbumMetadata {
                         album: album.clone(),
                         artists: artists.clone(),
-                        track_count: track_signals.len(),
+                        track_count: tracks.len(),
                         selected_release: releases.iter().find(|r| Some(r.id.clone()) == selected_release_id).cloned(),
                     }
                     PlayAlbumButton {
@@ -120,14 +120,14 @@ pub fn AlbumDetailView(
                         }
                     }
                     h2 { class: "text-xl font-bold text-white mb-4", "Tracklist" }
-                    if track_signals.is_empty() {
+                    if tracks.is_empty() {
                         div { class: "text-center py-8 text-gray-400",
                             p { "No tracks found for this album." }
                         }
                     } else {
                         {
                             // Read tracks to check for multiple discs
-                            let tracks_snapshot: Vec<Track> = track_signals.iter().map(|s| s()).collect();
+                            let tracks_snapshot: Vec<Track> = tracks.iter().map(|s| s()).collect();
                             let has_multiple_discs = tracks_snapshot
                                 .iter()
                                 .filter_map(|t| t.disc_number)
@@ -138,7 +138,7 @@ pub fn AlbumDetailView(
                                 let mut current_disc: Option<i32> = None;
                                 rsx! {
                                     div { class: "space-y-2",
-                                        for track_signal in &track_signals {
+                                        for track_signal in &tracks {
                                             {
                                                 let track = track_signal();
                                                 let show_disc_header = track.disc_number != current_disc;
@@ -186,7 +186,7 @@ pub fn AlbumDetailView(
                             } else {
                                 rsx! {
                                     div { class: "space-y-2",
-                                        for track_signal in &track_signals {
+                                        for track_signal in &tracks {
                                             {
                                                 let track = track_signal();
                                                 let is_this_track = current_track_id.as_ref() == Some(&track.id);
