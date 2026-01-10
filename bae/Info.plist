@@ -6,6 +6,13 @@
     <string>bae</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>bae uses your local network for BitTorrent peer discovery.</string>
+    <!-- Sparkle auto-update configuration -->
+    <key>SUFeedURL</key>
+    <string>https://github.com/bae-fm/bae/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>cYiouOrDxmQrHspLwOf/XpQOQOMt3isdYDs6xEDBGs8=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
 </dict>
 </plist>
 

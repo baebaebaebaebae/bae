@@ -242,5 +242,34 @@ if [[ -f "$CUSTOM_PLIST" ]]; then
         echo "  ✓ Added NSLocalNetworkUsageDescription"
     fi
     
+    # Sparkle auto-update configuration
+    if /usr/libexec/PlistBuddy -c "Print :SUFeedURL" "$CUSTOM_PLIST" &>/dev/null; then
+        VALUE=$(/usr/libexec/PlistBuddy -c "Print :SUFeedURL" "$CUSTOM_PLIST")
+        /usr/libexec/PlistBuddy -c "Delete :SUFeedURL" "$INFO_PLIST" 2>/dev/null || true
+        /usr/libexec/PlistBuddy -c "Add :SUFeedURL string '$VALUE'" "$INFO_PLIST"
+        echo "  ✓ Added SUFeedURL"
+    fi
+    
+    if /usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" "$CUSTOM_PLIST" &>/dev/null; then
+        VALUE=$(/usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" "$CUSTOM_PLIST")
+        /usr/libexec/PlistBuddy -c "Delete :SUPublicEDKey" "$INFO_PLIST" 2>/dev/null || true
+        /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string '$VALUE'" "$INFO_PLIST"
+        echo "  ✓ Added SUPublicEDKey"
+    fi
+    
+    if /usr/libexec/PlistBuddy -c "Print :SUEnableAutomaticChecks" "$CUSTOM_PLIST" &>/dev/null; then
+        VALUE=$(/usr/libexec/PlistBuddy -c "Print :SUEnableAutomaticChecks" "$CUSTOM_PLIST")
+        /usr/libexec/PlistBuddy -c "Delete :SUEnableAutomaticChecks" "$INFO_PLIST" 2>/dev/null || true
+        /usr/libexec/PlistBuddy -c "Add :SUEnableAutomaticChecks bool $VALUE" "$INFO_PLIST"
+        echo "  ✓ Added SUEnableAutomaticChecks"
+    fi
+    
     echo "✓ Info.plist merged"
+fi
+
+# Bundle Sparkle.framework for auto-updates
+BUNDLE_SPARKLE="$SCRIPT_DIR/bundle_sparkle.sh"
+if [[ -x "$BUNDLE_SPARKLE" ]]; then
+    echo ""
+    "$BUNDLE_SPARKLE" "$APP_PATH"
 fi

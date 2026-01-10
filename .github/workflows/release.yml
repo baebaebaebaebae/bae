@@ -208,6 +208,57 @@ jobs:
         
         xcrun stapler staple "$DMG_PATH"
 
+    - name: Download Sparkle for signing
+      run: |
+        SPARKLE_VERSION="2.8.1"
+        curl -L -o /tmp/sparkle.tar.xz "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+        mkdir -p /tmp/sparkle
+        tar -xf /tmp/sparkle.tar.xz -C /tmp/sparkle
+
+    - name: Sign DMG with Sparkle EdDSA key
+      env:
+        SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+      run: |
+        DMG_PATH="bae/target/bae.dmg"
+        
+        # Sign the DMG and capture the signature
+        SIGNATURE=$(echo "$SPARKLE_PRIVATE_KEY" | /tmp/sparkle/bin/sign_update "$DMG_PATH")
+        echo "SPARKLE_SIGNATURE=$SIGNATURE" >> $GITHUB_ENV
+        
+        # Get file size for appcast
+        DMG_SIZE=$(stat -f%z "$DMG_PATH")
+        echo "DMG_SIZE=$DMG_SIZE" >> $GITHUB_ENV
+
+    - name: Generate appcast.xml
+      run: |
+        VERSION="${{ needs.calculate-version.outputs.version }}"
+        DMG_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/bae.dmg"
+        
+        cat > bae/target/appcast.xml << EOF
+        <?xml version="1.0" encoding="utf-8"?>
+        <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+          <channel>
+            <title>bae Updates</title>
+            <link>https://github.com/${{ github.repository }}/releases</link>
+            <description>Most recent updates to bae</description>
+            <language>en</language>
+            <item>
+              <title>Version ${VERSION}</title>
+              <pubDate>$(date -R)</pubDate>
+              <sparkle:version>${VERSION}</sparkle:version>
+              <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
+              <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
+              <enclosure
+                url="${DMG_URL}"
+                length="${DMG_SIZE}"
+                type="application/octet-stream"
+                sparkle:edSignature="${SPARKLE_SIGNATURE}"
+              />
+            </item>
+          </channel>
+        </rss>
+        EOF
+
     - name: Verify app bundle is properly bundled
       working-directory: ./bae
       run: |
@@ -276,7 +327,9 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         tag_name: v${{ needs.calculate-version.outputs.version }}
-        files: bae/target/bae.dmg
+        files: |
+          bae/target/bae.dmg
+          bae/target/appcast.xml
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -25,6 +25,7 @@ mod subsonic;
 mod test_support;
 mod torrent;
 mod ui;
+mod updater;
 use library::SharedLibraryManager;
 use subsonic::create_router;
 /// Root application context containing all top-level dependencies
@@ -169,6 +170,9 @@ fn main() {
             start_subsonic_server(subsonic_library, subsonic_encryption, subsonic_port).await
         });
     }
+
+    // Initialize auto-updater (checks for updates on launch)
+    updater::start();
 
     info!("Starting UI");
     ui::launch_app(ui_context);

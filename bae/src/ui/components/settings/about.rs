@@ -1,4 +1,5 @@
 use crate::library::use_library_manager;
+use crate::updater;
 use dioxus::prelude::*;
 
 const VERSION: &str = env!("BAE_VERSION");
@@ -22,13 +23,22 @@ pub fn AboutSection() -> Element {
             div { class: "bg-gray-800 rounded-lg p-6 mb-6",
                 h3 { class: "text-lg font-medium text-white mb-4", "Application" }
                 div { class: "space-y-3",
-                    div { class: "flex justify-between",
+                    div { class: "flex justify-between items-center",
                         span { class: "text-gray-400", "Version" }
                         span { class: "text-white font-mono", "{VERSION}" }
                     }
-                    div { class: "flex justify-between",
+                    div { class: "flex justify-between items-center",
                         span { class: "text-gray-400", "Build" }
                         span { class: "text-white font-mono", "Rust (stable)" }
+                    }
+                }
+                div { class: "mt-4 pt-4 border-t border-gray-700",
+                    button {
+                        class: "px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors",
+                        onclick: move |_| {
+                            updater::check_for_updates();
+                        },
+                        "Check for Updates"
                     }
                 }
             }

@@ -22,3 +22,4 @@ pub mod subsonic;
 #[cfg(feature = "test-utils")]
 pub mod test_support;
 pub mod torrent;
+pub mod updater;
