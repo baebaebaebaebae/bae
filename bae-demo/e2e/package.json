@@ -7,7 +7,6 @@
     "test:headed": "playwright test --headed"
   },
   "devDependencies": {
-    "@playwright/test": "^1.49.0",
-    "serve": "^14.2.4"
+    "@playwright/test": "^1.49.0"
   }
 }

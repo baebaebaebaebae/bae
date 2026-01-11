@@ -19,10 +19,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    // Serve the demo build and mount covers at /covers
-    command: `node serve.mjs`,
+    command: `cd .. && dx serve --release --port 8080`,
     url: 'http://localhost:8080',
     reuseExistingServer: !process.env.CI,
-    timeout: 120000,
+    timeout: 180000,
   },
 });
