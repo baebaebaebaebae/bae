@@ -3,8 +3,10 @@
 pub mod album_card;
 pub mod album_detail;
 pub mod app_layout;
+pub mod dialog;
 pub mod helpers;
 pub mod import;
+pub mod imports;
 pub mod library;
 pub mod playback;
 pub mod settings;
@@ -19,11 +21,18 @@ pub use album_detail::{
     TrackRow,
 };
 pub use app_layout::AppLayoutView;
+pub use dialog::GlobalDialogView;
 pub use helpers::{BackButton, ErrorDisplay, LoadingSpinner, PageContainer};
 pub use import::{
-    CdDriveStatus, CdSelectorView, FolderSelectorView, ImportSource, ImportSourceSelectorView,
-    ImportView, TorrentInputMode, TorrentInputView,
+    CdDriveStatus, CdSelectorView, ConfirmationView, DetectingMetadataView, DiscIdLookupErrorView,
+    ExactLookupView, FileListView, FolderImportView, FolderImportViewProps, FolderSelectorView,
+    ImportErrorDisplayView, ImportSource, ImportSourceSelectorView, ImportView,
+    ManualSearchPanelView, MatchItemView, MatchListView, MetadataDetectionPromptView,
+    ReleaseSelectorView, SearchSourceSelectorView, SelectedSourceView, TorrentFilesDisplayView,
+    TorrentInfoDisplayView, TorrentInputMode, TorrentInputView, TorrentTrackerDisplayView,
+    TrackerConnectionStatus, TrackerStatus,
 };
+pub use imports::{ImportsButtonView, ImportsDropdownView};
 pub use library::LibraryView;
 pub use playback::{NowPlayingBarView, QueueSidebarState, QueueSidebarView};
 pub use settings::{

@@ -1,6 +1,12 @@
-use super::active_imports_context::{use_active_imports, ActiveImport};
+//! Imports dropdown wrapper
+//!
+//! Thin wrapper that bridges ActiveImportsState context to ImportsDropdownView.
+
+use super::active_imports_context::use_active_imports;
 use crate::db::ImportOperationStatus;
 use crate::ui::{image_url, AppContext, Route};
+use bae_ui::display_types::{ActiveImport as DisplayActiveImport, ImportStatus};
+use bae_ui::ImportsDropdownView;
 use dioxus::prelude::*;
 
 /// Dropdown showing list of active imports with progress
@@ -10,285 +16,96 @@ pub fn ImportsDropdown(mut is_open: Signal<bool>) -> Element {
     let imports = active_imports.imports.read();
     let navigator = use_navigator();
     let app_context = use_context::<AppContext>();
-    let import_count = imports.len();
-    if !*is_open.read() {
-        return rsx! {};
-    }
+
+    // Convert to display types
+    let display_imports: Vec<DisplayActiveImport> = imports
+        .iter()
+        .map(|i| {
+            let cover_url = i
+                .cover_image_id
+                .as_ref()
+                .map(|id| image_url(id))
+                .or_else(|| i.cover_art_url.clone());
+
+            DisplayActiveImport {
+                import_id: i.import_id.clone(),
+                album_title: i.album_title.clone(),
+                artist_name: i.artist_name.clone(),
+                status: match i.status {
+                    ImportOperationStatus::Preparing => ImportStatus::Preparing,
+                    ImportOperationStatus::Importing => ImportStatus::Importing,
+                    ImportOperationStatus::Complete => ImportStatus::Complete,
+                    ImportOperationStatus::Failed => ImportStatus::Failed,
+                },
+                current_step_text: i.current_step.map(|s| s.display_text().to_string()),
+                progress_percent: i.progress_percent,
+                release_id: i.release_id.clone(),
+                cover_url,
+            }
+        })
+        .collect();
+
+    // Build a map from import_id to release_id for navigation
+    let release_ids: std::collections::HashMap<String, Option<String>> = imports
+        .iter()
+        .map(|i| (i.import_id.clone(), i.release_id.clone()))
+        .collect();
+
     rsx! {
-        div {
-            class: "fixed inset-0 z-[1600]",
-            onclick: move |_| is_open.set(false),
-        }
-        div { class: "absolute top-full right-0 mt-2 w-96 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-[1700] overflow-hidden",
-            div { class: "px-4 py-3 bg-gray-800/50 border-b border-gray-700 flex items-center justify-between",
-                div { class: "flex items-center gap-2",
-                    svg {
-                        class: "h-4 w-4 text-indigo-400",
-                        fill: "none",
-                        stroke: "currentColor",
-                        view_box: "0 0 24 24",
-                        stroke_width: "2",
-                        path {
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            d: "M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4",
-                        }
+        ImportsDropdownView {
+            imports: display_imports,
+            is_open: *is_open.read(),
+            on_close: move |_| is_open.set(false),
+            on_import_click: {
+                let release_ids = release_ids.clone();
+                move |import_id: String| {
+                    is_open.set(false);
+                    if let Some(Some(rid)) = release_ids.get(&import_id) {
+                        navigator
+                            .push(Route::AlbumDetail {
+                                album_id: rid.clone(),
+                                release_id: String::new(),
+                            });
                     }
-                    h3 { class: "text-sm font-semibold text-white", "Imports" }
-                    span { class: "text-xs text-gray-500", "({import_count})" }
-                }
-                if import_count > 0 {
-                    button {
-                        class: "text-xs text-gray-400 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-gray-700/50",
-                        onclick: {
-                            let mut imports_signal = active_imports.imports;
-                            let library_manager = app_context.library_manager.clone();
-                            move |e: Event<MouseData>| {
-                                e.stop_propagation();
-                                // Collect IDs before clearing the list
-                                let import_ids: Vec<String> = imports_signal
-                                    // Delete all from DB
-                                    .read()
-                                    .iter()
-                                    .map(|i| i.import_id.clone())
-                                    .collect();
-                                imports_signal.with_mut(|list| list.clear());
-                                let library_manager = library_manager.clone();
-                                spawn(async move {
-                                    for id in import_ids {
-                                        if let Err(e) = library_manager.get().delete_import(&id).await {
-                                            tracing::warn!("Failed to delete import {} from DB: {}", id, e);
-                                        }
-                                    }
-                                });
-                            }
-                        },
-                        "Clear all"
-                    }
-                }
-            }
-            if imports.is_empty() {
-                div { class: "px-4 py-8 text-center",
-                    svg {
-                        class: "h-10 w-10 text-gray-600 mx-auto mb-3",
-                        fill: "none",
-                        stroke: "currentColor",
-                        view_box: "0 0 24 24",
-                        stroke_width: "1.5",
-                        path {
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            d: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
-                        }
-                    }
-                    p { class: "text-gray-500 text-sm", "No active imports" }
-                }
-            } else {
-                div { class: "max-h-96 overflow-y-auto divide-y divide-gray-800",
-                    for import in imports.iter() {
-                        {
-                            let import_id = import.import_id.clone();
-                            rsx! {
-                                ImportItem {
-                                    key: "{import_id}",
-                                    import: import.clone(),
-                                    on_click: {
-                                        let release_id = import.release_id.clone();
-                                        let mut is_open = is_open;
-                                        move |_| {
-                                            is_open.set(false);
-                                            if let Some(ref rid) = release_id {
-                                                navigator
-                                                    .push(Route::AlbumDetail {
-                                                        album_id: rid.clone(),
-                                                        release_id: String::new(),
-                                                    });
-                                            }
-                                        }
-                                    },
-                                    on_dismiss: {
-                                        let import_id = import_id.clone();
-                                        let library_manager = app_context.library_manager.clone();
-                                        move |_| {
-                                            active_imports.dismiss(&import_id);
-                                            // Also delete from DB so it doesn't reappear after restart
-                                            let library_manager = library_manager.clone();
-                                            let import_id = import_id.clone();
-                                            spawn(async move {
-                                                if let Err(e) = library_manager.get().delete_import(&import_id).await {
-                                                    tracing::warn!("Failed to delete import from DB: {}", e);
-                                                }
-                                            });
-                                        }
-                                    },
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-/// Single import item in the dropdown
-#[component]
-fn ImportItem(
-    import: ActiveImport,
-    on_click: EventHandler<()>,
-    on_dismiss: EventHandler<()>,
-) -> Element {
-    let is_complete = import.status == ImportOperationStatus::Complete;
-    let is_failed = import.status == ImportOperationStatus::Failed;
-    let is_importing = import.status == ImportOperationStatus::Importing;
-    let progress_percent = import.progress_percent.unwrap_or(0);
-    let status_color = match import.status {
-        ImportOperationStatus::Preparing => "text-yellow-500",
-        ImportOperationStatus::Importing => "text-indigo-400",
-        ImportOperationStatus::Complete => "text-green-500",
-        ImportOperationStatus::Failed => "text-red-500",
-    };
-    let status_text = match import.status {
-        ImportOperationStatus::Preparing => {
-            if let Some(step) = import.current_step {
-                step.display_text().to_string()
-            } else {
-                "Preparing...".to_string()
-            }
-        }
-        ImportOperationStatus::Importing => {
-            if progress_percent > 0 {
-                format!("{}% complete", progress_percent)
-            } else {
-                "Starting...".to_string()
-            }
-        }
-        ImportOperationStatus::Complete => "Import complete".to_string(),
-        ImportOperationStatus::Failed => "Import failed".to_string(),
-    };
-    let cursor_class = if is_complete {
-        "cursor-pointer"
-    } else {
-        "cursor-default"
-    };
-    rsx! {
-        div {
-            class: "group px-4 py-3 hover:bg-gray-800/50 transition-colors {cursor_class}",
-            onclick: move |_| {
-                if is_complete {
-                    on_click.call(());
                 }
             },
-            div { class: "flex items-start gap-3",
-                {
-                    let cover_url = import
-                        .cover_image_id
-                        .as_ref()
-                        .map(|id| image_url(id))
-                        .or(import.cover_art_url.clone());
-                    rsx! {
-                        div { class: "flex-shrink-0 w-10 h-10 bg-gray-700 rounded overflow-hidden relative",
-                            if let Some(url) = cover_url {
-                                img {
-                                    src: "{url}",
-                                    alt: "Album cover",
-                                    class: "w-full h-full object-cover",
-                                }
-                            } else {
-                                div { class: "w-full h-full flex items-center justify-center text-gray-500 text-lg",
-                                    "🎵"
-                                }
-                            }
-                            if is_complete {
-                                div { class: "absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center",
-                                    svg {
-                                        class: "h-2.5 w-2.5 text-white",
-                                        fill: "none",
-                                        stroke: "currentColor",
-                                        view_box: "0 0 24 24",
-                                        stroke_width: "3",
-                                        path {
-                                            stroke_linecap: "round",
-                                            stroke_linejoin: "round",
-                                            d: "M5 13l4 4L19 7",
-                                        }
-                                    }
-                                }
-                            } else if is_failed {
-                                div { class: "absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center",
-                                    svg {
-                                        class: "h-2.5 w-2.5 text-white",
-                                        fill: "none",
-                                        stroke: "currentColor",
-                                        view_box: "0 0 24 24",
-                                        stroke_width: "3",
-                                        path {
-                                            stroke_linecap: "round",
-                                            stroke_linejoin: "round",
-                                            d: "M6 18L18 6M6 6l12 12",
-                                        }
-                                    }
-                                }
-                            } else {
-                                div { class: "absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-indigo-500 rounded-full flex items-center justify-center",
-                                    svg {
-                                        class: "h-2.5 w-2.5 text-white animate-spin",
-                                        fill: "none",
-                                        view_box: "0 0 24 24",
-                                        circle {
-                                            class: "opacity-25",
-                                            cx: "12",
-                                            cy: "12",
-                                            r: "10",
-                                            stroke: "currentColor",
-                                            stroke_width: "4",
-                                        }
-                                        path {
-                                            class: "opacity-75",
-                                            fill: "currentColor",
-                                            d: "M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z",
-                                        }
-                                    }
-                                }
+            on_import_dismiss: {
+                let library_manager = app_context.library_manager.clone();
+                move |import_id: String| {
+                    active_imports.dismiss(&import_id);
+
+                    // Also delete from DB so it doesn't reappear after restart
+                    let library_manager = library_manager.clone();
+                    spawn(async move {
+                        if let Err(e) = library_manager.get().delete_import(&import_id).await {
+                            tracing::warn!("Failed to delete import from DB: {}", e);
+                        }
+                    });
+                }
+            },
+            on_clear_all: {
+                let library_manager = app_context.library_manager.clone();
+                let mut imports_signal = active_imports.imports;
+                move |_| {
+                    // Collect IDs before clearing the list
+                    let import_ids: Vec<String> = imports_signal
+                        .read()
+                        .iter()
+                        .map(|i| i.import_id.clone())
+                        .collect();
+                    imports_signal.with_mut(|list| list.clear());
+
+                    // Delete all from DB
+                    let library_manager = library_manager.clone();
+                    spawn(async move {
+                        for id in import_ids {
+                            if let Err(e) = library_manager.get().delete_import(&id).await {
+                                tracing::warn!("Failed to delete import {} from DB: {}", id, e);
                             }
                         }
-                    }
+                    });
                 }
-                div { class: "flex-1 min-w-0",
-                    p { class: "text-sm font-medium text-white truncate", "{import.album_title}" }
-                    if !import.artist_name.is_empty() {
-                        p { class: "text-xs text-gray-400 truncate", "{import.artist_name}" }
-                    }
-                    p { class: "text-xs {status_color} mt-1", "{status_text}" }
-                    if is_importing && progress_percent > 0 {
-                        div { class: "mt-2 h-1.5 bg-gray-700 rounded-full overflow-hidden",
-                            div {
-                                class: "h-full bg-gradient-to-r from-indigo-500 to-indigo-400 transition-all duration-300 ease-out",
-                                style: "width: {progress_percent}%",
-                            }
-                        }
-                    }
-                }
-                button {
-                    class: "flex-shrink-0 p-1.5 text-gray-600 hover:text-white hover:bg-gray-700 rounded-lg transition-all opacity-0 group-hover:opacity-100",
-                    onclick: move |e: Event<MouseData>| {
-                        e.stop_propagation();
-                        on_dismiss.call(());
-                    },
-                    title: "Dismiss",
-                    svg {
-                        class: "h-4 w-4",
-                        fill: "none",
-                        stroke: "currentColor",
-                        view_box: "0 0 24 24",
-                        stroke_width: "2",
-                        path {
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            d: "M6 18L18 6M6 6l12 12",
-                        }
-                    }
-                }
-            }
+            },
         }
     }
 }

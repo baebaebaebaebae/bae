@@ -6,13 +6,13 @@
 mod demo_data;
 
 use bae_ui::{
-    AboutSectionView, AlbumDetailView, ApiKeysSectionView, AppLayoutView, BackButton,
+    AboutSectionView, ActiveImport, AlbumDetailView, ApiKeysSectionView, AppLayoutView, BackButton,
     BitTorrentSectionView, BitTorrentSettings, CdDriveStatus, CdSelectorView,
-    EncryptionSectionView, ErrorDisplay, FolderSelectorView, ImportSource, ImportView, LibraryView,
-    NavItem, NowPlayingBarView, PageContainer, PlaybackDisplay, QueueItem, QueueSidebarView,
-    SearchResult, SettingsTab, SettingsView, StorageLocation, StorageProfile,
-    StorageProfilesSectionView, SubsonicSectionView, TitleBarView, TorrentInputMode,
-    TorrentInputView, Track, TrackImportState,
+    EncryptionSectionView, ErrorDisplay, FolderSelectorView, ImportSource, ImportStatus,
+    ImportView, ImportsButtonView, ImportsDropdownView, LibraryView, NavItem, NowPlayingBarView,
+    PageContainer, PlaybackDisplay, QueueItem, QueueSidebarView, SearchResult, SettingsTab,
+    SettingsView, StorageLocation, StorageProfile, StorageProfilesSectionView, SubsonicSectionView,
+    TitleBarView, TorrentInputMode, TorrentInputView, Track, TrackImportState,
 };
 use dioxus::prelude::*;
 
@@ -45,6 +45,42 @@ fn mock_playing_track() -> Track {
         is_available: true,
         import_state: TrackImportState::Complete,
     }
+}
+
+/// Get mock active imports for demo
+fn mock_active_imports() -> Vec<ActiveImport> {
+    vec![
+        ActiveImport {
+            import_id: "import-1".to_string(),
+            album_title: "Midnight Dreams".to_string(),
+            artist_name: "Synthwave Collective".to_string(),
+            status: ImportStatus::Importing,
+            current_step_text: None,
+            progress_percent: Some(67),
+            release_id: Some("release-1".to_string()),
+            cover_url: Some("/covers/the-midnight-signal_neon-frequencies.png".to_string()),
+        },
+        ActiveImport {
+            import_id: "import-2".to_string(),
+            album_title: "Electric Horizons".to_string(),
+            artist_name: "Neon Pulse".to_string(),
+            status: ImportStatus::Preparing,
+            current_step_text: Some("Downloading cover art...".to_string()),
+            progress_percent: None,
+            release_id: None,
+            cover_url: None,
+        },
+        ActiveImport {
+            import_id: "import-3".to_string(),
+            album_title: "Retro Future".to_string(),
+            artist_name: "Chrome Waves".to_string(),
+            status: ImportStatus::Complete,
+            current_step_text: None,
+            progress_percent: Some(100),
+            release_id: Some("release-3".to_string()),
+            cover_url: Some("/covers/velvet-mathematics_proof-by-induction.png".to_string()),
+        },
+    ]
 }
 
 /// Get mock queue items
@@ -88,6 +124,8 @@ fn DemoLayout() -> Element {
     let mut is_playing = use_signal(|| true);
     let mut position_ms = use_signal(|| 45_000u64);
     let mut queue_open = use_signal(|| false);
+    let mut imports_open = use_signal(|| false);
+    let mock_imports = mock_active_imports();
 
     // Mock search - filter albums by query
     let search_results: Vec<SearchResult> = {
@@ -199,6 +237,21 @@ fn DemoLayout() -> Element {
                     on_search_focus: move |_| {
                         if !search_query().is_empty() {
                             show_search_results.set(true);
+                        }
+                    },
+                    imports_indicator: rsx! {
+                        ImportsButtonView {
+                            imports: mock_imports.clone(),
+                            is_open: imports_open(),
+                            on_toggle: move |_| imports_open.toggle(),
+                        }
+                        ImportsDropdownView {
+                            imports: mock_imports.clone(),
+                            is_open: imports_open(),
+                            on_close: move |_| imports_open.set(false),
+                            on_import_click: move |_id: String| imports_open.set(false),
+                            on_import_dismiss: move |_id: String| {},
+                            on_clear_all: move |_| {},
                         }
                     },
                     // No window drag/zoom on web

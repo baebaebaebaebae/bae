@@ -107,3 +107,221 @@ pub struct Image {
     pub is_cover: bool,
     pub source: String,
 }
+
+/// Import operation status for UI display
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum ImportStatus {
+    #[default]
+    Preparing,
+    Importing,
+    Complete,
+    Failed,
+}
+
+/// Active import for UI display
+#[derive(Clone, Debug, PartialEq)]
+pub struct ActiveImport {
+    pub import_id: String,
+    pub album_title: String,
+    pub artist_name: String,
+    pub status: ImportStatus,
+    /// Human-readable text for current step (e.g., "Parsing metadata...")
+    pub current_step_text: Option<String>,
+    pub progress_percent: Option<u8>,
+    pub release_id: Option<String>,
+    pub cover_url: Option<String>,
+}
+
+// ============================================================================
+// Import Workflow Display Types
+// ============================================================================
+
+/// Import workflow phase for UI display
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum ImportPhase {
+    #[default]
+    FolderSelection,
+    ReleaseSelection,
+    MetadataDetection,
+    ExactLookup,
+    ManualSearch,
+    Confirmation,
+}
+
+/// Search tab for manual search panel
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum SearchTab {
+    #[default]
+    General,
+    CatalogNumber,
+    Barcode,
+}
+
+/// Search source (metadata provider)
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum SearchSource {
+    #[default]
+    MusicBrainz,
+    Discogs,
+}
+
+/// Match candidate source type
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MatchSourceType {
+    MusicBrainz,
+    Discogs,
+}
+
+/// Match candidate for UI display
+#[derive(Clone, Debug, PartialEq)]
+pub struct MatchCandidate {
+    pub title: String,
+    pub artist: String,
+    pub year: Option<String>,
+    pub cover_url: Option<String>,
+    pub format: Option<String>,
+    pub country: Option<String>,
+    pub label: Option<String>,
+    pub catalog_number: Option<String>,
+    pub source_type: MatchSourceType,
+    /// Original year / first release date (for MusicBrainz)
+    pub original_year: Option<String>,
+}
+
+/// Detected folder metadata for UI display
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct FolderMetadata {
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub year: Option<u32>,
+    pub track_count: Option<u32>,
+    /// Tokens extracted from folder name for search suggestions
+    pub folder_tokens: Vec<String>,
+}
+
+/// File info for UI display (simplified)
+#[derive(Clone, Debug, PartialEq)]
+pub struct FileInfo {
+    pub name: String,
+    pub size: u64,
+    pub format: String,
+}
+
+/// Artwork file info with display URL
+#[derive(Clone, Debug, PartialEq)]
+pub struct ArtworkFile {
+    pub name: String,
+    /// URL to display the artwork (resolved by caller)
+    pub display_url: String,
+}
+
+/// A CUE/FLAC pair for UI display
+#[derive(Clone, Debug, PartialEq)]
+pub struct CueFlacPairInfo {
+    pub cue_name: String,
+    pub flac_name: String,
+    pub total_size: u64,
+    pub track_count: usize,
+}
+
+/// Audio content type for UI display
+#[derive(Clone, Debug, PartialEq)]
+pub enum AudioContentInfo {
+    /// One or more CUE/FLAC pairs
+    CueFlacPairs(Vec<CueFlacPairInfo>),
+    /// Individual track files
+    TrackFiles(Vec<FileInfo>),
+}
+
+impl Default for AudioContentInfo {
+    fn default() -> Self {
+        AudioContentInfo::TrackFiles(Vec::new())
+    }
+}
+
+/// Pre-categorized files for UI display
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct CategorizedFileInfo {
+    /// Audio content - CUE/FLAC pairs or track files
+    pub audio: AudioContentInfo,
+    /// Artwork/image files (with resolved display URLs)
+    pub artwork: Vec<ArtworkFile>,
+    /// Document files (.log, .txt, .nfo) - CUE files in pairs are NOT here
+    pub documents: Vec<FileInfo>,
+    /// Everything else
+    pub other: Vec<FileInfo>,
+}
+
+impl CategorizedFileInfo {
+    /// Total number of files across all categories
+    pub fn total_count(&self) -> usize {
+        let audio_count = match &self.audio {
+            AudioContentInfo::CueFlacPairs(pairs) => pairs.len() * 2,
+            AudioContentInfo::TrackFiles(tracks) => tracks.len(),
+        };
+        audio_count + self.artwork.len() + self.documents.len() + self.other.len()
+    }
+
+    /// Check if empty
+    pub fn is_empty(&self) -> bool {
+        self.total_count() == 0
+    }
+
+    /// Get artwork as FileInfo for display in file lists
+    pub fn artwork_as_file_info(&self) -> Vec<FileInfo> {
+        self.artwork
+            .iter()
+            .map(|a| FileInfo {
+                name: a.name.clone(),
+                size: 0,
+                format: "Image".to_string(),
+            })
+            .collect()
+    }
+}
+
+/// Torrent file info for UI display
+#[derive(Clone, Debug, PartialEq)]
+pub struct TorrentFileInfo {
+    pub path: String,
+    pub size: i64,
+}
+
+/// Torrent info for UI display
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct TorrentInfo {
+    pub name: String,
+    pub trackers: Vec<String>,
+    pub comment: String,
+    pub creator: String,
+    pub creation_date: i64,
+    pub is_private: bool,
+    pub total_size: i64,
+    pub piece_length: i32,
+    pub num_pieces: i32,
+    pub files: Vec<TorrentFileInfo>,
+}
+
+/// Storage profile for UI display
+#[derive(Clone, Debug, PartialEq)]
+pub struct StorageProfileInfo {
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
+}
+
+/// Selected cover for import UI
+#[derive(Clone, Debug, PartialEq)]
+pub enum SelectedCover {
+    /// Remote cover from MusicBrainz/Discogs
+    Remote { url: String, source: String },
+    /// Local artwork file from the album folder
+    Local { filename: String },
+}
+
+/// Detected release (subfolder) for multi-release import
+#[derive(Clone, Debug, PartialEq)]
+pub struct DetectedRelease {
+    pub name: String,
+    pub path: String,
+}
