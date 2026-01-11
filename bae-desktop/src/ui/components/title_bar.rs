@@ -1,7 +1,7 @@
 //! Title bar wrapper for desktop app
 //!
 //! Wraps the shared TitleBarView with desktop-specific behavior:
-//! window dragging, zoom, and database-backed search.
+//! window dragging (macOS), zoom (macOS), and database-backed search.
 
 use crate::ui::components::imports_button::ImportsButton;
 use crate::ui::components::imports_dropdown::ImportsDropdown;
@@ -14,16 +14,21 @@ use bae_ui::{NavItem, SearchResult, TitleBarView};
 use cocoa::appkit::NSApplication;
 #[cfg(target_os = "macos")]
 use cocoa::base::{id, nil};
+#[cfg(target_os = "macos")]
 use dioxus::desktop::use_window;
 use dioxus::prelude::*;
 #[cfg(target_os = "macos")]
 use objc::{msg_send, sel, sel_impl};
 use std::collections::HashMap;
 
-/// Custom title bar component with navigation (macOS: native traffic lights + nav)
+/// Custom title bar component with navigation and search
+/// On macOS: includes window dragging, zoom, and space for traffic lights
+/// On Linux/Windows: simpler version without native window controls
 #[component]
 pub fn TitleBar() -> Element {
+    #[cfg(target_os = "macos")]
     let window = use_window();
+
     let current_route = use_route::<Route>();
     let library_manager = use_library_manager();
     let mut search_query = use_library_search();
@@ -133,6 +138,26 @@ pub fn TitleBar() -> Element {
         })
         .collect();
 
+    // Platform-specific: left padding for traffic lights on macOS
+    #[cfg(target_os = "macos")]
+    let left_padding = 80;
+    #[cfg(not(target_os = "macos"))]
+    let left_padding = 16;
+
+    // Platform-specific: window drag handler (macOS only)
+    #[cfg(target_os = "macos")]
+    let on_bar_mousedown = Some(EventHandler::new(move |_| {
+        let _ = window.drag_window();
+    }));
+    #[cfg(not(target_os = "macos"))]
+    let on_bar_mousedown: Option<EventHandler<()>> = None;
+
+    // Platform-specific: window zoom handler (macOS only)
+    #[cfg(target_os = "macos")]
+    let on_bar_double_click = Some(EventHandler::new(move |_| perform_zoom()));
+    #[cfg(not(target_os = "macos"))]
+    let on_bar_double_click: Option<EventHandler<()>> = None;
+
     rsx! {
         TitleBarView {
             nav_items,
@@ -164,15 +189,13 @@ pub fn TitleBar() -> Element {
                     show_results.set(true);
                 }
             },
-            on_bar_mousedown: move |_| {
-                let _ = window.drag_window();
-            },
-            on_bar_double_click: move |_| perform_zoom(),
+            on_bar_mousedown,
+            on_bar_double_click,
             imports_indicator: rsx! {
                 ImportsButton { is_open: imports_dropdown_open }
                 ImportsDropdown { is_open: imports_dropdown_open }
             },
-            left_padding: 80,
+            left_padding,
         }
     }
 }
@@ -190,6 +213,3 @@ fn perform_zoom() {
         }
     }
 }
-
-#[cfg(not(target_os = "macos"))]
-fn perform_zoom() {}
