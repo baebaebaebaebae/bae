@@ -78,7 +78,9 @@ pub fn AlbumDetailView(
     let track_ids: Vec<String> = tracks.iter().map(|s| s().id.clone()).collect();
 
     rsx! {
-        div { class: "grid grid-cols-1 lg:grid-cols-3 gap-8",
+        div {
+            class: "grid grid-cols-1 lg:grid-cols-3 gap-8",
+            "data-testid": "album-detail",
             div { class: "lg:col-span-1",
                 div { class: "bg-gray-800 rounded-lg p-6",
                     AlbumCoverSection {

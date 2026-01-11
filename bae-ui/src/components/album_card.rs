@@ -41,6 +41,7 @@ pub fn AlbumCard(
     rsx! {
         div {
             class: "{card_class}",
+            "data-testid": "album-card",
             onclick: {
                 let album_id = album_id.clone();
                 move |_| {

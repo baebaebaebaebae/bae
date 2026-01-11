@@ -28,14 +28,14 @@ test('capture album detail view', async ({ page }) => {
   await page.goto('/');
   
   // Wait for albums to load
-  await page.waitForSelector('.grid', { timeout: 10000 });
+  await page.waitForSelector('[data-testid="album-card"]', { timeout: 10000 });
   
-  // Click on the first album card to navigate to detail view
-  const firstAlbumCard = page.locator('.grid > a').first();
+  // Click on the first album card
+  const firstAlbumCard = page.locator('[data-testid="album-card"]').first();
   await firstAlbumCard.click();
   
   // Wait for album detail to load
-  await page.waitForSelector('h1', { timeout: 10000 });
+  await page.waitForSelector('[data-testid="album-detail"]', { timeout: 10000 });
   
   // Give images time to load
   await page.waitForTimeout(500);
