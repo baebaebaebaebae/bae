@@ -29,7 +29,7 @@ fn get_ffmpeg_errors() -> u32 {
 unsafe extern "C" fn ffmpeg_log_callback(
     _avcl: *mut c_void,
     level: c_int,
-    _fmt: *const i8,
+    _fmt: *const std::ffi::c_char,
     _vl: *mut ffmpeg_sys_next::__va_list_tag,
 ) {
     // Only count AV_LOG_FATAL (8) and AV_LOG_PANIC (0).
@@ -39,13 +39,29 @@ unsafe extern "C" fn ffmpeg_log_callback(
     }
 }
 
-/// Custom FFmpeg log callback that counts fatal errors per-thread (other platforms)
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+/// Custom FFmpeg log callback that counts fatal errors per-thread (Linux aarch64)
+/// On aarch64, va_list is a struct (__BindgenOpaqueArray<u64, 4>), not a pointer
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 unsafe extern "C" fn ffmpeg_log_callback(
     _avcl: *mut c_void,
     level: c_int,
-    _fmt: *const i8,
-    _vl: *mut i8,
+    _fmt: *const std::ffi::c_char,
+    _vl: ffmpeg_sys_next::__BindgenOpaqueArray<u64, 4>,
+) {
+    // Only count AV_LOG_FATAL (8) and AV_LOG_PANIC (0).
+    // AV_LOG_ERROR (16) includes recoverable sync errors during seeking.
+    if level <= 8 {
+        FFMPEG_DECODE_ERRORS.with(|c| c.set(c.get() + 1));
+    }
+}
+
+/// Custom FFmpeg log callback that counts fatal errors per-thread (other platforms)
+#[cfg(not(target_os = "linux"))]
+unsafe extern "C" fn ffmpeg_log_callback(
+    _avcl: *mut c_void,
+    level: c_int,
+    _fmt: *const std::ffi::c_char,
+    _vl: *mut std::ffi::c_char,
 ) {
     // Only count AV_LOG_FATAL (8) and AV_LOG_PANIC (0).
     // AV_LOG_ERROR (16) includes recoverable sync errors during seeking.
@@ -542,7 +558,7 @@ unsafe fn read_sample(
 /// Convert FFmpeg error code to string
 fn av_err_str(errnum: i32) -> String {
     unsafe {
-        let mut buf = [0i8; 256];
+        let mut buf = [0 as std::ffi::c_char; 256];
         ffmpeg_sys_next::av_strerror(errnum, buf.as_mut_ptr(), buf.len());
         std::ffi::CStr::from_ptr(buf.as_ptr())
             .to_string_lossy()
