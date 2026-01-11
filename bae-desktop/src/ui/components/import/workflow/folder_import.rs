@@ -356,12 +356,22 @@ pub fn FolderImport() -> Element {
         .clone()
         .unwrap_or_default();
 
+    // Generate image URLs from artwork files
+    let image_data: Vec<(String, String)> = display_folder_files
+        .artwork
+        .iter()
+        .map(|f| {
+            let path = std::path::Path::new(&*folder_path.read()).join(&f.name);
+            (f.name.clone(), format!("file://{}", path.display()))
+        })
+        .collect();
+
     rsx! {
         FolderImportView {
             phase: to_display_phase(&import_phase.read()),
             folder_path: folder_path.read().clone(),
             folder_files: display_folder_files,
-            image_data: vec![],
+            image_data,
             text_file_contents,
             is_dragging: *is_dragging.read(),
             on_folder_select_click: on_folder_select,
