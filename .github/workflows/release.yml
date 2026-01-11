@@ -97,11 +97,11 @@ jobs:
         (cd bae-demo && npm ci)
         (cd website && npm ci)
 
+    - name: Install cargo-binstall
+      run: curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+
     - name: Install Dioxus CLI
-      run: |
-        if ! command -v dx &> /dev/null; then
-          cargo install dioxus-cli
-        fi
+      run: cargo binstall dioxus-cli@0.7.2 --no-confirm
 
     - name: Set macOS environment
       run: |
@@ -130,13 +130,6 @@ jobs:
     - name: Bundle dylibs into app
       working-directory: ./bae-desktop
       run: ./scripts/bundle_dylibs.sh target/dx/bae/bundle/macos/bundle/macos/bae.app
-
-    - name: Upload unsigned build (backup)
-      uses: actions/upload-artifact@v4
-      with:
-        name: bae-macOS-unsigned
-        path: bae-desktop/target/dx/bae/bundle/macos/bundle/macos/bae.app
-        retention-days: 7
 
     - name: Import Apple certificate
       env:
