@@ -1,0 +1,30 @@
+name: 'Setup Node.js Environment'
+description: 'Install Node.js and project dependencies'
+
+inputs:
+  include-website:
+    description: 'Whether to include website dependencies'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: |
+          bae-desktop/package-lock.json
+          bae-demo/package-lock.json
+          website/package-lock.json
+
+    - name: Install Node dependencies
+      shell: bash
+      run: |
+        (cd bae-desktop && npm ci)
+        (cd bae-demo && npm ci)
+        if [[ "${{ inputs.include-website }}" == "true" ]]; then
+          (cd website && npm ci)
+        fi

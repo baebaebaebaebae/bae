@@ -1,0 +1,31 @@
+name: 'Setup macOS Build Environment'
+description: 'Install macOS dependencies and configure environment for building bae'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install macOS dependencies
+      shell: bash
+      run: |
+        brew install libdiscid libcdio libsodium pkg-config libtorrent-rasterbar boost ffmpeg openssl@3 switchaudio-osx
+
+    - name: Setup virtual audio device
+      shell: bash
+      run: |
+        SwitchAudioSource -a
+        SwitchAudioSource -s "Null Audio Device"
+
+    - name: Set macOS environment
+      shell: bash
+      run: |
+        if [[ -d "/opt/homebrew" ]]; then
+          echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=/opt/homebrew/lib" >> $GITHUB_ENV
+          echo "FFMPEG_DIR=/opt/homebrew" >> $GITHUB_ENV
+          echo "BINDGEN_EXTRA_CLANG_ARGS=-I/opt/homebrew/include" >> $GITHUB_ENV
+        else
+          echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=/usr/local/lib" >> $GITHUB_ENV
+          echo "FFMPEG_DIR=/usr/local" >> $GITHUB_ENV
+          echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/local/include" >> $GITHUB_ENV
+        fi

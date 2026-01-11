@@ -1,0 +1,30 @@
+name: 'Setup Rust Build Environment'
+description: 'Install Rust toolchain, configure caching, and install common tools'
+
+inputs:
+  install-dioxus:
+    description: 'Whether to install Dioxus CLI'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Rust (uses rust-toolchain.toml)
+      shell: bash
+      run: rustup show
+
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: rust-cache
+        cache-directories: ~/.cargo/bin
+
+    - name: Install cargo-binstall
+      shell: bash
+      run: curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+
+    - name: Install Dioxus CLI
+      if: inputs.install-dioxus == 'true'
+      shell: bash
+      run: cargo binstall dioxus-cli@0.7.2 --no-confirm --force
