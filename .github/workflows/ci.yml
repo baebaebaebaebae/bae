@@ -93,7 +93,7 @@ jobs:
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         (cd bae-desktop && dx fmt --check)
-        (cd bae-demo && dx fmt --check)
+        (cd bae-mocks && dx fmt --check)
 
     - name: Run Clippy (Linux/macOS)
       if: runner.os != 'Windows'

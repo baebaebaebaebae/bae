@@ -260,19 +260,19 @@ jobs:
         echo "✓ App bundle verification passed"
 
     - name: Build demo web app
-      working-directory: ./bae-demo
+      working-directory: ./bae-mocks
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         dx build --release --platform web
 
     - name: Install Playwright dependencies
-      working-directory: ./bae-demo/e2e
+      working-directory: ./bae-mocks/e2e
       run: |
         npm ci
         npx playwright install chromium
 
     - name: Generate screenshots
-      working-directory: ./bae-demo/e2e
+      working-directory: ./bae-mocks/e2e
       run: npx playwright test
 
     - name: Upload screenshots
