@@ -51,10 +51,7 @@ pub fn LibraryMock(initial_state: Option<String>) -> Element {
     };
 
     rsx! {
-        MockPanel {
-            current_mock: MockPage::Library,
-            registry,
-            max_width: "6xl",
+        MockPanel { current_mock: MockPage::Library, registry, max_width: "6xl",
             LibraryView {
                 albums,
                 artists_by_album,
