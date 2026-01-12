@@ -6,11 +6,13 @@
 #[cfg(target_os = "macos")]
 use cocoa::base::{id, nil};
 #[cfg(target_os = "macos")]
+use cocoa::foundation::NSString;
+#[cfg(target_os = "macos")]
 use objc::declare::ClassDecl;
 #[cfg(target_os = "macos")]
 use objc::runtime::{Class, Object, Sel};
 #[cfg(target_os = "macos")]
-use objc::{msg_send, sel, sel_impl};
+use objc::{class, msg_send, sel, sel_impl};
 #[cfg(target_os = "macos")]
 use tracing::error;
 use tracing::info;
@@ -146,6 +148,44 @@ unsafe fn create_delegate() -> id {
     delegate
 }
 
+/// Load Sparkle.framework from the app bundle
+#[cfg(target_os = "macos")]
+unsafe fn load_sparkle_framework() -> bool {
+    // Get the main bundle
+    let bundle_class = class!(NSBundle);
+    let main_bundle: id = msg_send![bundle_class, mainBundle];
+    if main_bundle.is_null() {
+        error!("Failed to get main bundle");
+        return false;
+    }
+
+    // Get the Frameworks path
+    let frameworks_path: id = msg_send![main_bundle, privateFrameworksPath];
+    if frameworks_path.is_null() {
+        error!("Failed to get frameworks path");
+        return false;
+    }
+
+    // Build path to Sparkle.framework
+    let sparkle_path: id = msg_send![frameworks_path, stringByAppendingPathComponent: NSString::alloc(nil).init_str("Sparkle.framework")];
+
+    // Load the bundle
+    let sparkle_bundle: id = msg_send![bundle_class, bundleWithPath: sparkle_path];
+    if sparkle_bundle.is_null() {
+        error!("Sparkle.framework not found in app bundle");
+        return false;
+    }
+
+    let loaded: bool = msg_send![sparkle_bundle, load];
+    if !loaded {
+        error!("Failed to load Sparkle.framework");
+        return false;
+    }
+
+    info!("Sparkle.framework loaded successfully");
+    true
+}
+
 /// Initialize the Sparkle updater and start background update checks.
 /// Call this early in app startup (after UI is ready to handle dialogs).
 pub fn start() {
@@ -154,11 +194,16 @@ pub fn start() {
         info!("Initializing Sparkle updater");
 
         unsafe {
+            // First, load the framework
+            if !load_sparkle_framework() {
+                return;
+            }
+
             let updater_class = match Class::get("SPUStandardUpdaterController") {
                 Some(class) => class,
                 None => {
                     error!(
-                        "Sparkle framework not loaded - SPUStandardUpdaterController class not found"
+                        "Sparkle framework loaded but SPUStandardUpdaterController class not found"
                     );
                     return;
                 }
