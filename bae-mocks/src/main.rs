@@ -6,6 +6,8 @@
 mod demo_data;
 mod mocks;
 mod pages;
+mod storage;
+mod ui;
 
 use dioxus::prelude::*;
 use pages::{

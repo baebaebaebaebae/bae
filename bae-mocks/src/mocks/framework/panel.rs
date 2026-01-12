@@ -2,40 +2,13 @@
 
 use super::registry::ControlRegistry;
 use super::viewport::{MockViewport, DEFAULT_BREAKPOINTS};
+use crate::storage;
+use crate::ui::{Checkbox, Dropdown, DropdownStyle, ToggleButton};
 use crate::Route;
 use dioxus::prelude::*;
 
 const COLLAPSED_KEY: &str = "mock_panel_collapsed";
 const VIEWPORT_KEY: &str = "mock_panel_viewport";
-
-fn get_storage() -> Option<web_sys::Storage> {
-    web_sys::window().and_then(|w| w.local_storage().ok().flatten())
-}
-
-fn get_stored_collapsed() -> bool {
-    get_storage()
-        .and_then(|s| s.get_item(COLLAPSED_KEY).ok().flatten())
-        .is_some_and(|v| v == "true")
-}
-
-fn set_stored_collapsed(collapsed: bool) {
-    if let Some(storage) = get_storage() {
-        let _ = storage.set_item(COLLAPSED_KEY, if collapsed { "true" } else { "false" });
-    }
-}
-
-fn get_stored_viewport() -> u32 {
-    get_storage()
-        .and_then(|s| s.get_item(VIEWPORT_KEY).ok().flatten())
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0)
-}
-
-fn set_stored_viewport(width: u32) {
-    if let Some(storage) = get_storage() {
-        let _ = storage.set_item(VIEWPORT_KEY, &width.to_string());
-    }
-}
 
 /// All available mock pages - add new mocks here
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,8 +67,8 @@ pub fn MockPanel(
     #[props(default = "4xl")] max_width: &'static str,
     children: Element,
 ) -> Element {
-    let viewport_width = use_signal(get_stored_viewport);
-    let mut collapsed = use_signal(get_stored_collapsed);
+    let viewport_width = use_signal(|| storage::get_parsed(VIEWPORT_KEY).unwrap_or(0));
+    let mut collapsed = use_signal(|| storage::get_bool(COLLAPSED_KEY).unwrap_or(false));
 
     let max_w_class = match max_width {
         "4xl" => "max-w-4xl",
@@ -127,10 +100,14 @@ pub fn MockPanel(
                                 class: "text-gray-400 hover:text-white px-2",
                                 onclick: move |_| {
                                     let new_val = !collapsed();
-                                    set_stored_collapsed(new_val);
+                                    storage::set_bool(COLLAPSED_KEY, new_val);
                                     collapsed.set(new_val);
                                 },
-                                if collapsed() { "▼" } else { "▲" }
+                                if collapsed() {
+                                    "▼"
+                                } else {
+                                    "▲"
+                                }
                             }
                         }
                     }
@@ -161,20 +138,16 @@ fn MockDropdown(current_mock: MockPage) -> Element {
     let nav = use_navigator();
 
     rsx! {
-        select {
-            class: "bg-transparent text-white font-medium text-sm appearance-none cursor-pointer pr-4 focus:outline-none",
-            style: "background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%239ca3af' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E\"); background-position: right center; background-repeat: no-repeat; background-size: 1.25em;",
-            onchange: move |e| {
-                if let Some(page) = MockPage::from_key(&e.value()) {
+        Dropdown {
+            value: current_mock.key().to_string(),
+            style: DropdownStyle::Transparent,
+            onchange: move |value: String| {
+                if let Some(page) = MockPage::from_key(&value) {
                     nav.push(page.to_route(None));
                 }
             },
             for page in MockPage::ALL {
-                option {
-                    value: page.key(),
-                    selected: *page == current_mock,
-                    "{page.label()}"
-                }
+                option { value: page.key(), selected: *page == current_mock, "{page.label()}" }
             }
         }
     }
@@ -256,12 +229,11 @@ fn ViewportDropdown(mut viewport_width: Signal<u32>) -> Element {
     let current = viewport_width();
 
     rsx! {
-        select {
-            class: "bg-gray-700 text-gray-300 text-sm rounded px-2 py-1 border border-gray-600",
+        Dropdown {
             value: current.to_string(),
-            onchange: move |e| {
-                if let Ok(w) = e.value().parse::<u32>() {
-                    set_stored_viewport(w);
+            onchange: move |value: String| {
+                if let Ok(w) = value.parse::<u32>() {
+                    storage::set_display(VIEWPORT_KEY, w);
                     viewport_width.set(w);
                 }
             },
@@ -269,7 +241,11 @@ fn ViewportDropdown(mut viewport_width: Signal<u32>) -> Element {
                 option {
                     value: bp.width.to_string(),
                     selected: current == bp.width,
-                    if bp.width > 0 { "{bp.name} ({bp.width}px)" } else { "{bp.name}" }
+                    if bp.width > 0 {
+                        "{bp.name} ({bp.width}px)"
+                    } else {
+                        "{bp.name}"
+                    }
                 }
             }
         }
@@ -289,11 +265,11 @@ fn EnumButton(
     let is_selected = registry.get_string(control_key) == value;
 
     rsx! {
-        button {
-            class: if is_selected { "px-3 py-1.5 text-sm rounded bg-blue-600 text-white" } else { "px-3 py-1.5 text-sm rounded bg-gray-700 text-gray-300 hover:bg-gray-600" },
+        ToggleButton {
+            selected: is_selected,
             onclick: move |_| registry.set_string(control_key, value.to_string()),
-            title: doc.unwrap_or(""),
-            "{label}"
+            label,
+            tooltip: doc,
         }
     }
 }
@@ -310,18 +286,11 @@ fn BoolCheckbox(
     let current = registry.get_bool(control_key);
 
     rsx! {
-        label {
-            class: "flex items-center gap-2 text-gray-400",
-            title: doc.unwrap_or(""),
-            input {
-                r#type: "checkbox",
-                checked: current,
-                onchange: move |e| registry.set_bool(control_key, e.checked()),
-            }
-            "{label}"
-            if doc.is_some() {
-                span { class: "text-gray-600", "ⓘ" }
-            }
+        Checkbox {
+            checked: current,
+            onchange: move |checked| registry.set_bool(control_key, checked),
+            label,
+            tooltip: doc,
         }
     }
 }
