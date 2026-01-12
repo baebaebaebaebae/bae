@@ -5,3 +5,7 @@ edition = "2021"
 
 [dependencies]
 dioxus = { version = "0.7.2", default-features = false, features = ["signals", "html", "macro", "hooks"] }
+
+[features]
+default = []
+test-utils = []

@@ -35,6 +35,10 @@ tracing-oslog = "0.3"
 objc = "0.2"
 cocoa = "0.25"
 
+[features]
+default = []
+test-utils = []
+
 [lints.clippy]
 too_many_arguments = "allow"
 
