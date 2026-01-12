@@ -61,14 +61,17 @@ pub fn MockPanel(
             // Controls panel
             div { class: "sticky top-0 z-50 bg-gray-800 border-b border-gray-700 p-4",
                 div { class: "{max_w_class} mx-auto",
-                    // Header row with title and viewport
-                    div { class: "flex items-center gap-3 {header_mb}",
-                        Link {
-                            to: Route::MockIndex {},
-                            class: "text-gray-400 hover:text-white",
-                            "←"
+                    // Header row with breadcrumb and viewport
+                    div { class: "flex items-center {header_mb}",
+                        nav { class: "flex items-center gap-2 text-sm",
+                            Link {
+                                to: Route::MockIndex {},
+                                class: "text-gray-400 hover:text-white",
+                                "Component mocks"
+                            }
+                            span { class: "text-gray-600", "/" }
+                            span { class: "text-white font-medium", "{title}" }
                         }
-                        h1 { class: "text-lg font-semibold text-white", "{title}" }
                         div { class: "ml-auto flex items-center gap-3",
                             ViewportDropdown { viewport_width }
                             button {

@@ -8,7 +8,7 @@ use dioxus::prelude::*;
 pub fn MockIndex() -> Element {
     rsx! {
         div { class: "min-h-screen bg-gray-900 text-white p-8",
-            h1 { class: "text-2xl font-bold mb-6", "Component Mocks" }
+            h1 { class: "text-2xl font-bold mb-6", "Component mocks" }
             div { class: "space-y-2",
                 Link {
                     to: Route::MockLibrary { state: None },
