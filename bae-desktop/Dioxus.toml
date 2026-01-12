@@ -5,6 +5,14 @@ name = "bae"
 identifier = "com.bae.app"
 publisher = "bae"
 
+# Generated from /icon-source.png via:
+# magick icon-source.png -trim +repage -resize 140% \
+#   -gravity center -background transparent -extent 960x960 \
+#   -gravity west -splice 115x0 -gravity east -chop 115x0 \
+#   -gravity north -splice 0x10 -gravity south -chop 0x10 icon_square.png
+# Then: mkdir icon.iconset && sips -z {16,32,64,128,256,512,1024} ... && iconutil -c icns
+icon = ["assets/icon.icns"]
+
 [bundle.macos]
 bundle_name = "bae"
 
