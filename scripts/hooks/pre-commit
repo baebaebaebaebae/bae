@@ -6,7 +6,7 @@ set -e
 #   bae-core: no local deps
 #   bae-ui: no local deps
 #   bae-desktop: depends on bae-core, bae-ui
-#   bae-demo: depends on bae-ui
+#   bae-mocks: depends on bae-ui
 
 TMPFILE=$(mktemp)
 trap "rm -f $TMPFILE" EXIT
@@ -109,21 +109,21 @@ if has_changes_in "bae-desktop" || has_changes_in "bae-core" || has_changes_in "
     cd ..
 fi
 
-# bae-demo checks (depends on bae-ui)
-if has_changes_in "bae-demo" || has_changes_in "bae-ui"; then
-    cd bae-demo
+# bae-mocks checks (depends on bae-ui)
+if has_changes_in "bae-mocks" || has_changes_in "bae-ui"; then
+    cd bae-mocks
 
-    run_check "cargo fmt (bae-demo)" cargo fmt -- --check || {
-        echo "Run 'cargo fmt' in the bae-demo directory to fix formatting"
+    run_check "cargo fmt (bae-mocks)" cargo fmt -- --check || {
+        echo "Run 'cargo fmt' in the bae-mocks directory to fix formatting"
         exit 1
     }
 
-    run_check "dx fmt (bae-demo)" dx fmt --check || {
-        echo "Run 'dx fmt' in the bae-demo directory to fix formatting"
+    run_check "dx fmt (bae-mocks)" dx fmt --check || {
+        echo "Run 'dx fmt' in the bae-mocks directory to fix formatting"
         exit 1
     }
 
-    run_check "clippy (bae-demo)" cargo clippy -- -D warnings || {
+    run_check "clippy (bae-mocks)" cargo clippy -- -D warnings || {
         echo "Fix the warnings above and try again"
         exit 1
     }

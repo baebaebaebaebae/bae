@@ -1,9 +1,9 @@
 [application]
-name = "bae-demo"
+name = "bae-mocks"
 default_platform = "web"
 
 [web.app]
-title = "bae demo"
+title = "bae mocks"
 
 [web.resource]
 style = []

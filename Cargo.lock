@@ -789,17 +789,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bae-demo"
-version = "0.1.0"
-dependencies = [
- "bae-ui",
- "dioxus",
- "getrandom 0.2.16",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "bae-desktop"
 version = "0.0.0-dev"
 dependencies = [
@@ -823,6 +812,17 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "uuid",
+]
+
+[[package]]
+name = "bae-mocks"
+version = "0.1.0"
+dependencies = [
+ "bae-ui",
+ "dioxus",
+ "getrandom 0.2.16",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
