@@ -22,10 +22,8 @@ Thumbs.db
 node_modules/
 
 # Generated CSS (copied/built at build time)
-bae/assets/main.css
-bae/assets/tailwind.css
-bae-demo/assets/main.css
-bae-demo/assets/tailwind.css
+bae-mocks/assets/main.css
+bae-mocks/assets/tailwind.css
 
 # Website build artifacts
 website/dist/
@@ -34,7 +32,6 @@ website/.vercel/
 website/public/screenshots/
 
 # Fixture node_modules
-bae/fixtures/screenshots/node_modules/
 website/fixtures/screenshots/node_modules/
 
 # Development environment
