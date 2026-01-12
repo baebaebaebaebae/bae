@@ -61,6 +61,7 @@ pub fn make_config(context: &AppContext) -> DioxusConfig {
     };
     DioxusConfig::default()
         .with_window(make_window())
+        .with_background_color((0x0f, 0x11, 0x16, 0xff))
         .with_disable_drag_drop_handler(false)
         .with_custom_protocol("bae", move |_webview_id, request| {
             let uri = request.uri().to_string();
@@ -178,6 +179,8 @@ fn make_window() -> WindowBuilder {
         .with_always_on_top(false)
         .with_decorations(true)
         .with_inner_size(dioxus::desktop::LogicalSize::new(1200, 800))
+        .with_transparent(true)
+        .with_background_color((0x0f, 0x11, 0x16, 0xff))
 }
 
 pub fn launch_app(context: AppContext) {
