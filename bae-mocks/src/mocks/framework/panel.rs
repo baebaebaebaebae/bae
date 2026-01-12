@@ -3,7 +3,9 @@
 use super::registry::ControlRegistry;
 use super::viewport::{MockViewport, DEFAULT_BREAKPOINTS};
 use crate::storage;
-use crate::ui::{Checkbox, Dropdown, DropdownStyle, ToggleButton};
+use crate::ui::{
+    Checkbox, Chevron, ChevronDirection, Dropdown, DropdownStyle, IconButton, ToggleButton,
+};
 use crate::Route;
 use dioxus::prelude::*;
 
@@ -96,18 +98,13 @@ pub fn MockPanel(
                         }
                         div { class: "ml-auto flex items-center gap-3",
                             ViewportDropdown { viewport_width }
-                            button {
-                                class: "text-gray-400 hover:text-white px-2",
+                            IconButton {
                                 onclick: move |_| {
                                     let new_val = !collapsed();
                                     storage::set_bool(COLLAPSED_KEY, new_val);
                                     collapsed.set(new_val);
                                 },
-                                if collapsed() {
-                                    "▼"
-                                } else {
-                                    "▲"
-                                }
+                                Chevron { direction: if collapsed() { ChevronDirection::Down } else { ChevronDirection::Up } }
                             }
                         }
                     }
