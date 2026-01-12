@@ -99,6 +99,9 @@ jobs:
       if: runner.os != 'Windows'
       run: |
         cargo clippy --workspace -- -D warnings
+        # Check wasm32 targets for UI packages
+        cargo clippy -p bae-ui --target wasm32-unknown-unknown -- -D warnings
+        cargo clippy -p bae-mocks --target wasm32-unknown-unknown -- -D warnings
         # Check integration tests with test-utils feature
         for test_file in bae-core/tests/*.rs; do
           if [ -f "$test_file" ]; then

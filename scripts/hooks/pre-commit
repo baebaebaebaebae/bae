@@ -84,6 +84,11 @@ if has_changes_in "bae-ui"; then
         exit 1
     }
 
+    run_check "clippy wasm32 (bae-ui)" cargo clippy --target wasm32-unknown-unknown -- -D warnings || {
+        echo "Fix the warnings above and try again"
+        exit 1
+    }
+
     cd ..
 fi
 
@@ -124,6 +129,11 @@ if has_changes_in "bae-mocks" || has_changes_in "bae-ui"; then
     }
 
     run_check "clippy (bae-mocks)" cargo clippy -- -D warnings || {
+        echo "Fix the warnings above and try again"
+        exit 1
+    }
+
+    run_check "clippy wasm32 (bae-mocks)" cargo clippy --target wasm32-unknown-unknown -- -D warnings || {
         echo "Fix the warnings above and try again"
         exit 1
     }
