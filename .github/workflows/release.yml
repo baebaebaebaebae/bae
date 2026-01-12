@@ -125,10 +125,27 @@ jobs:
         IDENTITY=$(security find-identity -v -p codesigning | grep "$APPLE_TEAM_ID" | head -1 | sed 's/.*"\(.*\)".*/\1/')
         echo "Using signing identity: $IDENTITY"
         
-        codesign --deep --force --verify --verbose \
-          --sign "$IDENTITY" \
-          --options runtime \
-          "$APP_PATH"
+        # --- Sparkle.framework signing ---
+        # Requires explicit signing of all nested components because codesign --deep
+        # doesn't reliably re-sign nested bundles like XPC services.
+        SPARKLE_PATH="$APP_PATH/Contents/Frameworks/Sparkle.framework"
+        for xpc in "$SPARKLE_PATH/Versions/B/XPCServices"/*.xpc; do
+          if [[ -d "$xpc" ]]; then
+            echo "Signing $xpc"
+            codesign --force --sign "$IDENTITY" --options runtime "$xpc"
+          fi
+        done
+        codesign --force --sign "$IDENTITY" --options runtime "$SPARKLE_PATH/Versions/B/Autoupdate"
+        codesign --force --sign "$IDENTITY" --options runtime "$SPARKLE_PATH/Versions/B/Updater.app"
+        codesign --force --sign "$IDENTITY" --options runtime "$SPARKLE_PATH"
+        # --- End Sparkle.framework signing ---
+        
+        # Sign all dylibs
+        find "$APP_PATH/Contents/Frameworks" -name "*.dylib" -exec \
+          codesign --force --sign "$IDENTITY" --options runtime {} \;
+        
+        # Finally sign the main app
+        codesign --force --sign "$IDENTITY" --options runtime "$APP_PATH"
         
         codesign --verify --verbose "$APP_PATH"
 
@@ -183,8 +200,8 @@ jobs:
       run: |
         DMG_PATH="target/bae.dmg"
         
-        # Sign the DMG and capture the signature
-        SIGNATURE=$(echo "$SPARKLE_PRIVATE_KEY" | /tmp/sparkle/bin/sign_update "$DMG_PATH" -f -)
+        # Sign the DMG and capture only the signature (-p flag), not the full attribute string
+        SIGNATURE=$(echo "$SPARKLE_PRIVATE_KEY" | /tmp/sparkle/bin/sign_update "$DMG_PATH" -f - -p)
         echo "SPARKLE_SIGNATURE=$SIGNATURE" >> $GITHUB_ENV
         
         # Get file size for appcast
