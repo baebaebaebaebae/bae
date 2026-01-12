@@ -1,5 +1,6 @@
 //! AlbumDetailView mock with playback controls
 
+use super::mock_header::MockHeader;
 use bae_ui::{Album, AlbumDetailView, Artist, PlaybackDisplay, Release, Track, TrackImportState};
 use dioxus::prelude::*;
 
@@ -107,7 +108,7 @@ pub fn AlbumDetailMock() -> Element {
             // Controls panel at top
             div { class: "sticky top-0 z-50 bg-gray-800 border-b border-gray-700 p-4",
                 div { class: "max-w-6xl mx-auto",
-                    h1 { class: "text-lg font-semibold text-white mb-3", "AlbumDetailView" }
+                    MockHeader { title: "AlbumDetailView".to_string() }
                     div { class: "flex flex-wrap gap-2 mb-3",
                         for (state , label) in [
                             (PlaybackState::Stopped, "Stopped"),

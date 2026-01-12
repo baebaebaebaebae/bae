@@ -1,5 +1,6 @@
 //! FolderImportView mock with phase controls
 
+use super::mock_header::MockHeader;
 use bae_ui::{
     ArtworkFile, AudioContentInfo, CategorizedFileInfo, DetectedRelease, FileInfo,
     FolderImportView, FolderMetadata, ImportPhase, MatchCandidate, MatchSourceType, SearchSource,
@@ -19,11 +20,10 @@ pub fn FolderImportMock() -> Element {
     // Release selection state
     let mut selected_release_indices = use_signal(Vec::<usize>::new);
 
-    // Metadata detection state
-    let mut is_detecting = use_signal(|| false);
-
-    // Exact lookup state
-    let mut is_looking_up = use_signal(|| false);
+    // Loading states
+    let mut is_detecting_metadata = use_signal(|| false);
+    let mut is_loading_exact_matches = use_signal(|| false);
+    let mut is_retrying_discid_lookup = use_signal(|| false);
     let mut selected_match_index = use_signal(|| None::<usize>);
 
     // Manual search state
@@ -199,7 +199,7 @@ pub fn FolderImportMock() -> Element {
             // Controls panel at top
             div { class: "sticky top-0 z-50 bg-gray-800 border-b border-gray-700 p-4",
                 div { class: "max-w-4xl mx-auto",
-                    h1 { class: "text-lg font-semibold text-white mb-3", "FolderImportView" }
+                    MockHeader { title: "FolderImportView".to_string() }
                     div { class: "flex flex-wrap gap-2 mb-3",
                         for (phase_option , label) in [
                             (ImportPhase::FolderSelection, "Folder Selection"),
@@ -229,18 +229,26 @@ pub fn FolderImportMock() -> Element {
                         label { class: "flex items-center gap-2 text-gray-400",
                             input {
                                 r#type: "checkbox",
-                                checked: is_detecting(),
-                                onchange: move |e| is_detecting.set(e.checked()),
+                                checked: is_detecting_metadata(),
+                                onchange: move |e| is_detecting_metadata.set(e.checked()),
                             }
-                            "Detecting"
+                            "Detecting Metadata"
                         }
                         label { class: "flex items-center gap-2 text-gray-400",
                             input {
                                 r#type: "checkbox",
-                                checked: is_looking_up(),
-                                onchange: move |e| is_looking_up.set(e.checked()),
+                                checked: is_loading_exact_matches(),
+                                onchange: move |e| is_loading_exact_matches.set(e.checked()),
                             }
-                            "Looking Up"
+                            "Loading Exact Matches"
+                        }
+                        label { class: "flex items-center gap-2 text-gray-400",
+                            input {
+                                r#type: "checkbox",
+                                checked: is_retrying_discid_lookup(),
+                                onchange: move |e| is_retrying_discid_lookup.set(e.checked()),
+                            }
+                            "Retrying DiscID"
                         }
                         label { class: "flex items-center gap-2 text-gray-400",
                             input {
@@ -309,9 +317,9 @@ pub fn FolderImportMock() -> Element {
                     selected_release_indices: selected_release_indices(),
                     on_release_selection_change: move |indices| selected_release_indices.set(indices),
                     on_releases_import: |_| {},
-                    is_detecting: is_detecting(),
+                    is_detecting_metadata: is_detecting_metadata(),
                     on_skip_detection: |_| {},
-                    is_looking_up: is_looking_up(),
+                    is_loading_exact_matches: is_loading_exact_matches(),
                     exact_match_candidates: exact_match_candidates.clone(),
                     selected_match_index: selected_match_index(),
                     on_exact_match_select: move |idx| selected_match_index.set(Some(idx)),
@@ -340,6 +348,7 @@ pub fn FolderImportMock() -> Element {
                     on_search: move |_| is_searching.set(true),
                     on_manual_confirm: |_| {},
                     discid_lookup_error,
+                    is_retrying_discid_lookup: is_retrying_discid_lookup(),
                     on_retry_discid_lookup: |_| {},
                     confirmed_candidate,
                     selected_cover: selected_cover(),
