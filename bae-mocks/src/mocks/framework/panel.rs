@@ -46,6 +46,15 @@ impl MockPage {
         }
     }
 
+    /// Description shown in mock index
+    pub fn description(self) -> &'static str {
+        match self {
+            MockPage::Library => "Album grid with loading/error/empty states",
+            MockPage::AlbumDetail => "Album detail page with tracks and controls",
+            MockPage::FolderImport => "Folder import workflow with all phases",
+        }
+    }
+
     /// Convert to Route
     pub fn to_route(self, state: Option<String>) -> Route {
         match self {
@@ -174,16 +183,21 @@ fn PresetBar(registry: ControlRegistry) -> Element {
 /// Auto-generated controls row
 #[component]
 fn ControlsRow(registry: ControlRegistry) -> Element {
-    // Separate enum controls (buttons) from bool controls (checkboxes)
+    // Separate controls by type
     let enum_controls: Vec<_> = registry
         .controls
         .iter()
         .filter(|c| c.enum_options.is_some())
         .collect();
+    let int_controls: Vec<_> = registry
+        .controls
+        .iter()
+        .filter(|c| c.int_range.is_some())
+        .collect();
     let bool_controls: Vec<_> = registry
         .controls
         .iter()
-        .filter(|c| c.enum_options.is_none())
+        .filter(|c| c.enum_options.is_none() && c.int_range.is_none())
         .collect();
 
     rsx! {
@@ -199,6 +213,21 @@ fn ControlsRow(registry: ControlRegistry) -> Element {
                             label,
                             doc: control.doc,
                         }
+                    }
+                }
+            }
+        }
+
+        // Int controls
+        if !int_controls.is_empty() {
+            div { class: "flex flex-wrap gap-4 text-sm mb-3",
+                for control in int_controls {
+                    IntInput {
+                        registry: registry.clone(),
+                        control_key: control.key,
+                        label: control.label,
+                        min: control.int_range.map(|(min, _)| min).unwrap_or(0),
+                        max: control.int_range.and_then(|(_, max)| max),
                     }
                 }
             }
@@ -267,6 +296,37 @@ fn EnumButton(
             onclick: move |_| registry.set_string(control_key, value.to_string()),
             label,
             tooltip: doc,
+        }
+    }
+}
+
+/// Integer input control - reads signal reactively
+#[component]
+fn IntInput(
+    registry: ControlRegistry,
+    control_key: &'static str,
+    label: &'static str,
+    min: i32,
+    max: Option<i32>,
+) -> Element {
+    let current = registry.get_int(control_key);
+
+    rsx! {
+        label { class: "flex items-center gap-2 text-gray-400",
+            "{label}:"
+            input {
+                r#type: "number",
+                class: "w-16 bg-gray-700 text-white text-sm rounded px-2 py-1 border border-gray-600",
+                min: min.to_string(),
+                max: max.map(|m| m.to_string()),
+                value: current.to_string(),
+                oninput: move |e| {
+                    if let Ok(v) = e.value().parse::<i32>() {
+                        let clamped = if let Some(m) = max { v.clamp(min, m) } else { v.max(min) };
+                        registry.set_int(control_key, clamped);
+                    }
+                },
+            }
         }
     }
 }

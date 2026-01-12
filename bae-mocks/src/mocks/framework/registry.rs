@@ -11,6 +11,7 @@ use std::collections::HashMap;
 pub enum ControlValue {
     Bool(bool),
     String(String),
+    Int(i32),
 }
 
 /// Definition of a control with metadata
@@ -21,6 +22,7 @@ pub struct ControlDef {
     pub default: ControlValue,
     pub doc: Option<&'static str>,
     pub enum_options: Option<Vec<(&'static str, &'static str)>>, // (value, label) for enums
+    pub int_range: Option<(i32, Option<i32>)>,                   // (min, max) for int controls
 }
 
 /// Builder for creating a ControlRegistry
@@ -45,6 +47,7 @@ impl ControlRegistryBuilder {
             default: ControlValue::Bool(default),
             doc: None,
             enum_options: None,
+            int_range: None,
         });
         self
     }
@@ -63,6 +66,27 @@ impl ControlRegistryBuilder {
             default: ControlValue::String(default.to_string()),
             doc: None,
             enum_options: Some(options),
+            int_range: None,
+        });
+        self
+    }
+
+    /// Add an integer control
+    pub fn int_control(
+        mut self,
+        key: &'static str,
+        label: &'static str,
+        default: i32,
+        min: i32,
+        max: Option<i32>,
+    ) -> Self {
+        self.controls.push(ControlDef {
+            key,
+            label,
+            default: ControlValue::Int(default),
+            doc: None,
+            enum_options: None,
+            int_range: Some((min, max)),
         });
         self
     }
@@ -107,6 +131,14 @@ impl ControlRegistryBuilder {
                         .map(|(_, v)| v.clone())
                         .unwrap_or_else(|| default.clone());
                     ControlValue::String(parsed)
+                }
+                ControlValue::Int(default) => {
+                    let parsed = state_pairs
+                        .iter()
+                        .find(|(k, _)| k == def.key)
+                        .and_then(|(_, v)| v.parse().ok())
+                        .unwrap_or(*default);
+                    ControlValue::Int(parsed)
                 }
             };
             // Use use_signal to properly hook into Dioxus reactive system
@@ -159,6 +191,17 @@ impl ControlRegistry {
             .unwrap_or_default()
     }
 
+    /// Get an integer value (reads signal, creating subscription)
+    pub fn get_int(&self, key: &'static str) -> i32 {
+        self.values
+            .get(key)
+            .map(|s| match &*s.read() {
+                ControlValue::Int(i) => *i,
+                _ => 0,
+            })
+            .unwrap_or(0)
+    }
+
     /// Set a boolean value
     pub fn set_bool(&self, key: &'static str, value: bool) {
         if let Some(mut signal) = self.values.get(key).copied() {
@@ -170,6 +213,13 @@ impl ControlRegistry {
     pub fn set_string(&self, key: &'static str, value: String) {
         if let Some(mut signal) = self.values.get(key).copied() {
             signal.set(ControlValue::String(value));
+        }
+    }
+
+    /// Set an integer value
+    pub fn set_int(&self, key: &'static str, value: i32) {
+        if let Some(mut signal) = self.values.get(key).copied() {
+            signal.set(ControlValue::Int(value));
         }
     }
 
@@ -196,6 +246,11 @@ impl ControlRegistry {
                     (ControlValue::String(v), ControlValue::String(default)) => {
                         if v != default {
                             builder.set_string(def.key, v);
+                        }
+                    }
+                    (ControlValue::Int(v), ControlValue::Int(default)) => {
+                        if v != default {
+                            builder.set_string(def.key, &v.to_string());
                         }
                     }
                     _ => {}

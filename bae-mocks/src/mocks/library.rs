@@ -19,6 +19,7 @@ pub fn LibraryMock(initial_state: Option<String>) -> Element {
                 ("Populated", "Populated"),
             ],
         )
+        .int_control("albums", "Albums", 12, 0, None)
         .with_presets(vec![
             Preset::new("Default"),
             Preset::new("Loading").set_string("state", "Loading"),
@@ -30,6 +31,7 @@ pub fn LibraryMock(initial_state: Option<String>) -> Element {
     registry.use_url_sync_library();
 
     let state = registry.get_string("state");
+    let album_count = registry.get_int("albums") as usize;
 
     let loading = state == "Loading";
     let error = if state == "Error" {
@@ -38,16 +40,10 @@ pub fn LibraryMock(initial_state: Option<String>) -> Element {
         None
     };
 
-    let albums = if state == "Populated" {
-        mock_albums()
+    let (albums, artists_by_album) = if state == "Populated" {
+        mock_albums_with_artists(album_count)
     } else {
-        vec![]
-    };
-
-    let artists_by_album = if state == "Populated" {
-        mock_artists_by_album()
-    } else {
-        HashMap::new()
+        (vec![], HashMap::new())
     };
 
     rsx! {
@@ -66,180 +62,155 @@ pub fn LibraryMock(initial_state: Option<String>) -> Element {
     }
 }
 
-fn mock_albums() -> Vec<Album> {
-    vec![
-        Album {
-            id: "1".to_string(),
-            title: "Neon Frequencies".to_string(),
-            year: Some(2023),
-            cover_url: Some("/covers/the-midnight-signal_neon-frequencies.png".to_string()),
-            is_compilation: false,
-        },
-        Album {
-            id: "2".to_string(),
-            title: "Pacific Standard".to_string(),
-            year: Some(2022),
-            cover_url: Some("/covers/glass-harbor_pacific-standard.png".to_string()),
-            is_compilation: false,
-        },
-        Album {
-            id: "3".to_string(),
-            title: "Landlocked".to_string(),
-            year: Some(2021),
-            cover_url: Some("/covers/glass-harbor_landlocked.png".to_string()),
-            is_compilation: false,
-        },
-        Album {
-            id: "4".to_string(),
-            title: "Set Theory".to_string(),
-            year: Some(2023),
-            cover_url: Some("/covers/velvet-mathematics_set-theory.png".to_string()),
-            is_compilation: false,
-        },
-        Album {
-            id: "5".to_string(),
-            title: "Proof by Induction".to_string(),
-            year: Some(2022),
-            cover_url: Some("/covers/velvet-mathematics_proof-by-induction.png".to_string()),
-            is_compilation: false,
-        },
-        Album {
-            id: "6".to_string(),
-            title: "Floors 1-12".to_string(),
-            year: Some(2020),
-            cover_url: Some("/covers/stairwell-echo_floors-1-12.png".to_string()),
-            is_compilation: false,
-        },
-        Album {
-            id: "7".to_string(),
-            title: "Level 4".to_string(),
-            year: Some(2021),
-            cover_url: Some("/covers/parking-structure_level-4.png".to_string()),
-            is_compilation: false,
-        },
-        Album {
-            id: "8".to_string(),
-            title: "Dial Tone".to_string(),
-            year: Some(2019),
-            cover_url: Some("/covers/the-last-payphone_dial-tone.png".to_string()),
-            is_compilation: false,
-        },
-        Album {
-            id: "9".to_string(),
-            title: "Express".to_string(),
-            year: Some(2023),
-            cover_url: Some("/covers/the-checkout-lane_express.png".to_string()),
-            is_compilation: false,
-        },
-        Album {
-            id: "10".to_string(),
-            title: "Your Number".to_string(),
-            year: Some(2022),
-            cover_url: Some("/covers/the-waiting-room_your-number.png".to_string()),
-            is_compilation: false,
-        },
-        Album {
-            id: "11".to_string(),
-            title: "Grow Light".to_string(),
-            year: Some(2021),
-            cover_url: Some("/covers/apartment-garden_grow-light.png".to_string()),
-            is_compilation: false,
-        },
-        Album {
-            id: "12".to_string(),
-            title: "Window Sill".to_string(),
-            year: Some(2020),
-            cover_url: Some("/covers/apartment-garden_window-sill.png".to_string()),
-            is_compilation: false,
-        },
-    ]
-}
+/// Base album data that cycles for any count (title, artist, year, cover)
+const ALBUM_DATA: &[(&str, &str, i32, &str)] = &[
+    (
+        "Neon Frequencies",
+        "The Midnight Signal",
+        2023,
+        "/covers/the-midnight-signal_neon-frequencies.png",
+    ),
+    (
+        "Pacific Standard",
+        "Glass Harbor",
+        2022,
+        "/covers/glass-harbor_pacific-standard.png",
+    ),
+    (
+        "Landlocked",
+        "Glass Harbor",
+        2021,
+        "/covers/glass-harbor_landlocked.png",
+    ),
+    (
+        "Set Theory",
+        "Velvet Mathematics",
+        2023,
+        "/covers/velvet-mathematics_set-theory.png",
+    ),
+    (
+        "Proof by Induction",
+        "Velvet Mathematics",
+        2022,
+        "/covers/velvet-mathematics_proof-by-induction.png",
+    ),
+    (
+        "Floors 1-12",
+        "Stairwell Echo",
+        2020,
+        "/covers/stairwell-echo_floors-1-12.png",
+    ),
+    (
+        "Level 4",
+        "Parking Structure",
+        2021,
+        "/covers/parking-structure_level-4.png",
+    ),
+    (
+        "Dial Tone",
+        "The Last Payphone",
+        2019,
+        "/covers/the-last-payphone_dial-tone.png",
+    ),
+    (
+        "Express",
+        "The Checkout Lane",
+        2023,
+        "/covers/the-checkout-lane_express.png",
+    ),
+    (
+        "Your Number",
+        "The Waiting Room",
+        2022,
+        "/covers/the-waiting-room_your-number.png",
+    ),
+    (
+        "Grow Light",
+        "Apartment Garden",
+        2021,
+        "/covers/apartment-garden_grow-light.png",
+    ),
+    (
+        "Window Sill",
+        "Apartment Garden",
+        2020,
+        "/covers/apartment-garden_window-sill.png",
+    ),
+    (
+        "Collated",
+        "Copy Machine",
+        2023,
+        "/covers/copy-machine_collated.png",
+    ),
+    (
+        "Back Page",
+        "Newspaper Weather",
+        2022,
+        "/covers/newspaper-weather_back-page.png",
+    ),
+    (
+        "Tomorrow's Forecast",
+        "Newspaper Weather",
+        2021,
+        "/covers/newspaper-weather_tomorrows-forecast.png",
+    ),
+    (
+        "Interest",
+        "The Borrowed Time",
+        2020,
+        "/covers/the-borrowed-time_interest.png",
+    ),
+    (
+        "Seconds",
+        "The Borrowed Time",
+        2019,
+        "/covers/the-borrowed-time_seconds.png",
+    ),
+    (
+        "Fuel Weight",
+        "The Cold Equations",
+        2023,
+        "/covers/the-cold-equations_fuel-weight.png",
+    ),
+    (
+        "Mission Control",
+        "The Cold Equations",
+        2022,
+        "/covers/the-cold-equations_mission-control.png",
+    ),
+    (
+        "Alphabetical",
+        "The Filing Cabinets",
+        2021,
+        "/covers/the-filing-cabinets_alphabetical.png",
+    ),
+];
 
-fn mock_artists_by_album() -> HashMap<String, Vec<Artist>> {
-    let mut map = HashMap::new();
-    map.insert(
-        "1".to_string(),
-        vec![Artist {
-            id: "a1".to_string(),
-            name: "The Midnight Signal".to_string(),
-        }],
-    );
-    map.insert(
-        "2".to_string(),
-        vec![Artist {
-            id: "a2".to_string(),
-            name: "Glass Harbor".to_string(),
-        }],
-    );
-    map.insert(
-        "3".to_string(),
-        vec![Artist {
-            id: "a2".to_string(),
-            name: "Glass Harbor".to_string(),
-        }],
-    );
-    map.insert(
-        "4".to_string(),
-        vec![Artist {
-            id: "a3".to_string(),
-            name: "Velvet Mathematics".to_string(),
-        }],
-    );
-    map.insert(
-        "5".to_string(),
-        vec![Artist {
-            id: "a3".to_string(),
-            name: "Velvet Mathematics".to_string(),
-        }],
-    );
-    map.insert(
-        "6".to_string(),
-        vec![Artist {
-            id: "a4".to_string(),
-            name: "Stairwell Echo".to_string(),
-        }],
-    );
-    map.insert(
-        "7".to_string(),
-        vec![Artist {
-            id: "a5".to_string(),
-            name: "Parking Structure".to_string(),
-        }],
-    );
-    map.insert(
-        "8".to_string(),
-        vec![Artist {
-            id: "a6".to_string(),
-            name: "The Last Payphone".to_string(),
-        }],
-    );
-    map.insert(
-        "9".to_string(),
-        vec![Artist {
-            id: "a7".to_string(),
-            name: "The Checkout Lane".to_string(),
-        }],
-    );
-    map.insert(
-        "10".to_string(),
-        vec![Artist {
-            id: "a8".to_string(),
-            name: "The Waiting Room".to_string(),
-        }],
-    );
-    map.insert(
-        "11".to_string(),
-        vec![Artist {
-            id: "a9".to_string(),
-            name: "Apartment Garden".to_string(),
-        }],
-    );
-    map.insert(
-        "12".to_string(),
-        vec![Artist {
-            id: "a9".to_string(),
-            name: "Apartment Garden".to_string(),
-        }],
-    );
-    map
+fn mock_albums_with_artists(count: usize) -> (Vec<Album>, HashMap<String, Vec<Artist>>) {
+    let mut albums = Vec::with_capacity(count);
+    let mut artists_by_album = HashMap::new();
+
+    for i in 0..count {
+        let idx = i % ALBUM_DATA.len();
+        let (title, artist_name, year, cover) = ALBUM_DATA[idx];
+        let id = (i + 1).to_string();
+
+        albums.push(Album {
+            id: id.clone(),
+            title: title.to_string(),
+            year: Some(year),
+            cover_url: Some(cover.to_string()),
+            is_compilation: false,
+        });
+
+        artists_by_album.insert(
+            id,
+            vec![Artist {
+                id: format!("a{}", idx + 1),
+                name: artist_name.to_string(),
+            }],
+        );
+    }
+
+    (albums, artists_by_album)
 }
