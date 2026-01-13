@@ -13,7 +13,7 @@ test('capture library view', async ({ page }) => {
   await page.goto('/');
   
   // Wait for the library to load (albums should be visible)
-  await page.waitForSelector('.grid', { timeout: 10000 });
+  await page.waitForSelector('.virtual-grid-content', { timeout: 10000 });
   
   // Give images time to load
   await page.waitForTimeout(500);

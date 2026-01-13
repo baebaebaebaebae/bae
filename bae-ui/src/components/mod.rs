@@ -13,6 +13,7 @@ pub mod playback;
 pub mod settings;
 pub mod title_bar;
 pub mod utils;
+pub mod virtual_grid;
 
 pub use album_card::AlbumCard;
 pub use album_detail::release_tabs_section::ReleaseTorrentInfo;
@@ -44,3 +45,4 @@ pub use settings::{
 };
 pub use title_bar::{NavItem, SearchResult, TitleBarView};
 pub use utils::{format_duration, format_file_size};
+pub use virtual_grid::{RenderFn, ScrollTarget, VirtualGrid, VirtualGridConfig};

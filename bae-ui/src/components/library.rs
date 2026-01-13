@@ -2,9 +2,18 @@
 
 use crate::components::album_card::AlbumCard;
 use crate::components::helpers::{ErrorDisplay, LoadingSpinner, PageContainer};
+use crate::components::virtual_grid::{RenderFn, ScrollTarget, VirtualGrid, VirtualGridConfig};
 use crate::display_types::{Album, Artist};
 use dioxus::prelude::*;
 use std::collections::HashMap;
+use std::rc::Rc;
+
+/// Item type for the virtual album grid
+#[derive(Clone, PartialEq)]
+struct AlbumGridItem {
+    album: Album,
+    artists: Vec<Artist>,
+}
 
 /// Library view component - pure rendering, no data fetching
 /// All callbacks are required - pass noops if not needed.
@@ -60,7 +69,7 @@ pub fn LibraryView(
     }
 }
 
-/// Grid component to display albums
+/// Grid component to display albums with virtual scrolling
 #[component]
 fn AlbumGrid(
     albums: Vec<Album>,
@@ -69,18 +78,42 @@ fn AlbumGrid(
     on_play_album: EventHandler<String>,
     on_add_album_to_queue: EventHandler<String>,
 ) -> Element {
-    rsx! {
-        div { class: "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6",
-            for album in albums {
-                AlbumCard {
-                    key: "{album.id}",
-                    album: album.clone(),
-                    artists: artists_by_album.get(&album.id).cloned().unwrap_or_default(),
-                    on_click: on_album_click,
-                    on_play: on_play_album,
-                    on_add_to_queue: on_add_album_to_queue,
-                }
+    // Prepare items by joining albums with their artists
+    let items: Vec<AlbumGridItem> = albums
+        .into_iter()
+        .map(|album| {
+            let artists = artists_by_album.get(&album.id).cloned().unwrap_or_default();
+            AlbumGridItem { album, artists }
+        })
+        .collect();
+
+    let config = VirtualGridConfig {
+        item_width: 200.0,
+        item_height: 280.0,
+        buffer_rows: 2,
+        gap: 24.0,
+    };
+
+    // Create render function that captures the event handlers
+    let render_item = RenderFn(Rc::new(move |item: AlbumGridItem, _idx: usize| {
+        rsx! {
+            AlbumCard {
+                key: "{item.album.id}",
+                album: item.album,
+                artists: item.artists,
+                on_click: on_album_click,
+                on_play: on_play_album,
+                on_add_to_queue: on_add_album_to_queue,
             }
+        }
+    }));
+
+    rsx! {
+        VirtualGrid {
+            items,
+            config,
+            render_item,
+            scroll_target: ScrollTarget::Window,
         }
     }
 }
