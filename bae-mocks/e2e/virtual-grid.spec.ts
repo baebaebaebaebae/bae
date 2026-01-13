@@ -112,23 +112,71 @@ test.describe('VirtualGrid', () => {
   });
 
   test('resize updates layout correctly', async ({ page }) => {
+    // Helper to get items per row (by checking Y positions)
+    async function getColumnsInFirstRow(): Promise<number> {
+      const items = page.locator('.virtual-grid-content > div[data-index]');
+      const boxes = await items.evaluateAll(els => 
+        els.slice(0, 10).map(el => ({ y: el.getBoundingClientRect().y }))
+      );
+      if (boxes.length === 0) return 0;
+      const firstRowY = boxes[0].y;
+      return boxes.filter(b => Math.abs(b.y - firstRowY) < 5).length;
+    }
+
     // Start at wide viewport
     await page.setViewportSize({ width: 1200, height: 800 });
     await page.waitForTimeout(300);
     
     const wideCount = await countGridItems(page);
+    const wideCols = await getColumnsInFirstRow();
     
     // Resize to narrow viewport
     await page.setViewportSize({ width: 400, height: 800 });
     await page.waitForTimeout(300);
     
     const narrowCount = await countGridItems(page);
+    const narrowCols = await getColumnsInFirstRow();
     
     // Both should be virtualized
     expect(wideCount).toBeLessThan(100);
     expect(narrowCount).toBeLessThan(100);
     
-    console.log(`Wide viewport: ${wideCount} items, Narrow: ${narrowCount} items`);
+    // Wide should have more columns than narrow
+    expect(wideCols, 'Wide viewport should have multiple columns').toBeGreaterThan(1);
+    expect(narrowCols, 'Narrow viewport should have fewer columns').toBeLessThan(wideCols);
+    
+    console.log(`Wide: ${wideCount} items, ${wideCols} cols | Narrow: ${narrowCount} items, ${narrowCols} cols`);
+  });
+
+  test('resize observer survives over time (no GC issues)', async ({ page }) => {
+    // Start narrow
+    await page.setViewportSize({ width: 400, height: 800 });
+    await page.waitForTimeout(500);
+
+    // Wait longer to give GC a chance to run
+    await page.waitForTimeout(2000);
+    
+    // Force GC if possible (may not work in all browsers)
+    await page.evaluate(() => {
+      if ((window as any).gc) (window as any).gc();
+    });
+    
+    await page.waitForTimeout(500);
+
+    // Now resize - should still respond if observer wasn't GC'd
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await page.waitForTimeout(500);
+
+    // Check that we have multiple columns (ResizeObserver still working)
+    const items = page.locator('.virtual-grid-content > div[data-index]');
+    const boxes = await items.evaluateAll(els => 
+      els.slice(0, 10).map(el => ({ y: el.getBoundingClientRect().y }))
+    );
+    const firstRowY = boxes[0]?.y ?? 0;
+    const cols = boxes.filter(b => Math.abs(b.y - firstRowY) < 5).length;
+    
+    console.log(`After GC wait + resize: ${cols} columns`);
+    expect(cols, 'ResizeObserver should still work after potential GC').toBeGreaterThan(1);
   });
 
   test('measurement updates after viewport change', async ({ page }) => {
@@ -214,6 +262,46 @@ test.describe('VirtualGrid', () => {
     }
   });
 
+  test('scroll performance - bounded DOM churn during scroll sweep', async ({ page }) => {
+    await page.goto('/mock/library?state=albums%3D500');
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await page.waitForSelector('.virtual-grid-content');
+    await page.waitForTimeout(500);
+
+    // Set up mutation counter
+    await page.evaluate(() => {
+      let count = 0;
+      const observer = new MutationObserver(mutations => {
+        count += mutations.length;
+      });
+      const target = document.querySelector('.virtual-grid-content');
+      if (target) {
+        observer.observe(target, { childList: true, subtree: true, attributes: true });
+      }
+      (window as any).__scrollMutationCount = () => {
+        observer.disconnect();
+        return count;
+      };
+    });
+
+    // Scroll through the page in increments
+    for (let y = 0; y <= 8000; y += 200) {
+      await page.evaluate(scrollY => window.scrollTo(0, scrollY), y);
+      await page.waitForTimeout(30);
+    }
+
+    const mutationCount = await page.evaluate(() => (window as any).__scrollMutationCount());
+    const itemCount = await countGridItems(page);
+    
+    console.log(`Scroll sweep: ${mutationCount} DOM mutations, ${itemCount} items in DOM`);
+    
+    // Virtual scrolling means we're swapping items in/out - expect mutations
+    // but not an explosion. 40 scroll steps * ~10-20 items changed per step = 400-800 reasonable
+    // Threshold of 2000 catches major regressions
+    expect(mutationCount, 'Too many DOM mutations during scroll').toBeLessThan(2000);
+    expect(itemCount, 'Should still be virtualized after scroll').toBeLessThan(100);
+  });
+
   test('resize performance - should not re-render excessively during resize', async ({ page }) => {
     await page.goto('/mock/library?state=albums%3D200');
     await page.setViewportSize({ width: 1400, height: 900 });
@@ -250,10 +338,9 @@ test.describe('VirtualGrid', () => {
     const finalCount = await page.evaluate(() => (window as any).__mutationCount());
     console.log(`Resize: 60 steps, ${finalCount} DOM mutations`);
     
-    // Should NOT re-render excessively - debouncing should limit DOM churn
-    // Each re-render touches many nodes, so even 10 re-renders = hundreds of mutations
-    // But 60 re-renders would be thousands - we want to stay well under that
-    expect(finalCount, 'Too many DOM mutations during resize').toBeLessThan(2000);
+    // With proper debouncing, we expect very few mutations (currently ~9-20)
+    // Threshold of 200 catches regressions while allowing some headroom
+    expect(finalCount, 'Too many DOM mutations during resize - debouncing broken?').toBeLessThan(200);
     
     // Grid should still be functional after resize
     const items = await page.locator('.virtual-grid-content > div[data-index]').count();

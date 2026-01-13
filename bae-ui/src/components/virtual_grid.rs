@@ -44,7 +44,7 @@ impl<T> PartialEq for RenderFn<T> {
 pub struct VirtualGridConfig {
     /// Minimum width of each item (used to calculate column count)
     pub item_width: f64,
-    /// Height of each row including gap
+    /// Height of each item (not including gap)
     pub item_height: f64,
     /// Number of extra rows to render above/below viewport
     pub buffer_rows: usize,
@@ -133,6 +133,10 @@ pub fn VirtualGrid<T: Clone + PartialEq + 'static>(
     // Measured item dimensions (override config when available)
     let mut measured_item_height = use_signal(|| None::<f64>);
     let mut first_item_element: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
+
+    // Track if we've warned about virtualization not working (to avoid spam)
+    #[cfg(target_arch = "wasm32")]
+    let warned_for_item_count = use_hook(|| std::cell::Cell::new(0_usize));
 
     // Set up window scroll listener when using window scrolling
     #[cfg(target_arch = "wasm32")]
@@ -234,19 +238,29 @@ pub fn VirtualGrid<T: Clone + PartialEq + 'static>(
         vec![]
     };
 
-    // Warn if too many items are being rendered - indicates virtual scrolling isn't working
-    // (likely due to missing height constraint on container)
+    // Warn if virtualization isn't working (showing all items when we should be virtualizing)
+    // Only warn once per item count to avoid console spam
     #[cfg(target_arch = "wasm32")]
-    if visible_items.len() > 200 && items.len() > 200 {
-        web_sys::console::warn_1(
-            &format!(
-                "VirtualGrid: rendering {} of {} items. Virtual scrolling may not be working - \
-                 ensure container has a height constraint.",
-                visible_items.len(),
-                items.len()
-            )
-            .into(),
-        );
+    {
+        let should_virtualize = items.len() > 50;
+        let is_showing_all = visible_items.len() == items.len();
+        let already_warned = warned_for_item_count.get() == items.len();
+
+        if should_virtualize && is_showing_all && !already_warned {
+            warned_for_item_count.set(items.len());
+            let hint = match scroll_target {
+                ScrollTarget::Container => "ensure container has a height constraint",
+                ScrollTarget::Window => "check element_offset_top measurement",
+            };
+            web_sys::console::warn_1(
+                &format!(
+                    "VirtualGrid: rendering all {} items (no virtualization). Hint: {}.",
+                    items.len(),
+                    hint
+                )
+                .into(),
+            );
+        }
     }
 
     let grid_style = format!(
@@ -282,7 +296,10 @@ pub fn VirtualGrid<T: Clone + PartialEq + 'static>(
                 if let Some(element) = mounted_element.read().clone() {
                     spawn(async move {
                         if let Ok(scroll) = element.get_scroll_offset().await {
-                            scroll_top.set(scroll.y);
+                            // Only update if scroll changed meaningfully to avoid re-render storms
+                            if (scroll_top() - scroll.y).abs() > 0.5 {
+                                scroll_top.set(scroll.y);
+                            }
                         }
                     });
                 }
