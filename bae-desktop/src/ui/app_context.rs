@@ -4,6 +4,7 @@ use bae_core::encryption;
 use bae_core::import;
 use bae_core::library::SharedLibraryManager;
 use bae_core::playback;
+#[cfg(feature = "torrent")]
 use bae_core::torrent;
 use dioxus::prelude::*;
 
@@ -15,6 +16,7 @@ pub struct AppContext {
     pub playback_handle: playback::PlaybackHandle,
     pub cache: cache::CacheManager,
     pub encryption_service: Option<encryption::EncryptionService>,
+    #[cfg(feature = "torrent")]
     pub torrent_manager: torrent::LazyTorrentManager,
 }
 

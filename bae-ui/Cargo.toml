@@ -9,3 +9,5 @@ dioxus = { version = "0.7.2", default-features = false, features = ["signals", "
 [features]
 default = []
 test-utils = []
+torrent = []
+cd-rip = []

@@ -10,12 +10,16 @@ fn has_unclean_state(ctx: &ImportContext) -> bool {
     let current_source = *ctx.selected_import_source().read();
     match current_source {
         ImportSource::Folder => !ctx.folder_path().read().is_empty(),
+        #[cfg(feature = "torrent")]
         ImportSource::Torrent => {
             ctx.torrent_source().read().is_some() || !ctx.magnet_link().read().is_empty()
         }
+        #[cfg(feature = "cd-rip")]
         ImportSource::Cd => {
             !ctx.folder_path().read().is_empty() || ctx.cd_toc_info().read().is_some()
         }
+        #[cfg(not(all(feature = "torrent", feature = "cd-rip")))]
+        _ => false,
     }
 }
 /// Try to switch import source, showing dialog if there's unclean state
