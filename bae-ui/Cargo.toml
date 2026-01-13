@@ -7,8 +7,9 @@ edition = "2021"
 dioxus = { version = "0.7.2", default-features = false, features = ["signals", "html", "macro", "hooks"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-web-sys = { version = "0.3", features = ["Element", "HtmlElement", "DomRect", "Window", "ScrollToOptions", "ScrollBehavior"] }
+web-sys = { version = "0.3", features = ["Element", "HtmlElement", "DomRect", "Window", "ScrollToOptions", "ScrollBehavior", "AddEventListenerOptions", "ResizeObserver", "ResizeObserverEntry", "ResizeObserverSize"] }
 wasm-bindgen = "0.2"
+js-sys = "0.3"
 
 [features]
 default = []

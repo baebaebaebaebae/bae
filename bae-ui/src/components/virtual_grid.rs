@@ -133,9 +133,6 @@ pub fn VirtualGrid<T: Clone + PartialEq + 'static>(
     // Measured item dimensions (override config when available)
     let mut measured_item_height = use_signal(|| None::<f64>);
     let mut first_item_element: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
-    // Counter that increments on resize to trigger re-measurement (wasm32 only)
-    #[cfg(target_arch = "wasm32")]
-    let mut remeasure_trigger = use_signal(|| 0_u32);
 
     // Set up window scroll listener when using window scrolling
     #[cfg(target_arch = "wasm32")]
@@ -145,17 +142,14 @@ pub fn VirtualGrid<T: Clone + PartialEq + 'static>(
             listeners_installed.set(true);
 
             if let Some(window) = web_sys::window() {
-                // Initial viewport height measurement (for visible row calculation)
-                // Note: container_width is measured from actual element in onmounted,
-                // not from window.innerWidth, because CSS grid column count depends
-                // on the actual container width
+                // Initial viewport height measurement
                 if let Ok(inner_height) = window.inner_height() {
                     if let Some(h) = inner_height.as_f64() {
                         container_height.set(h);
                     }
                 }
 
-                // Scroll handler
+                // Scroll handler (passive for performance)
                 let scroll_closure: Closure<dyn FnMut()> = Closure::wrap(Box::new(move || {
                     if let Some(window) = web_sys::window() {
                         let window_y = window.scroll_y().unwrap_or(0.0);
@@ -163,7 +157,6 @@ pub fn VirtualGrid<T: Clone + PartialEq + 'static>(
                         let new_scroll_top = (window_y - offset).max(0.0);
                         let current = scroll_top();
 
-                        // Only update if changed by more than threshold to avoid excessive re-renders
                         if (new_scroll_top - current).abs() > 0.5 {
                             scroll_top.set(new_scroll_top);
                         }
@@ -171,74 +164,46 @@ pub fn VirtualGrid<T: Clone + PartialEq + 'static>(
                 })
                     as Box<dyn FnMut()>);
 
+                let scroll_options = web_sys::AddEventListenerOptions::new();
+                scroll_options.set_passive(true);
                 window
-                    .add_event_listener_with_callback(
+                    .add_event_listener_with_callback_and_add_event_listener_options(
                         "scroll",
                         scroll_closure.as_ref().unchecked_ref(),
+                        &scroll_options,
                     )
                     .ok();
 
-                // Resize handler - update viewport height and trigger re-measurement
+                // Window resize only updates viewport height (container_width is handled by ResizeObserver)
+                // Only update if height changed significantly to avoid excessive re-renders
                 let resize_closure: Closure<dyn FnMut()> = Closure::wrap(Box::new(move || {
                     if let Some(window) = web_sys::window() {
-                        // Update viewport height (for visible row calculation)
                         if let Ok(h) = window.inner_height() {
                             if let Some(h) = h.as_f64() {
-                                container_height.set(h);
+                                if (container_height() - h).abs() > 1.0 {
+                                    container_height.set(h);
+                                }
                             }
                         }
-                        // Note: container_width is measured from the actual element
-                        // in the remeasure effect, not from window.innerWidth
-                        // Trigger re-measurement via signal (will be handled in use_effect)
-                        remeasure_trigger.set(remeasure_trigger() + 1);
                     }
                 })
                     as Box<dyn FnMut()>);
 
+                let resize_options = web_sys::AddEventListenerOptions::new();
+                resize_options.set_passive(true);
                 window
-                    .add_event_listener_with_callback(
+                    .add_event_listener_with_callback_and_add_event_listener_options(
                         "resize",
                         resize_closure.as_ref().unchecked_ref(),
+                        &resize_options,
                     )
                     .ok();
 
-                // Keep closures alive for the lifetime of the component
                 scroll_closure.forget();
                 resize_closure.forget();
             }
         }
     }
-
-    // Re-measure when triggered (e.g., after resize)
-    #[cfg(target_arch = "wasm32")]
-    use_effect(move || {
-        let _trigger = remeasure_trigger(); // Subscribe to changes
-
-        // Re-measure container width (for correct column calculation)
-        if let Some(container) = mounted_element() {
-            let mut container_width_signal = container_width;
-            spawn(async move {
-                if let Ok(rect) = container.get_client_rect().await {
-                    let w = rect.width();
-                    if (container_width_signal() - w).abs() > 1.0 {
-                        container_width_signal.set(w);
-                    }
-                }
-            });
-        }
-
-        // Re-measure first item height
-        if let Some(element) = first_item_element() {
-            spawn(async move {
-                if let Ok(rect) = element.get_client_rect().await {
-                    let h = rect.height();
-                    if measured_item_height().is_none_or(|current| (current - h).abs() > 1.0) {
-                        measured_item_height.set(Some(h));
-                    }
-                }
-            });
-        }
-    });
 
     // Use measured item height if available, otherwise config default
     let effective_config = {
@@ -258,22 +223,6 @@ pub fn VirtualGrid<T: Clone + PartialEq + 'static>(
         scroll_top(),
     );
 
-    #[cfg(target_arch = "wasm32")]
-    web_sys::console::log_1(
-        &format!(
-            "LAYOUT: container_w={:.0}, cols={}, scroll_top={:.0}, start_row={}, end_row={}, start_idx={}, end_idx={}, top_pad={:.0}",
-            container_width(),
-            layout.columns,
-            scroll_top(),
-            layout.start_row,
-            layout.end_row,
-            layout.start_idx,
-            layout.end_idx,
-            layout.top_padding,
-        )
-        .into(),
-    );
-
     // Slice visible items
     let visible_items: Vec<(usize, T)> = if layout.start_idx < items.len() {
         items[layout.start_idx..layout.end_idx]
@@ -284,16 +233,6 @@ pub fn VirtualGrid<T: Clone + PartialEq + 'static>(
     } else {
         vec![]
     };
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        let indices: Vec<usize> = visible_items.iter().map(|(idx, _)| *idx).collect();
-        if let (Some(first), Some(last)) = (indices.first(), indices.last()) {
-            web_sys::console::log_1(
-                &format!("RENDER: items {}-{} (count={})", first, last, indices.len()).into(),
-            );
-        }
-    }
 
     // Warn if too many items are being rendered - indicates virtual scrolling isn't working
     // (likely due to missing height constraint on container)
@@ -349,27 +288,50 @@ pub fn VirtualGrid<T: Clone + PartialEq + 'static>(
                 }
             },
             onmounted: move |evt| {
-                mounted_element.set(Some(evt.data()));
+                let data = evt.data();
+                mounted_element.set(Some(data.clone()));
+
+                // Set up ResizeObserver for container width changes
+                #[cfg(target_arch = "wasm32")]
+                {
+                    use wasm_bindgen::JsCast;
+                    if let Some(element) = data.downcast::<web_sys::Element>() {
+                        let resize_callback: Closure<dyn FnMut(js_sys::Array)> =
+                            Closure::wrap(Box::new(move |entries: js_sys::Array| {
+                                if let Some(entry) = entries.get(0).dyn_ref::<web_sys::ResizeObserverEntry>() {
+                                    let size_list = entry.content_box_size();
+                                    if let Some(size) = size_list.get(0).dyn_ref::<web_sys::ResizeObserverSize>() {
+                                        let w = size.inline_size();
+                                        if (container_width() - w).abs() > 1.0 {
+                                            container_width.set(w);
+                                        }
+                                    }
+                                }
+                            }) as Box<dyn FnMut(js_sys::Array)>);
+
+                        if let Ok(observer) = web_sys::ResizeObserver::new(resize_callback.as_ref().unchecked_ref()) {
+                            observer.observe(&element);
+                            resize_callback.forget();
+                        }
+                    }
+                }
+
+                // Initial measurement
                 spawn(async move {
-                    if let Ok(rect) = evt.get_client_rect().await {
-                        // For window scrolling, capture offset from viewport top
+                    if let Ok(rect) = data.get_client_rect().await {
                         if scroll_target_for_mount == ScrollTarget::Window {
                             #[cfg(target_arch = "wasm32")]
                             {
                                 let window_y = web_sys::window()
                                     .and_then(|w| w.scroll_y().ok())
                                     .unwrap_or(0.0);
-                                // Store page-relative offset, not viewport-relative
                                 let page_offset = window_y + rect.origin.y;
                                 element_offset_top.set(page_offset);
                             }
                             #[cfg(not(target_arch = "wasm32"))]
                             element_offset_top.set(rect.origin.y);
 
-                            // Also set container width from actual element (CSS grid column count
-                            // depends on container width, not window width)
                             container_width.set(rect.width());
-                            // container_height stays as window.innerHeight for visible row calculation
                         } else {
                             container_width.set(rect.width());
                             container_height.set(rect.height());
@@ -401,10 +363,6 @@ pub fn VirtualGrid<T: Clone + PartialEq + 'static>(
                                 spawn(async move {
                                     if let Ok(rect) = evt.get_client_rect().await {
                                         let h = rect.height();
-                                        #[cfg(target_arch = "wasm32")]
-                                        web_sys::console::log_1(
-                                            &format!("MEASURE: width={:.0}, height={:.0}, current={:?}", rect.width(), h, measured_item_height()).into()
-                                        );
                                         // Only update if significantly different to avoid loops
                                         if measured_item_height().is_none_or(|current| (current - h).abs() > 1.0) {
                                             measured_item_height.set(Some(h));

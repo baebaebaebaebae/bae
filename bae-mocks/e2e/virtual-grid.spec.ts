@@ -213,4 +213,51 @@ test.describe('VirtualGrid', () => {
       previousScrollY = scrollY;
     }
   });
+
+  test('resize performance - should not re-render excessively during resize', async ({ page }) => {
+    await page.goto('/mock/library?state=albums%3D200');
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await page.waitForSelector('.virtual-grid-content');
+    await page.waitForTimeout(500);
+
+    // Set up DOM mutation counter on the grid content
+    await page.evaluate(() => {
+      let count = 0;
+      const observer = new MutationObserver(mutations => {
+        count += mutations.length;
+      });
+      const target = document.querySelector('.virtual-grid-content');
+      if (target) {
+        observer.observe(target, { childList: true, subtree: true, attributes: true });
+      }
+      (window as any).__mutationCount = () => {
+        observer.disconnect();
+        return count;
+      };
+    });
+
+    // Simulate rapid window resize (60 steps total)
+    for (let width = 1400; width >= 800; width -= 20) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.waitForTimeout(16);
+    }
+    for (let width = 800; width <= 1400; width += 20) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.waitForTimeout(16);
+    }
+
+    // Get final mutation count
+    const finalCount = await page.evaluate(() => (window as any).__mutationCount());
+    console.log(`Resize: 60 steps, ${finalCount} DOM mutations`);
+    
+    // Should NOT re-render excessively - debouncing should limit DOM churn
+    // Each re-render touches many nodes, so even 10 re-renders = hundreds of mutations
+    // But 60 re-renders would be thousands - we want to stay well under that
+    expect(finalCount, 'Too many DOM mutations during resize').toBeLessThan(2000);
+    
+    // Grid should still be functional after resize
+    const items = await page.locator('.virtual-grid-content > div[data-index]').count();
+    expect(items).toBeGreaterThan(0);
+    expect(items).toBeLessThan(100); // Still virtualized
+  });
 });
