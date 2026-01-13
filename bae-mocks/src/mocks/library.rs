@@ -21,6 +21,7 @@ pub fn LibraryMock(initial_state: Option<String>) -> Element {
         )
         .int_control("albums", "Albums", 12, 0, None)
         .int_control("cycle", "Remount Cycle", 0, 0, None) // Change to force VirtualGrid remount
+        .string_control("scroll_to", "Scroll To (album ID)", "")
         .with_presets(vec![
             Preset::new("Default"),
             Preset::new("Loading").set_string("state", "Loading"),
@@ -34,6 +35,12 @@ pub fn LibraryMock(initial_state: Option<String>) -> Element {
     let state = registry.get_string("state");
     let album_count = registry.get_int("albums") as usize;
     let cycle = registry.get_int("cycle");
+    let scroll_to = registry.get_string("scroll_to");
+    let initial_scroll_to = if scroll_to.is_empty() {
+        None
+    } else {
+        Some(scroll_to)
+    };
 
     let loading = state == "Loading";
     let error = if state == "Error" {
@@ -60,6 +67,7 @@ pub fn LibraryMock(initial_state: Option<String>) -> Element {
                 on_play_album: |_| {},
                 on_add_album_to_queue: |_| {},
                 on_empty_action: Some(EventHandler::new(|_| {})),
+                initial_scroll_to,
             }
         }
     }

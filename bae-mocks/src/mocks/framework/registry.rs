@@ -91,6 +91,19 @@ impl ControlRegistryBuilder {
         self
     }
 
+    /// Add a free-form string control
+    pub fn string_control(mut self, key: &'static str, label: &'static str, default: &str) -> Self {
+        self.controls.push(ControlDef {
+            key,
+            label,
+            default: ControlValue::String(default.to_string()),
+            doc: None,
+            enum_options: None,
+            int_range: None,
+        });
+        self
+    }
+
     /// Add documentation to the last control
     pub fn doc(mut self, doc: &'static str) -> Self {
         if let Some(last) = self.controls.last_mut() {

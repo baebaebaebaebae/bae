@@ -309,16 +309,18 @@ pub fn VirtualGrid<T: Clone + PartialEq + 'static>(
         .collect();
 
     // Helper to scroll to a specific item key
-    let mut scroll_to_item_key = {
+    let scroll_to_item_key = {
         let key_to_index = key_to_index.clone();
         let effective_config = effective_config.clone();
-        let container_width = container_width();
-        let element_offset_top = element_offset_top();
         let scroll_target = scroll_target;
 
         move |key: String| {
             if let Some(&index) = key_to_index.get(&key) {
-                let columns = ((container_width + effective_config.gap)
+                // Read signals at call time, not capture time
+                let cw = container_width();
+                let eot = element_offset_top();
+
+                let columns = ((cw + effective_config.gap)
                     / (effective_config.item_width + effective_config.gap))
                     .floor()
                     .max(1.0) as usize;
@@ -331,7 +333,7 @@ pub fn VirtualGrid<T: Clone + PartialEq + 'static>(
                     if let Some(window) = web_sys::window() {
                         match scroll_target {
                             ScrollTarget::Window => {
-                                let page_y = element_offset_top + target_scroll;
+                                let page_y = eot + target_scroll;
                                 window.scroll_to_with_x_and_y(0.0, page_y);
                             }
                             ScrollTarget::Container => {
@@ -344,7 +346,7 @@ pub fn VirtualGrid<T: Clone + PartialEq + 'static>(
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 {
-                    let _ = (scroll_target, element_offset_top);
+                    let _ = (scroll_target, eot);
                     scroll_top.set(target_scroll);
                 }
             }
@@ -366,13 +368,20 @@ pub fn VirtualGrid<T: Clone + PartialEq + 'static>(
         }
     }
 
-    // Handle initial_scroll_to on mount
+    // Handle initial_scroll_to on mount (after container_width is measured)
     let initial_scroll_done = use_hook(|| std::cell::Cell::new(false));
-    if let Some(ref key) = initial_scroll_to {
-        if !initial_scroll_done.get() && container_width() > 0.0 {
-            initial_scroll_done.set(true);
-            scroll_to_item_key(key.clone());
-        }
+    {
+        let initial_scroll_to = initial_scroll_to.clone();
+        let mut scroll_to_item_key = scroll_to_item_key.clone();
+        let cw = container_width(); // Read signal to create dependency
+        use_effect(move || {
+            if let Some(ref key) = initial_scroll_to {
+                if !initial_scroll_done.get() && cw > 0.0 {
+                    initial_scroll_done.set(true);
+                    scroll_to_item_key(key.clone());
+                }
+            }
+        });
     }
 
     // Calculate grid layout

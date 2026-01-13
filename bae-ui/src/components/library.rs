@@ -32,6 +32,8 @@ pub fn LibraryView(
     on_add_album_to_queue: EventHandler<String>,
     // Empty state action (e.g., navigate to import)
     #[props(default)] on_empty_action: Option<EventHandler<()>>,
+    // Scroll to album by ID on mount
+    #[props(default)] initial_scroll_to: Option<String>,
 ) -> Element {
     rsx! {
         PageContainer {
@@ -65,6 +67,7 @@ pub fn LibraryView(
                     on_album_click,
                     on_play_album,
                     on_add_album_to_queue,
+                    initial_scroll_to,
                 }
             }
         }
@@ -79,6 +82,7 @@ fn AlbumGrid(
     on_album_click: EventHandler<String>,
     on_play_album: EventHandler<String>,
     on_add_album_to_queue: EventHandler<String>,
+    #[props(default)] initial_scroll_to: Option<String>,
 ) -> Element {
     // Prepare items by joining albums with their artists
     let items: Vec<AlbumGridItem> = albums
@@ -120,6 +124,7 @@ fn AlbumGrid(
             render_item,
             key_fn,
             scroll_target: ScrollTarget::Window,
+            initial_scroll_to,
         }
     }
 }

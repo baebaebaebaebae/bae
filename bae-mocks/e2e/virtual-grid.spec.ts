@@ -5,7 +5,7 @@ test.beforeEach(async ({ page }) => {
   page.on('console', msg => {
     const type = msg.type();
     const text = msg.text();
-    // Filter to our app logs (they have prefixes like LAYOUT:, MEASURE:)
+    // Filter to our app logs
     if (text.includes('LAYOUT:') || text.includes('MEASURE:') || text.includes('SCROLL:')) {
       console.log(`[browser ${type}] ${text}`);
     }
@@ -422,5 +422,72 @@ test.describe('VirtualGrid', () => {
     expect(firstKey).toMatch(/^\d+$/);
     
     console.log(`Found ${count} items with data-key, first key: ${firstKey}`);
+  });
+
+  test('initial_scroll_to scrolls to specified item on mount', async ({ page }) => {
+    // Load with 200 albums, scroll_to album 100, and cycle=0
+    // State format uses comma separator: albums=200,scroll_to=100,cycle=0
+    await page.goto('/mock/library?state=albums%3D200%2Cscroll_to%3D100%2Ccycle%3D0');
+    await page.waitForSelector('.virtual-grid-content');
+    await page.waitForTimeout(500);
+
+    // Debug: check scroll position and visible items
+    const scrollY = await page.evaluate(() => window.scrollY);
+    const visibleKeys = await page.locator('.virtual-grid-content > div[data-key]').evaluateAll(
+      els => els.map(el => el.getAttribute('data-key'))
+    );
+    console.log(`scrollY: ${scrollY}, visible keys: ${visibleKeys.slice(0, 10).join(', ')}...`);
+
+    // Album 100 should be visible in the DOM
+    const targetItem = page.locator('.virtual-grid-content > div[data-key="100"]');
+    await expect(targetItem).toBeVisible();
+
+    // Get its position - should be near the top of the viewport
+    const rect = await targetItem.boundingBox();
+    expect(rect).toBeTruthy();
+    
+    // Item should be in the visible area (not way off screen)
+    // Allow some tolerance for header offset
+    expect(rect!.y).toBeLessThan(600);
+    expect(rect!.y).toBeGreaterThan(-100);
+
+    console.log(`Album 100 position: y=${rect!.y}`);
+
+    // Verify scroll position is non-zero (we scrolled down)
+    const finalScrollY = await page.evaluate(() => window.scrollY);
+    expect(finalScrollY).toBeGreaterThan(1000); // Should have scrolled significantly
+    console.log(`Window scrollY: ${finalScrollY}`);
+  });
+
+  test('initial_scroll_to works on remount via cycle change', async ({ page }) => {
+    // Start with no scroll_to (state uses comma separator)
+    await page.goto('/mock/library?state=albums%3D200%2Ccycle%3D0');
+    await page.waitForSelector('.virtual-grid-content');
+    await page.waitForTimeout(300);
+
+    // Should be at top
+    let scrollY = await page.evaluate(() => window.scrollY);
+    expect(scrollY).toBeLessThan(50);
+
+    // Now set scroll_to and increment cycle to remount
+    // Find the scroll_to input and set it
+    const scrollToInput = page.locator('input[type="text"]').first();
+    await scrollToInput.fill('150');
+    
+    // Find the cycle input and increment it
+    const cycleInput = page.locator('input[type="number"]').nth(1); // Second number input (after albums)
+    await cycleInput.fill('1');
+    
+    // Wait for remount and scroll
+    await page.waitForTimeout(500);
+
+    // Album 150 should now be visible
+    const targetItem = page.locator('.virtual-grid-content > div[data-key="150"]');
+    await expect(targetItem).toBeVisible();
+
+    // Scroll position should have changed
+    scrollY = await page.evaluate(() => window.scrollY);
+    expect(scrollY).toBeGreaterThan(1000);
+    console.log(`After remount, scrollY: ${scrollY}`);
   });
 });

@@ -183,6 +183,8 @@ fn PresetBar(registry: ControlRegistry) -> Element {
 /// Auto-generated controls row
 #[component]
 fn ControlsRow(registry: ControlRegistry) -> Element {
+    use super::registry::ControlValue;
+
     // Separate controls by type
     let enum_controls: Vec<_> = registry
         .controls
@@ -197,7 +199,16 @@ fn ControlsRow(registry: ControlRegistry) -> Element {
     let bool_controls: Vec<_> = registry
         .controls
         .iter()
-        .filter(|c| c.enum_options.is_none() && c.int_range.is_none())
+        .filter(|c| matches!(c.default, ControlValue::Bool(_)))
+        .collect();
+    let string_controls: Vec<_> = registry
+        .controls
+        .iter()
+        .filter(|c| {
+            c.enum_options.is_none()
+                && c.int_range.is_none()
+                && matches!(c.default, ControlValue::String(_))
+        })
         .collect();
 
     rsx! {
@@ -228,6 +239,19 @@ fn ControlsRow(registry: ControlRegistry) -> Element {
                         label: control.label,
                         min: control.int_range.map(|(min, _)| min).unwrap_or(0),
                         max: control.int_range.and_then(|(_, max)| max),
+                    }
+                }
+            }
+        }
+
+        // String controls
+        if !string_controls.is_empty() {
+            div { class: "flex flex-wrap gap-4 text-sm mb-3",
+                for control in string_controls {
+                    StringInput {
+                        registry: registry.clone(),
+                        control_key: control.key,
+                        label: control.label,
                     }
                 }
             }
@@ -325,6 +349,30 @@ fn IntInput(
                         let clamped = if let Some(m) = max { v.clamp(min, m) } else { v.max(min) };
                         registry.set_int(control_key, clamped);
                     }
+                },
+            }
+        }
+    }
+}
+
+/// String input control - reads signal reactively
+#[component]
+fn StringInput(
+    registry: ControlRegistry,
+    control_key: &'static str,
+    label: &'static str,
+) -> Element {
+    let current = registry.get_string(control_key);
+
+    rsx! {
+        label { class: "flex items-center gap-2 text-gray-400",
+            "{label}:"
+            input {
+                r#type: "text",
+                class: "w-24 bg-gray-700 text-white text-sm rounded px-2 py-1 border border-gray-600",
+                value: current,
+                oninput: move |e| {
+                    registry.set_string(control_key, e.value());
                 },
             }
         }
