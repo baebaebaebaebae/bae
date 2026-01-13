@@ -31,6 +31,7 @@ impl SettingsTab {
             SettingsTab::StorageProfiles,
             SettingsTab::ApiKeys,
             SettingsTab::Encryption,
+            #[cfg(feature = "torrent")]
             SettingsTab::BitTorrent,
             SettingsTab::Subsonic,
             SettingsTab::About,

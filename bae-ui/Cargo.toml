@@ -14,3 +14,5 @@ js-sys = "0.3"
 [features]
 default = []
 test-utils = []
+torrent = []
+cd-rip = []

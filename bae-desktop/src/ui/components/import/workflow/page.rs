@@ -1,5 +1,7 @@
+#[cfg(feature = "cd-rip")]
 use super::cd_import::CdImport;
 use super::folder_import::FolderImport;
+#[cfg(feature = "torrent")]
 use super::torrent_import::TorrentImport;
 use crate::ui::import_context::ImportContext;
 use bae_ui::{ImportSource, ImportView};
@@ -23,11 +25,17 @@ pub fn ImportPage() -> Element {
                 ImportSource::Folder => rsx! {
                     FolderImport {}
                 },
+                #[cfg(feature = "torrent")]
                 ImportSource::Torrent => rsx! {
                     TorrentImport {}
                 },
+                #[cfg(feature = "cd-rip")]
                 ImportSource::Cd => rsx! {
                     CdImport {}
+                },
+                #[cfg(not(all(feature = "torrent", feature = "cd-rip")))]
+                _ => rsx! {
+                    div { class: "p-4 text-red-500", "This import source is not available" }
                 },
             }
         }

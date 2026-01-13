@@ -23,7 +23,9 @@ impl ImportSource {
     pub fn all() -> &'static [ImportSource] {
         &[
             ImportSource::Folder,
+            #[cfg(feature = "torrent")]
             ImportSource::Torrent,
+            #[cfg(feature = "cd-rip")]
             ImportSource::Cd,
         ]
     }

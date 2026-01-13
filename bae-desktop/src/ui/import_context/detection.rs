@@ -1,16 +1,21 @@
 use super::state::ImportContext;
 use super::types::ImportPhase;
-use crate::ui::components::import::{
-    categorized_files_from_scanned, CategorizedFileInfo, FileInfo,
-};
+use crate::ui::components::import::categorized_files_from_scanned;
+#[cfg(feature = "torrent")]
+use crate::ui::components::import::{CategorizedFileInfo, FileInfo};
+#[cfg(feature = "torrent")]
+use bae_core::import::TorrentSource;
 use bae_core::import::{
-    cover_art, detect_folder_contents, FolderMetadata, MatchCandidate, MatchSource, TorrentSource,
+    cover_art, detect_folder_contents, FolderMetadata, MatchCandidate, MatchSource,
 };
 use bae_core::musicbrainz::{lookup_by_discid, ExternalUrls, MbRelease};
+#[cfg(feature = "torrent")]
 use bae_core::torrent::parse_torrent_info;
 use dioxus::prelude::*;
 use std::path::PathBuf;
-use tracing::{info, warn};
+use tracing::info;
+#[cfg(feature = "torrent")]
+use tracing::warn;
 pub enum DiscIdLookupResult {
     NoMatches,
     SingleMatch(Box<MatchCandidate>),
@@ -21,6 +26,7 @@ pub struct FolderDetectionResult {
     pub discid_result: Option<DiscIdLookupResult>,
 }
 /// Load torrent for import: parse torrent file and extract info
+#[cfg(feature = "torrent")]
 pub async fn load_torrent_for_import(
     ctx: &ImportContext,
     path: PathBuf,
@@ -61,6 +67,7 @@ pub async fn load_torrent_for_import(
     Ok(())
 }
 /// Retry metadata detection for the current torrent.
+#[cfg(feature = "torrent")]
 pub async fn retry_torrent_metadata_detection(ctx: &ImportContext) -> Result<(), String> {
     let path = ctx.folder_path().read().clone();
     let seed_flag = *ctx.seed_after_download().read();
@@ -251,6 +258,7 @@ pub async fn load_selected_release(
     })
 }
 /// Load a CD for import: lookup by DiscID
+#[cfg(feature = "cd-rip")]
 pub async fn load_cd_for_import(
     ctx: &ImportContext,
     disc_id: String,
@@ -314,6 +322,7 @@ async fn handle_discid_lookup_result(
     }
 }
 /// Categorize torrent files into tracks, artwork, documents, and other
+#[cfg(feature = "torrent")]
 fn categorize_torrent_files(
     files: &[bae_core::torrent::ffi::TorrentFileInfo],
 ) -> CategorizedFileInfo {

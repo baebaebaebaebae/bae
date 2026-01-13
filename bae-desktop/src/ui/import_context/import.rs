@@ -137,6 +137,7 @@ pub async fn confirm_and_start_import(
                 }
             }
         }
+        #[cfg(feature = "torrent")]
         ImportSource::Torrent => {
             let torrent_source = ctx
                 .torrent_source()
@@ -190,6 +191,7 @@ pub async fn confirm_and_start_import(
                 }
             }
         }
+        #[cfg(feature = "cd-rip")]
         ImportSource::Cd => {
             let folder_path = ctx.folder_path().read().clone();
             match candidate.source.clone() {
@@ -213,6 +215,8 @@ pub async fn confirm_and_start_import(
                 }
             }
         }
+        #[cfg(not(all(feature = "torrent", feature = "cd-rip")))]
+        _ => return Err("This import source is not available".to_string()),
     };
     match ctx.import_service.send_request(request).await {
         Ok((album_id, _release_id)) => {

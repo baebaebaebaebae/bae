@@ -1,8 +1,12 @@
 use bae_core::db::Database;
 use bae_core::library::SharedLibraryManager;
 use bae_core::subsonic::create_router;
-use bae_core::{audio_codec, cache, config, encryption, import, network, playback, torrent};
-use tracing::{error, info, warn};
+use bae_core::{audio_codec, cache, config, encryption, import, playback};
+#[cfg(feature = "torrent")]
+use bae_core::{network, torrent};
+#[cfg(feature = "torrent")]
+use tracing::warn;
+use tracing::{error, info};
 
 mod media_controls;
 mod ui;
@@ -97,15 +101,25 @@ fn main() {
         .and_then(|key| encryption::EncryptionService::new(key).ok());
     let library_manager = create_library_manager(database.clone(), encryption_service.clone());
 
-    let torrent_options = torrent_options_from_config(&config);
-    let torrent_manager =
-        torrent::LazyTorrentManager::new(cache_manager.clone(), database.clone(), torrent_options);
+    #[cfg(feature = "torrent")]
+    let torrent_manager = {
+        let torrent_options = torrent_options_from_config(&config);
+        torrent::LazyTorrentManager::new(cache_manager.clone(), database.clone(), torrent_options)
+    };
 
+    #[cfg(feature = "torrent")]
     let import_handle = import::ImportService::start(
         runtime_handle.clone(),
         library_manager.clone(),
         encryption_service.clone(),
         torrent_manager.clone(),
+        std::sync::Arc::new(database.clone()),
+    );
+    #[cfg(not(feature = "torrent"))]
+    let import_handle = import::ImportService::start(
+        runtime_handle.clone(),
+        library_manager.clone(),
+        encryption_service.clone(),
         std::sync::Arc::new(database.clone()),
     );
 
@@ -137,6 +151,7 @@ fn main() {
         config: config.clone(),
         import_handle,
         playback_handle,
+        #[cfg(feature = "torrent")]
         torrent_manager,
         cache: cache_manager.clone(),
         encryption_service: encryption_service.clone(),
@@ -184,6 +199,7 @@ async fn start_subsonic_server(
 }
 
 /// Create torrent client options from application config
+#[cfg(feature = "torrent")]
 fn torrent_options_from_config(config: &config::Config) -> torrent::client::TorrentClientOptions {
     let bind_interface = if let Some(interface) = &config.torrent_bind_interface {
         match network::validate_network_interface(interface) {

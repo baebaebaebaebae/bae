@@ -6,13 +6,16 @@ use bae_core::discogs::client::DiscogsSearchResult;
 use bae_core::discogs::DiscogsClient;
 use bae_core::import::{
     DetectedRelease, FolderMetadata, ImportServiceHandle, MatchCandidate, PrepareStep,
-    TorrentImportMetadata, TorrentSource,
 };
+#[cfg(feature = "torrent")]
+use bae_core::import::{TorrentImportMetadata, TorrentSource};
 use bae_core::library::SharedLibraryManager;
 use bae_core::musicbrainz::MbRelease;
+#[cfg(feature = "torrent")]
 use bae_core::torrent::ffi::TorrentInfo;
 use dioxus::prelude::*;
 use dioxus::router::Navigator;
+#[cfg(feature = "torrent")]
 use std::path::PathBuf;
 use std::rc::Rc;
 /// Selected cover for import - stores the actual filename, not just an index
@@ -94,12 +97,19 @@ pub struct ImportContext {
     pub(crate) folder_files: Signal<CategorizedFileInfo>,
     /// Selected cover for import - stores actual filename
     pub(crate) selected_cover: Signal<Option<SelectedCover>>,
+    #[cfg(feature = "torrent")]
     pub(crate) torrent_source: Signal<Option<TorrentSource>>,
+    #[cfg(feature = "torrent")]
     pub(crate) seed_after_download: Signal<bool>,
+    #[cfg(feature = "torrent")]
     pub(crate) torrent_metadata: Signal<Option<TorrentImportMetadata>>,
+    #[cfg(feature = "torrent")]
     pub(crate) torrent_info_hash: Signal<Option<String>>,
+    #[cfg(feature = "torrent")]
     pub(crate) torrent_info: Signal<Option<TorrentInfo>>,
+    #[cfg(feature = "torrent")]
     pub(crate) magnet_link: Signal<String>,
+    #[cfg(feature = "cd-rip")]
     pub(crate) cd_toc_info: Signal<Option<(String, u8, u8)>>,
     pub(crate) storage_profile_id: Signal<Option<String>>,
     pub(crate) selected_import_source: Signal<ImportSource>,
@@ -154,12 +164,19 @@ impl ImportContext {
             duplicate_album_id: Signal::new(None),
             folder_files: Signal::new(CategorizedFileInfo::default()),
             selected_cover: Signal::new(None),
+            #[cfg(feature = "torrent")]
             torrent_source: Signal::new(None),
+            #[cfg(feature = "torrent")]
             seed_after_download: Signal::new(true),
+            #[cfg(feature = "torrent")]
             torrent_metadata: Signal::new(None),
+            #[cfg(feature = "torrent")]
             torrent_info_hash: Signal::new(None),
+            #[cfg(feature = "torrent")]
             torrent_info: Signal::new(None),
+            #[cfg(feature = "torrent")]
             magnet_link: Signal::new(String::new()),
+            #[cfg(feature = "cd-rip")]
             cd_toc_info: Signal::new(None),
             storage_profile_id: Signal::new(None),
             selected_import_source: Signal::new(ImportSource::Folder),
@@ -285,12 +302,15 @@ impl ImportContext {
             expected_filename,
         }));
     }
+    #[cfg(feature = "torrent")]
     pub fn torrent_source(&self) -> Signal<Option<TorrentSource>> {
         self.torrent_source
     }
+    #[cfg(feature = "torrent")]
     pub fn seed_after_download(&self) -> Signal<bool> {
         self.seed_after_download
     }
+    #[cfg(feature = "torrent")]
     pub fn torrent_metadata(&self) -> Signal<Option<TorrentImportMetadata>> {
         self.torrent_metadata
     }
@@ -444,39 +464,49 @@ impl ImportContext {
         let mut signal = self.folder_files;
         signal.set(value);
     }
+    #[cfg(feature = "torrent")]
     pub fn set_torrent_source(&self, value: Option<TorrentSource>) {
         let mut signal = self.torrent_source;
         signal.set(value);
     }
+    #[cfg(feature = "torrent")]
     pub fn set_seed_after_download(&self, value: bool) {
         let mut signal = self.seed_after_download;
         signal.set(value);
     }
+    #[cfg(feature = "torrent")]
     pub fn set_torrent_metadata(&self, value: Option<TorrentImportMetadata>) {
         let mut signal = self.torrent_metadata;
         signal.set(value);
     }
+    #[cfg(feature = "torrent")]
     pub fn set_torrent_info_hash(&self, value: Option<String>) {
         let mut signal = self.torrent_info_hash;
         signal.set(value);
     }
+    #[cfg(feature = "torrent")]
     pub fn torrent_info(&self) -> Signal<Option<TorrentInfo>> {
         self.torrent_info
     }
+    #[cfg(feature = "torrent")]
     pub fn set_torrent_info(&self, value: Option<TorrentInfo>) {
         let mut signal = self.torrent_info;
         signal.set(value);
     }
+    #[cfg(feature = "torrent")]
     pub fn magnet_link(&self) -> Signal<String> {
         self.magnet_link
     }
+    #[cfg(feature = "torrent")]
     pub fn set_magnet_link(&self, value: String) {
         let mut signal = self.magnet_link;
         signal.set(value);
     }
+    #[cfg(feature = "cd-rip")]
     pub fn cd_toc_info(&self) -> Signal<Option<(String, u8, u8)>> {
         self.cd_toc_info
     }
+    #[cfg(feature = "cd-rip")]
     pub fn set_cd_toc_info(&self, value: Option<(String, u8, u8)>) {
         let mut signal = self.cd_toc_info;
         signal.set(value);
@@ -533,16 +563,21 @@ impl ImportContext {
         self.set_discid_lookup_error(None);
         self.set_duplicate_album_id(None);
         self.set_folder_files(CategorizedFileInfo::default());
-        self.set_torrent_source(None);
-        self.set_seed_after_download(true);
-        self.set_torrent_metadata(None);
-        self.set_torrent_info_hash(None);
-        self.set_torrent_info(None);
-        self.set_magnet_link(String::new());
+        #[cfg(feature = "torrent")]
+        {
+            self.set_torrent_source(None);
+            self.set_seed_after_download(true);
+            self.set_torrent_metadata(None);
+            self.set_torrent_info_hash(None);
+            self.set_torrent_info(None);
+            self.set_magnet_link(String::new());
+        }
+        #[cfg(feature = "cd-rip")]
         self.set_cd_toc_info(None);
         self.set_manual_match_candidates(Vec::new());
     }
     /// Reset detection state and return to folder selection phase
+    #[cfg(feature = "torrent")]
     pub fn reset_to_folder_selection(&self) {
         self.set_is_detecting(false);
         self.set_import_phase(ImportPhase::FolderSelection);
@@ -560,6 +595,7 @@ impl ImportContext {
         self.set_search_tab(SearchTab::default());
     }
     /// Reset state for a new torrent selection
+    #[cfg(feature = "torrent")]
     pub fn select_torrent_file(
         &self,
         path: String,
@@ -591,6 +627,7 @@ impl ImportContext {
             self.set_current_release_index(current_idx + 1);
         }
     }
+    #[cfg(feature = "torrent")]
     pub async fn load_torrent_for_import(
         &self,
         path: PathBuf,
@@ -598,6 +635,7 @@ impl ImportContext {
     ) -> Result<(), String> {
         detection::load_torrent_for_import(self, path, seed_flag).await
     }
+    #[cfg(feature = "torrent")]
     pub async fn retry_torrent_metadata_detection(&self) -> Result<(), String> {
         detection::retry_torrent_metadata_detection(self).await
     }
@@ -663,6 +701,7 @@ impl ImportContext {
         }
         Ok(())
     }
+    #[cfg(feature = "cd-rip")]
     pub async fn load_cd_for_import(
         &self,
         drive_path: String,
