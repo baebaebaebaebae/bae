@@ -46,7 +46,7 @@ pub fn SmartFileDisplayView(
 
     rsx! {
         // Unified materials grid - all items as square tiles
-        div { class: "grid grid-cols-8 gap-1.5",
+        div { class: "grid grid-cols-6 gap-2",
             // Audio content tile
             AudioTileView {
                 audio: files.audio.clone(),
@@ -131,14 +131,14 @@ fn AudioTileView(audio: AudioContentInfo, on_cue_click: EventHandler<(String, St
         AudioContentInfo::TrackFiles(tracks) if !tracks.is_empty() => {
             let total_size: u64 = tracks.iter().map(|f| f.size).sum();
             rsx! {
-                div { class: "aspect-square bg-gray-800/50 border border-blue-500/30 rounded flex flex-col items-center justify-center p-1",
-                    div { class: "w-6 h-6 bg-blue-600 rounded flex items-center justify-center mb-1",
-                        span { class: "text-white text-xs", "🎼" }
+                div { class: "aspect-square bg-gray-800/50 border border-blue-500/30 rounded flex flex-col items-center justify-center p-1.5",
+                    div { class: "w-7 h-7 bg-blue-600 rounded flex items-center justify-center mb-1",
+                        span { class: "text-white text-sm", "🎼" }
                     }
-                    span { class: "text-[10px] font-semibold text-blue-300 text-center leading-tight",
+                    span { class: "text-xs font-semibold text-blue-300 text-center leading-tight",
                         {format!("{} tracks", tracks.len())}
                     }
-                    span { class: "text-[10px] text-gray-400 text-center leading-tight",
+                    span { class: "text-xs text-gray-400 text-center leading-tight",
                         {format_file_size(total_size)}
                     }
                 }
@@ -157,18 +157,18 @@ fn CueFlacTileView(pair: CueFlacPairInfo, on_click: EventHandler<(String, String
 
     rsx! {
         button {
-            class: "aspect-square bg-gray-800/50 border border-purple-500/30 rounded flex flex-col items-center justify-center p-1 hover:bg-gray-800/70 hover:border-purple-500/50 transition-colors cursor-pointer",
+            class: "aspect-square bg-gray-800/50 border border-purple-500/30 rounded flex flex-col items-center justify-center p-1.5 hover:bg-gray-800/70 hover:border-purple-500/50 transition-colors cursor-pointer",
             onclick: {
                 let name = cue_name.clone();
                 move |_| on_click.call((name.clone(), name.clone()))
             },
-            div { class: "w-6 h-6 bg-purple-600 rounded flex items-center justify-center mb-1",
-                span { class: "text-white text-xs", "💿" }
+            div { class: "w-7 h-7 bg-purple-600 rounded flex items-center justify-center mb-1",
+                span { class: "text-white text-sm", "💿" }
             }
-            span { class: "text-[10px] font-semibold text-purple-300 text-center leading-tight",
+            span { class: "text-xs font-semibold text-purple-300 text-center leading-tight",
                 {format!("{} tracks", track_count)}
             }
-            span { class: "text-[10px] text-gray-400 text-center leading-tight",
+            span { class: "text-xs text-gray-400 text-center leading-tight",
                 {format_file_size(total_size)}
             }
         }
@@ -192,8 +192,8 @@ fn GalleryThumbnailView(
                 alt: "{filename}",
                 class: "w-full h-full object-cover",
             }
-            div { class: "absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-1",
-                span { class: "text-[10px] text-white truncate w-full", {filename.clone()} }
+            div { class: "absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-1.5",
+                span { class: "text-xs text-white truncate w-full", {filename.clone()} }
             }
         }
     }
@@ -207,18 +207,18 @@ fn DocumentTileView(file: FileInfo, on_click: EventHandler<(String, String)>) ->
 
     rsx! {
         button {
-            class: "aspect-square bg-gray-800 border border-gray-700 rounded flex flex-col items-center justify-center p-1 hover:bg-gray-750 hover:border-gray-600 transition-colors cursor-pointer",
+            class: "aspect-square bg-gray-800 border border-gray-700 rounded flex flex-col items-center justify-center p-1.5 hover:bg-gray-750 hover:border-gray-600 transition-colors cursor-pointer",
             onclick: {
                 let name = filename.clone();
                 move |_| on_click.call((name.clone(), name.clone()))
             },
-            div { class: "w-6 h-6 bg-gray-700 rounded flex items-center justify-center mb-1",
-                span { class: "text-gray-400 text-xs", "📄" }
+            div { class: "w-7 h-7 bg-gray-700 rounded flex items-center justify-center mb-1",
+                span { class: "text-gray-400 text-sm", "📄" }
             }
-            span { class: "text-[10px] text-white font-medium text-center truncate w-full leading-tight",
+            span { class: "text-xs text-white font-medium text-center truncate w-full leading-tight",
                 {file.name.clone()}
             }
-            span { class: "text-[10px] text-gray-400 text-center leading-tight",
+            span { class: "text-xs text-gray-400 text-center leading-tight",
                 {format_file_size(file_size)}
             }
         }
@@ -229,14 +229,14 @@ fn DocumentTileView(file: FileInfo, on_click: EventHandler<(String, String)>) ->
 #[component]
 fn OtherFileTileView(file: FileInfo) -> Element {
     rsx! {
-        div { class: "aspect-square bg-gray-800/50 border border-gray-700 rounded flex flex-col items-center justify-center p-1",
-            div { class: "w-6 h-6 bg-gray-700 rounded flex items-center justify-center mb-1",
-                span { class: "text-gray-500 text-xs", "📁" }
+        div { class: "aspect-square bg-gray-800/50 border border-gray-700 rounded flex flex-col items-center justify-center p-1.5",
+            div { class: "w-7 h-7 bg-gray-700 rounded flex items-center justify-center mb-1",
+                span { class: "text-gray-500 text-sm", "📁" }
             }
-            span { class: "text-[10px] text-gray-400 text-center truncate w-full leading-tight",
+            span { class: "text-xs text-gray-400 text-center truncate w-full leading-tight",
                 {file.name.clone()}
             }
-            span { class: "text-[10px] text-gray-500 text-center leading-tight",
+            span { class: "text-xs text-gray-500 text-center leading-tight",
                 {format_file_size(file.size)}
             }
         }
