@@ -313,8 +313,15 @@ impl ControlRegistry {
         }
     }
 
-    /// Apply a preset
+    /// Apply a preset - resets all controls to defaults, then applies preset values
     pub fn apply_preset(&self, preset: &Preset) {
+        // First, reset all controls to their defaults
+        for control in &self.controls {
+            if let Some(mut signal) = self.values.get(control.key).copied() {
+                signal.set(control.default.clone());
+            }
+        }
+        // Then apply the preset's specific values
         for (key, value) in &preset.values {
             if let Some(mut signal) = self.values.get(key.as_str()).copied() {
                 signal.set(value.clone());

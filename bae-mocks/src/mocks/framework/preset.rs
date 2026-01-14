@@ -1,6 +1,7 @@
 //! State presets for quick configuration switching
 
-use super::registry::ControlValue;
+use super::registry::{ControlRegistry, ControlValue};
+use dioxus::prelude::*;
 use std::collections::HashMap;
 
 /// A named preset with predefined control values
@@ -31,5 +32,29 @@ impl Preset {
         self.values
             .insert(key.to_string(), ControlValue::String(value.to_string()));
         self
+    }
+
+    /// Check if this preset matches the current registry state.
+    /// A preset matches if all controls have their expected values:
+    /// - Controls specified in the preset must match the preset's value
+    /// - Controls not in the preset must be at their default value
+    pub fn matches(&self, registry: &ControlRegistry) -> bool {
+        for control in &registry.controls {
+            let current_value = registry.values.get(control.key).map(|s| s.read());
+            let current_value = current_value.as_deref();
+
+            if let Some(preset_value) = self.values.get(control.key) {
+                // Preset specifies this control - must match preset value
+                if current_value != Some(preset_value) {
+                    return false;
+                }
+            } else {
+                // Preset doesn't specify this control - must be at default
+                if current_value != Some(&control.default) {
+                    return false;
+                }
+            }
+        }
+        true
     }
 }

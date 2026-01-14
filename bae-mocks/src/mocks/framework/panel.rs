@@ -1,5 +1,6 @@
 //! Auto-generated control panel UI
 
+use super::preset::Preset;
 use super::registry::ControlRegistry;
 use super::viewport::{MockViewport, DEFAULT_BREAKPOINTS};
 use crate::storage;
@@ -166,16 +167,31 @@ fn PresetBar(registry: ControlRegistry) -> Element {
         div { class: "flex flex-wrap gap-2 mb-3",
             span { class: "text-xs text-gray-500 self-center mr-2", "Presets:" }
             for preset in &registry.presets {
-                button {
-                    class: "px-2 py-1 text-xs rounded bg-gray-700 text-gray-300 hover:bg-gray-600",
-                    onclick: {
-                        let preset = preset.clone();
-                        let registry = registry.clone();
-                        move |_| registry.apply_preset(&preset)
-                    },
-                    "{preset.name}"
-                }
+                PresetButton { registry: registry.clone(), preset: preset.clone() }
             }
+        }
+    }
+}
+
+/// Individual preset button - highlights when preset matches current state
+#[component]
+fn PresetButton(registry: ControlRegistry, preset: Preset) -> Element {
+    let is_active = preset.matches(&registry);
+    let class = if is_active {
+        "px-2 py-1 text-xs rounded bg-blue-600 text-white"
+    } else {
+        "px-2 py-1 text-xs rounded bg-gray-700 text-gray-300 hover:bg-gray-600"
+    };
+
+    rsx! {
+        button {
+            class,
+            onclick: {
+                let preset = preset.clone();
+                let registry = registry.clone();
+                move |_| registry.apply_preset(&preset)
+            },
+            "{preset.name}"
         }
     }
 }
