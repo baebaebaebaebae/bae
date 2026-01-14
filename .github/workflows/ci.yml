@@ -153,6 +153,9 @@ jobs:
       with:
         install-dioxus: 'true'
 
+    - name: Install wasm32 target
+      run: rustup target add wasm32-unknown-unknown
+
     - name: Setup Node.js environment
       uses: ./.github/actions/setup-node
 
@@ -160,7 +163,7 @@ jobs:
       run: cd bae-mocks/e2e && npx playwright install --with-deps chromium
 
     - name: Run Playwright tests
-      run: cd bae-mocks/e2e && npm test
+      run: cd bae-mocks/e2e && npx playwright test
 
     - name: Upload test results
       if: failure()
