@@ -12,7 +12,9 @@ runs:
   steps:
     - name: Install Rust (uses rust-toolchain.toml)
       shell: bash
-      run: rustup show
+      run: |
+        rustup show
+        rustup target add wasm32-unknown-unknown
 
     - name: Cache Rust dependencies
       uses: Swatinem/rust-cache@v2
