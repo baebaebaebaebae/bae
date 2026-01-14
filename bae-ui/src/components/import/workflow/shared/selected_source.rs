@@ -39,9 +39,21 @@ pub fn SelectedSourceView(
                     span { class: "text-sm text-gray-100 truncate", {display_name} }
                 }
                 button {
-                    class: "text-sm text-blue-400 hover:text-blue-300 flex-shrink-0",
+                    class: "p-1 text-gray-400 hover:text-gray-200 flex-shrink-0 rounded hover:bg-gray-700/50 transition-colors",
                     onclick: move |_| on_clear.call(()),
-                    "Change"
+                    svg {
+                        xmlns: "http://www.w3.org/2000/svg",
+                        fill: "none",
+                        view_box: "0 0 24 24",
+                        stroke_width: "2",
+                        stroke: "currentColor",
+                        class: "w-4 h-4",
+                        path {
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            d: "M6 18L18 6M6 6l12 12",
+                        }
+                    }
                 }
             }
 
