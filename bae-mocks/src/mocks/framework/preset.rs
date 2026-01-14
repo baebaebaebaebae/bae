@@ -34,6 +34,13 @@ impl Preset {
         self
     }
 
+    /// Set an integer value in this preset
+    pub fn set_int(mut self, key: &'static str, value: i32) -> Self {
+        self.values
+            .insert(key.to_string(), ControlValue::Int(value));
+        self
+    }
+
     /// Check if this preset matches the current registry state.
     /// A preset matches if all controls have their expected values:
     /// - Controls specified in the preset must match the preset's value
