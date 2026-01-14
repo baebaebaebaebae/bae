@@ -469,14 +469,13 @@ test.describe('VirtualGrid', () => {
     let scrollY = await page.evaluate(() => window.scrollY);
     expect(scrollY).toBeLessThan(50);
 
-    // Now set scroll_to and increment cycle to remount
+    // Now set scroll_to and click Remount to remount
     // Find the scroll_to input and set it
     const scrollToInput = page.locator('input[type="text"]').first();
     await scrollToInput.fill('150');
     
-    // Find the cycle input and increment it
-    const cycleInput = page.locator('input[type="number"]').nth(1); // Second number input (after albums)
-    await cycleInput.fill('1');
+    // Click the Remount button to trigger remount
+    await page.getByRole('button', { name: 'Remount' }).click();
     
     // Wait for remount and scroll
     await page.waitForTimeout(500);
