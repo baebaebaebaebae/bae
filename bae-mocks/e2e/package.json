@@ -1,6 +1,6 @@
 {
-  "name": "bae-screenshots",
-  "version": "1.0.0",
+  "name": "bae-mocks-e2e",
+  "version": "0.0.0-dev",
   "private": true,
   "scripts": {
     "test": "playwright test",

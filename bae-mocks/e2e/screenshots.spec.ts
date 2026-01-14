@@ -2,6 +2,9 @@ import { test, expect } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
 
+// Only run screenshot generation in CI
+test.skip(() => !process.env.CI, 'Screenshots only run in CI');
+
 const OUTPUT_DIR = path.join(__dirname, '../../website/public/screenshots');
 
 test.beforeAll(async () => {
