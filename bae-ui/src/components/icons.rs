@@ -307,7 +307,7 @@ pub fn DownloadIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Elemen
     }
 }
 
-/// File text icon (document)
+/// File text icon (document with lines)
 #[component]
 pub fn FileTextIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
     rsx! {
@@ -325,6 +325,25 @@ pub fn FileTextIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Elemen
             path { d: "M10 9H8" }
             path { d: "M16 13H8" }
             path { d: "M16 17H8" }
+        }
+    }
+}
+
+/// File icon (generic file)
+#[component]
+pub fn FileIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
+    rsx! {
+        svg {
+            class: "{class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" }
+            path { d: "M14 2v5a1 1 0 0 0 1 1h5" }
         }
     }
 }

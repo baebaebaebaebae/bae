@@ -1,6 +1,7 @@
 //! Smart file display view component
 
 use super::{ImageLightboxView, TextFileModalView};
+use crate::components::icons::{DiscIcon, FileIcon, FileTextIcon, MusicIcon};
 use crate::display_types::{AudioContentInfo, CategorizedFileInfo, CueFlacPairInfo, FileInfo};
 use dioxus::prelude::*;
 
@@ -132,6 +133,7 @@ fn AudioTileView(audio: AudioContentInfo, on_cue_click: EventHandler<(String, St
             let total_size: u64 = tracks.iter().map(|f| f.size).sum();
             rsx! {
                 div { class: "aspect-square bg-gray-800/50 border border-blue-500/30 rounded flex flex-col items-center justify-center p-1.5",
+                    MusicIcon { class: "w-5 h-5 text-blue-400 mb-0.5" }
                     span { class: "text-xs font-semibold text-blue-300 text-center leading-tight",
                         {format!("{} tracks", tracks.len())}
                     }
@@ -159,6 +161,7 @@ fn CueFlacTileView(pair: CueFlacPairInfo, on_click: EventHandler<(String, String
                 let name = cue_name.clone();
                 move |_| on_click.call((name.clone(), name.clone()))
             },
+            DiscIcon { class: "w-5 h-5 text-purple-400 mb-0.5" }
             span { class: "text-xs font-semibold text-purple-300 text-center leading-tight",
                 {format!("{} tracks", track_count)}
             }
@@ -206,6 +209,7 @@ fn DocumentTileView(file: FileInfo, on_click: EventHandler<(String, String)>) ->
                 let name = filename.clone();
                 move |_| on_click.call((name.clone(), name.clone()))
             },
+            FileTextIcon { class: "w-5 h-5 text-gray-400 mb-0.5" }
             span { class: "text-xs text-white font-medium text-center truncate w-full leading-tight",
                 {file.name.clone()}
             }
@@ -221,6 +225,7 @@ fn DocumentTileView(file: FileInfo, on_click: EventHandler<(String, String)>) ->
 fn OtherFileTileView(file: FileInfo) -> Element {
     rsx! {
         div { class: "aspect-square bg-gray-800/50 border border-gray-700 rounded flex flex-col items-center justify-center p-1.5",
+            FileIcon { class: "w-5 h-5 text-gray-500 mb-0.5" }
             span { class: "text-xs text-gray-400 text-center truncate w-full leading-tight",
                 {file.name.clone()}
             }

@@ -29,10 +29,10 @@ pub use error_toast::ErrorToast;
 pub use helpers::{BackButton, ErrorDisplay, LoadingSpinner, PageContainer};
 pub use icons::{
     AlertTriangleIcon, ArrowLeftIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon,
-    ChevronRightIcon, DiscIcon, DownloadIcon, EllipsisIcon, ExternalLinkIcon, FileTextIcon,
-    FolderIcon, InfoIcon, KeyIcon, LoaderIcon, LockIcon, MenuIcon, MusicIcon, PauseIcon,
-    PencilIcon, PlayIcon, PlusIcon, RefreshIcon, SkipBackIcon, SkipForwardIcon, StarIcon,
-    TrashIcon, UploadIcon, XIcon,
+    ChevronRightIcon, DiscIcon, DownloadIcon, EllipsisIcon, ExternalLinkIcon, FileIcon,
+    FileTextIcon, FolderIcon, InfoIcon, KeyIcon, LoaderIcon, LockIcon, MenuIcon, MusicIcon,
+    PauseIcon, PencilIcon, PlayIcon, PlusIcon, RefreshIcon, SkipBackIcon, SkipForwardIcon,
+    StarIcon, TrashIcon, UploadIcon, XIcon,
 };
 pub use import::{
     CdDriveStatus, CdSelectorView, ConfirmationView, DetectingMetadataView, DiscIdLookupErrorView,
