@@ -7,6 +7,7 @@ use crate::ui::{
     Checkbox, Chevron, ChevronDirection, Dropdown, DropdownStyle, IconButton, ToggleButton,
 };
 use crate::Route;
+use bae_ui::{LayersIcon, MonitorIcon};
 use dioxus::prelude::*;
 
 const COLLAPSED_KEY: &str = "mock_panel_collapsed";
@@ -169,25 +170,28 @@ fn PresetDropdown(registry: ControlRegistry) -> Element {
         .unwrap_or("Custom");
 
     rsx! {
-        Dropdown {
-            value: active_preset.to_string(),
-            onchange: {
-                let registry = registry.clone();
-                move |name: String| {
-                    if let Some(preset) = registry.presets.iter().find(|p| p.name == name) {
-                        registry.apply_preset(preset);
+        label { class: "flex items-center gap-1.5 text-gray-400 text-sm",
+            LayersIcon { class: "w-3.5 h-3.5" }
+            Dropdown {
+                value: active_preset.to_string(),
+                onchange: {
+                    let registry = registry.clone();
+                    move |name: String| {
+                        if let Some(preset) = registry.presets.iter().find(|p| p.name == name) {
+                            registry.apply_preset(preset);
+                        }
+                    }
+                },
+                for preset in &registry.presets {
+                    option {
+                        value: preset.name,
+                        selected: preset.name == active_preset,
+                        "{preset.name}"
                     }
                 }
-            },
-            for preset in &registry.presets {
-                option {
-                    value: preset.name,
-                    selected: preset.name == active_preset,
-                    "{preset.name}"
+                if active_preset == "Custom" {
+                    option { value: "Custom", selected: true, disabled: true, "Custom" }
                 }
-            }
-            if active_preset == "Custom" {
-                option { value: "Custom", selected: true, disabled: true, "Custom" }
             }
         }
     }
@@ -320,22 +324,25 @@ fn ViewportDropdown(mut viewport_width: Signal<u32>) -> Element {
     let current = viewport_width();
 
     rsx! {
-        Dropdown {
-            value: current.to_string(),
-            onchange: move |value: String| {
-                if let Ok(w) = value.parse::<u32>() {
-                    storage::set_display(VIEWPORT_KEY, w);
-                    viewport_width.set(w);
-                }
-            },
-            for bp in DEFAULT_BREAKPOINTS {
-                option {
-                    value: bp.width.to_string(),
-                    selected: current == bp.width,
-                    if bp.width > 0 {
-                        "{bp.name} ({bp.width}px)"
-                    } else {
-                        "{bp.name}"
+        label { class: "flex items-center gap-1.5 text-gray-400 text-sm",
+            MonitorIcon { class: "w-3.5 h-3.5" }
+            Dropdown {
+                value: current.to_string(),
+                onchange: move |value: String| {
+                    if let Ok(w) = value.parse::<u32>() {
+                        storage::set_display(VIEWPORT_KEY, w);
+                        viewport_width.set(w);
+                    }
+                },
+                for bp in DEFAULT_BREAKPOINTS {
+                    option {
+                        value: bp.width.to_string(),
+                        selected: current == bp.width,
+                        if bp.width > 0 {
+                            "{bp.name} ({bp.width}px)"
+                        } else {
+                            "{bp.name}"
+                        }
                     }
                 }
             }

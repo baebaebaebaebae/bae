@@ -30,9 +30,9 @@ pub use helpers::{BackButton, ErrorDisplay, LoadingSpinner, PageContainer};
 pub use icons::{
     AlertTriangleIcon, ArrowLeftIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon,
     ChevronRightIcon, DiscIcon, DownloadIcon, EllipsisIcon, ExternalLinkIcon, FileIcon,
-    FileTextIcon, FolderIcon, ImageIcon, InfoIcon, KeyIcon, LoaderIcon, LockIcon, MenuIcon,
-    PauseIcon, PencilIcon, PlayIcon, PlusIcon, RefreshIcon, RowsIcon, SkipBackIcon,
-    SkipForwardIcon, StarIcon, TrashIcon, UploadIcon, XIcon,
+    FileTextIcon, FolderIcon, ImageIcon, InfoIcon, KeyIcon, LayersIcon, LoaderIcon, LockIcon,
+    MenuIcon, MonitorIcon, PauseIcon, PencilIcon, PlayIcon, PlusIcon, RefreshIcon, RowsIcon,
+    SkipBackIcon, SkipForwardIcon, StarIcon, TrashIcon, UploadIcon, XIcon,
 };
 pub use import::{
     CdDriveStatus, CdSelectorView, ConfirmationView, DetectingMetadataView, DiscIdLookupErrorView,

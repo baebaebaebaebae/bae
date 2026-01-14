@@ -609,3 +609,43 @@ pub fn ImageIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
         }
     }
 }
+
+/// Monitor icon (screen/viewport)
+#[component]
+pub fn MonitorIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
+    rsx! {
+        svg {
+            class: "{class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            rect { x: "2", y: "3", width: "20", height: "14", rx: "2" }
+            path { d: "M8 21h8" }
+            path { d: "M12 17v4" }
+        }
+    }
+}
+
+/// Layers icon (stacked layers - for presets)
+#[component]
+pub fn LayersIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
+    rsx! {
+        svg {
+            class: "{class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z" }
+            path { d: "m22 12.5-8.58 3.91a2 2 0 0 1-1.66 0L2 12.5" }
+            path { d: "m22 17.5-8.58 3.91a2 2 0 0 1-1.66 0L2 17.5" }
+        }
+    }
+}
