@@ -1,6 +1,6 @@
 //! Confirmation view component
 
-use crate::components::icons::MusicIcon;
+use crate::components::icons::ImageIcon;
 use crate::display_types::{
     ArtworkFile, MatchCandidate, MatchSourceType, SelectedCover, StorageProfileInfo,
 };
@@ -72,7 +72,7 @@ pub fn ConfirmationView(
                         }
                     } else {
                         div { class: "flex-shrink-0 w-32 h-32 rounded-lg border border-gray-600 shadow-lg bg-gray-700 flex items-center justify-center",
-                            MusicIcon { class: "w-12 h-12 text-gray-500" }
+                            ImageIcon { class: "w-12 h-12 text-gray-500" }
                         }
                     }
 

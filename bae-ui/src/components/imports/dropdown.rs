@@ -2,7 +2,7 @@
 //!
 //! Pure, props-based dropdown showing list of active imports with progress.
 
-use crate::components::icons::{CheckIcon, DownloadIcon, FileTextIcon, MusicIcon, XIcon};
+use crate::components::icons::{CheckIcon, DownloadIcon, FileTextIcon, ImageIcon, XIcon};
 use crate::display_types::{ActiveImport, ImportStatus};
 use dioxus::prelude::*;
 
@@ -138,7 +138,7 @@ fn ImportItemView(
                         }
                     } else {
                         div { class: "w-full h-full flex items-center justify-center text-gray-500",
-                            MusicIcon { class: "w-5 h-5" }
+                            ImageIcon { class: "w-5 h-5" }
                         }
                     }
 

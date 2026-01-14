@@ -1,6 +1,6 @@
 //! Match item view component
 
-use crate::components::icons::MusicIcon;
+use crate::components::icons::ImageIcon;
 use crate::display_types::{MatchCandidate, MatchSourceType};
 use dioxus::prelude::*;
 
@@ -49,7 +49,7 @@ pub fn MatchItemView(
                         }
                     } else {
                         div { class: "w-full h-full flex items-center justify-center text-gray-500",
-                            MusicIcon { class: "w-8 h-8" }
+                            ImageIcon { class: "w-8 h-8" }
                         }
                     }
                 }

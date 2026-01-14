@@ -2,7 +2,7 @@
 //!
 //! Pure, props-based component for displaying the playback queue.
 
-use crate::components::icons::{MenuIcon, MusicIcon, XIcon};
+use crate::components::icons::{ImageIcon, MenuIcon, XIcon};
 use crate::components::utils::format_duration;
 use crate::display_types::QueueItem;
 use dioxus::prelude::*;
@@ -112,7 +112,7 @@ fn QueueItemView(
                     }
                 } else {
                     div { class: "w-full h-full flex items-center justify-center text-gray-500",
-                        MusicIcon { class: "w-6 h-6" }
+                        ImageIcon { class: "w-6 h-6" }
                     }
                 }
             }

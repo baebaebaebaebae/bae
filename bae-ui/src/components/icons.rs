@@ -120,26 +120,6 @@ pub fn EllipsisIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Elemen
     }
 }
 
-/// Music icon (music notes)
-#[component]
-pub fn MusicIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
-    rsx! {
-        svg {
-            class: "{class}",
-            xmlns: "http://www.w3.org/2000/svg",
-            view_box: "0 0 24 24",
-            fill: "none",
-            stroke: "currentColor",
-            stroke_width: "2",
-            stroke_linecap: "round",
-            stroke_linejoin: "round",
-            path { d: "M9 18V5l12-2v13" }
-            circle { cx: "6", cy: "18", r: "3" }
-            circle { cx: "18", cy: "16", r: "3" }
-        }
-    }
-}
-
 /// Plus icon (add)
 #[component]
 pub fn PlusIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
@@ -570,6 +550,26 @@ pub fn RefreshIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element
     }
 }
 
+/// Rows icon (stacked horizontal lines - for track lists)
+#[component]
+pub fn RowsIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
+    rsx! {
+        svg {
+            class: "{class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
+            path { d: "M21 9H3" }
+            path { d: "M21 15H3" }
+        }
+    }
+}
+
 /// Info icon (information circle)
 #[component]
 pub fn InfoIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
@@ -586,6 +586,26 @@ pub fn InfoIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
             circle { cx: "12", cy: "12", r: "10" }
             path { d: "M12 16v-4" }
             path { d: "M12 8h.01" }
+        }
+    }
+}
+
+/// Image icon (picture placeholder - for missing album art)
+#[component]
+pub fn ImageIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
+    rsx! {
+        svg {
+            class: "{class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            rect { x: "3", y: "3", width: "18", height: "18", rx: "2", ry: "2" }
+            circle { cx: "9", cy: "9", r: "2" }
+            path { d: "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" }
         }
     }
 }

@@ -1,0 +1,15 @@
+---
+description: Do not use music note icons in this app
+globs:
+alwaysApply: true
+---
+
+Do not use music note icons (e.g., Lucide's `music`, `music-2`, `music-3`, `music-4`) anywhere in this app.
+
+Music notes are cliché and don't convey useful information. Use more specific icons instead:
+
+- **Missing album art**: Use `ImageIcon` (picture placeholder)
+- **Track list/multiple files**: Use `RowsIcon` (stacked rows - emphasizes separateness)
+- **Single disc/CUE+FLAC**: Use `DiscIcon` (unified whole)
+
+The contrast between RowsIcon (separate items) and DiscIcon (unified whole) communicates meaningful information about the file structure.

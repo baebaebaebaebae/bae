@@ -1,6 +1,6 @@
 //! Album card component - pure view with callbacks
 
-use crate::components::icons::{EllipsisIcon, MusicIcon, PlayIcon, PlusIcon};
+use crate::components::icons::{EllipsisIcon, ImageIcon, PlayIcon, PlusIcon};
 use crate::display_types::{Album, Artist};
 use dioxus::prelude::*;
 
@@ -59,7 +59,7 @@ pub fn AlbumCard(
                         class: "w-full h-full object-cover",
                     }
                 } else {
-                    MusicIcon { class: "w-12 h-12 text-gray-500" }
+                    ImageIcon { class: "w-12 h-12 text-gray-500" }
                 }
 
                 // Hover overlay with dropdown trigger

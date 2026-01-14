@@ -1,7 +1,7 @@
 //! Smart file display view component
 
 use super::{ImageLightboxView, TextFileModalView};
-use crate::components::icons::{DiscIcon, FileIcon, FileTextIcon, MusicIcon};
+use crate::components::icons::{DiscIcon, FileIcon, FileTextIcon, RowsIcon};
 use crate::display_types::{AudioContentInfo, CategorizedFileInfo, CueFlacPairInfo, FileInfo};
 use dioxus::prelude::*;
 
@@ -133,7 +133,7 @@ fn AudioTileView(audio: AudioContentInfo, on_cue_click: EventHandler<(String, St
             let total_size: u64 = tracks.iter().map(|f| f.size).sum();
             rsx! {
                 div { class: "aspect-square bg-gray-800/50 border border-blue-500/30 rounded flex flex-col items-center justify-center p-1.5",
-                    MusicIcon { class: "w-5 h-5 text-blue-400 mb-0.5" }
+                    RowsIcon { class: "w-5 h-5 text-blue-400 mb-0.5" }
                     span { class: "text-xs font-semibold text-blue-300 text-center leading-tight",
                         {format!("{} tracks", tracks.len())}
                     }

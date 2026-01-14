@@ -2,7 +2,7 @@
 
 use crate::components::album_card::AlbumCard;
 use crate::components::helpers::{ErrorDisplay, LoadingSpinner, PageContainer};
-use crate::components::icons::MusicIcon;
+use crate::components::icons::ImageIcon;
 use crate::components::virtual_grid::{
     KeyFn, RenderFn, ScrollTarget, VirtualGrid, VirtualGridConfig,
 };
@@ -49,7 +49,7 @@ pub fn LibraryView(
             } else if albums.is_empty() {
                 div { class: "text-center py-12",
                     div { class: "text-gray-400 mb-4",
-                        MusicIcon { class: "w-16 h-16 mx-auto" }
+                        ImageIcon { class: "w-16 h-16 mx-auto" }
                     }
                     h2 { class: "text-2xl font-bold text-gray-300 mb-2",
                         "No albums in your library yet"

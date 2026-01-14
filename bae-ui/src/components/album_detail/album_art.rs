@@ -1,6 +1,6 @@
 //! Album art component with import progress overlay
 
-use crate::components::icons::MusicIcon;
+use crate::components::icons::ImageIcon;
 use dioxus::prelude::*;
 
 /// Album art with import progress spinner overlay
@@ -27,7 +27,7 @@ pub fn AlbumArt(
                     class: "w-full h-full object-cover",
                 }
             } else {
-                MusicIcon { class: "w-16 h-16 text-gray-500" }
+                ImageIcon { class: "w-16 h-16 text-gray-500" }
             }
             if let Some(percent) = import_progress() {
                 div { class: "absolute inset-0 bg-black/50 flex items-center justify-center",
