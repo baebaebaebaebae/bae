@@ -146,6 +146,7 @@ pub fn CdImportView(props: CdImportViewProps) -> Element {
                             title: "Selected CD".to_string(),
                             path: props.cd_path.clone(),
                             on_clear: props.on_clear,
+                            on_reveal: |_| {},
                             CdTocDisplayView { toc: props.toc_info.clone(), is_reading: props.is_loading_exact_matches }
                         }
 
@@ -210,6 +211,7 @@ pub fn CdImportView(props: CdImportViewProps) -> Element {
                             title: "Selected CD".to_string(),
                             path: props.cd_path.clone(),
                             on_clear: props.on_clear,
+                            on_reveal: |_| {},
                             CdTocDisplayView { toc: props.toc_info.clone(), is_reading: false }
                         }
 

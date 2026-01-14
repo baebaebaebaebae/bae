@@ -161,6 +161,7 @@ pub fn IdentifyStep(props: IdentifyStepProps) -> Element {
                 title: "Selected Folder".to_string(),
                 path: props.folder_path.clone(),
                 on_clear: props.on_clear,
+                on_reveal: |_| {},
                 if !props.folder_files.is_empty() {
                     div { class: "mt-4",
                         SmartFileDisplayView {
@@ -301,6 +302,7 @@ pub fn ConfirmStep(props: ConfirmStepProps) -> Element {
                 title: "Selected Folder".to_string(),
                 path: props.folder_path.clone(),
                 on_clear: props.on_clear,
+                on_reveal: |_| {},
                 if !props.folder_files.is_empty() {
                     div { class: "mt-4",
                         SmartFileDisplayView {

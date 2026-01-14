@@ -156,6 +156,7 @@ pub fn TorrentImportView(props: TorrentImportViewProps) -> Element {
                             title: "Selected Torrent".to_string(),
                             path: props.torrent_path.clone(),
                             on_clear: props.on_clear,
+                            on_reveal: |_| {},
 
                             TorrentTrackerDisplayView { trackers: props.tracker_statuses.clone() }
 
@@ -232,6 +233,7 @@ pub fn TorrentImportView(props: TorrentImportViewProps) -> Element {
                             title: "Selected Torrent".to_string(),
                             path: props.torrent_path.clone(),
                             on_clear: props.on_clear,
+                            on_reveal: |_| {},
 
                             TorrentTrackerDisplayView { trackers: props.tracker_statuses.clone() }
 
