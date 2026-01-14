@@ -78,7 +78,6 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             vec![("TrackFiles", "Track Files"), ("CueFlac", "CUE/FLAC")],
         )
         .int_control("track_count", "Track Count", 5, 1, Some(20))
-        .visible_when("audio_type", "TrackFiles")
         .int_control("image_count", "Image Count", 2, 0, Some(10))
         .int_control("doc_count", "Doc Count", 1, 0, Some(5))
         .with_presets(vec![
