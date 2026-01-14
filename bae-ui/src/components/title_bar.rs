@@ -44,21 +44,39 @@ pub fn TitleBarView(
     #[props(default)] imports_indicator: Option<Element>,
     // Left padding for traffic lights on macOS
     #[props(default = 80)] left_padding: u32,
+    // Use relative positioning instead of fixed (for mocks)
+    #[props(default = false)] relative: bool,
 ) -> Element {
-    rsx! {
-        // Click-outside overlay to dismiss search
-        if show_search_results {
-            div {
-                class: "fixed inset-0 z-[1500]",
-                onclick: move |_| on_search_dismiss.call(()),
-            }
-        }
+    let (position_class, overlay_class, popover_class) = if relative {
+        (
+            "relative",
+            "absolute inset-0 z-[1500]",
+            "absolute top-full right-2 w-64 z-[2000]",
+        )
+    } else {
+        (
+            "fixed top-0 left-0 right-0",
+            "fixed inset-0 z-[1500]",
+            "fixed top-10 right-2 w-64 z-[2000]",
+        )
+    };
 
-        // Title bar
+    rsx! {
         div {
-            id: "title-bar",
-            class: "fixed top-0 left-0 right-0 h-10 bg-[#1e222d] flex items-center pr-2 cursor-default z-[1000] border-b border-[#2d3138]",
-            style: "padding-left: {left_padding}px;",
+            class: if relative { "relative" } else { "" },
+            // Click-outside overlay to dismiss search
+            if show_search_results {
+                div {
+                    class: "{overlay_class}",
+                    onclick: move |_| on_search_dismiss.call(()),
+                }
+            }
+
+            // Title bar
+            div {
+                id: "title-bar",
+                class: "{position_class} h-10 bg-[#1e222d] flex items-center pr-2 cursor-default z-[1000] border-b border-[#2d3138]",
+                style: "padding-left: {left_padding}px;",
             onmousedown: move |_| {
                 if let Some(handler) = &on_bar_mousedown {
                     handler.call(());
@@ -119,18 +137,19 @@ pub fn TitleBarView(
             }
         }
 
-        // Search results popover
-        if show_search_results && !search_results.is_empty() {
-            div {
-                class: "fixed top-10 right-2 w-64 z-[2000]",
-                id: "search-popover",
-                onclick: move |evt| evt.stop_propagation(),
-                div { class: "mt-2 bg-[#2d3138] border border-[#3d4148] rounded-lg shadow-lg max-h-96 overflow-y-auto",
-                    for result in search_results.iter() {
-                        SearchResultItem {
-                            key: "{result.id}",
-                            result: result.clone(),
-                            on_click: on_search_result_click,
+            // Search results popover
+            if show_search_results && !search_results.is_empty() {
+                div {
+                    class: "{popover_class}",
+                    id: "search-popover",
+                    onclick: move |evt| evt.stop_propagation(),
+                    div { class: "mt-2 bg-[#2d3138] border border-[#3d4148] rounded-lg shadow-lg max-h-96 overflow-y-auto",
+                        for result in search_results.iter() {
+                            SearchResultItem {
+                                key: "{result.id}",
+                                result: result.clone(),
+                                on_click: on_search_result_click,
+                            }
                         }
                     }
                 }
