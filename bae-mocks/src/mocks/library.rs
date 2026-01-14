@@ -7,6 +7,8 @@ use std::collections::HashMap;
 
 #[component]
 pub fn LibraryMock(initial_state: Option<String>) -> Element {
+    let mut cycle = use_signal(|| 0u32);
+
     let registry = ControlRegistryBuilder::new()
         .enum_control(
             "state",
@@ -19,9 +21,9 @@ pub fn LibraryMock(initial_state: Option<String>) -> Element {
                 ("Populated", "Populated"),
             ],
         )
-        .int_control("albums", "Albums", 12, 0, None)
-        .int_control("cycle", "Remount Cycle", 0, 0, None) // Change to force VirtualGrid remount
+        .int_control("albums", "Albums count", 12, 0, None)
         .string_control("scroll_to", "Scroll To (album ID)", "")
+        .action("Remount", Callback::new(move |_| cycle += 1))
         .with_presets(vec![
             Preset::new("Default"),
             Preset::new("Loading").set_string("state", "Loading"),
@@ -34,7 +36,6 @@ pub fn LibraryMock(initial_state: Option<String>) -> Element {
 
     let state = registry.get_string("state");
     let album_count = registry.get_int("albums") as usize;
-    let cycle = registry.get_int("cycle");
     let scroll_to = registry.get_string("scroll_to");
     let initial_scroll_to = if scroll_to.is_empty() {
         None
@@ -55,10 +56,12 @@ pub fn LibraryMock(initial_state: Option<String>) -> Element {
         (vec![], HashMap::new())
     };
 
+    let cycle_val = cycle();
+
     rsx! {
         MockPanel { current_mock: MockPage::Library, registry, max_width: "6xl",
             LibraryView {
-                key: "{cycle}", // Change cycle to force complete remount
+                key: "{cycle_val}", // Change cycle to force complete remount
                 albums,
                 artists_by_album,
                 loading,

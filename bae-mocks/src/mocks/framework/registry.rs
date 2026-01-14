@@ -25,9 +25,17 @@ pub struct ControlDef {
     pub int_range: Option<(i32, Option<i32>)>,                   // (min, max) for int controls
 }
 
+/// Definition of an action button (not stored in URL params)
+#[derive(Clone)]
+pub struct ActionDef {
+    pub label: &'static str,
+    pub callback: Callback<()>,
+}
+
 /// Builder for creating a ControlRegistry
 pub struct ControlRegistryBuilder {
     controls: Vec<ControlDef>,
+    actions: Vec<ActionDef>,
     presets: Vec<Preset>,
 }
 
@@ -35,6 +43,7 @@ impl ControlRegistryBuilder {
     pub fn new() -> Self {
         Self {
             controls: Vec::new(),
+            actions: Vec::new(),
             presets: Vec::new(),
         }
     }
@@ -112,6 +121,12 @@ impl ControlRegistryBuilder {
         self
     }
 
+    /// Add an action button (not stored in URL params)
+    pub fn action(mut self, label: &'static str, callback: Callback<()>) -> Self {
+        self.actions.push(ActionDef { label, callback });
+        self
+    }
+
     /// Add state presets
     pub fn with_presets(mut self, presets: Vec<Preset>) -> Self {
         self.presets = presets;
@@ -161,6 +176,7 @@ impl ControlRegistryBuilder {
 
         ControlRegistry {
             controls: self.controls,
+            actions: self.actions,
             values,
             presets: self.presets,
         }
@@ -174,11 +190,21 @@ impl Default for ControlRegistryBuilder {
 }
 
 /// Registry holding all controls and their current values
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub struct ControlRegistry {
     pub controls: Vec<ControlDef>,
+    pub actions: Vec<ActionDef>,
     pub values: HashMap<&'static str, Signal<ControlValue>>,
     pub presets: Vec<Preset>,
+}
+
+impl PartialEq for ControlRegistry {
+    fn eq(&self, other: &Self) -> bool {
+        self.controls == other.controls
+            && self.values == other.values
+            && self.presets == other.presets
+            && self.actions.len() == other.actions.len()
+    }
 }
 
 impl ControlRegistry {

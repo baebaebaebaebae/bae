@@ -259,7 +259,7 @@ fn ControlsRow(registry: ControlRegistry) -> Element {
 
         // Bool controls
         if !bool_controls.is_empty() {
-            div { class: "flex flex-wrap gap-4 text-sm",
+            div { class: "flex flex-wrap gap-4 text-sm mb-3",
                 for control in bool_controls {
                     BoolCheckbox {
                         registry: registry.clone(),
@@ -267,6 +267,15 @@ fn ControlsRow(registry: ControlRegistry) -> Element {
                         label: control.label,
                         doc: control.doc,
                     }
+                }
+            }
+        }
+
+        // Action buttons
+        if !registry.actions.is_empty() {
+            div { class: "flex flex-wrap gap-2 text-sm",
+                for action in &registry.actions {
+                    ActionButton { label: action.label, callback: action.callback }
                 }
             }
         }
@@ -396,6 +405,18 @@ fn BoolCheckbox(
             onchange: move |checked| registry.set_bool(control_key, checked),
             label,
             tooltip: doc,
+        }
+    }
+}
+
+/// Action button component
+#[component]
+fn ActionButton(label: &'static str, callback: Callback<()>) -> Element {
+    rsx! {
+        button {
+            class: "px-2 py-1 text-xs rounded bg-gray-700 text-gray-300 hover:bg-gray-600",
+            onclick: move |_| callback.call(()),
+            "{label}"
         }
     }
 }
