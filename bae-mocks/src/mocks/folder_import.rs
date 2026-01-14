@@ -28,8 +28,8 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             "Select Mode",
             "FolderSelection",
             vec![
-                ("FolderSelection", "Folder Selection"),
-                ("ReleaseSelection", "Release Selection"),
+                ("FolderSelection", "Picking Folder"),
+                ("ReleaseSelection", "Multi-Release Picker"),
             ],
         )
         .visible_when("step", "SelectSource")
