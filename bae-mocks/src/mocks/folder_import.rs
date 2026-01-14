@@ -72,7 +72,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         .doc("Shows DiscID lookup error")
         .visible_when("step", "Identify")
         .with_presets(vec![
-            Preset::new("Default"),
+            Preset::new("Select Folder"),
             Preset::new("Multi-Release")
                 .set_string("step", "SelectSource")
                 .set_string("select_mode", "ReleaseSelection"),
