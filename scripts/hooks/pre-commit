@@ -138,7 +138,13 @@ if has_changes_in "bae-mocks" || has_changes_in "bae-ui"; then
         exit 1
     }
 
-    cd ..
+    # Run playwright e2e tests
+    cd e2e
+    run_check "playwright tests (bae-mocks)" npm test || {
+        echo "Fix the failing e2e tests and try again"
+        exit 1
+    }
+    cd ../..
 fi
 
 echo "✅ All checks passed"
