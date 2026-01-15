@@ -67,14 +67,14 @@ pub fn TitleBarView(
         (
             "relative",
             "absolute inset-0 z-[1500]",
-            "absolute top-full left-1/2 -translate-x-1/2 w-64 z-[2000]",
+            "absolute top-full right-12 w-64 z-[2000]",
             "absolute top-full right-0 w-48 z-[2000]",
         )
     } else {
         (
             "fixed top-0 left-0 right-0",
             "fixed inset-0 z-[1500]",
-            "fixed top-10 left-1/2 -translate-x-1/2 w-64 z-[2000]",
+            "fixed top-10 right-12 w-64 z-[2000]",
             "fixed top-10 right-2 w-48 z-[2000]",
         )
     };
@@ -132,16 +132,18 @@ pub fn TitleBarView(
                     }
                 }
 
-                // Center section: Search (absolutely positioned for true centering)
+                // Right section: Search + Settings
                 div {
-                    class: "absolute left-1/2 -translate-x-1/2",
+                    class: "flex-none flex items-center gap-2",
                     style: "-webkit-app-region: no-drag;",
-                    div { class: "relative w-64", id: "search-container",
+
+                    // Search input
+                    div { class: "relative w-40", id: "search-container",
                         input {
                             r#type: "text",
                             placeholder: "Search...",
                             autocomplete: "off",
-                            class: "w-full h-7 px-3 bg-[#2d3138] border border-[#3d4148] rounded text-white text-xs placeholder-gray-500 focus:outline-none focus:border-blue-500",
+                            class: "w-full h-7 px-2 bg-[#2a2e38] border border-[#33373f] rounded text-white text-xs placeholder-gray-400 focus:outline-none focus:border-gray-500",
                             value: "{search_value}",
                             oninput: move |evt| on_search_change.call(evt.value()),
                             onfocus: move |_| on_search_focus.call(()),
@@ -152,10 +154,8 @@ pub fn TitleBarView(
                             },
                         }
                     }
-                }
 
-                // Right section: Settings button
-                div { class: "flex-none", style: "-webkit-app-region: no-drag;",
+                    // Settings button
                     SettingsButton {
                         is_active: settings_active,
                         update_state,
