@@ -101,18 +101,24 @@ pub fn TitleBar() -> Element {
         },
     ];
 
-    // Get update state from updater
+    // Poll update state reactively (updater uses atomics updated by Sparkle callbacks)
+    let mut update_state_signal = use_signal(|| UpdateState::Idle);
+
     #[cfg(target_os = "macos")]
-    let update_state = {
+    use_future(move || async move {
         use crate::updater;
-        match updater::update_state() {
-            updater::UpdateState::Idle => UpdateState::Idle,
-            updater::UpdateState::Downloading => UpdateState::Downloading,
-            updater::UpdateState::Ready => UpdateState::Ready,
+        loop {
+            let state = match updater::update_state() {
+                updater::UpdateState::Idle => UpdateState::Idle,
+                updater::UpdateState::Downloading => UpdateState::Downloading,
+                updater::UpdateState::Ready => UpdateState::Ready,
+            };
+            update_state_signal.set(state);
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
-    };
-    #[cfg(not(target_os = "macos"))]
-    let update_state = UpdateState::Idle;
+    });
+
+    let update_state = update_state_signal();
 
     // Convert filtered albums to search results
     let search_results: Vec<SearchResult> = filtered_albums()
