@@ -174,7 +174,6 @@ pub fn IdentifyStep(props: IdentifyStepProps) -> Element {
                     }
                 }
             }
-
             // Mode-specific content
             match props.mode {
                 IdentifyMode::Detecting => rsx! {
@@ -200,8 +199,6 @@ pub fn IdentifyStep(props: IdentifyStepProps) -> Element {
                             on_retry: props.on_retry_discid_lookup,
                         }
                     }
-
-
                     ManualSearchPanelView {
                         search_source: props.search_source,
                         on_search_source_change: props.on_search_source_change,
@@ -318,7 +315,6 @@ pub fn ConfirmStep(props: ConfirmStepProps) -> Element {
                     }
                 }
             }
-
             // Confirmation view
             ConfirmationView {
                 candidate: props.confirmed_candidate.clone(),
@@ -337,7 +333,6 @@ pub fn ConfirmStep(props: ConfirmStepProps) -> Element {
                 on_confirm: props.on_confirm,
                 on_configure_storage: props.on_configure_storage,
             }
-
             // Error display
             ImportErrorDisplayView {
                 error_message: props.import_error.clone(),
