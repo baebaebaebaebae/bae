@@ -369,9 +369,11 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
     let cover_urls = [
         "/covers/the-midnight-signal_neon-frequencies.png",
         "/covers/velvet-mathematics_proof-by-induction.png",
-        "/covers/cassette-sunset_chrome-horizons.png",
-        "/covers/digital-ghosts_memory-leaks.png",
-        "/covers/echo-protocol_recursive-dreams.png",
+        "/covers/glass-harbor_pacific-standard.png",
+        "/covers/the-borrowed-time_interest.png",
+        "/covers/stairwell-echo_floors-1-12.png",
+        "/covers/newspaper-weather_tomorrows-forecast.png",
+        "/covers/parking-structure_level-4.png",
     ];
     let artwork_files: Vec<ArtworkFile> = (0..image_count)
         .map(|i| ArtworkFile {
