@@ -297,6 +297,9 @@
   .right-4 {
     right: calc(var(--spacing) * 4);
   }
+  .right-12 {
+    right: calc(var(--spacing) * 12);
+  }
   .-bottom-0\.5 {
     bottom: calc(var(--spacing) * -0.5);
   }
@@ -308,9 +311,6 @@
   }
   .left-0 {
     left: calc(var(--spacing) * 0);
-  }
-  .left-1\/2 {
-    left: calc(1/2 * 100%);
   }
   .left-4 {
     left: calc(var(--spacing) * 4);
@@ -456,6 +456,9 @@
   .h-3 {
     height: calc(var(--spacing) * 3);
   }
+  .h-3\.5 {
+    height: calc(var(--spacing) * 3.5);
+  }
   .h-4 {
     height: calc(var(--spacing) * 4);
   }
@@ -507,14 +510,14 @@
   .w-1 {
     width: calc(var(--spacing) * 1);
   }
-  .w-2 {
-    width: calc(var(--spacing) * 2);
-  }
   .w-2\.5 {
     width: calc(var(--spacing) * 2.5);
   }
   .w-3 {
     width: calc(var(--spacing) * 3);
+  }
+  .w-3\.5 {
+    width: calc(var(--spacing) * 3.5);
   }
   .w-4 {
     width: calc(var(--spacing) * 4);
@@ -546,6 +549,9 @@
   .w-36 {
     width: calc(var(--spacing) * 36);
   }
+  .w-40 {
+    width: calc(var(--spacing) * 40);
+  }
   .w-48 {
     width: calc(var(--spacing) * 48);
   }
@@ -569,9 +575,6 @@
   }
   .w-full {
     width: 100%;
-  }
-  .w-px {
-    width: 1px;
   }
   .max-w-2xl {
     max-width: var(--container-2xl);
@@ -611,10 +614,6 @@
   }
   .flex-shrink-0 {
     flex-shrink: 0;
-  }
-  .-translate-x-1\/2 {
-    --tw-translate-x: calc(calc(1/2 * 100%) * -1);
-    translate: var(--tw-translate-x) var(--tw-translate-y);
   }
   .-translate-y-1\/2 {
     --tw-translate-y: calc(calc(1/2 * 100%) * -1);
@@ -837,6 +836,9 @@
   .border-\[\#3d4148\] {
     border-color: #3d4148;
   }
+  .border-\[\#33373f\] {
+    border-color: #33373f;
+  }
   .border-amber-700\/50 {
     border-color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 50%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
@@ -908,6 +910,9 @@
   }
   .bg-\[\#1e222d\] {
     background-color: #1e222d;
+  }
+  .bg-\[\#2a2e38\] {
+    background-color: #2a2e38;
   }
   .bg-\[\#2d3138\] {
     background-color: #2d3138;
@@ -1428,8 +1433,10 @@
   .italic {
     font-style: italic;
   }
-  .no-underline {
-    text-decoration-line: none;
+  .placeholder-gray-400 {
+    &::placeholder {
+      color: var(--color-gray-400);
+    }
   }
   .placeholder-gray-500 {
     &::placeholder {
@@ -1812,6 +1819,11 @@
   .focus\:border-blue-500 {
     &:focus {
       border-color: var(--color-blue-500);
+    }
+  }
+  .focus\:border-gray-500 {
+    &:focus {
+      border-color: var(--color-gray-500);
     }
   }
   .focus\:border-transparent {
