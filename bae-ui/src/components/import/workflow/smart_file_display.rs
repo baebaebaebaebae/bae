@@ -130,16 +130,13 @@ fn AudioTileView(audio: AudioContentInfo, on_cue_click: EventHandler<(String, St
             }
         }
         AudioContentInfo::TrackFiles(tracks) if !tracks.is_empty() => {
-            let total_size: u64 = tracks.iter().map(|f| f.size).sum();
             rsx! {
                 div { class: "aspect-square bg-gray-800/50 border border-blue-500/30 rounded flex flex-col items-center justify-center p-1.5",
                     RowsIcon { class: "w-5 h-5 text-blue-400 mb-0.5" }
                     span { class: "text-xs font-semibold text-blue-300 text-center leading-tight",
                         {format!("{} tracks", tracks.len())}
                     }
-                    span { class: "text-xs text-gray-400 text-center leading-tight",
-                        {format_file_size(total_size)}
-                    }
+                    span { class: "text-xs text-gray-400 text-center leading-tight", "FLAC" }
                 }
             }
         }
@@ -152,7 +149,6 @@ fn AudioTileView(audio: AudioContentInfo, on_cue_click: EventHandler<(String, St
 fn CueFlacTileView(pair: CueFlacPairInfo, on_click: EventHandler<(String, String)>) -> Element {
     let cue_name = pair.cue_name.clone();
     let track_count = pair.track_count;
-    let total_size = pair.total_size;
 
     rsx! {
         button {
@@ -165,9 +161,7 @@ fn CueFlacTileView(pair: CueFlacPairInfo, on_click: EventHandler<(String, String
             span { class: "text-xs font-semibold text-purple-300 text-center leading-tight",
                 {format!("{} tracks", track_count)}
             }
-            span { class: "text-xs text-gray-400 text-center leading-tight",
-                {format_file_size(total_size)}
-            }
+            span { class: "text-xs text-gray-400 text-center leading-tight", "CUE/FLAC" }
         }
     }
 }
