@@ -179,6 +179,7 @@ fn make_window() -> WindowBuilder {
         .with_always_on_top(false)
         .with_decorations(true)
         .with_inner_size(dioxus::desktop::LogicalSize::new(1200, 800))
+        .with_maximized(true)
         .with_transparent(true)
         .with_background_color((0x0f, 0x11, 0x16, 0xff))
 }

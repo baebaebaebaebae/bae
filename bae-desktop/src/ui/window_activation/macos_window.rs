@@ -241,6 +241,13 @@ pub fn setup_transparent_titlebar() {
         let _: () = msg_send![toolbar, setShowsBaselineSeparator : NO];
         let _: () = msg_send![window, setToolbar : toolbar];
 
+        // Zoom window to fill the screen
+        let screen: id = msg_send![window, screen];
+        if screen != nil {
+            let frame: cocoa::foundation::NSRect = msg_send![screen, visibleFrame];
+            let _: () = msg_send![window, setFrame: frame display: YES];
+        }
+
         info!("macOS transparent titlebar configured");
     }
 }
