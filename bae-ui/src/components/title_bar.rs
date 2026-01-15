@@ -240,67 +240,53 @@ fn SettingsButton(
 
     rsx! {
         div {
-            class: "relative flex items-center",
+            class: "flex items-center gap-2",
             onmousedown: move |evt| evt.stop_propagation(),
 
+            // Settings button (always the same)
+            button {
+                class: "{button_class}",
+                title: "Settings",
+                onclick: move |_| on_settings_click.call(()),
+                SettingsIcon { class: "w-4 h-4" }
+            }
+
+            // Update indicator (separate, next to settings)
             if has_update {
-                // Split button: settings + update indicator
-                div { class: "flex items-center",
-                    // Settings button
-                    button {
-                        class: "{button_class}",
-                        title: "Settings",
-                        onclick: move |_| on_settings_click.call(()),
-                        SettingsIcon { class: "w-4 h-4" }
-                    }
-                    // Divider
-                    div { class: "w-px h-4 bg-gray-600" }
-                    // Update indicator button
-                    button {
-                        class: "p-1.5 hover:bg-gray-700 transition-colors flex items-center gap-1",
-                        title: if update_state == UpdateState::Ready { "Update ready" } else { "Downloading update" },
-                        onclick: move |_| on_toggle_menu.call(()),
-                        match update_state {
-                            UpdateState::Downloading => rsx! {
-                                // Spinning indicator
-                                svg {
-                                    class: "animate-spin h-3 w-3 text-gray-400",
-                                    xmlns: "http://www.w3.org/2000/svg",
-                                    fill: "none",
-                                    view_box: "0 0 24 24",
-                                    circle {
-                                        class: "opacity-25",
-                                        cx: "12",
-                                        cy: "12",
-                                        r: "10",
-                                        stroke: "currentColor",
-                                        stroke_width: "4",
-                                    }
-                                    path {
-                                        class: "opacity-75",
-                                        fill: "currentColor",
-                                        d: "M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z",
-                                    }
-                                }
-                            },
-                            UpdateState::Ready => rsx! {
-                                // Pulsing green dot
-                                span { class: "relative flex h-2 w-2",
-                                    span { class: "animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" }
-                                    span { class: "relative inline-flex rounded-full h-2 w-2 bg-emerald-500" }
-                                }
-                            },
-                            UpdateState::Idle => rsx! {},
-                        }
-                    }
-                }
-            } else {
-                // Simple settings button
                 button {
-                    class: "{button_class}",
-                    title: "Settings",
-                    onclick: move |_| on_settings_click.call(()),
-                    SettingsIcon { class: "w-4 h-4" }
+                    class: "p-1 hover:bg-gray-700 rounded transition-colors flex items-center",
+                    title: if update_state == UpdateState::Ready { "Update ready - click to install" } else { "Downloading update..." },
+                    onclick: move |_| on_toggle_menu.call(()),
+                    match update_state {
+                        UpdateState::Downloading => rsx! {
+                            svg {
+                                class: "animate-spin h-3.5 w-3.5 text-gray-400",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                fill: "none",
+                                view_box: "0 0 24 24",
+                                circle {
+                                    class: "opacity-25",
+                                    cx: "12",
+                                    cy: "12",
+                                    r: "10",
+                                    stroke: "currentColor",
+                                    stroke_width: "4",
+                                }
+                                path {
+                                    class: "opacity-75",
+                                    fill: "currentColor",
+                                    d: "M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z",
+                                }
+                            }
+                        },
+                        UpdateState::Ready => rsx! {
+                            span { class: "relative flex h-2.5 w-2.5",
+                                span { class: "animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" }
+                                span { class: "relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" }
+                            }
+                        },
+                        UpdateState::Idle => rsx! {},
+                    }
                 }
             }
         }
