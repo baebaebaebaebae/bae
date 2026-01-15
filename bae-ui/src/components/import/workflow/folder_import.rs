@@ -201,6 +201,7 @@ pub fn IdentifyStep(props: IdentifyStepProps) -> Element {
                         }
                     }
 
+
                     ManualSearchPanelView {
                         search_source: props.search_source,
                         on_search_source_change: props.on_search_source_change,

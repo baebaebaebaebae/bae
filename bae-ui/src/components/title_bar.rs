@@ -226,13 +226,10 @@ fn SettingsButton(
     let has_update = update_state != UpdateState::Idle;
 
     rsx! {
-        div {
-            class: "flex items-center gap-1",
+        div { class: "flex items-center gap-1",
 
             // Settings button using shared NavButton
-            NavButton {
-                is_active,
-                on_click: move |_| on_settings_click.call(()),
+            NavButton { is_active, on_click: move |_| on_settings_click.call(()),
                 SettingsIcon { class: "w-4 h-4" }
             }
 

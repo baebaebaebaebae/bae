@@ -45,7 +45,9 @@ fn AudioTileContent(
 ) -> Element {
     rsx! {
         {children}
-        span { class: "text-xs font-semibold text-center leading-tight {text_color}", {format!("{} tracks", track_count)} }
+        span { class: "text-xs font-semibold text-center leading-tight {text_color}",
+            {format!("{} tracks", track_count)}
+        }
         span { class: "text-[10px] text-gray-400 text-center leading-tight", "{format}" }
     }
 }
@@ -164,9 +166,7 @@ fn AudioTileView(audio: AudioContentInfo, on_cue_click: EventHandler<(String, St
         }
         AudioContentInfo::TrackFiles(tracks) if !tracks.is_empty() => {
             rsx! {
-                FileTile {
-                    bg: "bg-gray-800/50",
-                    border: "border-blue-500/30",
+                FileTile { bg: "bg-gray-800/50", border: "border-blue-500/30",
                     AudioTileContent {
                         track_count: tracks.len(),
                         format: "FLAC",
@@ -253,9 +253,7 @@ fn DocumentTileView(file: FileInfo, on_click: EventHandler<(String, String)>) ->
 #[component]
 fn OtherFileTileView(file: FileInfo) -> Element {
     rsx! {
-        FileTile {
-            bg: "bg-gray-800/50",
-            border: "border-gray-700",
+        FileTile { bg: "bg-gray-800/50", border: "border-gray-700",
             FileIcon { class: "w-5 h-5 text-gray-500 mb-0.5" }
             span { class: "text-xs text-gray-400 text-center truncate w-full leading-tight",
                 {file.name.clone()}
