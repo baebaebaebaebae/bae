@@ -1,30 +1,19 @@
-#[cfg(target_os = "macos")]
 use cocoa::appkit::{
     NSApplication, NSApplicationActivationPolicy, NSMenu, NSMenuItem, NSWindow, NSWindowStyleMask,
     NSWindowTitleVisibility,
 };
-#[cfg(target_os = "macos")]
 use cocoa::base::{id, nil, selector, NO, YES};
-#[cfg(target_os = "macos")]
 use cocoa::foundation::{NSAutoreleasePool, NSString};
-#[cfg(target_os = "macos")]
 use dispatch::Queue;
-#[cfg(target_os = "macos")]
 use objc::declare::ClassDecl;
-#[cfg(target_os = "macos")]
 use objc::runtime::{Class, Object, Sel};
-#[cfg(target_os = "macos")]
 use objc::{class, msg_send, sel, sel_impl};
 use tracing::info;
 
-#[cfg(target_os = "macos")]
 static MENU_HANDLER_CLASS_REGISTERED: std::sync::Once = std::sync::Once::new();
-#[cfg(target_os = "macos")]
 static MENU_DELEGATE_CLASS_REGISTERED: std::sync::Once = std::sync::Once::new();
-#[cfg(target_os = "macos")]
 static UPDATE_MENU_ITEM: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-#[cfg(target_os = "macos")]
 pub fn setup_macos_window_activation() {
     unsafe {
         let app = NSApplication::sharedApplication(nil);
@@ -35,8 +24,8 @@ pub fn setup_macos_window_activation() {
         info!("macOS window activation configured");
     }
 }
+
 /// Register a custom Objective-C class to handle menu actions
-#[cfg(target_os = "macos")]
 unsafe fn register_menu_handler_class() {
     MENU_HANDLER_CLASS_REGISTERED.call_once(|| {
         let superclass = Class::get("NSObject").unwrap();
@@ -56,7 +45,6 @@ unsafe fn register_menu_handler_class() {
 }
 
 /// Get or create the shared menu handler instance
-#[cfg(target_os = "macos")]
 unsafe fn get_menu_handler() -> id {
     register_menu_handler_class();
 
@@ -71,7 +59,6 @@ unsafe fn get_menu_handler() -> id {
 }
 
 /// Register a menu delegate class that updates menu item titles before display
-#[cfg(target_os = "macos")]
 unsafe fn register_menu_delegate_class() {
     MENU_DELEGATE_CLASS_REGISTERED.call_once(|| {
         let superclass = Class::get("NSObject").unwrap();
@@ -112,7 +99,6 @@ unsafe fn register_menu_delegate_class() {
 }
 
 /// Get or create the shared menu delegate instance
-#[cfg(target_os = "macos")]
 unsafe fn get_menu_delegate() -> id {
     register_menu_delegate_class();
 
@@ -128,7 +114,6 @@ unsafe fn get_menu_delegate() -> id {
 
 /// Set up the application menu with custom items including "Check for Updates..."
 /// Dispatches to main thread since Cocoa UI operations require it.
-#[cfg(target_os = "macos")]
 pub fn setup_app_menu() {
     Queue::main().exec_async(|| unsafe {
         let app = NSApplication::sharedApplication(nil);
@@ -136,7 +121,6 @@ pub fn setup_app_menu() {
     });
 }
 
-#[cfg(target_os = "macos")]
 unsafe fn setup_app_menu_inner(app: id) {
     let _pool = NSAutoreleasePool::new(nil);
     let main_menu = NSMenu::new(nil);
@@ -216,17 +200,16 @@ unsafe fn setup_app_menu_inner(app: id) {
     main_menu.addItem_(app_menu_item);
     app.setMainMenu_(main_menu);
 }
+
 /// Configure the window with transparent titlebar and native traffic lights.
 /// This must be called after the window is created.
 /// Dispatches to main thread since Cocoa UI operations require it.
-#[cfg(target_os = "macos")]
 pub fn setup_transparent_titlebar() {
     Queue::main().exec_async(|| {
         setup_transparent_titlebar_inner();
     });
 }
 
-#[cfg(target_os = "macos")]
 fn setup_transparent_titlebar_inner() {
     unsafe {
         let app = NSApplication::sharedApplication(nil);
