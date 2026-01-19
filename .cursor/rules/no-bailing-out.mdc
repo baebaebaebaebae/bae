@@ -1,0 +1,5 @@
+---
+description: Don't abandon approaches without asking
+alwaysApply: true
+---
+When working on a fix or approach, keep going until it's complete. Don't bail out or switch to a different approach (like "let's just leave the warning" or "this is good enough") without explicitly asking for permission first. If you hit obstacles, work through them rather than giving up.
