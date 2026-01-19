@@ -23,10 +23,17 @@ pub fn App() -> Element {
             ActiveImportsProvider {
                 ImportContextProvider {
                     LibrarySearchContextProvider {
-                        div { class: "h-screen overflow-y-auto", Router::<Route> {} }
+                        MainContent { Router::<Route> {} }
                     }
                 }
             }
         }
+    }
+}
+
+#[component]
+fn MainContent(children: Element) -> Element {
+    rsx! {
+        div { class: "h-screen overflow-y-auto", {children} }
     }
 }
