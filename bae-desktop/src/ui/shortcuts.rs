@@ -4,6 +4,7 @@
 //! Also provides a mechanism for native menus to request navigation.
 
 use crate::ui::Route;
+#[cfg(target_os = "macos")]
 use bae_core::playback::RepeatMode;
 use dioxus::prelude::*;
 use std::sync::OnceLock;
