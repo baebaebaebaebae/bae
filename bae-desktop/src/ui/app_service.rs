@@ -91,7 +91,10 @@ impl AppService {
     /// Start all event subscriptions. Call this once after creating AppService.
     pub fn start_subscriptions(&self) {
         self.subscribe_playback_events();
+
+        #[cfg(target_os = "macos")]
         self.subscribe_playback_menu_actions();
+
         self.subscribe_import_progress();
         self.subscribe_library_events();
         self.subscribe_folder_scan_events();
@@ -317,6 +320,7 @@ impl AppService {
     }
 
     /// Subscribe to playback menu actions (macOS native menu)
+    #[cfg(target_os = "macos")]
     fn subscribe_playback_menu_actions(&self) {
         let state = self.state;
         let playback_handle = self.playback_handle.clone();

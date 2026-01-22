@@ -148,6 +148,8 @@ fn main() {
 
     // Initialize navigation + playback channels for menu shortcuts (must be before menu setup)
     ui::shortcuts::init_nav_channel();
+
+    #[cfg(target_os = "macos")]
     ui::shortcuts::init_playback_channel();
 
     let ui_context = AppContext {

@@ -34,6 +34,8 @@ impl NavTarget {
 }
 
 static NAV_SENDER: OnceLock<broadcast::Sender<NavAction>> = OnceLock::new();
+
+#[cfg(target_os = "macos")]
 static PLAYBACK_SENDER: OnceLock<broadcast::Sender<PlaybackAction>> = OnceLock::new();
 
 /// Initialize the navigation channel. Call once at startup.
@@ -43,6 +45,7 @@ pub fn init_nav_channel() {
 }
 
 /// Initialize the playback action channel. Call once at startup.
+#[cfg(target_os = "macos")]
 pub fn init_playback_channel() {
     let (tx, _rx) = broadcast::channel(16);
     PLAYBACK_SENDER
@@ -59,6 +62,7 @@ pub fn subscribe_nav() -> broadcast::Receiver<NavAction> {
 }
 
 /// Subscribe to playback actions.
+#[cfg(target_os = "macos")]
 pub fn subscribe_playback_actions() -> broadcast::Receiver<PlaybackAction> {
     PLAYBACK_SENDER
         .get()
@@ -89,6 +93,7 @@ pub fn request_playback_action(action: PlaybackAction) {
 }
 
 /// Playback actions that can be triggered by native menus.
+#[cfg(target_os = "macos")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaybackAction {
     SetRepeatMode(RepeatMode),
