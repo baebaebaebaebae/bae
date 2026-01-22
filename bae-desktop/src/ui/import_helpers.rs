@@ -982,9 +982,11 @@ fn scanned_to_file_info(
         .and_then(|n| n.to_str())
         .unwrap_or("")
         .to_string();
+    let path = f.path.to_string_lossy().to_string();
 
     bae_ui::display_types::FileInfo {
         name,
+        path,
         size: f.size,
         format,
     }
@@ -1009,6 +1011,7 @@ pub fn categorized_files_from_scanned(
                         .and_then(|n| n.to_str())
                         .unwrap_or("")
                         .to_string(),
+                    cue_path: p.cue_file.path.to_string_lossy().to_string(),
                     flac_name: p
                         .audio_file
                         .path

@@ -297,6 +297,7 @@ pub fn TorrentFilesDisplayView(files: Vec<TorrentFileInfo>) -> Element {
             let format = name.rsplit('.').next().unwrap_or("").to_uppercase();
             FileInfo {
                 name,
+                path: tf.path.clone(),
                 size: tf.size as u64,
                 format,
             }

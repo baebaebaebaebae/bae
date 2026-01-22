@@ -160,7 +160,7 @@ pub fn ConfirmationView(
                                 let name_for_click = img.name.clone();
                                 rsx! {
                                     button {
-                                        key: "{img_name}",
+                                        key: "{img_url}",
                                         class: if is_selected { "relative w-16 h-16 rounded border-2 border-green-500 overflow-hidden" } else { "relative w-16 h-16 rounded border-2 border-gray-600 hover:border-gray-500 overflow-hidden" },
                                         onclick: move |_| on_select_local_cover.call(name_for_click.clone()),
                                         img {

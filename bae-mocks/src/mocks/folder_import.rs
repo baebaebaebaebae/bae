@@ -9,6 +9,32 @@ use bae_ui::{
 };
 use dioxus::prelude::*;
 
+/// Helper to create mock FileInfo with a path derived from name
+fn mock_file(name: &str, size: u64, format: &str) -> FileInfo {
+    FileInfo {
+        name: name.to_string(),
+        path: format!("/mock/{}", name),
+        size,
+        format: format.to_string(),
+    }
+}
+
+/// Helper to create mock CueFlacPairInfo
+fn mock_cue_flac(
+    cue_name: &str,
+    flac_name: &str,
+    track_count: usize,
+    total_size: u64,
+) -> CueFlacPairInfo {
+    CueFlacPairInfo {
+        cue_name: cue_name.to_string(),
+        cue_path: format!("/mock/{}", cue_name),
+        flac_name: flac_name.to_string(),
+        total_size,
+        track_count,
+    }
+}
+
 #[component]
 pub fn FolderImportMock(initial_state: Option<String>) -> Element {
     // Build control registry with URL sync
@@ -153,81 +179,25 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             },
             CategorizedFileInfo {
                 audio: AudioContentInfo::TrackFiles(vec![
-                    FileInfo {
-                        name: "01 - Broadcast.flac".to_string(),
-                        size: 32_000_000,
-                        format: "FLAC".to_string(),
-                    },
-                    FileInfo {
-                        name: "02 - Static Dreams.flac".to_string(),
-                        size: 28_500_000,
-                        format: "FLAC".to_string(),
-                    },
-                    FileInfo {
-                        name: "03 - Frequency Drift.flac".to_string(),
-                        size: 31_200_000,
-                        format: "FLAC".to_string(),
-                    },
-                    FileInfo {
-                        name: "04 - Night Transmission.flac".to_string(),
-                        size: 29_800_000,
-                        format: "FLAC".to_string(),
-                    },
-                    FileInfo {
-                        name: "05 - Signal Lost.flac".to_string(),
-                        size: 27_600_000,
-                        format: "FLAC".to_string(),
-                    },
-                    FileInfo {
-                        name: "06 - Wavelength.flac".to_string(),
-                        size: 33_100_000,
-                        format: "FLAC".to_string(),
-                    },
-                    FileInfo {
-                        name: "07 - Clear Channel.flac".to_string(),
-                        size: 30_400_000,
-                        format: "FLAC".to_string(),
-                    },
-                    FileInfo {
-                        name: "08 - Transmission End.flac".to_string(),
-                        size: 35_200_000,
-                        format: "FLAC".to_string(),
-                    },
+                    mock_file("01 - Broadcast.flac", 32_000_000, "FLAC"),
+                    mock_file("02 - Static Dreams.flac", 28_500_000, "FLAC"),
+                    mock_file("03 - Frequency Drift.flac", 31_200_000, "FLAC"),
+                    mock_file("04 - Night Transmission.flac", 29_800_000, "FLAC"),
+                    mock_file("05 - Signal Lost.flac", 27_600_000, "FLAC"),
+                    mock_file("06 - Wavelength.flac", 33_100_000, "FLAC"),
+                    mock_file("07 - Clear Channel.flac", 30_400_000, "FLAC"),
+                    mock_file("08 - Transmission End.flac", 35_200_000, "FLAC"),
                 ]),
                 artwork: vec![
-                    FileInfo {
-                        name: "cover.jpg".to_string(),
-                        size: 2_500_000,
-                        format: "JPEG".to_string(),
-                    },
-                    FileInfo {
-                        name: "back.jpg".to_string(),
-                        size: 2_100_000,
-                        format: "JPEG".to_string(),
-                    },
-                    FileInfo {
-                        name: "cd.jpg".to_string(),
-                        size: 1_800_000,
-                        format: "JPEG".to_string(),
-                    },
+                    mock_file("cover.jpg", 2_500_000, "JPEG"),
+                    mock_file("back.jpg", 2_100_000, "JPEG"),
+                    mock_file("cd.jpg", 1_800_000, "JPEG"),
                 ],
                 documents: vec![
-                    FileInfo {
-                        name: "rip.log".to_string(),
-                        size: 4_500,
-                        format: "LOG".to_string(),
-                    },
-                    FileInfo {
-                        name: "info.txt".to_string(),
-                        size: 1_200,
-                        format: "TXT".to_string(),
-                    },
+                    mock_file("rip.log", 4_500, "LOG"),
+                    mock_file("info.txt", 1_200, "TXT"),
                 ],
-                other: vec![FileInfo {
-                    name: ".DS_Store".to_string(),
-                    size: 6_148,
-                    format: "".to_string(),
-                }],
+                other: vec![mock_file(".DS_Store", 6_148, "")],
             },
         ),
         // Folder 2: CUE/FLAC pair, minimal extras
@@ -239,17 +209,13 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                 status: DetectedCandidateStatus::Pending,
             },
             CategorizedFileInfo {
-                audio: AudioContentInfo::CueFlacPairs(vec![CueFlacPairInfo {
-                    cue_name: "Glass Harbor - Pacific Standard.cue".to_string(),
-                    flac_name: "Glass Harbor - Pacific Standard.flac".to_string(),
-                    track_count: 10,
-                    total_size: 380_000_000,
-                }]),
-                artwork: vec![FileInfo {
-                    name: "folder.jpg".to_string(),
-                    size: 850_000,
-                    format: "JPEG".to_string(),
-                }],
+                audio: AudioContentInfo::CueFlacPairs(vec![mock_cue_flac(
+                    "Glass Harbor - Pacific Standard.cue",
+                    "Glass Harbor - Pacific Standard.flac",
+                    10,
+                    380_000_000,
+                )]),
+                artwork: vec![mock_file("folder.jpg", 850_000, "JPEG")],
                 documents: vec![],
                 other: vec![],
             },
@@ -264,85 +230,25 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             },
             CategorizedFileInfo {
                 audio: AudioContentInfo::TrackFiles(vec![
-                    FileInfo {
-                        name: "01-velvet_mathematics-axiom.flac".to_string(),
-                        size: 25_000_000,
-                        format: "FLAC".to_string(),
-                    },
-                    FileInfo {
-                        name: "02-velvet_mathematics-lemma.flac".to_string(),
-                        size: 27_500_000,
-                        format: "FLAC".to_string(),
-                    },
-                    FileInfo {
-                        name: "03-velvet_mathematics-theorem.flac".to_string(),
-                        size: 29_200_000,
-                        format: "FLAC".to_string(),
-                    },
-                    FileInfo {
-                        name: "04-velvet_mathematics-corollary.flac".to_string(),
-                        size: 24_800_000,
-                        format: "FLAC".to_string(),
-                    },
-                    FileInfo {
-                        name: "05-velvet_mathematics-qed.flac".to_string(),
-                        size: 31_600_000,
-                        format: "FLAC".to_string(),
-                    },
+                    mock_file("01-velvet_mathematics-axiom.flac", 25_000_000, "FLAC"),
+                    mock_file("02-velvet_mathematics-lemma.flac", 27_500_000, "FLAC"),
+                    mock_file("03-velvet_mathematics-theorem.flac", 29_200_000, "FLAC"),
+                    mock_file("04-velvet_mathematics-corollary.flac", 24_800_000, "FLAC"),
+                    mock_file("05-velvet_mathematics-qed.flac", 31_600_000, "FLAC"),
                 ]),
                 artwork: vec![
-                    FileInfo {
-                        name: "cover.jpg".to_string(),
-                        size: 3_200_000,
-                        format: "JPEG".to_string(),
-                    },
-                    FileInfo {
-                        name: "back.jpg".to_string(),
-                        size: 2_800_000,
-                        format: "JPEG".to_string(),
-                    },
-                    FileInfo {
-                        name: "booklet-01.png".to_string(),
-                        size: 4_500_000,
-                        format: "PNG".to_string(),
-                    },
-                    FileInfo {
-                        name: "booklet-02.png".to_string(),
-                        size: 4_200_000,
-                        format: "PNG".to_string(),
-                    },
-                    FileInfo {
-                        name: "booklet-03.png".to_string(),
-                        size: 4_100_000,
-                        format: "PNG".to_string(),
-                    },
-                    FileInfo {
-                        name: "booklet-04.png".to_string(),
-                        size: 3_900_000,
-                        format: "PNG".to_string(),
-                    },
-                    FileInfo {
-                        name: "cd.jpg".to_string(),
-                        size: 1_900_000,
-                        format: "JPEG".to_string(),
-                    },
-                    FileInfo {
-                        name: "matrix.jpg".to_string(),
-                        size: 1_200_000,
-                        format: "JPEG".to_string(),
-                    },
+                    mock_file("cover.jpg", 3_200_000, "JPEG"),
+                    mock_file("back.jpg", 2_800_000, "JPEG"),
+                    mock_file("booklet-01.png", 4_500_000, "PNG"),
+                    mock_file("booklet-02.png", 4_200_000, "PNG"),
+                    mock_file("booklet-03.png", 4_100_000, "PNG"),
+                    mock_file("booklet-04.png", 3_900_000, "PNG"),
+                    mock_file("cd.jpg", 1_900_000, "JPEG"),
+                    mock_file("matrix.jpg", 1_200_000, "JPEG"),
                 ],
                 documents: vec![
-                    FileInfo {
-                        name: "Velvet_Mathematics-Proof_by_Induction-2021-FLAC.nfo".to_string(),
-                        size: 8_500,
-                        format: "NFO".to_string(),
-                    },
-                    FileInfo {
-                        name: "Velvet_Mathematics-Proof_by_Induction-2021-FLAC.m3u".to_string(),
-                        size: 450,
-                        format: "M3U".to_string(),
-                    },
+                    mock_file("Velvet_Mathematics-Proof_by_Induction-2021-FLAC.nfo", 8_500, "NFO"),
+                    mock_file("Velvet_Mathematics-Proof_by_Induction-2021-FLAC.m3u", 450, "M3U"),
                 ],
                 other: vec![],
             },
@@ -356,44 +262,16 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             },
             CategorizedFileInfo {
                 audio: AudioContentInfo::TrackFiles(vec![
-                    FileInfo {
-                        name: "01 Seedling.flac".to_string(),
-                        size: 28_200_000,
-                        format: "FLAC".to_string(),
-                    },
-                    FileInfo {
-                        name: "02 Photosynthesis.flac".to_string(),
-                        size: 27_800_000,
-                        format: "FLAC".to_string(),
-                    },
-                    FileInfo {
-                        name: "03 Root System.flac".to_string(),
-                        size: 29_100_000,
-                        format: "FLAC".to_string(),
-                    },
-                    FileInfo {
-                        name: "04 Bloom.flac".to_string(),
-                        size: 28_500_000,
-                        format: "FLAC".to_string(),
-                    },
+                    mock_file("01 Seedling.flac", 28_200_000, "FLAC"),
+                    mock_file("02 Photosynthesis.flac", 27_800_000, "FLAC"),
+                    mock_file("03 Root System.flac", 29_100_000, "FLAC"),
+                    mock_file("04 Bloom.flac", 28_500_000, "FLAC"),
                 ]),
-                artwork: vec![FileInfo {
-                    name: "AlbumArt.jpg".to_string(),
-                    size: 450_000,
-                    format: "JPEG".to_string(),
-                }],
+                artwork: vec![mock_file("AlbumArt.jpg", 450_000, "JPEG")],
                 documents: vec![],
                 other: vec![
-                    FileInfo {
-                        name: "desktop.ini".to_string(),
-                        size: 282,
-                        format: "".to_string(),
-                    },
-                    FileInfo {
-                        name: "Thumbs.db".to_string(),
-                        size: 12_288,
-                        format: "".to_string(),
-                    },
+                    mock_file("desktop.ini", 282, ""),
+                    mock_file("Thumbs.db", 12_288, ""),
                 ],
             },
         ),
@@ -407,70 +285,22 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             },
             CategorizedFileInfo {
                 audio: AudioContentInfo::TrackFiles(vec![
-                    FileInfo {
-                        name: "A1 - Launch Window.flac".to_string(),
-                        size: 85_000_000,
-                        format: "FLAC".to_string(),
-                    },
-                    FileInfo {
-                        name: "A2 - Orbital Mechanics.flac".to_string(),
-                        size: 92_000_000,
-                        format: "FLAC".to_string(),
-                    },
-                    FileInfo {
-                        name: "B1 - Escape Velocity.flac".to_string(),
-                        size: 78_000_000,
-                        format: "FLAC".to_string(),
-                    },
-                    FileInfo {
-                        name: "B2 - Gravity Well.flac".to_string(),
-                        size: 88_000_000,
-                        format: "FLAC".to_string(),
-                    },
+                    mock_file("A1 - Launch Window.flac", 85_000_000, "FLAC"),
+                    mock_file("A2 - Orbital Mechanics.flac", 92_000_000, "FLAC"),
+                    mock_file("B1 - Escape Velocity.flac", 78_000_000, "FLAC"),
+                    mock_file("B2 - Gravity Well.flac", 88_000_000, "FLAC"),
                 ]),
                 artwork: vec![
-                    FileInfo {
-                        name: "front.png".to_string(),
-                        size: 15_000_000,
-                        format: "PNG".to_string(),
-                    },
-                    FileInfo {
-                        name: "back.png".to_string(),
-                        size: 14_200_000,
-                        format: "PNG".to_string(),
-                    },
-                    FileInfo {
-                        name: "label-a.png".to_string(),
-                        size: 8_500_000,
-                        format: "PNG".to_string(),
-                    },
-                    FileInfo {
-                        name: "label-b.png".to_string(),
-                        size: 8_300_000,
-                        format: "PNG".to_string(),
-                    },
-                    FileInfo {
-                        name: "inner-sleeve.png".to_string(),
-                        size: 12_000_000,
-                        format: "PNG".to_string(),
-                    },
+                    mock_file("front.png", 15_000_000, "PNG"),
+                    mock_file("back.png", 14_200_000, "PNG"),
+                    mock_file("label-a.png", 8_500_000, "PNG"),
+                    mock_file("label-b.png", 8_300_000, "PNG"),
+                    mock_file("inner-sleeve.png", 12_000_000, "PNG"),
                 ],
                 documents: vec![
-                    FileInfo {
-                        name: "ripping-notes.txt".to_string(),
-                        size: 2_800,
-                        format: "TXT".to_string(),
-                    },
-                    FileInfo {
-                        name: "vinyl-condition.txt".to_string(),
-                        size: 1_500,
-                        format: "TXT".to_string(),
-                    },
-                    FileInfo {
-                        name: "dr-analysis.txt".to_string(),
-                        size: 3_200,
-                        format: "TXT".to_string(),
-                    },
+                    mock_file("ripping-notes.txt", 2_800, "TXT"),
+                    mock_file("vinyl-condition.txt", 1_500, "TXT"),
+                    mock_file("dr-analysis.txt", 3_200, "TXT"),
                 ],
                 other: vec![],
             },

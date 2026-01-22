@@ -227,6 +227,7 @@ pub struct FolderMetadata {
 #[derive(Clone, Debug, PartialEq, Store)]
 pub struct FileInfo {
     pub name: String,
+    pub path: String,
     pub size: u64,
     pub format: String,
 }
@@ -243,6 +244,7 @@ pub struct ArtworkFile {
 #[derive(Clone, Debug, PartialEq, Store)]
 pub struct CueFlacPairInfo {
     pub cue_name: String,
+    pub cue_path: String,
     pub flac_name: String,
     pub total_size: u64,
     pub track_count: usize,

@@ -90,7 +90,7 @@ pub fn SmartFileDisplayView(
             // Artwork tiles
             for (idx , (filename , url)) in image_data.iter().enumerate() {
                 GalleryThumbnailView {
-                    key: "{filename}",
+                    key: "{url}",
                     filename: filename.clone(),
                     url: url.clone(),
                     index: idx,
@@ -104,7 +104,7 @@ pub fn SmartFileDisplayView(
             // Document tiles
             for doc in files.documents.iter() {
                 DocumentTileView {
-                    key: "{doc.name}",
+                    key: "{doc.path}",
                     file: doc.clone(),
                     on_click: move |(name, _path): (String, String)| on_text_file_select.call(name),
                 }
@@ -112,7 +112,7 @@ pub fn SmartFileDisplayView(
 
             // Other files as simple tiles
             for file in files.other.iter() {
-                OtherFileTileView { key: "{file.name}", file: file.clone() }
+                OtherFileTileView { key: "{file.path}", file: file.clone() }
             }
         }
 
@@ -145,7 +145,7 @@ fn AudioTileView(audio: AudioContentInfo, on_cue_click: EventHandler<(String, St
             rsx! {
                 for pair in pairs.iter() {
                     CueFlacTileView {
-                        key: "{pair.cue_name}",
+                        key: "{pair.cue_path}",
                         pair: pair.clone(),
                         on_click: move |(name, path)| on_cue_click.call((name, path)),
                     }
