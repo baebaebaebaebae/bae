@@ -146,6 +146,9 @@ fn main() {
     };
     let _keep_alive = media_controls;
 
+    // Initialize navigation channel for menu shortcuts (must be before menu setup)
+    ui::shortcuts::init_nav_channel();
+
     let ui_context = AppContext {
         library_manager: library_manager.clone(),
         config: config.clone(),
@@ -154,7 +157,6 @@ fn main() {
         #[cfg(feature = "torrent")]
         torrent_manager,
         cache: cache_manager.clone(),
-        encryption_service: encryption_service.clone(),
     };
 
     if config.subsonic_enabled {

@@ -1,164 +1,122 @@
 //! Folder import workflow wrapper - reads context and delegates to FolderImportView
 
-use crate::ui::components::import::workflow::shared::confirmation::to_display_candidate;
-use crate::ui::components::import::ImportSource;
-use crate::ui::components::import::SearchSource as BaeSearchSource;
-use crate::ui::import_context::{detection, ImportContext, ImportPhase, SearchTab as BaeSearchTab};
-use bae_ui::components::import::FolderImportView;
-use bae_ui::display_types::{
-    DetectedRelease, IdentifyMode, SearchSource, SearchTab, SelectSourceMode, WizardStep,
+use crate::ui::app_service::use_app;
+use crate::ui::import_helpers::{
+    confirm_and_start_import, load_selected_release, lookup_discid, search_by_barcode,
+    search_by_catalog_number, search_general, DiscIdLookupResult,
 };
+use bae_ui::components::import::FolderImportView;
+use bae_ui::display_types::{DetectedCandidate, DetectedCandidateStatus, SearchSource, SearchTab};
+use bae_ui::stores::import::CandidateEvent;
+use bae_ui::stores::AppStateStoreExt;
+use bae_ui::ImportSource;
 use dioxus::prelude::*;
-use std::rc::Rc;
 use tracing::{info, warn};
-
-/// Convert internal ImportPhase to display WizardStep
-fn to_wizard_step(phase: &ImportPhase) -> WizardStep {
-    match phase {
-        ImportPhase::FolderSelection | ImportPhase::ReleaseSelection => WizardStep::SelectSource,
-        ImportPhase::MetadataDetection | ImportPhase::ExactLookup | ImportPhase::ManualSearch => {
-            WizardStep::Identify
-        }
-        ImportPhase::Confirmation => WizardStep::Confirm,
-    }
-}
-
-/// Convert internal ImportPhase to SelectSourceMode (only valid when step is SelectSource)
-fn to_select_source_mode(phase: &ImportPhase) -> SelectSourceMode {
-    match phase {
-        ImportPhase::ReleaseSelection => SelectSourceMode::ReleaseSelection,
-        _ => SelectSourceMode::FolderSelection,
-    }
-}
-
-/// Convert internal ImportPhase to IdentifyMode (only valid when step is Identify)
-fn to_identify_mode(phase: &ImportPhase, is_detecting: bool) -> IdentifyMode {
-    if is_detecting || *phase == ImportPhase::MetadataDetection {
-        IdentifyMode::Detecting
-    } else {
-        match phase {
-            ImportPhase::ExactLookup => IdentifyMode::ExactLookup,
-            ImportPhase::ManualSearch => IdentifyMode::ManualSearch,
-            _ => IdentifyMode::Detecting,
-        }
-    }
-}
-
-fn to_display_search_source(source: &BaeSearchSource) -> SearchSource {
-    match source {
-        BaeSearchSource::MusicBrainz => SearchSource::MusicBrainz,
-        BaeSearchSource::Discogs => SearchSource::Discogs,
-    }
-}
-
-fn to_display_search_tab(tab: &BaeSearchTab) -> SearchTab {
-    match tab {
-        BaeSearchTab::General => SearchTab::General,
-        BaeSearchTab::CatalogNumber => SearchTab::CatalogNumber,
-        BaeSearchTab::Barcode => SearchTab::Barcode,
-    }
-}
 
 #[component]
 pub fn FolderImport() -> Element {
-    let import_context = use_context::<Rc<ImportContext>>();
+    let app = use_app();
     let navigator = use_navigator();
 
-    let mut is_searching = use_signal(|| false);
     let is_dragging = use_signal(|| false);
-    let selected_release_indices = use_signal(Vec::<usize>::new);
 
-    // Read context state
-    let folder_path = import_context.folder_path();
-    let detected_metadata = import_context.detected_metadata();
-    let import_phase = import_context.import_phase();
-    let exact_match_candidates = import_context.exact_match_candidates();
-    let selected_match_index = import_context.selected_match_index();
-    let confirmed_candidate = import_context.confirmed_candidate();
-    let is_looking_up = import_context.is_looking_up();
-    let is_detecting = import_context.is_detecting();
-    let import_error_message = import_context.import_error_message();
-    let discid_lookup_error = import_context.discid_lookup_error();
-    let duplicate_album_id = import_context.duplicate_album_id();
-    let folder_files = import_context.folder_files();
-    let detected_releases = import_context.detected_releases();
+    // Get import store for reads
+    let import_store = app.state.import();
 
-    // Manual search state from context
-    let search_artist = import_context.search_artist();
-    let search_album = import_context.search_album();
-    let search_year = import_context.search_year();
-    let search_label = import_context.search_label();
-    let search_catalog_number = import_context.search_catalog_number();
-    let search_barcode = import_context.search_barcode();
-    let active_tab = import_context.search_tab();
-    let search_source = import_context.search_source();
-    let match_candidates = import_context.manual_match_candidates();
-    let error_message = import_context.error_message();
-    let has_searched = import_context.has_searched();
+    // Read state from the Store
+    let state = import_store.read();
+    let step = state.get_import_step();
+    let identify_mode = state.get_identify_mode();
+    let display_folder_files = state.folder_files.clone();
+    let current_candidate_key = state.current_candidate_key.clone();
+    let is_looking_up = state.is_looking_up;
+    let is_scanning_candidates = state.is_scanning_candidates;
+    let duplicate_album_id = state.duplicate_album_id.clone();
+    let import_error_message = state.import_error_message.clone();
+    let search_state = state.get_search_state();
+    let display_exact_candidates = state.get_exact_match_candidates();
+    let display_confirmed = state.get_confirmed_candidate();
+    let display_metadata = state.get_metadata();
+    let discid_lookup_error = state.get_discid_lookup_error();
+    let selected_match_index = state.current_candidate_state().and_then(|s| match s {
+        bae_ui::stores::import::CandidateState::Identifying(is) => is.selected_match_index,
+        _ => None,
+    });
 
-    // Convert phase to new wizard model
-    let phase = import_phase.read();
-    let step = to_wizard_step(&phase);
-    let select_source_mode = to_select_source_mode(&phase);
-    let identify_mode = to_identify_mode(&phase, *is_detecting.read());
-    drop(phase);
-
-    // folder_files is already CategorizedFileInfo (display type)
-    let display_folder_files = folder_files.read().clone();
-
-    // Convert detected releases to display type
-    let display_detected_releases: Vec<DetectedRelease> = detected_releases
-        .read()
+    // Convert detected candidates to display type with status from state machine
+    let display_detected_candidates: Vec<DetectedCandidate> = state
+        .detected_candidates
         .iter()
-        .map(|r| DetectedRelease {
-            name: r.name.clone(),
-            path: r.path.to_string_lossy().to_string(),
+        .map(|c| {
+            let status = state
+                .candidate_states
+                .get(&c.path)
+                .map(|s| {
+                    if s.is_imported() {
+                        DetectedCandidateStatus::Imported
+                    } else if s.is_importing() {
+                        DetectedCandidateStatus::Importing
+                    } else {
+                        DetectedCandidateStatus::Pending
+                    }
+                })
+                .unwrap_or(DetectedCandidateStatus::Pending);
+            DetectedCandidate {
+                name: c.name.clone(),
+                path: c.path.clone(),
+                status,
+            }
         })
         .collect();
 
-    // Convert candidates to display types
-    let display_exact_candidates: Vec<bae_ui::display_types::MatchCandidate> =
-        exact_match_candidates
-            .read()
+    // Derive selected candidate index from current candidate key
+    let selected_candidate_index: Option<usize> = current_candidate_key.as_ref().and_then(|key| {
+        state
+            .detected_candidates
             .iter()
-            .map(to_display_candidate)
-            .collect();
+            .position(|c| &c.path == key)
+    });
 
-    let display_manual_candidates: Vec<bae_ui::display_types::MatchCandidate> = match_candidates
-        .read()
-        .iter()
-        .map(to_display_candidate)
-        .collect();
-
-    let display_confirmed: Option<bae_ui::display_types::MatchCandidate> = confirmed_candidate
-        .read()
+    // Get search state values
+    let has_searched = search_state
         .as_ref()
-        .map(to_display_candidate);
-
-    // Convert detected metadata to display type
-    let display_metadata: Option<bae_ui::display_types::FolderMetadata> = detected_metadata
-        .read()
+        .map(|s| s.has_searched)
+        .unwrap_or(false);
+    let error_message = search_state.as_ref().and_then(|s| s.error_message.clone());
+    let display_manual_candidates = search_state
         .as_ref()
-        .map(|m| bae_ui::display_types::FolderMetadata {
-            artist: m.artist.clone(),
-            album: m.album.clone(),
-            year: m.year,
-            track_count: m.track_count,
-            discid: m.discid.clone(),
-            confidence: m.confidence,
-            folder_tokens: bae_core::musicbrainz::extract_search_tokens(m),
-        });
+        .map(|s| s.search_results.clone())
+        .unwrap_or_default();
+
+    // Clone detected candidates for async use
+    let detected_candidates_for_handlers = state.detected_candidates.clone();
+
+    // Drop the state borrow before creating handlers
+    drop(state);
 
     // Handlers
     let on_folder_select = {
-        let import_context = import_context.clone();
+        let app = app.clone();
         move |_| {
-            let import_context = import_context.clone();
+            let app = app.clone();
             spawn(async move {
                 if let Some(path) = rfd::AsyncFileDialog::new().pick_folder().await {
                     let path_str = path.path().to_string_lossy().to_string();
-                    if let Err(e) = import_context.load_folder_for_import(path_str).await {
-                        warn!("Failed to load folder: {}", e);
+                    let import_handle = app.import_handle.clone();
+
+                    // Clear existing candidates if this is the first folder
+                    {
+                        let mut import_store = app.state.import();
+                        if import_store.read().detected_candidates.is_empty() {
+                            import_store.write().reset();
+                        }
+                        import_store.write().is_scanning_candidates = true;
+                    }
+
+                    if let Err(e) =
+                        import_handle.enqueue_folder_scan(std::path::PathBuf::from(path_str))
+                    {
+                        warn!("Failed to add folder to scan: {}", e);
                     }
                 }
             });
@@ -166,16 +124,16 @@ pub fn FolderImport() -> Element {
     };
 
     let on_clear = {
-        let import_context = import_context.clone();
+        let app = app.clone();
         move |_| {
-            import_context.reset();
+            app.state.import().write().reset();
         }
     };
 
     let on_reveal = {
+        let key = current_candidate_key.clone();
         move |_| {
-            let path = folder_path.read().clone();
-            if !path.is_empty() {
+            if let Some(path) = key.clone() {
                 #[cfg(target_os = "macos")]
                 {
                     let _ = std::process::Command::new("open").arg(&path).spawn();
@@ -192,323 +150,461 @@ pub fn FolderImport() -> Element {
         }
     };
 
-    let on_exact_match_select = {
-        let import_context = import_context.clone();
+    let on_remove_release = {
+        let app = app.clone();
         move |index: usize| {
-            import_context.select_exact_match(index);
+            app.state.import().write().remove_detected_release(index);
         }
     };
 
-    let on_release_selection_change = {
-        let mut selected_release_indices = selected_release_indices;
-        move |indices: Vec<usize>| {
-            selected_release_indices.set(indices);
+    let on_clear_all_releases = {
+        let app = app.clone();
+        move |_| {
+            let mut store = app.state.import();
+            let mut state = store.write();
+            state.detected_candidates.clear();
+            state.candidate_states.clear();
+            state.loading_candidates.clear();
+            state.discid_lookup_attempted.clear();
+            state.switch_candidate(None);
         }
     };
 
-    let on_releases_import = {
-        let import_context = import_context.clone();
-        move |indices: Vec<usize>| {
-            let import_context = import_context.clone();
-            let releases = detected_releases.read();
-            if let Some(idx) = indices.first() {
-                if let Some(release) = releases.get(*idx) {
-                    let path = release.path.to_string_lossy().to_string();
-                    drop(releases);
-                    let import_context = import_context.clone();
-                    spawn(async move {
-                        if let Err(e) = import_context.load_folder_for_import(path).await {
-                            warn!("Failed to load release folder: {}", e);
-                        }
-                    });
+    let on_exact_match_select = {
+        let app = app.clone();
+        move |index: usize| {
+            app.state
+                .import()
+                .write()
+                .dispatch(CandidateEvent::SelectExactMatch(index));
+        }
+    };
+
+    let on_release_select = {
+        let app = app.clone();
+        let detected = detected_candidates_for_handlers.clone();
+        move |index: usize| {
+            let app = app.clone();
+            let detected = detected.clone();
+            spawn(async move {
+                if let Err(e) = load_selected_release(&app, index, &detected).await {
+                    warn!("Failed to switch to release: {}", e);
                 }
-            }
+            });
         }
     };
 
-    // Manual search handlers
-    let mut perform_search = {
-        let import_context = import_context.clone();
+    // Manual search handler
+    let perform_search = {
+        let app = app.clone();
         move || {
-            let tab = *active_tab.read();
-            let source = *search_source.read();
+            let app = app.clone();
+            spawn(async move {
+                let mut import_store = app.state.import();
+                let search_state = import_store.read().get_search_state();
+                let metadata = import_store.read().get_metadata();
 
-            match tab {
-                BaeSearchTab::General => {
-                    let artist = search_artist.read().clone();
-                    let album = search_album.read().clone();
-                    let year = search_year.read().clone();
-                    let label = search_label.read().clone();
+                let Some(search_state) = search_state else {
+                    return;
+                };
 
-                    if artist.trim().is_empty()
-                        && album.trim().is_empty()
-                        && year.trim().is_empty()
-                        && label.trim().is_empty()
-                    {
-                        import_context.set_error_message(Some(
-                            "Please fill in at least one field".to_string(),
-                        ));
-                        return;
-                    }
+                let tab = search_state.search_tab;
+                let source = search_state.search_source;
 
-                    is_searching.set(true);
-                    import_context.set_error_message(None);
-                    import_context.set_manual_match_candidates(Vec::new());
+                match tab {
+                    bae_ui::display_types::SearchTab::General => {
+                        let artist = search_state.search_artist.clone();
+                        let album = search_state.search_album.clone();
+                        let year = search_state.search_year.clone();
+                        let label = search_state.search_label.clone();
 
-                    let ctx = import_context.clone();
-                    let mut is_searching = is_searching;
-                    spawn(async move {
-                        match ctx.search_general(source, artist, album, year, label).await {
-                            Ok(candidates) => ctx.set_manual_match_candidates(candidates),
-                            Err(e) => ctx.set_error_message(Some(format!("Search failed: {}", e))),
+                        if artist.trim().is_empty()
+                            && album.trim().is_empty()
+                            && year.trim().is_empty()
+                            && label.trim().is_empty()
+                        {
+                            import_store
+                                .write()
+                                .dispatch(CandidateEvent::SearchComplete {
+                                    results: vec![],
+                                    error: Some("Please fill in at least one field".to_string()),
+                                });
+                            return;
                         }
-                        ctx.set_has_searched(true);
-                        is_searching.set(false);
-                    });
-                }
-                BaeSearchTab::CatalogNumber => {
-                    let catno = search_catalog_number.read().clone();
-                    if catno.trim().is_empty() {
-                        import_context
-                            .set_error_message(Some("Please enter a catalog number".to_string()));
-                        return;
-                    }
 
-                    is_searching.set(true);
-                    import_context.set_error_message(None);
-                    import_context.set_manual_match_candidates(Vec::new());
+                        import_store.write().dispatch(CandidateEvent::StartSearch);
 
-                    let ctx = import_context.clone();
-                    let mut is_searching = is_searching;
-                    spawn(async move {
-                        match ctx.search_by_catalog_number(source, catno).await {
-                            Ok(candidates) => ctx.set_manual_match_candidates(candidates),
-                            Err(e) => ctx.set_error_message(Some(format!("Search failed: {}", e))),
+                        let result =
+                            search_general(metadata, source, artist, album, year, label).await;
+                        match result {
+                            Ok(candidates) => {
+                                import_store
+                                    .write()
+                                    .dispatch(CandidateEvent::SearchComplete {
+                                        results: candidates,
+                                        error: None,
+                                    });
+                            }
+                            Err(e) => {
+                                import_store
+                                    .write()
+                                    .dispatch(CandidateEvent::SearchComplete {
+                                        results: vec![],
+                                        error: Some(format!("Search failed: {}", e)),
+                                    });
+                            }
                         }
-                        ctx.set_has_searched(true);
-                        is_searching.set(false);
-                    });
-                }
-                BaeSearchTab::Barcode => {
-                    let barcode = search_barcode.read().clone();
-                    if barcode.trim().is_empty() {
-                        import_context
-                            .set_error_message(Some("Please enter a barcode".to_string()));
-                        return;
                     }
-
-                    is_searching.set(true);
-                    import_context.set_error_message(None);
-                    import_context.set_manual_match_candidates(Vec::new());
-
-                    let ctx = import_context.clone();
-                    let mut is_searching = is_searching;
-                    spawn(async move {
-                        match ctx.search_by_barcode(source, barcode).await {
-                            Ok(candidates) => ctx.set_manual_match_candidates(candidates),
-                            Err(e) => ctx.set_error_message(Some(format!("Search failed: {}", e))),
+                    bae_ui::display_types::SearchTab::CatalogNumber => {
+                        let catno = search_state.search_catalog_number.clone();
+                        if catno.trim().is_empty() {
+                            import_store
+                                .write()
+                                .dispatch(CandidateEvent::SearchComplete {
+                                    results: vec![],
+                                    error: Some("Please enter a catalog number".to_string()),
+                                });
+                            return;
                         }
-                        ctx.set_has_searched(true);
-                        is_searching.set(false);
-                    });
+
+                        import_store.write().dispatch(CandidateEvent::StartSearch);
+
+                        let result = search_by_catalog_number(metadata, source, catno).await;
+                        match result {
+                            Ok(candidates) => {
+                                import_store
+                                    .write()
+                                    .dispatch(CandidateEvent::SearchComplete {
+                                        results: candidates,
+                                        error: None,
+                                    });
+                            }
+                            Err(e) => {
+                                import_store
+                                    .write()
+                                    .dispatch(CandidateEvent::SearchComplete {
+                                        results: vec![],
+                                        error: Some(format!("Search failed: {}", e)),
+                                    });
+                            }
+                        }
+                    }
+                    bae_ui::display_types::SearchTab::Barcode => {
+                        let barcode = search_state.search_barcode.clone();
+                        if barcode.trim().is_empty() {
+                            import_store
+                                .write()
+                                .dispatch(CandidateEvent::SearchComplete {
+                                    results: vec![],
+                                    error: Some("Please enter a barcode".to_string()),
+                                });
+                            return;
+                        }
+
+                        import_store.write().dispatch(CandidateEvent::StartSearch);
+
+                        let result = search_by_barcode(metadata, source, barcode).await;
+                        match result {
+                            Ok(candidates) => {
+                                import_store
+                                    .write()
+                                    .dispatch(CandidateEvent::SearchComplete {
+                                        results: candidates,
+                                        error: None,
+                                    });
+                            }
+                            Err(e) => {
+                                import_store
+                                    .write()
+                                    .dispatch(CandidateEvent::SearchComplete {
+                                        results: vec![],
+                                        error: Some(format!("Search failed: {}", e)),
+                                    });
+                            }
+                        }
+                    }
                 }
-            }
+            });
         }
     };
 
     let on_manual_match_select = {
-        let import_context = import_context.clone();
+        let app = app.clone();
         move |index: usize| {
-            import_context.set_selected_match_index(Some(index));
+            app.state
+                .import()
+                .write()
+                .dispatch(CandidateEvent::SelectSearchResult(index));
         }
     };
 
     let on_manual_confirm = {
-        let import_context = import_context.clone();
-        move |candidate: bae_ui::display_types::MatchCandidate| {
-            if let Some(bae_candidate) = match_candidates
-                .read()
-                .iter()
-                .find(|c| c.title() == candidate.title)
-            {
-                import_context.confirm_candidate(bae_candidate.clone());
-            }
+        let app = app.clone();
+        move |_candidate: bae_ui::display_types::MatchCandidate| {
+            app.state
+                .import()
+                .write()
+                .dispatch(CandidateEvent::ConfirmSearchResult);
         }
     };
 
     let on_retry_discid_lookup = {
-        let import_context = import_context.clone();
+        let app = app.clone();
         move |_| {
-            let import_context = import_context.clone();
+            let app = app.clone();
             spawn(async move {
-                info!("Retrying DiscID lookup...");
-                detection::retry_discid_lookup(&import_context).await;
+                let mut import_store = app.state.import();
+
+                // Dispatch event to set mode to DiscIdLookup
+                import_store
+                    .write()
+                    .dispatch(CandidateEvent::RetryDiscIdLookup);
+                import_store.write().is_looking_up = true;
+
+                let mb_discid = import_store
+                    .read()
+                    .get_metadata()
+                    .and_then(|m| m.mb_discid.clone());
+
+                if let Some(mb_discid) = mb_discid {
+                    info!("Retrying DiscID lookup...");
+                    match lookup_discid(&mb_discid).await {
+                        Ok(result) => {
+                            let matches = match result {
+                                DiscIdLookupResult::NoMatches => vec![],
+                                DiscIdLookupResult::SingleMatch(c) => vec![*c],
+                                DiscIdLookupResult::MultipleMatches(cs) => cs,
+                            };
+                            import_store.write().is_looking_up = false;
+                            import_store
+                                .write()
+                                .dispatch(CandidateEvent::DiscIdLookupComplete {
+                                    matches,
+                                    error: None,
+                                });
+                        }
+                        Err(e) => {
+                            import_store.write().is_looking_up = false;
+                            import_store
+                                .write()
+                                .dispatch(CandidateEvent::DiscIdLookupComplete {
+                                    matches: vec![],
+                                    error: Some(e),
+                                });
+                        }
+                    }
+                } else {
+                    import_store.write().is_looking_up = false;
+                }
             });
         }
     };
 
     // Confirmation handlers
     let on_edit = {
-        let import_context = import_context.clone();
+        let app = app.clone();
         move |_| {
-            import_context.reject_confirmation();
+            app.state
+                .import()
+                .write()
+                .dispatch(CandidateEvent::GoBackToIdentify);
         }
     };
 
     let on_confirm = {
-        let import_context = import_context.clone();
+        let app = app.clone();
         move |_| {
-            if let Some(candidate) = confirmed_candidate.read().as_ref().cloned() {
-                let import_context = import_context.clone();
-                let navigator = navigator;
-                spawn(async move {
-                    if let Err(e) = import_context
-                        .confirm_and_start_import(candidate, ImportSource::Folder, navigator)
-                        .await
+            let app = app.clone();
+            let navigator = navigator;
+            spawn(async move {
+                let confirmed = app.state.import().read().get_confirmed_candidate();
+                if let Some(candidate) = confirmed {
+                    if let Err(e) =
+                        confirm_and_start_import(&app, candidate, ImportSource::Folder, navigator)
+                            .await
                     {
                         warn!("Failed to confirm and start import: {}", e);
                     }
-                });
-            }
+                }
+            });
         }
     };
 
-    // Text file contents - loaded async when folder changes
+    // Search field change handlers
+    let on_search_source_change = {
+        let app = app.clone();
+        move |source: SearchSource| {
+            app.state
+                .import()
+                .write()
+                .dispatch(CandidateEvent::SetSearchSource(source));
+        }
+    };
+
+    let on_search_tab_change = {
+        let app = app.clone();
+        move |tab: SearchTab| {
+            app.state
+                .import()
+                .write()
+                .dispatch(CandidateEvent::SetSearchTab(tab));
+        }
+    };
+
+    let on_artist_change = {
+        let app = app.clone();
+        move |value: String| {
+            app.state
+                .import()
+                .write()
+                .dispatch(CandidateEvent::UpdateSearchField {
+                    field: bae_ui::stores::import::SearchField::Artist,
+                    value,
+                });
+        }
+    };
+
+    let on_album_change = {
+        let app = app.clone();
+        move |value: String| {
+            app.state
+                .import()
+                .write()
+                .dispatch(CandidateEvent::UpdateSearchField {
+                    field: bae_ui::stores::import::SearchField::Album,
+                    value,
+                });
+        }
+    };
+
+    let on_year_change = {
+        let app = app.clone();
+        move |value: String| {
+            app.state
+                .import()
+                .write()
+                .dispatch(CandidateEvent::UpdateSearchField {
+                    field: bae_ui::stores::import::SearchField::Year,
+                    value,
+                });
+        }
+    };
+
+    let on_label_change = {
+        let app = app.clone();
+        move |value: String| {
+            app.state
+                .import()
+                .write()
+                .dispatch(CandidateEvent::UpdateSearchField {
+                    field: bae_ui::stores::import::SearchField::Label,
+                    value,
+                });
+        }
+    };
+
+    let on_catalog_number_change = {
+        let app = app.clone();
+        move |value: String| {
+            app.state
+                .import()
+                .write()
+                .dispatch(CandidateEvent::UpdateSearchField {
+                    field: bae_ui::stores::import::SearchField::CatalogNumber,
+                    value,
+                });
+        }
+    };
+
+    let on_barcode_change = {
+        let app = app.clone();
+        move |value: String| {
+            app.state
+                .import()
+                .write()
+                .dispatch(CandidateEvent::UpdateSearchField {
+                    field: bae_ui::stores::import::SearchField::Barcode,
+                    value,
+                });
+        }
+    };
+
+    // Text file viewing
+    let mut selected_text_file = use_signal(|| None::<String>);
+
+    // Load text file contents when selected
+    let folder_path = current_candidate_key.clone();
     let text_file_contents_resource = use_resource(move || {
-        let folder = folder_path.read().clone();
-        let files = folder_files.read().clone();
+        let folder = folder_path.clone().unwrap_or_default();
+        let selected = selected_text_file.read().clone();
         async move {
-            let mut contents = std::collections::HashMap::new();
-
-            // Load CUE files from CUE/FLAC pairs
-            if let bae_ui::display_types::AudioContentInfo::CueFlacPairs(pairs) = &files.audio {
-                for pair in pairs {
-                    let path = std::path::Path::new(&folder).join(&pair.cue_name);
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        contents.insert(pair.cue_name.clone(), content);
-                    }
-                }
-            }
-
-            // Load document files
-            for doc in &files.documents {
-                let path = std::path::Path::new(&folder).join(&doc.name);
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    contents.insert(doc.name.clone(), content);
-                }
-            }
-
-            contents
+            let name = selected?;
+            let path = std::path::Path::new(&folder).join(&name);
+            std::fs::read_to_string(&path).ok()
         }
     });
 
-    let text_file_contents = text_file_contents_resource
-        .read()
-        .clone()
-        .unwrap_or_default();
+    let text_file_content = text_file_contents_resource.read().clone().unwrap_or(None);
 
     // Generate image URLs from artwork files
     let image_data: Vec<(String, String)> = display_folder_files
         .artwork
         .iter()
         .map(|f| {
-            let path = std::path::Path::new(&*folder_path.read()).join(&f.name);
+            let folder_path = current_candidate_key.clone().unwrap_or_default();
+            let path = std::path::Path::new(&folder_path).join(&f.name);
             let url = crate::ui::local_file_url::local_file_url(&path);
-            tracing::debug!("Generated image URL for {}: {}", f.name, url);
             (f.name.clone(), url)
         })
         .collect();
-    tracing::debug!(
-        "image_data has {} entries, artwork has {} entries",
-        image_data.len(),
-        display_folder_files.artwork.len()
-    );
 
     rsx! {
         FolderImportView {
             step,
-            select_source_mode,
             identify_mode,
-            folder_path: folder_path.read().clone(),
+            folder_path: current_candidate_key.clone().unwrap_or_default(),
             folder_files: display_folder_files,
             image_data,
-            text_file_contents,
+            selected_text_file: selected_text_file.read().clone(),
+            text_file_content,
+            on_text_file_select: move |name| selected_text_file.set(Some(name)),
+            on_text_file_close: move |_| selected_text_file.set(None),
             is_dragging: *is_dragging.read(),
             on_folder_select_click: on_folder_select,
-            detected_releases: display_detected_releases,
-            selected_release_indices: selected_release_indices.read().clone(),
-            on_release_selection_change,
-            on_releases_import,
+            is_scanning_candidates,
+            detected_candidates: display_detected_candidates,
+            selected_candidate_index,
+            on_release_select,
             on_skip_detection: |_| {},
-            is_loading_exact_matches: *is_looking_up.read(),
             exact_match_candidates: display_exact_candidates,
-            selected_match_index: *selected_match_index.read(),
+            selected_match_index,
             on_exact_match_select,
             detected_metadata: display_metadata,
-            search_source: to_display_search_source(&search_source.read()),
-            on_search_source_change: {
-                let import_context = import_context.clone();
-                move |source: SearchSource| {
-                    let bae_source = match source {
-                        SearchSource::MusicBrainz => BaeSearchSource::MusicBrainz,
-                        SearchSource::Discogs => BaeSearchSource::Discogs,
-                    };
-                    import_context.set_search_source(bae_source);
-                    import_context.set_manual_match_candidates(Vec::new());
-                    import_context.set_error_message(None);
-                }
-            },
-            search_tab: to_display_search_tab(&active_tab.read()),
-            on_search_tab_change: {
-                let import_context = import_context.clone();
-                move |tab: SearchTab| {
-                    let bae_tab = match tab {
-                        SearchTab::General => BaeSearchTab::General,
-                        SearchTab::CatalogNumber => BaeSearchTab::CatalogNumber,
-                        SearchTab::Barcode => BaeSearchTab::Barcode,
-                    };
-                    import_context.set_search_tab(bae_tab);
-                }
-            },
-            search_artist: search_artist.read().clone(),
-            on_artist_change: {
-                let import_context = import_context.clone();
-                move |value: String| import_context.set_search_artist(value)
-            },
-            search_album: search_album.read().clone(),
-            on_album_change: {
-                let import_context = import_context.clone();
-                move |value: String| import_context.set_search_album(value)
-            },
-            search_year: search_year.read().clone(),
-            on_year_change: {
-                let import_context = import_context.clone();
-                move |value: String| import_context.set_search_year(value)
-            },
-            search_label: search_label.read().clone(),
-            on_label_change: {
-                let import_context = import_context.clone();
-                move |value: String| import_context.set_search_label(value)
-            },
-            search_catalog_number: search_catalog_number.read().clone(),
-            on_catalog_number_change: {
-                let import_context = import_context.clone();
-                move |value: String| import_context.set_search_catalog_number(value)
-            },
-            search_barcode: search_barcode.read().clone(),
-            on_barcode_change: {
-                let import_context = import_context.clone();
-                move |value: String| import_context.set_search_barcode(value)
-            },
-            is_searching: *is_searching.read(),
-            search_error: error_message.read().clone(),
-            has_searched: *has_searched.read(),
+            search_source: search_state.as_ref().map(|s| s.search_source).unwrap_or(SearchSource::MusicBrainz),
+            on_search_source_change,
+            search_tab: search_state.as_ref().map(|s| s.search_tab).unwrap_or(SearchTab::General),
+            on_search_tab_change,
+            search_artist: search_state.as_ref().map(|s| s.search_artist.clone()).unwrap_or_default(),
+            on_artist_change,
+            search_album: search_state.as_ref().map(|s| s.search_album.clone()).unwrap_or_default(),
+            on_album_change,
+            search_year: search_state.as_ref().map(|s| s.search_year.clone()).unwrap_or_default(),
+            on_year_change,
+            search_label: search_state.as_ref().map(|s| s.search_label.clone()).unwrap_or_default(),
+            on_label_change,
+            search_catalog_number: search_state.as_ref().map(|s| s.search_catalog_number.clone()).unwrap_or_default(),
+            on_catalog_number_change,
+            search_barcode: search_state.as_ref().map(|s| s.search_barcode.clone()).unwrap_or_default(),
+            on_barcode_change,
+            is_searching: search_state.as_ref().map(|s| s.is_searching).unwrap_or(false),
+            search_error: error_message,
+            has_searched,
             manual_match_candidates: display_manual_candidates,
             on_manual_match_select,
             on_search: move |_| perform_search(),
             on_manual_confirm,
-            discid_lookup_error: discid_lookup_error.read().clone(),
-            is_retrying_discid_lookup: *is_looking_up.read(),
+            discid_lookup_error,
+            is_retrying_discid_lookup: is_looking_up,
             on_retry_discid_lookup,
             confirmed_candidate: display_confirmed,
             selected_cover: None,
@@ -526,8 +622,10 @@ pub fn FolderImport() -> Element {
             on_configure_storage: |_| {},
             on_clear,
             on_reveal,
-            import_error: import_error_message.read().clone(),
-            duplicate_album_id: duplicate_album_id.read().clone(),
+            on_remove_release,
+            on_clear_all_releases,
+            import_error: import_error_message,
+            duplicate_album_id,
             on_view_duplicate: |_| {},
         }
     }

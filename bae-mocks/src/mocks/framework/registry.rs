@@ -26,26 +26,17 @@ pub struct ControlDef {
     /// Conditions that must all be true for this control to be visible.
     /// Each tuple is (control_key, required_value) - the referenced control must have that value.
     pub visible_when: Vec<(&'static str, &'static str)>,
-    /// Conditions that hide the control if ANY match.
-    /// Each tuple is (control_key, value) - if the control has that value, this control is hidden.
-    pub hidden_when: Vec<(&'static str, &'static str)>,
     /// If true, enum controls render as dropdowns inline with bool controls
     pub inline: bool,
 }
 
 impl ControlDef {
     /// Check if this control should be visible given the current registry state.
-    /// Returns true if all `visible_when` conditions are met AND no `hidden_when` conditions match.
+    /// Returns true if all `visible_when` conditions are met.
     pub fn is_visible(&self, registry: &ControlRegistry) -> bool {
-        let visible = self
-            .visible_when
+        self.visible_when
             .iter()
-            .all(|(key, value)| registry.get_string(key) == *value);
-        let hidden = self
-            .hidden_when
-            .iter()
-            .any(|(key, value)| registry.get_string(key) == *value);
-        visible && !hidden
+            .all(|(key, value)| registry.get_string(key) == *value)
     }
 }
 
@@ -82,7 +73,6 @@ impl ControlRegistryBuilder {
             enum_options: None,
             int_range: None,
             visible_when: Vec::new(),
-            hidden_when: Vec::new(),
             inline: false,
         });
         self
@@ -104,7 +94,6 @@ impl ControlRegistryBuilder {
             enum_options: Some(options),
             int_range: None,
             visible_when: Vec::new(),
-            hidden_when: Vec::new(),
             inline: false,
         });
         self
@@ -127,7 +116,6 @@ impl ControlRegistryBuilder {
             enum_options: None,
             int_range: Some((min, max)),
             visible_when: Vec::new(),
-            hidden_when: Vec::new(),
             inline: false,
         });
         self
@@ -143,7 +131,6 @@ impl ControlRegistryBuilder {
             enum_options: None,
             int_range: None,
             visible_when: Vec::new(),
-            hidden_when: Vec::new(),
             inline: false,
         });
         self
@@ -153,15 +140,6 @@ impl ControlRegistryBuilder {
     pub fn inline(mut self) -> Self {
         if let Some(last) = self.controls.last_mut() {
             last.inline = true;
-        }
-        self
-    }
-
-    /// Hide the control when a condition matches (opposite of visible_when).
-    /// Multiple calls create an OR condition (any match hides the control).
-    pub fn hidden_when(mut self, key: &'static str, value: &'static str) -> Self {
-        if let Some(last) = self.controls.last_mut() {
-            last.hidden_when.push((key, value));
         }
         self
     }

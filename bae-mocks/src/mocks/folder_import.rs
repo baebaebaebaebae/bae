@@ -2,54 +2,41 @@
 
 use super::framework::{ControlRegistryBuilder, MockPage, MockPanel, Preset};
 use bae_ui::{
-    ArtworkFile, AudioContentInfo, CategorizedFileInfo, CueFlacPairInfo, DetectedRelease, FileInfo,
-    FolderImportView, FolderMetadata, IdentifyMode, MatchCandidate, MatchSourceType, SearchSource,
-    SearchTab, SelectSourceMode, SelectedCover, StorageProfileInfo, WizardStep,
+    ArtworkFile, AudioContentInfo, CategorizedFileInfo, CueFlacPairInfo, DetectedCandidate,
+    DetectedCandidateStatus, FileInfo, FolderImportView, FolderMetadata, IdentifyMode,
+    ImportSource, ImportStep, ImportView, MatchCandidate, MatchSourceType, SearchSource, SearchTab,
+    SelectedCover, StorageProfileInfo,
 };
 use dioxus::prelude::*;
-use std::collections::HashMap;
 
 #[component]
 pub fn FolderImportMock(initial_state: Option<String>) -> Element {
     // Build control registry with URL sync
     let registry = ControlRegistryBuilder::new()
+        .bool_control("has_releases", "Has Releases", true)
+        .doc("When false, shows folder picker. When true, shows two-pane layout.")
         .enum_control(
             "step",
             "Step",
-            "SelectSource",
-            vec![
-                ("SelectSource", "Select Source"),
-                ("Identify", "Identify"),
-                ("Confirm", "Confirm"),
-            ],
+            "Identify",
+            vec![("Identify", "Identify"), ("Confirm", "Confirm")],
         )
-        .enum_control(
-            "select_mode",
-            "Select Mode",
-            "FolderSelection",
-            vec![
-                ("FolderSelection", "Picking Folder"),
-                ("ReleaseSelection", "Multi-Release Picker"),
-            ],
-        )
-        .visible_when("step", "SelectSource")
+        .visible_when("has_releases", "true")
         .enum_control(
             "identify_mode",
             "Identify Mode",
-            "Detecting",
+            "ManualSearch",
             vec![
-                ("Detecting", "Detecting"),
-                ("ExactLookup", "Exact Lookup"),
+                ("Created", "Created"),
+                ("DiscIdLookup", "DiscID Lookup"),
+                ("MultipleExactMatches", "Multiple Exact Matches"),
                 ("ManualSearch", "Manual Search"),
             ],
         )
+        .visible_when("has_releases", "true")
         .visible_when("step", "Identify")
         .bool_control("dragging", "Dragging", false)
-        .visible_when("step", "SelectSource")
-        .bool_control("loading", "Loading Exact Matches", false)
-        .doc("Shows spinner during exact match lookup")
-        .visible_when("step", "Identify")
-        .visible_when("identify_mode", "ExactLookup")
+        .visible_when("has_releases", "false")
         .bool_control("searching", "Searching", false)
         .doc("Shows spinner during manual search")
         .visible_when("step", "Identify")
@@ -73,77 +60,39 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         .bool_control("error", "Error", false)
         .doc("Shows error banner")
         .visible_when("step", "Confirm")
-        .enum_control(
-            "audio_type",
-            "Audio Type",
-            "TrackFiles",
-            vec![("TrackFiles", "Track Files"), ("CueFlac", "CUE/FLAC")],
-        )
-        .inline()
-        .hidden_when("step", "SelectSource")
-        .enum_control(
-            "track_count",
-            "Tracks",
-            "8",
-            vec![("3", "3"), ("8", "8"), ("15", "15")],
-        )
-        .inline()
-        .hidden_when("step", "SelectSource")
-        .enum_control(
-            "image_count",
-            "Images",
-            "3",
-            vec![("0", "0"), ("3", "3"), ("12", "12")],
-        )
-        .inline()
-        .hidden_when("step", "SelectSource")
-        .enum_control(
-            "doc_count",
-            "Docs",
-            "2",
-            vec![("0", "0"), ("2", "2"), ("4", "4")],
-        )
-        .inline()
-        .hidden_when("step", "SelectSource")
-        .enum_control(
-            "other_count",
-            "Other",
-            "2",
-            vec![("0", "0"), ("2", "2"), ("4", "4")],
-        )
-        .inline()
-        .hidden_when("step", "SelectSource")
         .with_presets(vec![
-            Preset::new("Select Folder"),
-            Preset::new("Multi-Release")
-                .set_string("step", "SelectSource")
-                .set_string("select_mode", "ReleaseSelection"),
-            Preset::new("Detecting")
+            Preset::new("Select Folder").set_bool("has_releases", false),
+            Preset::new("DiscID Lookup")
+                .set_bool("has_releases", true)
                 .set_string("step", "Identify")
-                .set_string("identify_mode", "Detecting"),
-            Preset::new("Exact Matches")
+                .set_string("identify_mode", "DiscIdLookup"),
+            Preset::new("Multiple Exact Matches")
+                .set_bool("has_releases", true)
                 .set_string("step", "Identify")
-                .set_string("identify_mode", "ExactLookup"),
-            Preset::new("Loading Matches")
-                .set_string("step", "Identify")
-                .set_string("identify_mode", "ExactLookup")
-                .set_bool("loading", true),
+                .set_string("identify_mode", "MultipleExactMatches"),
             Preset::new("Manual Search")
+                .set_bool("has_releases", true)
                 .set_string("step", "Identify")
                 .set_string("identify_mode", "ManualSearch"),
             Preset::new("Searching")
+                .set_bool("has_releases", true)
                 .set_string("step", "Identify")
                 .set_string("identify_mode", "ManualSearch")
                 .set_bool("searching", true),
             Preset::new("With Results")
+                .set_bool("has_releases", true)
                 .set_string("step", "Identify")
                 .set_string("identify_mode", "ManualSearch")
                 .set_bool("results", true),
-            Preset::new("Confirm").set_string("step", "Confirm"),
+            Preset::new("Confirm")
+                .set_bool("has_releases", true)
+                .set_string("step", "Confirm"),
             Preset::new("Importing")
+                .set_bool("has_releases", true)
                 .set_string("step", "Confirm")
                 .set_bool("importing", true),
             Preset::new("Error")
+                .set_bool("has_releases", true)
                 .set_string("step", "Confirm")
                 .set_bool("error", true),
         ])
@@ -153,7 +102,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
     registry.use_url_sync_folder_import();
 
     // Local state (not persisted to URL)
-    let mut selected_release_indices = use_signal(Vec::<usize>::new);
+    let mut selected_candidate_index = use_signal(|| Some(0usize)); // Default to first release
     let mut selected_match_index = use_signal(|| None::<usize>);
     let mut search_source = use_signal(|| SearchSource::MusicBrainz);
     let mut search_tab = use_signal(|| SearchTab::General);
@@ -168,29 +117,21 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
 
     // Parse step from registry
     let step = match registry.get_string("step").as_str() {
-        "SelectSource" => WizardStep::SelectSource,
-        "Identify" => WizardStep::Identify,
-        "Confirm" => WizardStep::Confirm,
-        _ => WizardStep::SelectSource,
-    };
-
-    // Parse select source mode
-    let select_source_mode = match registry.get_string("select_mode").as_str() {
-        "FolderSelection" => SelectSourceMode::FolderSelection,
-        "ReleaseSelection" => SelectSourceMode::ReleaseSelection,
-        _ => SelectSourceMode::FolderSelection,
+        "Identify" => ImportStep::Identify,
+        "Confirm" => ImportStep::Confirm,
+        _ => ImportStep::Identify,
     };
 
     // Parse identify mode
     let identify_mode = match registry.get_string("identify_mode").as_str() {
-        "Detecting" => IdentifyMode::Detecting,
-        "ExactLookup" => IdentifyMode::ExactLookup,
+        "Created" => IdentifyMode::Created,
+        "DiscIdLookup" => IdentifyMode::DiscIdLookup,
+        "MultipleExactMatches" => IdentifyMode::MultipleExactMatches,
         "ManualSearch" => IdentifyMode::ManualSearch,
-        _ => IdentifyMode::Detecting,
+        _ => IdentifyMode::DiscIdLookup,
     };
 
     let is_dragging = registry.get_bool("dragging");
-    let is_loading_exact_matches = registry.get_bool("loading");
     let is_retrying_discid_lookup = registry.get_bool("retrying");
     let is_searching = registry.get_bool("searching");
     let has_searched = registry.get_bool("results");
@@ -198,130 +139,361 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
     let show_error = registry.get_bool("error");
     let show_discid_error = registry.get_bool("discid_error");
 
-    // File content controls
-    let audio_type = registry.get_string("audio_type");
-    let track_count = registry.get_string("track_count").parse().unwrap_or(8);
-    let image_count = registry.get_string("image_count").parse().unwrap_or(3);
-    let doc_count = registry.get_string("doc_count").parse().unwrap_or(2);
-    let other_count = registry.get_string("other_count").parse().unwrap_or(2);
+    let has_releases = registry.get_bool("has_releases");
 
-    // Mock data
-    let folder_path = "/Users/demo/Music/The Midnight Signal - Neon Frequencies (2023)".to_string();
-
-    // Generate audio content based on type
-    let track_names = [
-        "Broadcast",
-        "Static Dreams",
-        "Frequency Drift",
-        "Night Transmission",
-        "Signal Lost",
-        "Wavelength",
-        "Interference",
-        "Clear Channel",
-        "Dead Air",
-        "Transmission End",
-        "Resonance",
-        "Amplitude",
-        "Oscillation",
-        "Harmonic",
-        "Feedback",
-        "White Noise",
-        "Pink Noise",
-        "Brown Noise",
-        "Silence",
-        "Outro",
+    // Define folder data - each folder has different file compositions
+    let folder_data: Vec<(DetectedCandidate, CategorizedFileInfo)> = vec![
+        // Folder 1: Track files with full artwork and docs
+        (
+            DetectedCandidate {
+                name: "The Midnight Signal - Neon Frequencies (2023) [FLAC 24-96]".to_string(),
+                path: "/Users/demo/Music/Imports/The Midnight Signal - Neon Frequencies (2023) [FLAC 24-96]"
+                    .to_string(),
+                status: DetectedCandidateStatus::Pending,
+            },
+            CategorizedFileInfo {
+                audio: AudioContentInfo::TrackFiles(vec![
+                    FileInfo {
+                        name: "01 - Broadcast.flac".to_string(),
+                        size: 32_000_000,
+                        format: "FLAC".to_string(),
+                    },
+                    FileInfo {
+                        name: "02 - Static Dreams.flac".to_string(),
+                        size: 28_500_000,
+                        format: "FLAC".to_string(),
+                    },
+                    FileInfo {
+                        name: "03 - Frequency Drift.flac".to_string(),
+                        size: 31_200_000,
+                        format: "FLAC".to_string(),
+                    },
+                    FileInfo {
+                        name: "04 - Night Transmission.flac".to_string(),
+                        size: 29_800_000,
+                        format: "FLAC".to_string(),
+                    },
+                    FileInfo {
+                        name: "05 - Signal Lost.flac".to_string(),
+                        size: 27_600_000,
+                        format: "FLAC".to_string(),
+                    },
+                    FileInfo {
+                        name: "06 - Wavelength.flac".to_string(),
+                        size: 33_100_000,
+                        format: "FLAC".to_string(),
+                    },
+                    FileInfo {
+                        name: "07 - Clear Channel.flac".to_string(),
+                        size: 30_400_000,
+                        format: "FLAC".to_string(),
+                    },
+                    FileInfo {
+                        name: "08 - Transmission End.flac".to_string(),
+                        size: 35_200_000,
+                        format: "FLAC".to_string(),
+                    },
+                ]),
+                artwork: vec![
+                    FileInfo {
+                        name: "cover.jpg".to_string(),
+                        size: 2_500_000,
+                        format: "JPEG".to_string(),
+                    },
+                    FileInfo {
+                        name: "back.jpg".to_string(),
+                        size: 2_100_000,
+                        format: "JPEG".to_string(),
+                    },
+                    FileInfo {
+                        name: "cd.jpg".to_string(),
+                        size: 1_800_000,
+                        format: "JPEG".to_string(),
+                    },
+                ],
+                documents: vec![
+                    FileInfo {
+                        name: "rip.log".to_string(),
+                        size: 4_500,
+                        format: "LOG".to_string(),
+                    },
+                    FileInfo {
+                        name: "info.txt".to_string(),
+                        size: 1_200,
+                        format: "TXT".to_string(),
+                    },
+                ],
+                other: vec![FileInfo {
+                    name: ".DS_Store".to_string(),
+                    size: 6_148,
+                    format: "".to_string(),
+                }],
+            },
+        ),
+        // Folder 2: CUE/FLAC pair, minimal extras
+        (
+            DetectedCandidate {
+                name: "Glass Harbor - 2022 - Pacific Standard".to_string(),
+                path: "/Users/demo/Music/Imports/Glass Harbor - 2022 - Pacific Standard"
+                    .to_string(),
+                status: DetectedCandidateStatus::Pending,
+            },
+            CategorizedFileInfo {
+                audio: AudioContentInfo::CueFlacPairs(vec![CueFlacPairInfo {
+                    cue_name: "Glass Harbor - Pacific Standard.cue".to_string(),
+                    flac_name: "Glass Harbor - Pacific Standard.flac".to_string(),
+                    track_count: 10,
+                    total_size: 380_000_000,
+                }]),
+                artwork: vec![FileInfo {
+                    name: "folder.jpg".to_string(),
+                    size: 850_000,
+                    format: "JPEG".to_string(),
+                }],
+                documents: vec![],
+                other: vec![],
+            },
+        ),
+        // Folder 3: Track files, lots of scans, torrent style
+        (
+            DetectedCandidate {
+                name: "Velvet_Mathematics-Proof_by_Induction-2021-FLAC".to_string(),
+                path: "/Users/demo/Music/Imports/Velvet_Mathematics-Proof_by_Induction-2021-FLAC"
+                    .to_string(),
+                status: DetectedCandidateStatus::Pending,
+            },
+            CategorizedFileInfo {
+                audio: AudioContentInfo::TrackFiles(vec![
+                    FileInfo {
+                        name: "01-velvet_mathematics-axiom.flac".to_string(),
+                        size: 25_000_000,
+                        format: "FLAC".to_string(),
+                    },
+                    FileInfo {
+                        name: "02-velvet_mathematics-lemma.flac".to_string(),
+                        size: 27_500_000,
+                        format: "FLAC".to_string(),
+                    },
+                    FileInfo {
+                        name: "03-velvet_mathematics-theorem.flac".to_string(),
+                        size: 29_200_000,
+                        format: "FLAC".to_string(),
+                    },
+                    FileInfo {
+                        name: "04-velvet_mathematics-corollary.flac".to_string(),
+                        size: 24_800_000,
+                        format: "FLAC".to_string(),
+                    },
+                    FileInfo {
+                        name: "05-velvet_mathematics-qed.flac".to_string(),
+                        size: 31_600_000,
+                        format: "FLAC".to_string(),
+                    },
+                ]),
+                artwork: vec![
+                    FileInfo {
+                        name: "cover.jpg".to_string(),
+                        size: 3_200_000,
+                        format: "JPEG".to_string(),
+                    },
+                    FileInfo {
+                        name: "back.jpg".to_string(),
+                        size: 2_800_000,
+                        format: "JPEG".to_string(),
+                    },
+                    FileInfo {
+                        name: "booklet-01.png".to_string(),
+                        size: 4_500_000,
+                        format: "PNG".to_string(),
+                    },
+                    FileInfo {
+                        name: "booklet-02.png".to_string(),
+                        size: 4_200_000,
+                        format: "PNG".to_string(),
+                    },
+                    FileInfo {
+                        name: "booklet-03.png".to_string(),
+                        size: 4_100_000,
+                        format: "PNG".to_string(),
+                    },
+                    FileInfo {
+                        name: "booklet-04.png".to_string(),
+                        size: 3_900_000,
+                        format: "PNG".to_string(),
+                    },
+                    FileInfo {
+                        name: "cd.jpg".to_string(),
+                        size: 1_900_000,
+                        format: "JPEG".to_string(),
+                    },
+                    FileInfo {
+                        name: "matrix.jpg".to_string(),
+                        size: 1_200_000,
+                        format: "JPEG".to_string(),
+                    },
+                ],
+                documents: vec![
+                    FileInfo {
+                        name: "Velvet_Mathematics-Proof_by_Induction-2021-FLAC.nfo".to_string(),
+                        size: 8_500,
+                        format: "NFO".to_string(),
+                    },
+                    FileInfo {
+                        name: "Velvet_Mathematics-Proof_by_Induction-2021-FLAC.m3u".to_string(),
+                        size: 450,
+                        format: "M3U".to_string(),
+                    },
+                ],
+                other: vec![],
+            },
+        ),
+        // Folder 4: Simple rip, no docs, junk files
+        (
+            DetectedCandidate {
+                name: "Apartment Garden - Grow Light".to_string(),
+                path: "/Users/demo/Downloads/Apartment Garden - Grow Light".to_string(),
+                status: DetectedCandidateStatus::Pending,
+            },
+            CategorizedFileInfo {
+                audio: AudioContentInfo::TrackFiles(vec![
+                    FileInfo {
+                        name: "01 Seedling.flac".to_string(),
+                        size: 28_200_000,
+                        format: "FLAC".to_string(),
+                    },
+                    FileInfo {
+                        name: "02 Photosynthesis.flac".to_string(),
+                        size: 27_800_000,
+                        format: "FLAC".to_string(),
+                    },
+                    FileInfo {
+                        name: "03 Root System.flac".to_string(),
+                        size: 29_100_000,
+                        format: "FLAC".to_string(),
+                    },
+                    FileInfo {
+                        name: "04 Bloom.flac".to_string(),
+                        size: 28_500_000,
+                        format: "FLAC".to_string(),
+                    },
+                ]),
+                artwork: vec![FileInfo {
+                    name: "AlbumArt.jpg".to_string(),
+                    size: 450_000,
+                    format: "JPEG".to_string(),
+                }],
+                documents: vec![],
+                other: vec![
+                    FileInfo {
+                        name: "desktop.ini".to_string(),
+                        size: 282,
+                        format: "".to_string(),
+                    },
+                    FileInfo {
+                        name: "Thumbs.db".to_string(),
+                        size: 12_288,
+                        format: "".to_string(),
+                    },
+                ],
+            },
+        ),
+        // Folder 5: Vinyl rip with extensive documentation
+        (
+            DetectedCandidate {
+                name: "The Cold Equations - Fuel Weight (Vinyl Rip) [24-96]".to_string(),
+                path: "/Users/demo/Music/Vinyl Rips/The Cold Equations - Fuel Weight (Vinyl Rip) [24-96]"
+                    .to_string(),
+                status: DetectedCandidateStatus::Pending,
+            },
+            CategorizedFileInfo {
+                audio: AudioContentInfo::TrackFiles(vec![
+                    FileInfo {
+                        name: "A1 - Launch Window.flac".to_string(),
+                        size: 85_000_000,
+                        format: "FLAC".to_string(),
+                    },
+                    FileInfo {
+                        name: "A2 - Orbital Mechanics.flac".to_string(),
+                        size: 92_000_000,
+                        format: "FLAC".to_string(),
+                    },
+                    FileInfo {
+                        name: "B1 - Escape Velocity.flac".to_string(),
+                        size: 78_000_000,
+                        format: "FLAC".to_string(),
+                    },
+                    FileInfo {
+                        name: "B2 - Gravity Well.flac".to_string(),
+                        size: 88_000_000,
+                        format: "FLAC".to_string(),
+                    },
+                ]),
+                artwork: vec![
+                    FileInfo {
+                        name: "front.png".to_string(),
+                        size: 15_000_000,
+                        format: "PNG".to_string(),
+                    },
+                    FileInfo {
+                        name: "back.png".to_string(),
+                        size: 14_200_000,
+                        format: "PNG".to_string(),
+                    },
+                    FileInfo {
+                        name: "label-a.png".to_string(),
+                        size: 8_500_000,
+                        format: "PNG".to_string(),
+                    },
+                    FileInfo {
+                        name: "label-b.png".to_string(),
+                        size: 8_300_000,
+                        format: "PNG".to_string(),
+                    },
+                    FileInfo {
+                        name: "inner-sleeve.png".to_string(),
+                        size: 12_000_000,
+                        format: "PNG".to_string(),
+                    },
+                ],
+                documents: vec![
+                    FileInfo {
+                        name: "ripping-notes.txt".to_string(),
+                        size: 2_800,
+                        format: "TXT".to_string(),
+                    },
+                    FileInfo {
+                        name: "vinyl-condition.txt".to_string(),
+                        size: 1_500,
+                        format: "TXT".to_string(),
+                    },
+                    FileInfo {
+                        name: "dr-analysis.txt".to_string(),
+                        size: 3_200,
+                        format: "TXT".to_string(),
+                    },
+                ],
+                other: vec![],
+            },
+        ),
     ];
 
-    let audio = if audio_type == "CueFlac" {
-        AudioContentInfo::CueFlacPairs(vec![CueFlacPairInfo {
-            cue_name: "album.cue".to_string(),
-            flac_name: "album.flac".to_string(),
-            track_count,
-            total_size: 450_000_000,
-        }])
+    let detected_candidates: Vec<DetectedCandidate> = if has_releases {
+        folder_data.iter().map(|(r, _)| r.clone()).collect()
     } else {
-        AudioContentInfo::TrackFiles(
-            (0..track_count)
-                .map(|i| FileInfo {
-                    name: format!(
-                        "{:02} - {}.flac",
-                        i + 1,
-                        track_names.get(i).unwrap_or(&"Track")
-                    ),
-                    size: 28_000_000 + (i as u64 * 2_000_000),
-                    format: "FLAC".to_string(),
-                })
-                .collect(),
-        )
+        vec![]
     };
 
-    // Generate artwork files
-    let image_names = [
-        "cover.jpg",
-        "back.jpg",
-        "cd.jpg",
-        "inlay.jpg",
-        "booklet-01.jpg",
-        "booklet-02.jpg",
-        "booklet-03.jpg",
-        "booklet-04.jpg",
-        "obi.jpg",
-        "matrix.jpg",
-        "spine.jpg",
-        "tray.jpg",
-        "sticker.jpg",
-    ];
-    let artwork: Vec<FileInfo> = (0..image_count)
-        .map(|i| FileInfo {
-            name: image_names.get(i).unwrap_or(&"image.jpg").to_string(),
-            size: 2_500_000 - (i as u64 * 200_000),
-            format: "JPEG".to_string(),
-        })
-        .collect();
+    // Get folder files for selected release
+    let selected_idx = selected_candidate_index.read().unwrap_or(0);
+    let folder_files = folder_data
+        .get(selected_idx)
+        .map(|(_, files)| files.clone())
+        .unwrap_or_else(|| folder_data[0].1.clone());
 
-    // Generate document files
-    let doc_names = [
-        "rip.log",
-        "info.txt",
-        "accurip.txt",
-        "cue.txt",
-        "readme.nfo",
-    ];
-    let documents: Vec<FileInfo> = (0..doc_count)
-        .map(|i| FileInfo {
-            name: doc_names.get(i).unwrap_or(&"file.txt").to_string(),
-            size: 4_500 - (i as u64 * 500),
-            format: if i == 0 { "LOG" } else { "TXT" }.to_string(),
-        })
-        .collect();
-
-    // Generate other files
-    let other_names = [".DS_Store", "Thumbs.db", "desktop.ini", "playlist.m3u"];
-    let other: Vec<FileInfo> = (0..other_count)
-        .map(|i| FileInfo {
-            name: other_names.get(i).unwrap_or(&"file.dat").to_string(),
-            size: 1_000 + (i as u64 * 500),
-            format: "".to_string(),
-        })
-        .collect();
-
-    let folder_files = CategorizedFileInfo {
-        audio,
-        artwork,
-        documents,
-        other,
-    };
-
-    let detected_releases = vec![
-        DetectedRelease {
-            name: "CD1".to_string(),
-            path: "/Users/demo/Music/Album/CD1".to_string(),
-        },
-        DetectedRelease {
-            name: "CD2".to_string(),
-            path: "/Users/demo/Music/Album/CD2".to_string(),
-        },
-    ];
+    let folder_path = detected_candidates
+        .get(selected_idx)
+        .map(|r| r.path.clone())
+        .unwrap_or_else(|| "/Users/demo/Music/Imports".to_string());
 
     let exact_match_candidates = vec![
         MatchCandidate {
@@ -335,6 +507,10 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             catalog_number: Some("SWR-001".to_string()),
             source_type: MatchSourceType::MusicBrainz,
             original_year: Some("2023".to_string()),
+            musicbrainz_release_id: Some("mock-mb-release-001".to_string()),
+            musicbrainz_release_group_id: Some("mock-mb-rg-001".to_string()),
+            discogs_release_id: None,
+            discogs_master_id: None,
         },
         MatchCandidate {
             title: "Neon Frequencies (Deluxe)".to_string(),
@@ -347,6 +523,10 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             catalog_number: Some("SWR-001D".to_string()),
             source_type: MatchSourceType::MusicBrainz,
             original_year: Some("2023".to_string()),
+            musicbrainz_release_id: Some("mock-mb-release-002".to_string()),
+            musicbrainz_release_group_id: Some("mock-mb-rg-001".to_string()),
+            discogs_release_id: None,
+            discogs_master_id: None,
         },
     ];
 
@@ -357,12 +537,21 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
     };
     let confirmed_candidate = exact_match_candidates.first().cloned();
 
+    // Get track count from current folder's audio
+    let track_count = match &folder_files.audio {
+        AudioContentInfo::TrackFiles(tracks) => tracks.len() as u32,
+        AudioContentInfo::CueFlacPairs(pairs) => {
+            pairs.first().map(|p| p.track_count as u32).unwrap_or(0)
+        }
+    };
+
     let detected_metadata = Some(FolderMetadata {
         artist: Some("The Midnight Signal".to_string()),
         album: Some("Neon Frequencies".to_string()),
         year: Some(2023),
-        track_count: Some(track_count as u32),
+        track_count: Some(track_count),
         discid: None,
+        mb_discid: None,
         confidence: 0.85,
         folder_tokens: vec![
             "midnight".to_string(),
@@ -372,7 +561,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         ],
     });
 
-    // Generate artwork files for selection (with display URLs)
+    // Generate artwork files for selection (with display URLs from current folder)
     let cover_urls = [
         "/covers/the-midnight-signal_neon-frequencies.png",
         "/covers/velvet-mathematics_proof-by-induction.png",
@@ -382,9 +571,12 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         "/covers/newspaper-weather_tomorrows-forecast.png",
         "/covers/parking-structure_level-4.png",
     ];
-    let artwork_files: Vec<ArtworkFile> = (0..image_count)
-        .map(|i| ArtworkFile {
-            name: image_names.get(i).unwrap_or(&"image.jpg").to_string(),
+    let artwork_files: Vec<ArtworkFile> = folder_files
+        .artwork
+        .iter()
+        .enumerate()
+        .map(|(i, file)| ArtworkFile {
+            name: file.name.clone(),
             display_url: cover_urls
                 .get(i % cover_urls.len())
                 .unwrap_or(&cover_urls[0])
@@ -422,83 +614,90 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         MockPanel {
             current_mock: MockPage::FolderImport,
             registry,
-            max_width: "4xl",
-            FolderImportView {
-                step,
-                select_source_mode,
-                identify_mode,
-                folder_path: folder_path.clone(),
-                folder_files: folder_files.clone(),
-                image_data: artwork_files.iter().map(|f| (f.name.clone(), f.display_url.clone())).collect(),
-                text_file_contents: HashMap::new(),
-                is_dragging,
-                on_folder_select_click: |_| {},
-                detected_releases: detected_releases.clone(),
-                selected_release_indices: selected_release_indices(),
-                on_release_selection_change: move |indices| selected_release_indices.set(indices),
-                on_releases_import: |_| {},
-                on_skip_detection: |_| {},
-                is_loading_exact_matches,
-                exact_match_candidates: exact_match_candidates.clone(),
-                selected_match_index: selected_match_index(),
-                on_exact_match_select: move |idx| selected_match_index.set(Some(idx)),
-                detected_metadata: detected_metadata.clone(),
-                search_source: search_source(),
-                on_search_source_change: move |src| search_source.set(src),
-                search_tab: search_tab(),
-                on_search_tab_change: move |tab| search_tab.set(tab),
-                search_artist: search_artist(),
-                on_artist_change: move |v| search_artist.set(v),
-                search_album: search_album(),
-                on_album_change: move |v| search_album.set(v),
-                search_year: search_year(),
-                on_year_change: move |v| search_year.set(v),
-                search_label: search_label(),
-                on_label_change: move |v| search_label.set(v),
-                search_catalog_number: search_catalog_number(),
-                on_catalog_number_change: move |v| search_catalog_number.set(v),
-                search_barcode: search_barcode(),
-                on_barcode_change: move |v| search_barcode.set(v),
-                is_searching,
-                search_error: None,
-                has_searched,
-                manual_match_candidates,
-                on_manual_match_select: move |idx| selected_match_index.set(Some(idx)),
-                on_search: {
-                    let registry = registry_for_clear.clone();
-                    move |_| registry.set_bool("searching", true)
-                },
-                on_manual_confirm: |_| {},
-                discid_lookup_error,
-                is_retrying_discid_lookup,
-                on_retry_discid_lookup: |_| {},
-                confirmed_candidate,
-                selected_cover: selected_cover(),
-                display_cover_url: Some("/covers/the-midnight-signal_neon-frequencies.png".to_string()),
-                artwork_files,
-                storage_profiles,
-                selected_profile_id: selected_profile_id(),
-                is_importing,
-                preparing_step_text: if is_importing { Some("Encoding tracks...".to_string()) } else { None },
-                on_select_remote_cover: move |url| {
-                    selected_cover
-                        .set(
-                            Some(SelectedCover::Remote {
-                                url,
-                                source: "MusicBrainz".to_string(),
-                            }),
-                        )
-                },
-                on_select_local_cover: move |filename| { selected_cover.set(Some(SelectedCover::Local { filename })) },
-                on_storage_profile_change: move |id| selected_profile_id.set(id),
-                on_edit: |_| {},
-                on_confirm: |_| {},
-                on_configure_storage: |_| {},
-                on_clear: move |_| registry_for_clear.set_string("step", "SelectSource".to_string()),
-                on_reveal: |_| {},
-                import_error,
-                duplicate_album_id: None,
-                on_view_duplicate: |_| {},
+            max_width: "full",
+            ImportView {
+                selected_source: ImportSource::Folder,
+                on_source_select: |_| {},
+                FolderImportView {
+                    step,
+                    identify_mode,
+                    folder_path: folder_path.clone(),
+                    folder_files: folder_files.clone(),
+                    image_data: artwork_files.iter().map(|f| (f.name.clone(), f.display_url.clone())).collect(),
+                    selected_text_file: None,
+                    text_file_content: None,
+                    on_text_file_select: |_| {},
+                    on_text_file_close: |_| {},
+                    is_dragging,
+                    on_folder_select_click: |_| {},
+                    is_scanning_candidates: false,
+                    detected_candidates: detected_candidates.clone(),
+                    selected_candidate_index: selected_candidate_index(),
+                    on_release_select: move |idx| selected_candidate_index.set(Some(idx)),
+                    on_skip_detection: |_| {},
+                    exact_match_candidates: exact_match_candidates.clone(),
+                    selected_match_index: selected_match_index(),
+                    on_exact_match_select: move |idx| selected_match_index.set(Some(idx)),
+                    detected_metadata: detected_metadata.clone(),
+                    search_source: search_source(),
+                    on_search_source_change: move |src| search_source.set(src),
+                    search_tab: search_tab(),
+                    on_search_tab_change: move |tab| search_tab.set(tab),
+                    search_artist: search_artist(),
+                    on_artist_change: move |v| search_artist.set(v),
+                    search_album: search_album(),
+                    on_album_change: move |v| search_album.set(v),
+                    search_year: search_year(),
+                    on_year_change: move |v| search_year.set(v),
+                    search_label: search_label(),
+                    on_label_change: move |v| search_label.set(v),
+                    search_catalog_number: search_catalog_number(),
+                    on_catalog_number_change: move |v| search_catalog_number.set(v),
+                    search_barcode: search_barcode(),
+                    on_barcode_change: move |v| search_barcode.set(v),
+                    is_searching,
+                    search_error: None,
+                    has_searched,
+                    manual_match_candidates,
+                    on_manual_match_select: move |idx| selected_match_index.set(Some(idx)),
+                    on_search: {
+                        let registry = registry_for_clear.clone();
+                        move |_| registry.set_bool("searching", true)
+                    },
+                    on_manual_confirm: |_| {},
+                    discid_lookup_error,
+                    is_retrying_discid_lookup,
+                    on_retry_discid_lookup: |_| {},
+                    confirmed_candidate,
+                    selected_cover: selected_cover(),
+                    display_cover_url: Some("/covers/the-midnight-signal_neon-frequencies.png".to_string()),
+                    artwork_files,
+                    storage_profiles,
+                    selected_profile_id: selected_profile_id(),
+                    is_importing,
+                    preparing_step_text: if is_importing { Some("Encoding tracks...".to_string()) } else { None },
+                    on_select_remote_cover: move |url| {
+                        selected_cover
+                            .set(
+                                Some(SelectedCover::Remote {
+                                    url,
+                                    source: "MusicBrainz".to_string(),
+                                }),
+                            )
+                    },
+                    on_select_local_cover: move |filename| { selected_cover.set(Some(SelectedCover::Local { filename })) },
+                    on_storage_profile_change: move |id| selected_profile_id.set(id),
+                    on_edit: |_| {},
+                    on_confirm: |_| {},
+                    on_configure_storage: |_| {},
+                    on_clear: move |_| registry_for_clear.set_string("step", "Identify".to_string()),
+                    on_reveal: |_| {},
+                    on_remove_release: |_| {},
+                    on_clear_all_releases: |_| {},
+                    import_error,
+                    duplicate_album_id: None,
+                    on_view_duplicate: |_| {},
+                }
             }
         }
     }

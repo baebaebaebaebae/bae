@@ -1,76 +1,29 @@
 //! Folder import workflow view
 //!
-//! A 3-step wizard for importing music from a folder:
+//! Multi-pane layout for importing music from folders:
 //!
-//! ## Step 1: Select Source
-//! User picks a folder. If the folder contains multiple releases (e.g., CD1/CD2),
-//! user selects which to import.
+//! ## Initial State
+//! User picks a folder (full-width folder selector).
 //!
-//! ## Step 2: Identify
-//! System identifies the music via DiscID or metadata parsing. If ambiguous,
-//! user picks from candidates. If no match, user searches manually.
-//!
-//! ## Step 3: Confirm
-//! User reviews the match, selects cover art and storage profile, then imports.
+//! ## Working State (after folder selected)
+//! Two-pane layout:
+//! - Left sidebar: List of detected releases with status
+//! - Right main area:
+//!   - Top: Identify/Confirm workflow for selected release
+//!   - Bottom (fixed): SmartFileDisplay showing folder contents
 
+use super::release_sidebar::{DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH};
 use super::{
-    ConfirmationView, DetectingMetadataView, DiscIdLookupErrorView, ExactLookupView,
-    ImportErrorDisplayView, ManualSearchPanelView, ReleaseSelectorView, SelectedSourceView,
-    SmartFileDisplayView,
+    ConfirmationView, DetectingMetadataView, DiscIdLookupErrorView, ImportErrorDisplayView,
+    ManualSearchPanelView, MultipleMatchesView, ReleaseSidebarView, SmartFileDisplayView,
 };
+use crate::components::icons::{FolderIcon, LoaderIcon};
+use crate::components::{ResizablePanel, ResizeDirection};
 use crate::display_types::{
-    ArtworkFile, CategorizedFileInfo, DetectedRelease, FolderMetadata, IdentifyMode,
-    MatchCandidate, SearchSource, SearchTab, SelectSourceMode, SelectedCover, StorageProfileInfo,
-    WizardStep,
+    ArtworkFile, CategorizedFileInfo, DetectedCandidate, FolderMetadata, IdentifyMode, ImportStep,
+    MatchCandidate, SearchSource, SearchTab, SelectedCover, StorageProfileInfo,
 };
-use crate::FolderSelectorView;
 use dioxus::prelude::*;
-
-// ============================================================================
-// Step 1: Select Source
-// ============================================================================
-
-/// Props for the SelectSource step
-#[derive(Clone, PartialEq, Props)]
-pub struct SelectSourceStepProps {
-    /// Sub-mode: FolderSelection or ReleaseSelection
-    pub mode: SelectSourceMode,
-    /// True if user is dragging a folder over the drop zone
-    pub is_dragging: bool,
-    /// Callback when user clicks to select a folder
-    pub on_folder_select_click: EventHandler<()>,
-    /// Detected releases (for ReleaseSelection mode)
-    pub detected_releases: Vec<DetectedRelease>,
-    /// Currently selected release indices
-    pub selected_release_indices: Vec<usize>,
-    /// Callback when selection changes
-    pub on_release_selection_change: EventHandler<Vec<usize>>,
-    /// Callback when user confirms release selection
-    pub on_releases_import: EventHandler<Vec<usize>>,
-}
-
-/// Step 1: Select the source folder (and releases if multi-release)
-#[component]
-pub fn SelectSourceStep(props: SelectSourceStepProps) -> Element {
-    rsx! {
-        match props.mode {
-            SelectSourceMode::FolderSelection => rsx! {
-                FolderSelectorView {
-                    is_dragging: props.is_dragging,
-                    on_select_click: props.on_folder_select_click,
-                }
-            },
-            SelectSourceMode::ReleaseSelection => rsx! {
-                ReleaseSelectorView {
-                    releases: props.detected_releases.clone(),
-                    selected_indices: props.selected_release_indices.clone(),
-                    on_selection_change: props.on_release_selection_change,
-                    on_import: props.on_releases_import,
-                }
-            },
-        }
-    }
-}
 
 // ============================================================================
 // Step 2: Identify
@@ -88,8 +41,6 @@ pub struct IdentifyStepProps {
     pub folder_files: CategorizedFileInfo,
     /// Image data for gallery (filename, display_url)
     pub image_data: Vec<(String, String)>,
-    /// Text file contents keyed by filename
-    pub text_file_contents: std::collections::HashMap<String, String>,
     /// Callback to clear/change folder
     pub on_clear: EventHandler<()>,
     /// Callback to reveal folder in file browser
@@ -97,9 +48,7 @@ pub struct IdentifyStepProps {
     // Detecting mode
     /// Callback to skip detection
     pub on_skip_detection: EventHandler<()>,
-    // ExactLookup mode
-    /// True while loading exact match candidates
-    pub is_loading_exact_matches: bool,
+    // MultipleExactMatches mode
     /// Exact match candidates from DiscID lookup
     pub exact_match_candidates: Vec<MatchCandidate>,
     /// Currently selected match index
@@ -153,40 +102,23 @@ pub struct IdentifyStepProps {
     pub on_retry_discid_lookup: EventHandler<()>,
 }
 
-/// Step 2: Identify the music
+/// Step 2: Identify the music (search/matching UI only, no file display)
 #[component]
 pub fn IdentifyStep(props: IdentifyStepProps) -> Element {
     rsx! {
         div { class: "space-y-6",
-            // Selected source display (always shown)
-            SelectedSourceView {
-                title: "Selected Folder".to_string(),
-                path: props.folder_path.clone(),
-                on_clear: props.on_clear,
-                on_reveal: props.on_reveal,
-                if !props.folder_files.is_empty() {
-                    div { class: "mt-4",
-                        SmartFileDisplayView {
-                            files: props.folder_files.clone(),
-                            image_data: props.image_data.clone(),
-                            text_file_contents: props.text_file_contents.clone(),
-                        }
-                    }
-                }
-            }
             // Mode-specific content
             match props.mode {
-                IdentifyMode::Detecting => rsx! {
+                IdentifyMode::Created | IdentifyMode::DiscIdLookup => rsx! {
                     DetectingMetadataView {
                         message: "Looking up release...".to_string(),
                         on_skip: props.on_skip_detection,
                     }
                 },
-                IdentifyMode::ExactLookup => rsx! {
-                    ExactLookupView {
-                        is_loading: props.is_loading_exact_matches,
-                        exact_match_candidates: props.exact_match_candidates.clone(),
-                        selected_match_index: props.selected_match_index,
+                IdentifyMode::MultipleExactMatches => rsx! {
+                    MultipleMatchesView {
+                        candidates: props.exact_match_candidates.clone(),
+                        selected_index: props.selected_match_index,
                         on_select: props.on_exact_match_select,
                     }
                 },
@@ -250,8 +182,6 @@ pub struct ConfirmStepProps {
     pub folder_files: CategorizedFileInfo,
     /// Image data for gallery (filename, display_url)
     pub image_data: Vec<(String, String)>,
-    /// Text file contents keyed by filename
-    pub text_file_contents: std::collections::HashMap<String, String>,
     /// Callback to clear/change folder
     pub on_clear: EventHandler<()>,
     /// Callback to reveal folder in file browser
@@ -294,27 +224,11 @@ pub struct ConfirmStepProps {
     pub on_view_duplicate: EventHandler<String>,
 }
 
-/// Step 3: Confirm and import
+/// Step 3: Confirm and import (confirmation UI only, no file display)
 #[component]
 pub fn ConfirmStep(props: ConfirmStepProps) -> Element {
     rsx! {
         div { class: "space-y-6",
-            // Selected source display
-            SelectedSourceView {
-                title: "Selected Folder".to_string(),
-                path: props.folder_path.clone(),
-                on_clear: props.on_clear,
-                on_reveal: props.on_reveal,
-                if !props.folder_files.is_empty() {
-                    div { class: "mt-4",
-                        SmartFileDisplayView {
-                            files: props.folder_files.clone(),
-                            image_data: props.image_data.clone(),
-                            text_file_contents: props.text_file_contents.clone(),
-                        }
-                    }
-                }
-            }
             // Confirmation view
             ConfirmationView {
                 candidate: props.confirmed_candidate.clone(),
@@ -333,6 +247,7 @@ pub fn ConfirmStep(props: ConfirmStepProps) -> Element {
                 on_confirm: props.on_confirm,
                 on_configure_storage: props.on_configure_storage,
             }
+
             // Error display
             ImportErrorDisplayView {
                 error_message: props.import_error.clone(),
@@ -350,52 +265,57 @@ pub fn ConfirmStep(props: ConfirmStepProps) -> Element {
 /// Props for the folder import workflow view
 #[derive(Clone, PartialEq, Props)]
 pub struct FolderImportViewProps {
-    /// Current wizard step
-    pub step: WizardStep,
-    // Step 1: SelectSource props
-    /// Sub-mode within SelectSource step
-    #[props(default)]
-    pub select_source_mode: SelectSourceMode,
+    /// Current import step
+    pub step: ImportStep,
+    // Folder selection
     /// True if dragging over drop zone
     #[props(default)]
     pub is_dragging: bool,
     /// Callback when user clicks to select folder
     pub on_folder_select_click: EventHandler<()>,
-    /// Detected releases for multi-release folders
+    /// True while scanning a folder for release candidates
     #[props(default)]
-    pub detected_releases: Vec<DetectedRelease>,
-    /// Selected release indices
+    pub is_scanning_candidates: bool,
+    // Release sidebar
+    /// Detected release candidates
     #[props(default)]
-    pub selected_release_indices: Vec<usize>,
-    /// Callback when release selection changes
-    pub on_release_selection_change: EventHandler<Vec<usize>>,
-    /// Callback when user confirms release selection
-    pub on_releases_import: EventHandler<Vec<usize>>,
+    pub detected_candidates: Vec<DetectedCandidate>,
+    /// Currently selected candidate index in sidebar
+    #[props(default)]
+    pub selected_candidate_index: Option<usize>,
+    /// Callback when a candidate is selected in sidebar
+    pub on_release_select: EventHandler<usize>,
     // Step 2: Identify props
     /// Mode within Identify step
-    #[props(default)]
     pub identify_mode: IdentifyMode,
     /// Path to selected folder
     #[props(default)]
     pub folder_path: String,
     /// Files in the folder
-    #[props(default)]
     pub folder_files: CategorizedFileInfo,
     /// Image data for gallery
     #[props(default)]
     pub image_data: Vec<(String, String)>,
-    /// Text file contents
+    /// Currently viewed text file name
     #[props(default)]
-    pub text_file_contents: std::collections::HashMap<String, String>,
+    pub selected_text_file: Option<String>,
+    /// Loaded text file content (for selected file)
+    #[props(default)]
+    pub text_file_content: Option<String>,
+    /// Callback when user selects a text file to view
+    pub on_text_file_select: EventHandler<String>,
+    /// Callback when user closes text file modal
+    pub on_text_file_close: EventHandler<()>,
     /// Callback to clear folder
     pub on_clear: EventHandler<()>,
     /// Callback to reveal folder in file browser
     pub on_reveal: EventHandler<()>,
+    /// Callback to remove a release from the list
+    pub on_remove_release: EventHandler<usize>,
+    /// Callback to clear all releases
+    pub on_clear_all_releases: EventHandler<()>,
     /// Callback to skip detection
     pub on_skip_detection: EventHandler<()>,
-    /// True while loading exact matches
-    #[props(default)]
-    pub is_loading_exact_matches: bool,
     /// Exact match candidates
     #[props(default)]
     pub exact_match_candidates: Vec<MatchCandidate>,
@@ -408,12 +328,10 @@ pub struct FolderImportViewProps {
     #[props(default)]
     pub detected_metadata: Option<FolderMetadata>,
     /// Search source
-    #[props(default)]
     pub search_source: SearchSource,
     /// Callback when search source changes
     pub on_search_source_change: EventHandler<SearchSource>,
     /// Search tab
-    #[props(default)]
     pub search_tab: SearchTab,
     /// Callback when search tab changes
     pub on_search_tab_change: EventHandler<SearchTab>,
@@ -509,95 +427,193 @@ pub struct FolderImportViewProps {
     pub on_view_duplicate: EventHandler<String>,
 }
 
-/// Folder import workflow view - routes between wizard steps
+/// Folder import workflow view - two-pane layout with sidebar
 #[component]
 pub fn FolderImportView(props: FolderImportViewProps) -> Element {
+    // Two-pane layout: sidebar + main content
     rsx! {
-        div { class: "space-y-6",
-            match props.step {
-                WizardStep::SelectSource => rsx! {
-                    SelectSourceStep {
-                        mode: props.select_source_mode,
-                        is_dragging: props.is_dragging,
-                        on_folder_select_click: props.on_folder_select_click,
-                        detected_releases: props.detected_releases.clone(),
-                        selected_release_indices: props.selected_release_indices.clone(),
-                        on_release_selection_change: props.on_release_selection_change,
-                        on_releases_import: props.on_releases_import,
-                    }
-                },
-                WizardStep::Identify => rsx! {
-                    IdentifyStep {
-                        mode: props.identify_mode,
-                        folder_path: props.folder_path.clone(),
-                        folder_files: props.folder_files.clone(),
-                        image_data: props.image_data.clone(),
-                        text_file_contents: props.text_file_contents.clone(),
-                        on_clear: props.on_clear,
-                        on_reveal: props.on_reveal,
-                        on_skip_detection: props.on_skip_detection,
-                        is_loading_exact_matches: props.is_loading_exact_matches,
-                        exact_match_candidates: props.exact_match_candidates.clone(),
-                        selected_match_index: props.selected_match_index,
-                        on_exact_match_select: props.on_exact_match_select,
-                        detected_metadata: props.detected_metadata.clone(),
-                        search_source: props.search_source,
-                        on_search_source_change: props.on_search_source_change,
-                        search_tab: props.search_tab,
-                        on_search_tab_change: props.on_search_tab_change,
-                        search_artist: props.search_artist.clone(),
-                        on_artist_change: props.on_artist_change,
-                        search_album: props.search_album.clone(),
-                        on_album_change: props.on_album_change,
-                        search_year: props.search_year.clone(),
-                        on_year_change: props.on_year_change,
-                        search_label: props.search_label.clone(),
-                        on_label_change: props.on_label_change,
-                        search_catalog_number: props.search_catalog_number.clone(),
-                        on_catalog_number_change: props.on_catalog_number_change,
-                        search_barcode: props.search_barcode.clone(),
-                        on_barcode_change: props.on_barcode_change,
-                        is_searching: props.is_searching,
-                        search_error: props.search_error.clone(),
-                        has_searched: props.has_searched,
-                        manual_match_candidates: props.manual_match_candidates.clone(),
-                        on_manual_match_select: props.on_manual_match_select,
-                        on_search: props.on_search,
-                        on_manual_confirm: props.on_manual_confirm,
-                        discid_lookup_error: props.discid_lookup_error.clone(),
-                        is_retrying_discid_lookup: props.is_retrying_discid_lookup,
-                        on_retry_discid_lookup: props.on_retry_discid_lookup,
-                    }
-                },
-                WizardStep::Confirm => rsx! {
-                    if let Some(ref candidate) = props.confirmed_candidate {
-                        ConfirmStep {
-                            folder_path: props.folder_path.clone(),
-                            folder_files: props.folder_files.clone(),
-                            image_data: props.image_data.clone(),
-                            text_file_contents: props.text_file_contents.clone(),
-                            on_clear: props.on_clear,
-                            on_reveal: props.on_reveal,
-                            confirmed_candidate: candidate.clone(),
-                            selected_cover: props.selected_cover.clone(),
-                            display_cover_url: props.display_cover_url.clone(),
-                            artwork_files: props.artwork_files.clone(),
-                            storage_profiles: props.storage_profiles.clone(),
-                            selected_profile_id: props.selected_profile_id.clone(),
-                            is_importing: props.is_importing,
-                            preparing_step_text: props.preparing_step_text.clone(),
-                            on_select_remote_cover: props.on_select_remote_cover,
-                            on_select_local_cover: props.on_select_local_cover,
-                            on_storage_profile_change: props.on_storage_profile_change,
-                            on_edit: props.on_edit,
-                            on_confirm: props.on_confirm,
-                            on_configure_storage: props.on_configure_storage,
-                            import_error: props.import_error.clone(),
-                            duplicate_album_id: props.duplicate_album_id.clone(),
-                            on_view_duplicate: props.on_view_duplicate,
+        div { class: "flex flex-grow h-full bg-surface-base",
+            // Left sidebar - floating panel (resizable)
+            ResizablePanel {
+                storage_key: "import-sidebar-width",
+                min_size: MIN_SIDEBAR_WIDTH,
+                max_size: MAX_SIDEBAR_WIDTH,
+                default_size: DEFAULT_SIDEBAR_WIDTH,
+                grabber_span_ratio: 0.95,
+                direction: ResizeDirection::Horizontal,
+                ReleaseSidebarView {
+                    candidates: props.detected_candidates.clone(),
+                    selected_index: props.selected_candidate_index,
+                    on_select: props.on_release_select,
+                    on_add_folder: props.on_folder_select_click,
+                    on_remove: props.on_remove_release,
+                    on_clear_all: props.on_clear_all_releases,
+                    is_scanning: props.is_scanning_candidates,
+                }
+            }
+
+            // Right main area - flex column with scrollable top and fixed bottom
+            div { class: "flex-1 flex flex-col min-w-0",
+                if props.detected_candidates.is_empty() {
+                    if props.is_scanning_candidates {
+                        div { class: "flex-1 flex items-center justify-center px-6 py-4",
+                            div { class: "w-full max-w-3xl text-center space-y-3",
+                                LoaderIcon { class: "w-5 h-5 text-gray-400 animate-spin mx-auto" }
+                                p { class: "text-sm text-gray-400", "Scanning folder for releases..." }
+                            }
+                        }
+                    } else {
+                        div { class: "flex-1 flex items-center justify-center px-6 py-4",
+                            div { class: "w-full max-w-3xl text-center space-y-4",
+                                button {
+                                    class: "px-4 py-2 text-sm font-medium text-gray-200 bg-white/5 hover:bg-white/10 rounded-md transition-colors inline-flex items-center gap-2",
+                                    onclick: move |_| props.on_folder_select_click.call(()),
+                                    FolderIcon { class: "w-4 h-4" }
+                                    "Select a folder"
+                                }
+                                p { class: "text-sm text-gray-400",
+                                    "We'll scan the folder for possible releases to import"
+                                }
+                            }
                         }
                     }
-                },
+                } else {
+                    // Top section: Workflow content (scrollable)
+                    div { class: "flex-1 overflow-y-auto px-6 py-4",
+                        div { class: "mx-auto w-full max-w-5xl",
+                            match props.step {
+                                ImportStep::Identify => rsx! {
+                                    IdentifyStep {
+                                        mode: props.identify_mode,
+                                        folder_path: props.folder_path.clone(),
+                                        folder_files: props.folder_files.clone(),
+                                        image_data: props.image_data.clone(),
+                                        on_clear: props.on_clear,
+                                        on_reveal: props.on_reveal,
+                                        on_skip_detection: props.on_skip_detection,
+                                        exact_match_candidates: props.exact_match_candidates.clone(),
+                                        selected_match_index: props.selected_match_index,
+                                        on_exact_match_select: props.on_exact_match_select,
+                                        detected_metadata: props.detected_metadata.clone(),
+                                        search_source: props.search_source,
+                                        on_search_source_change: props.on_search_source_change,
+                                        search_tab: props.search_tab,
+                                        on_search_tab_change: props.on_search_tab_change,
+                                        search_artist: props.search_artist.clone(),
+                                        on_artist_change: props.on_artist_change,
+                                        search_album: props.search_album.clone(),
+                                        on_album_change: props.on_album_change,
+                                        search_year: props.search_year.clone(),
+                                        on_year_change: props.on_year_change,
+                                        search_label: props.search_label.clone(),
+                                        on_label_change: props.on_label_change,
+                                        search_catalog_number: props.search_catalog_number.clone(),
+                                        on_catalog_number_change: props.on_catalog_number_change,
+                                        search_barcode: props.search_barcode.clone(),
+                                        on_barcode_change: props.on_barcode_change,
+                                        is_searching: props.is_searching,
+                                        search_error: props.search_error.clone(),
+                                        has_searched: props.has_searched,
+                                        manual_match_candidates: props.manual_match_candidates.clone(),
+                                        on_manual_match_select: props.on_manual_match_select,
+                                        on_search: props.on_search,
+                                        on_manual_confirm: props.on_manual_confirm,
+                                        discid_lookup_error: props.discid_lookup_error.clone(),
+                                        is_retrying_discid_lookup: props.is_retrying_discid_lookup,
+                                        on_retry_discid_lookup: props.on_retry_discid_lookup,
+                                    }
+                                },
+                                ImportStep::Confirm => rsx! {
+                                    if let Some(ref candidate) = props.confirmed_candidate {
+                                        ConfirmStep {
+                                            folder_path: props.folder_path.clone(),
+                                            folder_files: props.folder_files.clone(),
+                                            image_data: props.image_data.clone(),
+                                            on_clear: props.on_clear,
+                                            on_reveal: props.on_reveal,
+                                            confirmed_candidate: candidate.clone(),
+                                            selected_cover: props.selected_cover.clone(),
+                                            display_cover_url: props.display_cover_url.clone(),
+                                            artwork_files: props.artwork_files.clone(),
+                                            storage_profiles: props.storage_profiles.clone(),
+                                            selected_profile_id: props.selected_profile_id.clone(),
+                                            is_importing: props.is_importing,
+                                            preparing_step_text: props.preparing_step_text.clone(),
+                                            on_select_remote_cover: props.on_select_remote_cover,
+                                            on_select_local_cover: props.on_select_local_cover,
+                                            on_storage_profile_change: props.on_storage_profile_change,
+                                            on_edit: props.on_edit,
+                                            on_confirm: props.on_confirm,
+                                            on_configure_storage: props.on_configure_storage,
+                                            import_error: props.import_error.clone(),
+                                            duplicate_album_id: props.duplicate_album_id.clone(),
+                                            on_view_duplicate: props.on_view_duplicate,
+                                        }
+                                    }
+                                },
+                            }
+                        }
+                    }
+                    // Bottom section: File display dock
+                    // Files are guaranteed to be present - state machine requires them by construction
+                    FilesDock {
+                        files: props.folder_files.clone(),
+                        image_data: props.image_data.clone(),
+                        selected_text_file: props.selected_text_file.clone(),
+                        text_file_content: props.text_file_content.clone(),
+                        on_text_file_select: props.on_text_file_select,
+                        on_text_file_close: props.on_text_file_close,
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Resizable bottom dock showing files from the folder being imported
+#[component]
+fn FilesDock(
+    files: CategorizedFileInfo,
+    image_data: Vec<(String, String)>,
+    selected_text_file: Option<String>,
+    text_file_content: Option<String>,
+    on_text_file_select: EventHandler<String>,
+    on_text_file_close: EventHandler<()>,
+) -> Element {
+    rsx! {
+        ResizablePanel {
+            storage_key: "import-files-dock-height",
+            min_size: 156.0,
+            max_size: 250.0,
+            default_size: 156.0,
+            grabber_span_ratio: 0.95,
+            direction: ResizeDirection::Vertical,
+            DockCard { title: "Files", class: "w-fit max-w-3xl",
+                SmartFileDisplayView {
+                    files,
+                    image_data,
+                    selected_text_file,
+                    text_file_content,
+                    on_text_file_select,
+                    on_text_file_close,
+                }
+            }
+        }
+    }
+}
+
+/// Centered card container with title header
+#[component]
+fn DockCard(
+    title: &'static str,
+    #[props(default = "")] class: &'static str,
+    children: Element,
+) -> Element {
+    rsx! {
+        div { class: "p-3 flex justify-center h-full",
+            div { class: "h-full bg-surface-raised rounded-2xl shadow-lg shadow-black/10 px-4 py-3 overflow-y-auto {class}",
+                div { class: "text-xs font-medium text-gray-300 mb-2", "{title}" }
+                {children}
             }
         }
     }

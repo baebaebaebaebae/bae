@@ -11,14 +11,12 @@ pub fn ImportView(
     children: Element,
 ) -> Element {
     rsx! {
-        div { class: "max-w-4xl mx-auto p-6",
-            div { class: "mb-6",
-                h1 { class: "text-2xl font-bold text-white", "Import" }
-            }
-            div { class: "bg-gray-900 rounded-lg shadow p-4",
+        div { class: "h-full flex flex-col flex-grow",
+            div { class: "pt-6 px-7 pb-2 flex items-center gap-6",
+                h1 { class: "text-3xl font-bold text-white", "Import" }
                 ImportSourceSelectorView { selected_source, on_source_select }
-                {children}
             }
+            div { class: "flex-1 min-h-0 flex flex-col px-3", {children} }
         }
     }
 }

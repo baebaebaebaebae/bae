@@ -1,0 +1,4 @@
+Avoid `#[default]` and `#[derive(Default)]` for enums and UI display types.
+
+Prefer explicit initialization at call sites instead of implicit defaults.
+If a default is truly required, consult the user first and explain why.

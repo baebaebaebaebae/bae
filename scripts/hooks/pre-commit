@@ -9,7 +9,21 @@ set -e
 #   bae-mocks: depends on bae-ui
 
 TMPFILE=$(mktemp)
-trap "rm -f $TMPFILE" EXIT
+STASHED=0
+
+cleanup() {
+    rm -f "$TMPFILE"
+    if [ "$STASHED" -eq 1 ]; then
+        git stash pop -q 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+
+# Stash unstaged changes so checks only run against staged code
+if ! git diff --quiet; then
+    git stash -q --keep-index
+    STASHED=1
+fi
 
 # Get changed files (staged for commit)
 CHANGED_FILES=$(git --no-pager diff --cached --name-only)

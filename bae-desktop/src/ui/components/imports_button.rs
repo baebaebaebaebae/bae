@@ -1,19 +1,21 @@
 //! Imports button wrapper
 //!
-//! Thin wrapper that bridges ActiveImportsState context to ImportsButtonView.
+//! Thin wrapper that bridges App state to ImportsButtonView.
 
-use super::active_imports_context::use_active_imports;
+use crate::ui::app_service::use_app;
 use crate::ui::image_url;
-use bae_core::db::ImportOperationStatus;
 use bae_ui::display_types::{ActiveImport as DisplayActiveImport, ImportStatus};
+use bae_ui::stores::{ActiveImportsUiStateStoreExt, AppStateStoreExt, ImportOperationStatus};
 use bae_ui::ImportsButtonView;
 use dioxus::prelude::*;
 
 /// Button in title bar that shows active imports count and toggles dropdown
 #[component]
 pub fn ImportsButton(mut is_open: Signal<bool>) -> Element {
-    let active_imports = use_active_imports();
-    let imports = active_imports.imports.read();
+    let app = use_app();
+    let active_imports_store = app.state.active_imports();
+    let imports_store = active_imports_store.imports();
+    let imports = imports_store.read();
 
     // Convert to display types
     let display_imports: Vec<DisplayActiveImport> = imports
@@ -30,12 +32,13 @@ pub fn ImportsButton(mut is_open: Signal<bool>) -> Element {
                 album_title: i.album_title.clone(),
                 artist_name: i.artist_name.clone(),
                 status: match i.status {
+                    ImportOperationStatus::Pending => ImportStatus::Preparing,
                     ImportOperationStatus::Preparing => ImportStatus::Preparing,
                     ImportOperationStatus::Importing => ImportStatus::Importing,
                     ImportOperationStatus::Complete => ImportStatus::Complete,
                     ImportOperationStatus::Failed => ImportStatus::Failed,
                 },
-                current_step_text: i.current_step.map(|s| s.display_text().to_string()),
+                current_step_text: i.current_step.map(|s| format!("{:?}", s)),
                 progress_percent: i.progress_percent,
                 release_id: i.release_id.clone(),
                 cover_url,

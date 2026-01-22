@@ -4,6 +4,8 @@
 //! only the fields needed for display. They enable props-based components
 //! that can work with either real or demo data.
 
+use dioxus::prelude::*;
+
 /// Album display info
 #[derive(Clone, Debug, PartialEq)]
 pub struct Album {
@@ -22,10 +24,9 @@ pub struct Artist {
 }
 
 /// Track import state for UI display
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TrackImportState {
     /// Track import not started or not applicable
-    #[default]
     None,
     /// Track is being imported with progress percentage
     Importing(u8),
@@ -47,9 +48,8 @@ pub struct Track {
 }
 
 /// Playback display state
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PlaybackDisplay {
-    #[default]
     Stopped,
     Loading {
         track_id: String,
@@ -75,7 +75,7 @@ pub struct QueueItem {
 }
 
 /// Release display info
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Release {
     pub id: String,
     pub album_id: String,
@@ -109,9 +109,8 @@ pub struct Image {
 }
 
 /// Import operation status for UI display
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ImportStatus {
-    #[default]
     Preparing,
     Importing,
     Complete,
@@ -136,40 +135,28 @@ pub struct ActiveImport {
 // Import Workflow Display Types
 // ============================================================================
 
-/// Wizard step for folder import workflow
+/// Import step for import workflows
 ///
-/// The import workflow is a 3-step wizard:
-/// 1. SelectSource - User picks a folder (and selects releases if multi-release)
-/// 2. Identify - System identifies the music; user disambiguates or searches if needed
-/// 3. Confirm - User reviews match, selects cover/profile, and imports
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
-pub enum WizardStep {
-    #[default]
-    SelectSource,
+/// The import workflow is a 2-step flow:
+/// 1. Identify - Select source and identify the music; user disambiguates or searches if needed
+/// 2. Confirm - User reviews match, selects cover/profile, and imports
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ImportStep {
     Identify,
     Confirm,
 }
 
 /// Mode within the Identify step
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum IdentifyMode {
-    /// System is detecting metadata (loading state)
-    #[default]
-    Detecting,
+    /// Candidate created but lookup not started yet
+    Created,
+    /// Looking up release by DiscID (network call in flight)
+    DiscIdLookup,
     /// DiscID matched multiple candidates; user picks one
-    ExactLookup,
+    MultipleExactMatches,
     /// No exact match; user searches manually
     ManualSearch,
-}
-
-/// Sub-mode within SelectSource step
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
-pub enum SelectSourceMode {
-    /// User needs to select a folder
-    #[default]
-    FolderSelection,
-    /// Folder has multiple releases; user picks which to import
-    ReleaseSelection,
 }
 
 /// Search tab for manual search panel
@@ -197,7 +184,7 @@ pub enum MatchSourceType {
 }
 
 /// Match candidate for UI display
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Store)]
 pub struct MatchCandidate {
     pub title: String,
     pub artist: String,
@@ -210,23 +197,34 @@ pub struct MatchCandidate {
     pub source_type: MatchSourceType,
     /// Original year / first release date (for MusicBrainz)
     pub original_year: Option<String>,
+    // IDs for import workflow
+    /// MusicBrainz release ID
+    pub musicbrainz_release_id: Option<String>,
+    /// MusicBrainz release group ID
+    pub musicbrainz_release_group_id: Option<String>,
+    /// Discogs release ID
+    pub discogs_release_id: Option<String>,
+    /// Discogs master ID
+    pub discogs_master_id: Option<String>,
 }
 
 /// Detected folder metadata for UI display
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Store)]
 pub struct FolderMetadata {
     pub artist: Option<String>,
     pub album: Option<String>,
     pub year: Option<u32>,
     pub track_count: Option<u32>,
     pub discid: Option<String>,
+    /// MusicBrainz DiscID (used for exact lookup retry)
+    pub mb_discid: Option<String>,
     pub confidence: f32,
     /// Tokens extracted from folder name for search suggestions
     pub folder_tokens: Vec<String>,
 }
 
 /// File info for UI display (simplified)
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Store)]
 pub struct FileInfo {
     pub name: String,
     pub size: u64,
@@ -234,7 +232,7 @@ pub struct FileInfo {
 }
 
 /// Artwork file info with display URL
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Store)]
 pub struct ArtworkFile {
     pub name: String,
     /// URL to display the artwork (resolved by caller)
@@ -242,7 +240,7 @@ pub struct ArtworkFile {
 }
 
 /// A CUE/FLAC pair for UI display
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Store)]
 pub struct CueFlacPairInfo {
     pub cue_name: String,
     pub flac_name: String,
@@ -251,7 +249,7 @@ pub struct CueFlacPairInfo {
 }
 
 /// Audio content type for UI display
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Store)]
 pub enum AudioContentInfo {
     /// One or more CUE/FLAC pairs
     CueFlacPairs(Vec<CueFlacPairInfo>),
@@ -266,7 +264,7 @@ impl Default for AudioContentInfo {
 }
 
 /// Pre-categorized files for UI display
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Store)]
 pub struct CategorizedFileInfo {
     /// Audio content - CUE/FLAC pairs or track files
     pub audio: AudioContentInfo,
@@ -302,7 +300,7 @@ pub struct TorrentFileInfo {
 }
 
 /// Torrent info for UI display
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TorrentInfo {
     pub name: String,
     pub trackers: Vec<String>,
@@ -325,7 +323,7 @@ pub struct StorageProfileInfo {
 }
 
 /// Selected cover for import UI
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Store)]
 pub enum SelectedCover {
     /// Remote cover from MusicBrainz/Discogs
     Remote { url: String, source: String },
@@ -333,11 +331,27 @@ pub enum SelectedCover {
     Local { filename: String },
 }
 
-/// Detected release (subfolder) for multi-release import
-#[derive(Clone, Debug, PartialEq)]
-pub struct DetectedRelease {
+/// Status of a detected candidate during import
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum DetectedCandidateStatus {
+    #[default]
+    Pending,
+    /// Import in progress (preparing or importing)
+    Importing,
+    /// Import completed successfully
+    Imported,
+}
+
+/// Detected candidate (album folder) for import.
+/// Called "candidate" because it hasn't been identified yet.
+#[derive(Clone, Debug, PartialEq, Store)]
+pub struct DetectedCandidate {
+    /// Display name (e.g., "The Midnight Signal - Neon Frequencies")
     pub name: String,
+    /// Full path to the candidate folder
     pub path: String,
+    /// Import status
+    pub status: DetectedCandidateStatus,
 }
 
 /// CD drive info for selection UI

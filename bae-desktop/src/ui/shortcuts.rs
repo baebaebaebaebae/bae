@@ -1,0 +1,89 @@
+//! App-level keyboard shortcuts
+//!
+//! Maps Cmd+N (macOS) / Ctrl+N (Windows/Linux) to navigation actions.
+//! Also provides a mechanism for native menus to request navigation.
+
+use crate::ui::Route;
+use dioxus::prelude::*;
+use std::sync::OnceLock;
+use tokio::sync::broadcast;
+
+/// Navigation actions that can be triggered by shortcuts or menus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NavAction {
+    Back,
+    Forward,
+    GoTo(NavTarget),
+}
+
+/// Navigation targets for direct routing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NavTarget {
+    Library,
+    Import,
+}
+
+impl NavTarget {
+    pub fn to_route(self) -> Route {
+        match self {
+            NavTarget::Library => Route::Library {},
+            NavTarget::Import => Route::ImportWorkflowManager {},
+        }
+    }
+}
+
+static NAV_SENDER: OnceLock<broadcast::Sender<NavAction>> = OnceLock::new();
+
+/// Initialize the navigation channel. Call once at startup.
+pub fn init_nav_channel() {
+    let (tx, _rx) = broadcast::channel(16);
+    NAV_SENDER.set(tx).expect("nav channel already initialized");
+}
+
+/// Subscribe to navigation actions. Can be called multiple times (survives remounts).
+pub fn subscribe_nav() -> broadcast::Receiver<NavAction> {
+    NAV_SENDER
+        .get()
+        .expect("nav channel not initialized")
+        .subscribe()
+}
+
+/// Request a navigation action (called from native menu handlers).
+/// On macOS, dispatches to main thread via GCD.
+#[cfg(target_os = "macos")]
+pub fn request_nav(action: NavAction) {
+    dispatch::Queue::main().exec_async(move || {
+        if let Some(tx) = NAV_SENDER.get() {
+            let _ = tx.send(action);
+        }
+    });
+}
+
+/// Check if the platform modifier key is pressed (Cmd on macOS, Ctrl elsewhere).
+fn has_platform_modifier(evt: &KeyboardEvent) -> bool {
+    let mods = evt.modifiers();
+    #[cfg(target_os = "macos")]
+    {
+        mods.meta() && !mods.ctrl() && !mods.alt() && !mods.shift()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        mods.ctrl() && !mods.meta() && !mods.alt() && !mods.shift()
+    }
+}
+
+/// Try to handle a keyboard event as an app shortcut.
+/// Returns `Some(NavAction)` if the event matches a shortcut, `None` otherwise.
+pub fn handle_shortcut(evt: &KeyboardEvent) -> Option<NavAction> {
+    if !has_platform_modifier(evt) {
+        return None;
+    }
+
+    match evt.key() {
+        Key::Character(c) if c == "1" => Some(NavAction::GoTo(NavTarget::Library)),
+        Key::Character(c) if c == "2" => Some(NavAction::GoTo(NavTarget::Import)),
+        Key::Character(c) if c == "[" => Some(NavAction::Back),
+        Key::Character(c) if c == "]" => Some(NavAction::Forward),
+        _ => None,
+    }
+}

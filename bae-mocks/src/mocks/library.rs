@@ -33,21 +33,28 @@ pub fn LibraryMock(initial_state: Option<String>) -> Element {
 
     registry.use_url_sync_library();
 
-    let state = registry.get_string("state");
+    let ui_state = registry.get_string("state");
     let album_count = registry.get_int("albums") as usize;
 
-    let loading = state == "Loading";
-    let error = if state == "Error" {
-        Some("Failed to load library: Database connection error".to_string())
-    } else {
-        None
-    };
+    let ui_state_for_loading = ui_state.clone();
+    let ui_state_for_error = ui_state.clone();
+    let loading = use_memo(move || ui_state_for_loading == "Loading");
+    let error = use_memo(move || {
+        if ui_state_for_error == "Error" {
+            Some("Failed to load library: Database connection error".to_string())
+        } else {
+            None
+        }
+    });
 
-    let (albums, artists_by_album) = if state == "Populated" {
+    let (album_data, artist_data) = if ui_state == "Populated" {
         mock_albums_with_artists(album_count)
     } else {
         (vec![], HashMap::new())
     };
+
+    let albums = use_memo(move || album_data.clone());
+    let artists_by_album = use_memo(move || artist_data.clone());
 
     let cycle_val = cycle();
 

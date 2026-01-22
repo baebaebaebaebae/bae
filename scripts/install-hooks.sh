@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Install git hooks from scripts/hooks to .git/hooks
+# Install git hooks from scripts/hooks to .git/hooks as symlinks
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOOKS_DIR="$SCRIPT_DIR/hooks"
@@ -11,12 +11,12 @@ echo "Installing git hooks..."
 for hook in "$HOOKS_DIR"/*; do
     if [ -f "$hook" ]; then
         hook_name=$(basename "$hook")
-        cp "$hook" "$GIT_HOOKS_DIR/$hook_name"
-        chmod +x "$GIT_HOOKS_DIR/$hook_name"
-        echo "✅ Installed $hook_name"
+        target="$GIT_HOOKS_DIR/$hook_name"
+        rm -f "$target"
+        ln -s "$hook" "$target"
+        echo "✅ Installed $hook_name (symlink)"
     fi
 done
 
 echo ""
 echo "Git hooks installed successfully!"
-

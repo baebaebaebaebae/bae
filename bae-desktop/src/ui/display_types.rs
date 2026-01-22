@@ -2,10 +2,9 @@
 
 use crate::ui::image_url;
 use bae_core::db::{DbAlbum, DbArtist, DbRelease, DbTrack, ImportStatus};
-use bae_core::playback::PlaybackState;
 
 // Re-export bae-ui types so existing code continues to work
-pub use bae_ui::{Album, Artist, PlaybackDisplay, QueueItem, Release, Track, TrackImportState};
+pub use bae_ui::{Album, Artist, Release, Track, TrackImportState};
 
 pub fn album_from_db_ref(db: &DbAlbum) -> Album {
     let cover_url = db
@@ -43,35 +42,6 @@ pub fn track_from_db_ref(db: &DbTrack) -> Track {
             TrackImportState::Complete
         } else {
             TrackImportState::None
-        },
-    }
-}
-
-pub fn playback_display_from_state(state: &PlaybackState) -> PlaybackDisplay {
-    match state {
-        PlaybackState::Stopped => PlaybackDisplay::Stopped,
-        PlaybackState::Loading { track_id } => PlaybackDisplay::Loading {
-            track_id: track_id.clone(),
-        },
-        PlaybackState::Playing {
-            track,
-            position,
-            duration,
-            ..
-        } => PlaybackDisplay::Playing {
-            track_id: track.id.clone(),
-            position_ms: position.as_millis() as u64,
-            duration_ms: duration.map(|d| d.as_millis() as u64).unwrap_or(0),
-        },
-        PlaybackState::Paused {
-            track,
-            position,
-            duration,
-            ..
-        } => PlaybackDisplay::Paused {
-            track_id: track.id.clone(),
-            position_ms: position.as_millis() as u64,
-            duration_ms: duration.map(|d| d.as_millis() as u64).unwrap_or(0),
         },
     }
 }

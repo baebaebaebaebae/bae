@@ -1,4 +1,4 @@
-//! Recursive folder scanner with leaf detection for multi-release imports.
+//! Recursive folder scanner with leaf detection for imports.
 //!
 //! Supports three folder structures:
 //! 1. Single release (flat) - audio files in root, optional artwork subfolders
@@ -57,9 +57,10 @@ pub struct CategorizedFiles {
     /// Everything else
     pub other: Vec<ScannedFile>,
 }
-/// A detected release (leaf directory) in a collection
+/// A detected candidate (leaf directory) in a collection.
+/// Called "candidate" because it hasn't been identified yet.
 #[derive(Debug, Clone)]
-pub struct DetectedRelease {
+pub struct DetectedCandidate {
     /// Root path of this release
     pub path: PathBuf,
     /// Display name (derived from folder name)
@@ -102,24 +103,18 @@ fn is_noise_file(path: &Path) -> bool {
         .map(|name| name == ".DS_Store" || name == "Thumbs.db" || name == "desktop.ini")
         .unwrap_or(false)
 }
-/// Check if a directory contains audio files directly
+/// Check if a directory contains audio files directly (ignores 0-byte files)
 fn has_audio_files(dir: &Path) -> Result<bool, String> {
     let entries = fs::read_dir(dir).map_err(|e| format!("Failed to read dir {:?}: {}", dir, e))?;
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_file() && is_audio_file(&path) {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-/// Check if a directory has CUE files directly
-fn has_cue_files(dir: &Path) -> Result<bool, String> {
-    let entries = fs::read_dir(dir).map_err(|e| format!("Failed to read dir {:?}: {}", dir, e))?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() && is_cue_file(&path) {
-            return Ok(true);
+            // Skip 0-byte files (incomplete downloads)
+            if let Ok(metadata) = entry.metadata() {
+                if metadata.len() > 0 {
+                    return Ok(true);
+                }
+            }
         }
     }
     Ok(false)
@@ -146,25 +141,93 @@ fn has_nested_audio_dirs(dir: &Path) -> Result<bool, String> {
     }
     Ok(false)
 }
+
+/// Find the longest common prefix of a list of strings (case-insensitive)
+fn longest_common_prefix(names: &[String]) -> String {
+    if names.is_empty() {
+        return String::new();
+    }
+    let first = names[0].to_lowercase();
+    let mut prefix_len = first.len();
+
+    for name in &names[1..] {
+        let name_lower = name.to_lowercase();
+        prefix_len = first
+            .chars()
+            .zip(name_lower.chars())
+            .take(prefix_len)
+            .take_while(|(a, b)| a == b)
+            .count();
+        if prefix_len == 0 {
+            break;
+        }
+    }
+
+    first[..prefix_len].to_string()
+}
+
+/// Maximum length for a folder name to be considered a "disc folder"
+/// Album titles are typically longer than this
+const MAX_DISC_FOLDER_NAME_LENGTH: usize = 15;
+
+/// Check if all audio-containing subdirectories look like disc folders.
+/// Uses a heuristic: disc folders are SHORT and share a common prefix.
+fn subdirs_are_disc_folders(dir: &Path) -> Result<bool, String> {
+    let entries = fs::read_dir(dir).map_err(|e| format!("Failed to read dir {:?}: {}", dir, e))?;
+    let mut subdir_names: Vec<String> = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() && has_audio_files(&path)? {
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            subdir_names.push(name);
+        }
+    }
+
+    if subdir_names.is_empty() {
+        return Ok(false);
+    }
+
+    // All just numbers? (1, 2, 3 or 01, 02, 03)
+    if subdir_names
+        .iter()
+        .all(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+    {
+        return Ok(true);
+    }
+
+    // Check if names are short (disc folders are typically short)
+    let all_short = subdir_names
+        .iter()
+        .all(|n| n.len() <= MAX_DISC_FOLDER_NAME_LENGTH);
+    if !all_short {
+        return Ok(false);
+    }
+
+    // Check for a meaningful common prefix (at least 2 chars)
+    let prefix = longest_common_prefix(&subdir_names);
+    Ok(prefix.len() >= 2)
+}
+
 /// Determine if a directory is a leaf (single release).
 ///
 /// A directory is a leaf if:
-/// - Has audio files directly in it, OR
-/// - Has CUE files, OR
-/// - Has subdirectories containing audio files, but those subdirectories don't have
-///   their own subdirectories with audio files (multi-disc case)
+/// - Has FLAC audio files directly in it, OR
+/// - Has subdirectories that look like disc folders (CD1, Disc 2, etc.) containing audio
 fn is_leaf_directory(dir: &Path) -> Result<bool, String> {
     if has_audio_files(dir)? {
         debug!("Directory {:?} is a leaf (has audio files)", dir);
         return Ok(true);
     }
-    if has_cue_files(dir)? {
-        debug!("Directory {:?} is a leaf (has CUE files)", dir);
-        return Ok(true);
-    }
-    if has_subdirs_with_audio(dir)? && !has_nested_audio_dirs(dir)? {
+    // Only treat as multi-disc if subdirs look like disc folders (CD1, Disc 2, etc.)
+    // This prevents album collections from being treated as a single release
+    if subdirs_are_disc_folders(dir)? && !has_nested_audio_dirs(dir)? {
         debug!(
-            "Directory {:?} is a leaf (has subdirs with audio, no nesting)",
+            "Directory {:?} is a leaf (has disc subfolders with audio)",
             dir
         );
         return Ok(true);
@@ -172,12 +235,15 @@ fn is_leaf_directory(dir: &Path) -> Result<bool, String> {
     debug!("Directory {:?} is not a leaf", dir);
     Ok(false)
 }
-/// Recursively scan for release leaves in a folder tree
-fn scan_recursive(
+/// Recursively scan for release leaves in a folder tree, emitting as found.
+fn scan_recursive_with_callback<F>(
     dir: &Path,
     depth: usize,
-    releases: &mut Vec<DetectedRelease>,
-) -> Result<(), String> {
+    on_candidate: &mut F,
+) -> Result<(), String>
+where
+    F: FnMut(DetectedCandidate),
+{
     if depth > MAX_RECURSION_DEPTH {
         warn!(
             "Max recursion depth {} reached at {:?}, stopping",
@@ -191,9 +257,9 @@ fn scan_recursive(
             .and_then(|n| n.to_str())
             .unwrap_or("Unknown")
             .to_string();
-        info!("Found release leaf: {:?}", dir);
+        info!("Found candidate leaf: {:?}", dir);
         let files = collect_release_files(dir)?;
-        releases.push(DetectedRelease {
+        on_candidate(DetectedCandidate {
             path: dir.to_path_buf(),
             name,
             files,
@@ -204,20 +270,22 @@ fn scan_recursive(
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            scan_recursive(&path, depth + 1, releases)?;
+            scan_recursive_with_callback(&path, depth + 1, on_candidate)?;
         }
     }
     Ok(())
 }
-/// Scan a folder for releases (leaf directories)
-///
-/// Returns a list of detected releases. Each release is a leaf in the folder tree.
-pub fn scan_for_releases(root: PathBuf) -> Result<Vec<DetectedRelease>, String> {
-    info!("Scanning for releases in: {:?}", root);
-    let mut releases = Vec::new();
-    scan_recursive(&root, 0, &mut releases)?;
-    info!("Found {} release(s)", releases.len());
-    Ok(releases)
+/// Scan a folder for candidates and invoke callback as each is found.
+pub fn scan_for_candidates_with_callback<F>(
+    root: PathBuf,
+    mut on_candidate: F,
+) -> Result<(), String>
+where
+    F: FnMut(DetectedCandidate),
+{
+    info!("Scanning for candidates in: {:?}", root);
+    scan_recursive_with_callback(&root, 0, &mut on_candidate)?;
+    Ok(())
 }
 /// Collect all files from a release directory and categorize them
 ///
@@ -338,6 +406,12 @@ fn collect_files_into_vectors(
                 .metadata()
                 .map_err(|e| format!("Failed to read metadata for {:?}: {}", path, e))?
                 .len();
+
+            // Skip 0-byte audio files (incomplete downloads from torrent clients)
+            if is_audio_file(&path) && size == 0 {
+                continue;
+            }
+
             let relative_path = path
                 .strip_prefix(release_root)
                 .map_err(|e| format!("Failed to strip prefix: {}", e))?
@@ -423,5 +497,411 @@ mod tests {
         // Check nothing from hidden dirs/files leaked through
         assert!(files.documents.is_empty());
         assert!(files.other.is_empty());
+    }
+
+    /// Creates a minimal CUE file content that references the given FLAC filename
+    fn make_cue_content(flac_filename: &str, title: &str) -> String {
+        format!(
+            r#"PERFORMER "Test Artist"
+TITLE "{title}"
+FILE "{flac_filename}" WAVE
+  TRACK 01 AUDIO
+    TITLE "Track One"
+    INDEX 01 00:00:00
+  TRACK 02 AUDIO
+    TITLE "Track Two"
+    INDEX 01 05:00:00
+"#
+        )
+    }
+
+    #[test]
+    fn test_collection_of_albums_detected_as_separate_candidates() {
+        // This replicates a common layout: a collection folder containing multiple
+        // independent albums, each with its own CUE+FLAC pair.
+        //
+        // Structure:
+        //   Artist Collection/
+        //   ├── 2020 - Album One [CAT001]/
+        //   │   ├── Artist - Album One.cue
+        //   │   ├── Artist - Album One.flac
+        //   │   └── cover.jpg
+        //   ├── 2021 - Album Two [CAT002]/
+        //   │   └── ...
+        //   └── 2022 - Album Three [CAT003]/
+        //       └── ...
+        //
+        // Each subdirectory should be detected as a separate candidate (3 total),
+        // NOT as a single multi-disc release.
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("Artist Collection");
+        std::fs::create_dir(&root).unwrap();
+
+        let albums = [
+            ("2020 - Album One [CAT001]", "Artist - Album One"),
+            ("2021 - Album Two [CAT002]", "Artist - Album Two"),
+            ("2022 - Album Three [CAT003]", "Artist - Album Three"),
+        ];
+
+        for (folder_name, file_base) in &albums {
+            let album_dir = root.join(folder_name);
+            std::fs::create_dir(&album_dir).unwrap();
+
+            let flac_name = format!("{}.flac", file_base);
+            let cue_name = format!("{}.cue", file_base);
+
+            std::fs::write(album_dir.join(&flac_name), b"fake flac data").unwrap();
+            std::fs::write(
+                album_dir.join(&cue_name),
+                make_cue_content(&flac_name, file_base),
+            )
+            .unwrap();
+            std::fs::write(album_dir.join("cover.jpg"), b"fake image").unwrap();
+        }
+
+        let mut candidates = Vec::new();
+        scan_for_candidates_with_callback(root, |c| candidates.push(c)).unwrap();
+
+        // We expect 3 separate candidates, one per album
+        assert_eq!(
+            candidates.len(),
+            3,
+            "Expected 3 separate album candidates, got {}. \
+             The scanner is incorrectly treating a collection as a single multi-disc release.",
+            candidates.len()
+        );
+
+        // Each candidate should have exactly 1 CUE/FLAC pair
+        for candidate in &candidates {
+            match &candidate.files.audio {
+                AudioContent::CueFlacPairs(pairs) => {
+                    assert_eq!(
+                        pairs.len(),
+                        1,
+                        "Each album should have exactly 1 CUE/FLAC pair"
+                    );
+                }
+                AudioContent::TrackFiles(_) => {
+                    panic!(
+                        "Expected CUE/FLAC pairs, got track files for {}",
+                        candidate.name
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_multi_disc_release_detected_as_single_candidate() {
+        // A multi-disc release with CD1/CD2 subfolders should be detected as ONE candidate.
+        //
+        // Structure:
+        //   Multi Disc Album/
+        //   ├── CD1/
+        //   │   ├── Artist - Album CD1.cue
+        //   │   └── Artist - Album CD1.flac
+        //   └── CD2/
+        //       ├── Artist - Album CD2.cue
+        //       └── Artist - Album CD2.flac
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("Multi Disc Album");
+        std::fs::create_dir(&root).unwrap();
+
+        let discs = [("CD1", "Artist - Album CD1"), ("CD2", "Artist - Album CD2")];
+
+        for (folder_name, file_base) in &discs {
+            let disc_dir = root.join(folder_name);
+            std::fs::create_dir(&disc_dir).unwrap();
+
+            let flac_name = format!("{}.flac", file_base);
+            let cue_name = format!("{}.cue", file_base);
+
+            std::fs::write(disc_dir.join(&flac_name), b"fake flac data").unwrap();
+            std::fs::write(
+                disc_dir.join(&cue_name),
+                make_cue_content(&flac_name, file_base),
+            )
+            .unwrap();
+        }
+
+        let mut candidates = Vec::new();
+        scan_for_candidates_with_callback(root, |c| candidates.push(c)).unwrap();
+
+        // We expect 1 candidate (the multi-disc album as a whole)
+        assert_eq!(
+            candidates.len(),
+            1,
+            "Expected 1 multi-disc release candidate, got {}",
+            candidates.len()
+        );
+
+        // That candidate should have 2 CUE/FLAC pairs (one per disc)
+        match &candidates[0].files.audio {
+            AudioContent::CueFlacPairs(pairs) => {
+                assert_eq!(
+                    pairs.len(),
+                    2,
+                    "Multi-disc release should have 2 CUE/FLAC pairs"
+                );
+            }
+            AudioContent::TrackFiles(_) => {
+                panic!("Expected CUE/FLAC pairs for multi-disc release");
+            }
+        }
+    }
+
+    /// Helper to create a multi-disc test structure and verify it's detected as 1 candidate
+    fn assert_multi_disc_detected(folder_names: &[&str]) {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("Test Album");
+        std::fs::create_dir(&root).unwrap();
+
+        for folder_name in folder_names {
+            let disc_dir = root.join(folder_name);
+            std::fs::create_dir(&disc_dir).unwrap();
+            std::fs::write(disc_dir.join("track.flac"), b"fake flac").unwrap();
+        }
+
+        let mut candidates = Vec::new();
+        scan_for_candidates_with_callback(root, |c| candidates.push(c)).unwrap();
+
+        assert_eq!(
+            candidates.len(),
+            1,
+            "Folders {:?} should be detected as 1 multi-disc release, got {}",
+            folder_names,
+            candidates.len()
+        );
+    }
+
+    /// Helper to create a collection test structure and verify each is a separate candidate
+    fn assert_collection_detected(folder_names: &[&str]) {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("Collection");
+        std::fs::create_dir(&root).unwrap();
+
+        for folder_name in folder_names {
+            let album_dir = root.join(folder_name);
+            std::fs::create_dir(&album_dir).unwrap();
+            std::fs::write(album_dir.join("track.flac"), b"fake flac").unwrap();
+        }
+
+        let mut candidates = Vec::new();
+        scan_for_candidates_with_callback(root, |c| candidates.push(c)).unwrap();
+
+        assert_eq!(
+            candidates.len(),
+            folder_names.len(),
+            "Folders {:?} should be detected as {} separate albums, got {}",
+            folder_names,
+            folder_names.len(),
+            candidates.len()
+        );
+    }
+
+    #[test]
+    fn test_multi_disc_disc_1_disc_2() {
+        assert_multi_disc_detected(&["Disc 1", "Disc 2"]);
+    }
+
+    #[test]
+    fn test_multi_disc_side_a_side_b() {
+        assert_multi_disc_detected(&["Side A", "Side B"]);
+    }
+
+    #[test]
+    fn test_multi_disc_numbered() {
+        assert_multi_disc_detected(&["1", "2", "3"]);
+    }
+
+    #[test]
+    fn test_multi_disc_zero_padded() {
+        assert_multi_disc_detected(&["01", "02"]);
+    }
+
+    #[test]
+    fn test_collection_year_prefixed() {
+        assert_collection_detected(&["2020 - Album One", "2021 - Album Two", "2022 - Album Three"]);
+    }
+
+    #[test]
+    fn test_collection_artist_prefixed() {
+        assert_collection_detected(&[
+            "Artist - First Album",
+            "Artist - Second Album",
+            "Artist - Third Album",
+        ]);
+    }
+
+    #[test]
+    fn test_collection_with_catalog_numbers() {
+        assert_collection_detected(&[
+            "Album One [CAT001]",
+            "Album Two [CAT002]",
+            "Album Three [CAT003]",
+        ]);
+    }
+
+    #[test]
+    fn test_cue_without_flac_not_detected() {
+        // A folder with CUE + unsupported audio (APE, WAV, etc.) should NOT be detected.
+        // We only support FLAC.
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("APE Album");
+        std::fs::create_dir(&root).unwrap();
+
+        // Create CUE file that references an APE file
+        let cue_content = r#"PERFORMER "Test Artist"
+TITLE "Test Album"
+FILE "album.ape" WAVE
+  TRACK 01 AUDIO
+    TITLE "Track One"
+    INDEX 01 00:00:00
+"#;
+        std::fs::write(root.join("album.cue"), cue_content).unwrap();
+        std::fs::write(root.join("album.ape"), b"fake ape data").unwrap();
+        std::fs::write(root.join("cover.jpg"), b"fake image").unwrap();
+
+        let mut candidates = Vec::new();
+        scan_for_candidates_with_callback(root, |c| candidates.push(c)).unwrap();
+
+        assert_eq!(
+            candidates.len(),
+            0,
+            "CUE + APE (no FLAC) should not be detected as a candidate"
+        );
+    }
+
+    #[test]
+    fn test_empty_folder_not_detected() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("Empty Album");
+        std::fs::create_dir(&root).unwrap();
+
+        let mut candidates = Vec::new();
+        scan_for_candidates_with_callback(root, |c| candidates.push(c)).unwrap();
+
+        assert_eq!(candidates.len(), 0, "Empty folder should not be detected");
+    }
+
+    #[test]
+    fn test_folder_with_only_images_not_detected() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("Just Images");
+        std::fs::create_dir(&root).unwrap();
+
+        std::fs::write(root.join("cover.jpg"), b"fake image").unwrap();
+        std::fs::write(root.join("back.png"), b"fake image").unwrap();
+
+        let mut candidates = Vec::new();
+        scan_for_candidates_with_callback(root, |c| candidates.push(c)).unwrap();
+
+        assert_eq!(
+            candidates.len(),
+            0,
+            "Folder with only images should not be detected"
+        );
+    }
+
+    #[test]
+    fn test_video_ts_folder_not_detected() {
+        // DVD rips with VIDEO_TS folders should not be detected (no FLAC)
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("Concert DVD");
+        std::fs::create_dir(&root).unwrap();
+
+        let video_ts = root.join("VIDEO_TS");
+        std::fs::create_dir(&video_ts).unwrap();
+        std::fs::write(video_ts.join("VIDEO_TS.VOB"), b"fake video").unwrap();
+        std::fs::write(video_ts.join("VTS_01_1.VOB"), b"fake video").unwrap();
+
+        let mut candidates = Vec::new();
+        scan_for_candidates_with_callback(root, |c| candidates.push(c)).unwrap();
+
+        assert_eq!(
+            candidates.len(),
+            0,
+            "VIDEO_TS folder (DVD rip) should not be detected"
+        );
+    }
+
+    #[test]
+    fn test_volume_folders_with_long_names_are_separate() {
+        // "Vol. 01 (Catalog Info)" style folders are long enough (> 15 chars)
+        // to be treated as separate albums, not multi-disc
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("Compilation Series");
+        std::fs::create_dir(&root).unwrap();
+
+        let volumes = ["Vol. 01 (R2 70921 - 1990)", "Vol. 02 (R2 70922 - 1991)"];
+
+        for vol_name in &volumes {
+            let vol_dir = root.join(vol_name);
+            std::fs::create_dir(&vol_dir).unwrap();
+            std::fs::write(vol_dir.join("track.flac"), b"fake flac").unwrap();
+        }
+
+        let mut candidates = Vec::new();
+        scan_for_candidates_with_callback(root, |c| candidates.push(c)).unwrap();
+
+        assert_eq!(
+            candidates.len(),
+            2,
+            "Long 'Vol. XX (catalog)' folders should be separate candidates, not multi-disc"
+        );
+    }
+
+    #[test]
+    fn test_zero_byte_files_ignored() {
+        // Torrent clients often leave 0-byte placeholder files for incomplete downloads.
+        // These should not be considered real audio files.
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("Incomplete Download");
+        std::fs::create_dir(&root).unwrap();
+
+        // Create 0-byte FLAC files (incomplete download placeholders)
+        std::fs::write(root.join("01 - Track One.flac"), b"").unwrap();
+        std::fs::write(root.join("02 - Track Two.flac"), b"").unwrap();
+        std::fs::write(root.join("cover.jpg"), b"fake image").unwrap();
+
+        let mut candidates = Vec::new();
+        scan_for_candidates_with_callback(root, |c| candidates.push(c)).unwrap();
+
+        assert_eq!(
+            candidates.len(),
+            0,
+            "Folder with only 0-byte FLAC files should not be detected"
+        );
+    }
+
+    #[test]
+    fn test_mix_of_real_and_zero_byte_files() {
+        // If some files are real and some are 0-byte, only count the real ones
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("Partial Download");
+        std::fs::create_dir(&root).unwrap();
+
+        // One real file, two 0-byte placeholders
+        std::fs::write(root.join("01 - Track One.flac"), b"real audio data").unwrap();
+        std::fs::write(root.join("02 - Track Two.flac"), b"").unwrap();
+        std::fs::write(root.join("03 - Track Three.flac"), b"").unwrap();
+
+        let mut candidates = Vec::new();
+        scan_for_candidates_with_callback(root.clone(), |c| candidates.push(c)).unwrap();
+
+        assert_eq!(
+            candidates.len(),
+            1,
+            "Should detect folder with at least one real file"
+        );
+
+        // Check that only the real file is counted
+        let audio_count = match &candidates[0].files.audio {
+            AudioContent::TrackFiles(tracks) => tracks.len(),
+            AudioContent::CueFlacPairs(pairs) => pairs.len(),
+        };
+        assert_eq!(audio_count, 1, "Should only count the non-zero-byte file");
     }
 }

@@ -1,13 +1,14 @@
 //! Encryption section wrapper - reads config, delegates UI to EncryptionSectionView
 
-use crate::ui::use_config;
+use crate::ui::app_service::use_app;
 use bae_ui::EncryptionSectionView;
 use dioxus::prelude::*;
 
 /// Encryption section - read-only key status
 #[component]
 pub fn EncryptionSection() -> Element {
-    let config = use_config();
+    let app = use_app();
+    let config = app.config.clone();
 
     // Handle optional encryption key
     let (key_preview, key_length, is_configured) = if let Some(ref key) = config.encryption_key {

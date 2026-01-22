@@ -26,11 +26,19 @@ pub const DEFAULT_BREAKPOINTS: &[Breakpoint] = &[
 /// Viewport container - just applies width constraint
 #[component]
 pub fn MockViewport(width: u32, children: Element) -> Element {
+    // When width is 0 (Full), use w-full to expand; otherwise use fixed width
+    let class = if width > 0 {
+        "bg-surface-base rounded-lg overflow-hidden flex-1 flex flex-col".to_string()
+    } else {
+        "bg-surface-base rounded-lg overflow-hidden flex-1 flex flex-col w-full".to_string()
+    };
+    let style = if width > 0 {
+        format!("width: {}px; margin: 0 auto;", width)
+    } else {
+        String::new()
+    };
+
     rsx! {
-        div {
-            class: "bg-gray-950 rounded-lg overflow-hidden",
-            style: if width > 0 { format!("width: {}px; margin: 0 auto;", width) } else { String::new() },
-            {children}
-        }
+        div { class, style, {children} }
     }
 }

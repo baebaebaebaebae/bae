@@ -82,7 +82,7 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
         },
     ];
 
-    let tracks: Vec<Signal<Track>> = [
+    let tracks_data: Vec<Track> = [
         ("track-1", "Broadcast", 1, 198_000i64),
         ("track-2", "Static Dreams", 2, 245_000),
         ("track-3", "Frequency Drift", 3, 312_000),
@@ -93,18 +93,17 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
         ("track-8", "Sign Off", 8, 356_000),
     ]
     .iter()
-    .map(|(id, title, num, duration)| {
-        Signal::new(Track {
-            id: id.to_string(),
-            title: title.to_string(),
-            track_number: Some(*num),
-            disc_number: Some(1),
-            duration_ms: Some(*duration),
-            is_available: true,
-            import_state: TrackImportState::Complete,
-        })
+    .map(|(id, title, num, duration)| Track {
+        id: id.to_string(),
+        title: title.to_string(),
+        track_number: Some(*num),
+        disc_number: Some(1),
+        duration_ms: Some(*duration),
+        is_available: true,
+        import_state: TrackImportState::Complete,
     })
     .collect();
+    let tracks = use_memo(move || tracks_data.clone());
 
     let playback = match playback_state.as_str() {
         "Stopped" => PlaybackDisplay::Stopped,

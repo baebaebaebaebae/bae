@@ -1,0 +1,35 @@
+---
+description: Tests should exercise production code paths
+globs: 
+alwaysApply: true
+---
+
+# Test Production Code, Not Test-Only Code
+
+Tests should exercise the same code paths that run in production. Don't create simplified wrapper functions "for testing" that duplicate production logic.
+
+Bad:
+```rust
+// Production code
+pub fn do_thing_with_callback<F>(x: i32, f: F) { ... }
+
+// Test-only wrapper that duplicates logic
+pub fn do_thing(x: i32) -> Vec<Result> { ... }
+
+#[test]
+fn test_do_thing() {
+    let results = do_thing(42); // Testing the wrong function!
+}
+```
+
+Good:
+```rust
+#[test]
+fn test_do_thing() {
+    let mut results = Vec::new();
+    do_thing_with_callback(42, |r| results.push(r));
+    // Now we're testing the actual production code
+}
+```
+
+If you find test-only code that duplicates production logic, delete it and rewrite the tests to use the production code path.

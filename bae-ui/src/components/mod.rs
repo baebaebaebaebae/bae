@@ -11,6 +11,7 @@ pub mod import;
 pub mod imports;
 pub mod library;
 pub mod playback;
+pub mod resizable_panel;
 pub mod settings;
 pub mod title_bar;
 pub mod utils;
@@ -38,16 +39,17 @@ pub use icons::{
 };
 pub use import::{
     CdDriveStatus, CdSelectorView, ConfirmationView, DetectingMetadataView, DiscIdLookupErrorView,
-    ExactLookupView, FileListView, FolderImportView, FolderImportViewProps, FolderSelectorView,
+    FileListView, FolderImportView, FolderImportViewProps, FolderSelectorView,
     ImportErrorDisplayView, ImportSource, ImportSourceSelectorView, ImportView,
     ManualSearchPanelView, MatchItemView, MatchListView, MetadataDetectionPromptView,
-    ReleaseSelectorView, SearchSourceSelectorView, SelectedSourceView, TorrentFilesDisplayView,
-    TorrentInfoDisplayView, TorrentInputMode, TorrentInputView, TorrentTrackerDisplayView,
-    TrackerConnectionStatus, TrackerStatus,
+    MultipleMatchesView, ReleaseSelectorView, SearchSourceSelectorView, SelectedSourceView,
+    TorrentFilesDisplayView, TorrentInfoDisplayView, TorrentInputMode, TorrentInputView,
+    TorrentTrackerDisplayView, TrackerConnectionStatus, TrackerStatus,
 };
 pub use imports::{ImportsButtonView, ImportsDropdownView};
 pub use library::LibraryView;
 pub use playback::{NowPlayingBarView, QueueSidebarState, QueueSidebarView};
+pub use resizable_panel::{GrabBar, ResizablePanel, ResizeDirection};
 pub use settings::{
     AboutSectionView, ApiKeysSectionView, BitTorrentSectionView, BitTorrentSettings,
     EncryptionSectionView, SettingsTab, SettingsView, StorageLocation, StorageProfile,

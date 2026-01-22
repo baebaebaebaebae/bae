@@ -9,6 +9,7 @@ use crate::encryption::EncryptionService;
 use crate::library::export::ExportService;
 use std::path::Path;
 use thiserror::Error;
+use tokio::sync::broadcast;
 use tracing::warn;
 #[derive(Error, Debug)]
 pub enum LibraryError {
@@ -25,6 +26,13 @@ pub enum LibraryError {
     #[error("Encryption error: {0}")]
     Encryption(#[from] crate::encryption::EncryptionError),
 }
+
+/// Events emitted by LibraryManager when data changes
+#[derive(Clone, Debug)]
+pub enum LibraryEvent {
+    /// Albums have changed (added, deleted, or modified)
+    AlbumsChanged,
+}
 /// The main library manager for database operations and entity persistence
 ///
 /// Handles:
@@ -32,18 +40,49 @@ pub enum LibraryError {
 /// - State transitions (importing -> complete/failed)
 /// - Query methods for library browsing
 /// - Deletion with cloud storage cleanup
-#[derive(Debug, Clone)]
 pub struct LibraryManager {
     database: Database,
     encryption_service: Option<EncryptionService>,
+    event_tx: broadcast::Sender<LibraryEvent>,
+}
+
+impl std::fmt::Debug for LibraryManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LibraryManager")
+            .field("database", &self.database)
+            .field("encryption_service", &self.encryption_service)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Clone for LibraryManager {
+    fn clone(&self) -> Self {
+        Self {
+            database: self.database.clone(),
+            encryption_service: self.encryption_service.clone(),
+            event_tx: self.event_tx.clone(),
+        }
+    }
 }
 impl LibraryManager {
     /// Create a new library manager
     pub fn new(database: Database, encryption_service: Option<EncryptionService>) -> Self {
+        let (event_tx, _) = broadcast::channel(16);
         LibraryManager {
             database,
             encryption_service,
+            event_tx,
         }
+    }
+
+    /// Subscribe to library events (albums changed, etc.)
+    pub fn subscribe_events(&self) -> broadcast::Receiver<LibraryEvent> {
+        self.event_tx.subscribe()
+    }
+
+    /// Notify subscribers that albums have changed
+    pub fn notify_albums_changed(&self) {
+        let _ = self.event_tx.send(LibraryEvent::AlbumsChanged);
     }
 
     /// Get a reference to the encryption service (if configured)
@@ -438,6 +477,10 @@ impl LibraryManager {
         if remaining_releases.is_empty() {
             self.database.delete_album(&album_id).await?;
         }
+
+        // Notify UI that library has changed
+        self.notify_albums_changed();
+
         Ok(())
     }
 
@@ -472,6 +515,10 @@ impl LibraryManager {
             }
         }
         self.database.delete_album(album_id).await?;
+
+        // Notify UI that library has changed
+        self.notify_albums_changed();
+
         Ok(())
     }
     /// Export all files for a release to a directory

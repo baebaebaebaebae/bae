@@ -1,0 +1,8 @@
+When adding component props, strongly avoid optional props and defaults.
+
+If a default or optional prop is truly necessary:
+- Stop and consult the user first
+- Explain clearly why the default/optional prop is required
+
+Callback props should be non-optional. Callers must pass no-ops if they do not
+need the callback.

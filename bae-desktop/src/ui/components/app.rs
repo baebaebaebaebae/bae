@@ -1,9 +1,6 @@
-use super::active_imports_context::ActiveImportsProvider;
 use super::dialog_context::DialogContext;
-use super::library_search_context::LibrarySearchContextProvider;
-use super::playback_hooks::PlaybackStateProvider;
-use super::queue_sidebar::QueueSidebarState;
-use crate::ui::import_context::ImportContextProvider;
+use crate::ui::app_context::AppServices;
+use crate::ui::app_service::AppService;
 use crate::ui::{Route, FAVICON, MAIN_CSS, TAILWIND_CSS};
 use dioxus::prelude::*;
 use tracing::debug;
@@ -11,29 +8,33 @@ use tracing::debug;
 #[component]
 pub fn App() -> Element {
     debug!("Rendering app component");
-    use_context_provider(|| QueueSidebarState {
-        is_open: Signal::new(false),
-    });
+
+    // Get backend services from launch context
+    let services = use_context::<AppServices>();
+
+    // Create AppService (owns Store + handles event subscriptions)
+    let app_service = AppService::new(&services);
+
+    // Start all event subscriptions
+    app_service.start_subscriptions();
+
+    // Provide AppService as context for all components
+    use_context_provider(|| app_service.clone());
+
+    // Dialog context for modals
     use_context_provider(DialogContext::new);
+
     rsx! {
         document::Link { rel: "icon", href: FAVICON }
         document::Link { rel: "stylesheet", href: MAIN_CSS }
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
-        PlaybackStateProvider {
-            ActiveImportsProvider {
-                ImportContextProvider {
-                    LibrarySearchContextProvider {
-                        MainContent { Router::<Route> {} }
-                    }
-                }
-            }
-        }
+        MainContent { Router::<Route> {} }
     }
 }
 
 #[component]
 fn MainContent(children: Element) -> Element {
     rsx! {
-        div { class: "h-screen overflow-y-auto", {children} }
+        div { class: "h-screen overflow-y-auto flex", {children} }
     }
 }

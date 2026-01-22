@@ -6,6 +6,7 @@ use crate::discogs::DiscogsRelease;
 use crate::import::cover_art::download_cover_art_to_bae_folder;
 #[cfg(feature = "cd-rip")]
 use crate::import::discogs_parser::parse_discogs_release;
+use crate::import::folder_scanner::DetectedCandidate;
 #[cfg(feature = "cd-rip")]
 use crate::import::musicbrainz_parser::fetch_and_parse_mb_release;
 use crate::import::progress::ImportProgressHandle;
@@ -19,7 +20,7 @@ use crate::library::{LibraryManager, SharedLibraryManager};
 use crate::musicbrainz::MbRelease;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
 /// Handle for sending import requests and subscribing to progress updates
 #[derive(Clone)]
@@ -30,6 +31,19 @@ pub struct ImportServiceHandle {
     pub library_manager: SharedLibraryManager,
     pub database: Arc<Database>,
     pub runtime_handle: tokio::runtime::Handle,
+    pub scan_tx: mpsc::UnboundedSender<ScanRequest>,
+    pub scan_events_tx: broadcast::Sender<ScanEvent>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ScanEvent {
+    Candidate(DetectedCandidate),
+    Error(String),
+    Finished,
+}
+
+pub struct ScanRequest {
+    pub path: std::path::PathBuf,
 }
 /// Torrent-specific metadata for import
 #[cfg(feature = "torrent")]
@@ -60,6 +74,8 @@ impl ImportServiceHandle {
         library_manager: SharedLibraryManager,
         database: Arc<Database>,
         runtime_handle: tokio::runtime::Handle,
+        scan_tx: mpsc::UnboundedSender<ScanRequest>,
+        scan_events_tx: broadcast::Sender<ScanEvent>,
     ) -> Self {
         let progress_handle = ImportProgressHandle::new(progress_rx, runtime_handle.clone());
         Self {
@@ -69,7 +85,19 @@ impl ImportServiceHandle {
             library_manager,
             database,
             runtime_handle,
+            scan_tx,
+            scan_events_tx,
         }
+    }
+
+    pub fn enqueue_folder_scan(&self, path: std::path::PathBuf) -> Result<(), String> {
+        self.scan_tx
+            .send(ScanRequest { path })
+            .map_err(|_| "Failed to enqueue folder scan".to_string())
+    }
+
+    pub fn subscribe_folder_scan_events(&self) -> broadcast::Receiver<ScanEvent> {
+        self.scan_events_tx.subscribe()
     }
     /// Validate and queue an import request.
     ///

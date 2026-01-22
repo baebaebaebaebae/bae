@@ -8,9 +8,10 @@ use crate::db::DbAlbum;
 use crate::db::DbTrack;
 use crate::db::{Database, DbFile, DbRelease, DbStorageProfile, ImportOperationStatus};
 use crate::encryption::EncryptionService;
-use crate::import::handle::ImportServiceHandle;
+use crate::import::folder_scanner::scan_for_candidates_with_callback;
 #[cfg(feature = "torrent")]
 use crate::import::handle::TorrentImportMetadata;
+use crate::import::handle::{ImportServiceHandle, ScanEvent, ScanRequest};
 #[cfg(feature = "torrent")]
 use crate::import::types::TorrentSource;
 use crate::import::types::{
@@ -23,7 +24,7 @@ use crate::torrent::LazyTorrentManager;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 #[cfg(any(feature = "torrent", feature = "cd-rip"))]
 use tracing::warn;
 use tracing::{error, info};
@@ -70,6 +71,40 @@ pub struct ImportService {
 }
 
 impl ImportService {
+    fn start_scan_worker(
+        runtime_handle: &tokio::runtime::Handle,
+        mut scan_rx: mpsc::UnboundedReceiver<ScanRequest>,
+        scan_events_tx: broadcast::Sender<ScanEvent>,
+    ) {
+        runtime_handle.spawn(async move {
+            while let Some(request) = scan_rx.recv().await {
+                let tx = scan_events_tx.clone();
+                let path = request.path;
+
+                let result = tokio::task::spawn_blocking(move || {
+                    scan_for_candidates_with_callback(path, |candidate| {
+                        let _ = tx.send(ScanEvent::Candidate(candidate));
+                    })
+                })
+                .await;
+
+                match result {
+                    Ok(Ok(())) => {
+                        let _ = scan_events_tx.send(ScanEvent::Finished);
+                    }
+                    Ok(Err(error)) => {
+                        let _ = scan_events_tx.send(ScanEvent::Error(error));
+                        let _ = scan_events_tx.send(ScanEvent::Finished);
+                    }
+                    Err(error) => {
+                        let _ = scan_events_tx
+                            .send(ScanEvent::Error(format!("Scan task failed: {}", error)));
+                        let _ = scan_events_tx.send(ScanEvent::Finished);
+                    }
+                }
+            }
+        });
+    }
     /// Start the import service worker.
     ///
     /// Creates one worker task that imports validated albums sequentially from a queue.
@@ -85,9 +120,13 @@ impl ImportService {
     ) -> ImportServiceHandle {
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
         let (progress_tx, progress_rx) = mpsc::unbounded_channel();
+        let (scan_tx, scan_rx) = mpsc::unbounded_channel();
+        let (scan_events_tx, _) = broadcast::channel(64);
         let progress_tx_for_handle = progress_tx.clone();
         let library_manager_for_worker = library_manager.clone();
         let database_for_handle = database.clone();
+
+        ImportService::start_scan_worker(&runtime_handle, scan_rx, scan_events_tx.clone());
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
@@ -125,6 +164,8 @@ impl ImportService {
             library_manager,
             database_for_handle,
             runtime_handle,
+            scan_tx,
+            scan_events_tx,
         )
     }
 
@@ -138,9 +179,13 @@ impl ImportService {
     ) -> ImportServiceHandle {
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
         let (progress_tx, progress_rx) = mpsc::unbounded_channel();
+        let (scan_tx, scan_rx) = mpsc::unbounded_channel();
+        let (scan_events_tx, _) = broadcast::channel(64);
         let progress_tx_for_handle = progress_tx.clone();
         let library_manager_for_worker = library_manager.clone();
         let database_for_handle = database.clone();
+
+        ImportService::start_scan_worker(&runtime_handle, scan_rx, scan_events_tx.clone());
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
@@ -177,6 +222,8 @@ impl ImportService {
             library_manager,
             database_for_handle,
             runtime_handle,
+            scan_tx,
+            scan_events_tx,
         )
     }
 
@@ -193,10 +240,14 @@ impl ImportService {
     ) -> ImportServiceHandle {
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
         let (progress_tx, progress_rx) = mpsc::unbounded_channel();
+        let (scan_tx, scan_rx) = mpsc::unbounded_channel();
+        let (scan_events_tx, _) = broadcast::channel(64);
         let progress_tx_for_handle = progress_tx.clone();
         let library_manager_for_worker = library_manager.clone();
         let database_for_handle = database.clone();
         let runtime_handle = tokio::runtime::Handle::current();
+
+        ImportService::start_scan_worker(&runtime_handle, scan_rx, scan_events_tx.clone());
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
@@ -233,6 +284,8 @@ impl ImportService {
             library_manager,
             database_for_handle,
             runtime_handle,
+            scan_tx,
+            scan_events_tx,
         )
     }
 
@@ -248,10 +301,14 @@ impl ImportService {
     ) -> ImportServiceHandle {
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
         let (progress_tx, progress_rx) = mpsc::unbounded_channel();
+        let (scan_tx, scan_rx) = mpsc::unbounded_channel();
+        let (scan_events_tx, _) = broadcast::channel(64);
         let progress_tx_for_handle = progress_tx.clone();
         let library_manager_for_worker = library_manager.clone();
         let database_for_handle = database.clone();
         let runtime_handle = tokio::runtime::Handle::current();
+
+        ImportService::start_scan_worker(&runtime_handle, scan_rx, scan_events_tx.clone());
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
@@ -287,6 +344,8 @@ impl ImportService {
             library_manager,
             database_for_handle,
             runtime_handle,
+            scan_tx,
+            scan_events_tx,
         )
     }
 

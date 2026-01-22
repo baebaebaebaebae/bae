@@ -8,8 +8,8 @@ use dioxus::prelude::*;
 /// Individual track row component (props-based, pure rendering)
 #[component]
 pub fn TrackRow(
-    // Track signal for reactive updates
-    track: Signal<Track>,
+    // Track data
+    track: Track,
     artists: Vec<Artist>,
     release_id: String,
     // Album context
@@ -27,8 +27,6 @@ pub fn TrackRow(
     on_add_to_queue: EventHandler<String>,
     on_export: EventHandler<String>,
 ) -> Element {
-    // Read track from signal - this makes the component reactive to track changes
-    let track = track();
     let is_active = is_playing || is_paused;
 
     // Determine availability from import state

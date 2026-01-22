@@ -16,7 +16,7 @@ fn ContentArea(children: Element, has_title_bar: bool, has_playback_bar: bool) -
     };
 
     rsx! {
-        div { class: "{class}", {children} }
+        div { class: "{class} flex flex-grow", {children} }
     }
 }
 

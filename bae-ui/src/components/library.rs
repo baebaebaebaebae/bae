@@ -17,13 +17,14 @@ struct AlbumGridItem {
 }
 
 /// Library view component - pure rendering, no data fetching
+/// Accepts individual reactive signals from the Store.
 /// All callbacks are required - pass noops if not needed.
 #[component]
 pub fn LibraryView(
-    albums: Vec<Album>,
-    artists_by_album: HashMap<String, Vec<Artist>>,
-    loading: bool,
-    error: Option<String>,
+    albums: ReadSignal<Vec<Album>>,
+    artists_by_album: ReadSignal<HashMap<String, Vec<Artist>>>,
+    loading: ReadSignal<bool>,
+    error: ReadSignal<Option<String>>,
     // Navigation callback - called with album_id when an album is clicked
     on_album_click: EventHandler<String>,
     // Action callbacks
@@ -32,6 +33,11 @@ pub fn LibraryView(
     // Empty state action (e.g., navigate to import)
     on_empty_action: EventHandler<()>,
 ) -> Element {
+    let loading = loading();
+    let error = error();
+    let albums = albums();
+    let artists_by_album = artists_by_album();
+
     rsx! {
         PageContainer {
             h1 { class: "text-3xl font-bold text-white mb-6", "Music Library" }

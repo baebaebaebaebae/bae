@@ -1,7 +1,7 @@
 //! URL state persistence for mock pages
 //!
 //! Provides a simple state string format: key=value,key=value
-//! e.g. "phase=ExactLookup,error=1,loading=1"
+//! e.g. "phase=MultipleExactMatches,error=1"
 
 /// Parse state string into key-value pairs
 pub fn parse_state(state: &str) -> Vec<(String, String)> {

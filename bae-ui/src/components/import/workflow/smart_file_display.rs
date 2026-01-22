@@ -5,31 +5,30 @@ use crate::components::icons::{DiscIcon, FileIcon, FileTextIcon, RowsIcon};
 use crate::display_types::{AudioContentInfo, CategorizedFileInfo, CueFlacPairInfo, FileInfo};
 use dioxus::prelude::*;
 
-/// Base file tile container - captures common layout (aspect-square, rounded, padding, etc.)
+/// Base file tile container - fixed 72x72px square tiles
 #[component]
 fn FileTile(
-    /// Background class (e.g., "bg-gray-800/50")
+    /// Background class (e.g., "bg-white/5")
     bg: &'static str,
-    /// Border class (e.g., "border-blue-500/30")
-    border: &'static str,
     /// Click handler - if present, renders as button with hover states
     #[props(default)]
     on_click: Option<EventHandler<()>>,
     children: Element,
 ) -> Element {
-    let base = "aspect-square border rounded flex flex-col items-center justify-center p-1.5";
+    let base =
+        "w-[72px] h-[72px] flex-shrink-0 rounded-xl flex flex-col items-center justify-center p-2";
 
     if let Some(handler) = on_click {
         rsx! {
             button {
-                class: "{base} {bg} {border} hover:bg-gray-800/70 transition-colors cursor-pointer",
+                class: "{base} {bg} hover:bg-white/10 transition-all duration-150 cursor-pointer",
                 onclick: move |_| handler.call(()),
                 {children}
             }
         }
     } else {
         rsx! {
-            div { class: "{base} {bg} {border}", {children} }
+            div { class: "{base} {bg}", {children} }
         }
     }
 }
@@ -62,10 +61,15 @@ pub fn SmartFileDisplayView(
     files: CategorizedFileInfo,
     /// Image data for gallery (filename, display_url)
     image_data: Vec<(String, String)>,
-    /// Text file contents keyed by filename - parent provides all content upfront
-    text_file_contents: std::collections::HashMap<String, String>,
+    /// Currently viewed text file name
+    selected_text_file: Option<String>,
+    /// Loaded text file content (for selected file)
+    text_file_content: Option<String>,
+    /// Callback when user selects a text file to view
+    on_text_file_select: EventHandler<String>,
+    /// Callback when user closes text file modal
+    on_text_file_close: EventHandler<()>,
 ) -> Element {
-    let mut viewing_text_file = use_signal(|| None::<String>);
     let mut viewing_image_index = use_signal(|| None::<usize>);
 
     if files.is_empty() {
@@ -74,24 +78,13 @@ pub fn SmartFileDisplayView(
         };
     }
 
-    // Get content for currently viewed text file
-    let text_file_content = viewing_text_file
-        .read()
-        .as_ref()
-        .and_then(|name| text_file_contents.get(name).cloned());
-
     rsx! {
-        // Unified materials grid - all items as square tiles
-        div { class: "grid grid-cols-9 gap-1.5",
+        // Wrapping grid of fixed-size square tiles
+        div { class: "flex flex-wrap gap-1.5 content-start",
             // Audio content tile
             AudioTileView {
                 audio: files.audio.clone(),
-                on_cue_click: {
-                    let mut viewing_text_file = viewing_text_file;
-                    move |(name, _path): (String, String)| {
-                        viewing_text_file.set(Some(name));
-                    }
-                },
+                on_cue_click: move |(name, _path): (String, String)| on_text_file_select.call(name),
             }
 
             // Artwork tiles
@@ -113,12 +106,7 @@ pub fn SmartFileDisplayView(
                 DocumentTileView {
                     key: "{doc.name}",
                     file: doc.clone(),
-                    on_click: {
-                        let mut viewing_text_file = viewing_text_file;
-                        move |(name, _path): (String, String)| {
-                            viewing_text_file.set(Some(name));
-                        }
-                    },
+                    on_click: move |(name, _path): (String, String)| on_text_file_select.call(name),
                 }
             }
 
@@ -129,11 +117,11 @@ pub fn SmartFileDisplayView(
         }
 
         // Text file modal
-        if let Some(filename) = viewing_text_file.read().clone() {
+        if let Some(filename) = selected_text_file {
             TextFileModalView {
                 filename: filename.clone(),
                 content: text_file_content.unwrap_or_else(|| "File not available".to_string()),
-                on_close: move |_| viewing_text_file.set(None),
+                on_close: move |_| on_text_file_close.call(()),
             }
         }
 
@@ -166,12 +154,12 @@ fn AudioTileView(audio: AudioContentInfo, on_cue_click: EventHandler<(String, St
         }
         AudioContentInfo::TrackFiles(tracks) if !tracks.is_empty() => {
             rsx! {
-                FileTile { bg: "bg-gray-800/50", border: "border-blue-500/30",
+                FileTile { bg: "bg-blue-500/10",
                     AudioTileContent {
                         track_count: tracks.len(),
                         format: "FLAC",
                         text_color: "text-blue-300",
-                        RowsIcon { class: "w-5 h-5 text-blue-400 mb-0.5" }
+                        RowsIcon { class: "w-5 h-5 text-blue-400 mb-1" }
                     }
                 }
             }
@@ -188,8 +176,7 @@ fn CueFlacTileView(pair: CueFlacPairInfo, on_click: EventHandler<(String, String
 
     rsx! {
         FileTile {
-            bg: "bg-gray-800/50",
-            border: "border-purple-500/30",
+            bg: "bg-purple-500/10",
             on_click: {
                 let name = cue_name.clone();
                 move |_| on_click.call((name.clone(), name.clone()))
@@ -198,13 +185,13 @@ fn CueFlacTileView(pair: CueFlacPairInfo, on_click: EventHandler<(String, String
                 track_count,
                 format: "CUE/FLAC",
                 text_color: "text-purple-300",
-                DiscIcon { class: "w-5 h-5 text-purple-400 mb-0.5" }
+                DiscIcon { class: "w-5 h-5 text-purple-400 mb-1" }
             }
         }
     }
 }
 
-/// Gallery thumbnail
+/// Gallery thumbnail - fixed 72x72px to match other tiles
 #[component]
 fn GalleryThumbnailView(
     filename: String,
@@ -214,15 +201,15 @@ fn GalleryThumbnailView(
 ) -> Element {
     rsx! {
         button {
-            class: "relative aspect-square bg-gray-800 border border-gray-700 rounded overflow-hidden hover:border-gray-500 transition-colors group",
+            class: "relative w-[72px] h-[72px] flex-shrink-0 rounded-xl overflow-hidden hover:ring-2 hover:ring-white/20 transition-all duration-150 group",
             onclick: move |_| on_click.call(index),
             img {
                 src: "{url}",
                 alt: "{filename}",
                 class: "w-full h-full object-cover",
             }
-            div { class: "absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-1.5",
-                span { class: "text-xs text-white truncate w-full", {filename.clone()} }
+            div { class: "absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-1.5",
+                span { class: "text-[10px] text-white truncate w-full", {filename.clone()} }
             }
         }
     }
@@ -235,14 +222,13 @@ fn DocumentTileView(file: FileInfo, on_click: EventHandler<(String, String)>) ->
 
     rsx! {
         FileTile {
-            bg: "bg-gray-800",
-            border: "border-gray-700",
+            bg: "bg-white/5",
             on_click: {
                 let name = filename.clone();
                 move |_| on_click.call((name.clone(), name.clone()))
             },
-            FileTextIcon { class: "w-5 h-5 text-gray-400 mb-0.5" }
-            span { class: "text-xs text-white font-medium text-center truncate w-full leading-tight",
+            FileTextIcon { class: "w-5 h-5 text-gray-400 mb-1" }
+            span { class: "text-xs text-gray-200 text-center truncate w-full leading-tight",
                 {file.name.clone()}
             }
         }
@@ -253,8 +239,8 @@ fn DocumentTileView(file: FileInfo, on_click: EventHandler<(String, String)>) ->
 #[component]
 fn OtherFileTileView(file: FileInfo) -> Element {
     rsx! {
-        FileTile { bg: "bg-gray-800/50", border: "border-gray-700",
-            FileIcon { class: "w-5 h-5 text-gray-500 mb-0.5" }
+        FileTile { bg: "bg-white/5",
+            FileIcon { class: "w-5 h-5 text-gray-500 mb-1" }
             span { class: "text-xs text-gray-400 text-center truncate w-full leading-tight",
                 {file.name.clone()}
             }

@@ -1,50 +1,52 @@
 //! API Keys section wrapper - handles config state, delegates UI to ApiKeysSectionView
 
-use crate::ui::use_config;
-use crate::AppContext;
+use crate::ui::app_service::use_app;
+use bae_ui::stores::{AppStateStoreExt, ConfigStateStoreExt};
 use bae_ui::ApiKeysSectionView;
 use dioxus::prelude::*;
-use tracing::{error, info};
 
 /// API Keys section - Discogs key management
 #[component]
 pub fn ApiKeysSection() -> Element {
-    let config = use_config();
-    let app_context = use_context::<AppContext>();
+    let app = use_app();
 
-    let mut discogs_key = use_signal(|| config.discogs_api_key.clone());
+    // Read config from Store
+    let config_store = app.state.config();
+    let store_discogs_key = config_store.discogs_api_key().read().clone();
+
+    let initial_key = store_discogs_key.clone();
+    let mut discogs_key = use_signal(move || initial_key.clone());
     let mut is_editing = use_signal(|| false);
     let mut is_saving = use_signal(|| false);
     let mut save_error = use_signal(|| Option::<String>::None);
 
-    let has_changes = *discogs_key.read() != config.discogs_api_key;
-    let discogs_configured = config.discogs_api_key.is_some();
+    let has_changes = *discogs_key.read() != store_discogs_key;
+    let discogs_configured = store_discogs_key.is_some();
 
-    let save_changes = move |_| {
-        let new_key = discogs_key.read().clone();
-        let mut config = app_context.config.clone();
-        spawn(async move {
+    let save_changes = {
+        let app = app.clone();
+        move |_| {
+            let new_key = discogs_key.read().clone();
+
             is_saving.set(true);
             save_error.set(None);
-            config.discogs_api_key = new_key;
-            match config.save() {
-                Ok(()) => {
-                    info!("Saved Discogs API key");
-                    is_editing.set(false);
-                }
-                Err(e) => {
-                    error!("Failed to save config: {}", e);
-                    save_error.set(Some(e.to_string()));
-                }
-            }
+
+            app.save_config(move |config| {
+                config.discogs_api_key = new_key;
+            });
+
             is_saving.set(false);
-        });
+            is_editing.set(false);
+        }
     };
 
-    let cancel_edit = move |_| {
-        discogs_key.set(config.discogs_api_key.clone());
-        is_editing.set(false);
-        save_error.set(None);
+    let cancel_edit = {
+        let store_discogs_key = store_discogs_key.clone();
+        move |_| {
+            discogs_key.set(store_discogs_key.clone());
+            is_editing.set(false);
+            save_error.set(None);
+        }
     };
 
     rsx! {

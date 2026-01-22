@@ -1,34 +1,30 @@
 //! CD import workflow view
 //!
-//! A 3-step wizard for importing music from a CD:
+//! A 2-step flow for importing music from a CD:
 //!
-//! ## Step 1: Select Source
-//! User selects a CD drive.
+//! ## Step 1: Identify
+//! User selects a CD drive, then the system identifies the CD via DiscID.
+//! If ambiguous, user picks from candidates. If no match, user searches manually.
 //!
-//! ## Step 2: Identify
-//! System identifies the CD via DiscID. If ambiguous, user picks from candidates.
-//! If no match, user searches manually.
-//!
-//! ## Step 3: Confirm
+//! ## Step 2: Confirm
 //! User reviews the match, selects cover art and storage profile, then imports.
 
 use super::{
     CdRipperView, CdTocDisplayView, CdTocInfo, ConfirmationView, DiscIdLookupErrorView,
-    ExactLookupView, ImportErrorDisplayView, ManualSearchPanelView, SelectedSourceView,
+    ImportErrorDisplayView, ManualSearchPanelView, MultipleMatchesView, SelectedSourceView,
 };
 use crate::display_types::{
-    ArtworkFile, CdDriveInfo, FolderMetadata, IdentifyMode, MatchCandidate, SearchSource,
-    SearchTab, SelectedCover, StorageProfileInfo, WizardStep,
+    ArtworkFile, CdDriveInfo, FolderMetadata, IdentifyMode, ImportStep, MatchCandidate,
+    SearchSource, SearchTab, SelectedCover, StorageProfileInfo,
 };
 use dioxus::prelude::*;
 
 /// Props for CD import workflow view
 #[derive(Clone, PartialEq, Props)]
 pub struct CdImportViewProps {
-    /// Current wizard step
-    pub step: WizardStep,
+    /// Current import step
+    pub step: ImportStep,
     /// Mode within Identify step
-    #[props(default)]
     pub identify_mode: IdentifyMode,
     // CD path (when selected)
     pub cd_path: String,
@@ -39,7 +35,7 @@ pub struct CdImportViewProps {
     pub drives: Vec<CdDriveInfo>,
     pub selected_drive: Option<String>,
     pub on_drive_select: EventHandler<String>,
-    // ExactLookup mode
+    // MultipleExactMatches mode
     /// True while fetching exact match candidates from MusicBrainz/Discogs
     #[props(default)]
     pub is_loading_exact_matches: bool,
@@ -51,10 +47,8 @@ pub struct CdImportViewProps {
     // ManualSearch mode
     #[props(default)]
     pub detected_metadata: Option<FolderMetadata>,
-    #[props(default)]
     pub search_source: SearchSource,
     pub on_search_source_change: EventHandler<SearchSource>,
-    #[props(default)]
     pub search_tab: SearchTab,
     pub on_search_tab_change: EventHandler<SearchTab>,
     #[props(default)]
@@ -132,80 +126,80 @@ pub fn CdImportView(props: CdImportViewProps) -> Element {
     rsx! {
         div { class: "space-y-6",
             match props.step {
-                WizardStep::SelectSource => rsx! {
-                    CdRipperView {
-                        is_scanning: props.is_scanning,
-                        drives: props.drives.clone(),
-                        selected_drive: props.selected_drive.clone(),
-                        on_drive_select: props.on_drive_select,
-                    }
-                },
-                WizardStep::Identify => rsx! {
-                    div { class: "space-y-6",
-                        SelectedSourceView {
-                            title: "Selected CD".to_string(),
-                            path: props.cd_path.clone(),
-                            on_clear: props.on_clear,
-                            on_reveal: |_| {},
-                            CdTocDisplayView {
-                                toc: props.toc_info.clone(),
-                                is_reading: props.is_loading_exact_matches,
+                ImportStep::Identify => rsx! {
+                    if props.cd_path.is_empty() {
+                        CdRipperView {
+                            is_scanning: props.is_scanning,
+                            drives: props.drives.clone(),
+                            selected_drive: props.selected_drive.clone(),
+                            on_drive_select: props.on_drive_select,
+                        }
+                    } else {
+                        div { class: "space-y-6",
+                            SelectedSourceView {
+                                title: "Selected CD".to_string(),
+                                path: props.cd_path.clone(),
+                                on_clear: props.on_clear,
+                                on_reveal: |_| {},
+                                CdTocDisplayView {
+                                    toc: props.toc_info.clone(),
+                                    is_reading: props.is_loading_exact_matches,
+                                }
+                            }
+                            match props.identify_mode {
+                                IdentifyMode::Created | IdentifyMode::DiscIdLookup => rsx! {},
+                                IdentifyMode::MultipleExactMatches => rsx! {
+                                    MultipleMatchesView {
+                                        candidates: props.exact_match_candidates.clone(),
+                                        selected_index: props.selected_match_index,
+                                        on_select: props.on_exact_match_select,
+                                    }
+                                },
+                                IdentifyMode::ManualSearch => rsx! {
+                                    if props.discid_lookup_error.is_some() {
+                                        DiscIdLookupErrorView {
+                                            error_message: props.discid_lookup_error.clone(),
+                                            is_retrying: props.is_retrying_discid_lookup,
+                                            on_retry: props.on_retry_discid_lookup,
+                                        }
+                                    }
+                                    ManualSearchPanelView {
+                                        search_source: props.search_source,
+                                        on_search_source_change: props.on_search_source_change,
+                                        active_tab: props.search_tab,
+                                        on_tab_change: props.on_search_tab_change,
+                                        search_artist: props.search_artist.clone(),
+                                        on_artist_change: props.on_artist_change,
+                                        search_album: props.search_album.clone(),
+                                        on_album_change: props.on_album_change,
+                                        search_year: props.search_year.clone(),
+                                        on_year_change: props.on_year_change,
+                                        search_label: props.search_label.clone(),
+                                        on_label_change: props.on_label_change,
+                                        search_catalog_number: props.search_catalog_number.clone(),
+                                        on_catalog_number_change: props.on_catalog_number_change,
+                                        search_barcode: props.search_barcode.clone(),
+                                        on_barcode_change: props.on_barcode_change,
+                                        search_tokens: props
+                                            .detected_metadata
+                                            .as_ref()
+                                            .map(|m| m.folder_tokens.clone())
+                                            .unwrap_or_default(),
+                                        is_searching: props.is_searching,
+                                        error_message: props.search_error.clone(),
+                                        has_searched: props.has_searched,
+                                        match_candidates: props.manual_match_candidates.clone(),
+                                        selected_index: props.selected_match_index,
+                                        on_match_select: props.on_manual_match_select,
+                                        on_search: props.on_search,
+                                        on_confirm: props.on_manual_confirm,
+                                    }
+                                },
                             }
                         }
-                        match props.identify_mode {
-                            IdentifyMode::Detecting => rsx! {},
-                            IdentifyMode::ExactLookup => rsx! {
-                                ExactLookupView {
-                                    is_loading: props.is_loading_exact_matches,
-                                    exact_match_candidates: props.exact_match_candidates.clone(),
-                                    selected_match_index: props.selected_match_index,
-                                    on_select: props.on_exact_match_select,
-                                }
-                            },
-                            IdentifyMode::ManualSearch => rsx! {
-                                if props.discid_lookup_error.is_some() {
-                                    DiscIdLookupErrorView {
-                                        error_message: props.discid_lookup_error.clone(),
-                                        is_retrying: props.is_retrying_discid_lookup,
-                                        on_retry: props.on_retry_discid_lookup,
-                                    }
-                                }
-                                ManualSearchPanelView {
-                                    search_source: props.search_source,
-                                    on_search_source_change: props.on_search_source_change,
-                                    active_tab: props.search_tab,
-                                    on_tab_change: props.on_search_tab_change,
-                                    search_artist: props.search_artist.clone(),
-                                    on_artist_change: props.on_artist_change,
-                                    search_album: props.search_album.clone(),
-                                    on_album_change: props.on_album_change,
-                                    search_year: props.search_year.clone(),
-                                    on_year_change: props.on_year_change,
-                                    search_label: props.search_label.clone(),
-                                    on_label_change: props.on_label_change,
-                                    search_catalog_number: props.search_catalog_number.clone(),
-                                    on_catalog_number_change: props.on_catalog_number_change,
-                                    search_barcode: props.search_barcode.clone(),
-                                    on_barcode_change: props.on_barcode_change,
-                                    search_tokens: props
-                                        .detected_metadata
-                                        .as_ref()
-                                        .map(|m| m.folder_tokens.clone())
-                                        .unwrap_or_default(),
-                                    is_searching: props.is_searching,
-                                    error_message: props.search_error.clone(),
-                                    has_searched: props.has_searched,
-                                    match_candidates: props.manual_match_candidates.clone(),
-                                    selected_index: props.selected_match_index,
-                                    on_match_select: props.on_manual_match_select,
-                                    on_search: props.on_search,
-                                    on_confirm: props.on_manual_confirm,
-                                }
-                            },
-                        }
                     }
                 },
-                WizardStep::Confirm => rsx! {
+                ImportStep::Confirm => rsx! {
                     div { class: "space-y-6",
                         SelectedSourceView {
                             title: "Selected CD".to_string(),

@@ -192,8 +192,29 @@ pub fn launch_app(context: AppContext) {
         setup_transparent_titlebar();
         setup_app_menu();
     }
+
+    // Create AppServices from AppContext (these are Send-safe)
+    #[cfg(feature = "torrent")]
+    let services = super::app_context::AppServices {
+        library_manager: context.library_manager.clone(),
+        config: context.config.clone(),
+        import_handle: context.import_handle.clone(),
+        playback_handle: context.playback_handle.clone(),
+        cache: context.cache.clone(),
+        torrent_manager: context.torrent_manager.clone(),
+    };
+    #[cfg(not(feature = "torrent"))]
+    let services = super::app_context::AppServices {
+        library_manager: context.library_manager.clone(),
+        config: context.config.clone(),
+        import_handle: context.import_handle.clone(),
+        playback_handle: context.playback_handle.clone(),
+        cache: context.cache.clone(),
+    };
+
     LaunchBuilder::desktop()
         .with_cfg(make_config(&context))
-        .with_context_provider(move || Box::new(context.clone()))
+        // Provide AppServices (Send-safe) - App struct is created inside component
+        .with_context_provider(move || Box::new(services.clone()))
         .launch(App);
 }

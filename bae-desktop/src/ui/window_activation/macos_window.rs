@@ -28,6 +28,8 @@ pub fn setup_macos_window_activation() {
 /// Register a custom Objective-C class to handle menu actions
 unsafe fn register_menu_handler_class() {
     MENU_HANDLER_CLASS_REGISTERED.call_once(|| {
+        use crate::ui::shortcuts::{request_nav, NavAction, NavTarget};
+
         let superclass = Class::get("NSObject").unwrap();
         let mut decl = ClassDecl::new("BaeMenuHandler", superclass).unwrap();
 
@@ -35,9 +37,38 @@ unsafe fn register_menu_handler_class() {
             crate::updater::check_for_updates();
         }
 
+        extern "C" fn go_back(_this: &Object, _cmd: Sel, _sender: id) {
+            request_nav(NavAction::Back);
+        }
+
+        extern "C" fn go_forward(_this: &Object, _cmd: Sel, _sender: id) {
+            request_nav(NavAction::Forward);
+        }
+
+        extern "C" fn go_library(_this: &Object, _cmd: Sel, _sender: id) {
+            request_nav(NavAction::GoTo(NavTarget::Library));
+        }
+
+        extern "C" fn go_import(_this: &Object, _cmd: Sel, _sender: id) {
+            request_nav(NavAction::GoTo(NavTarget::Import));
+        }
+
         decl.add_method(
             sel!(checkForUpdates:),
             check_for_updates as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(sel!(goBack:), go_back as extern "C" fn(&Object, Sel, id));
+        decl.add_method(
+            sel!(goForward:),
+            go_forward as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(goLibrary:),
+            go_library as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(goImport:),
+            go_import as extern "C" fn(&Object, Sel, id),
         );
 
         decl.register();
@@ -198,6 +229,71 @@ unsafe fn setup_app_menu_inner(app: id) {
     app_menu_item.autorelease();
     app_menu_item.setSubmenu_(app_menu);
     main_menu.addItem_(app_menu_item);
+
+    // Go menu
+    let go_menu = NSMenu::new(nil);
+    go_menu.autorelease();
+    let go_menu_title = NSString::alloc(nil).init_str("Go");
+    let _: () = msg_send![go_menu, setTitle: go_menu_title];
+
+    let menu_handler = get_menu_handler();
+
+    // Back
+    let back_title = NSString::alloc(nil).init_str("Back");
+    let back_key = NSString::alloc(nil).init_str("[");
+    let back_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+        back_title,
+        selector("goBack:"),
+        back_key,
+    );
+    back_item.autorelease();
+    let _: () = msg_send![back_item, setTarget: menu_handler];
+    go_menu.addItem_(back_item);
+
+    // Forward
+    let forward_title = NSString::alloc(nil).init_str("Forward");
+    let forward_key = NSString::alloc(nil).init_str("]");
+    let forward_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+        forward_title,
+        selector("goForward:"),
+        forward_key,
+    );
+    forward_item.autorelease();
+    let _: () = msg_send![forward_item, setTarget: menu_handler];
+    go_menu.addItem_(forward_item);
+
+    let go_separator = NSMenuItem::separatorItem(nil);
+    go_menu.addItem_(go_separator);
+
+    // Library
+    let library_title = NSString::alloc(nil).init_str("Library");
+    let library_key = NSString::alloc(nil).init_str("1");
+    let library_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+        library_title,
+        selector("goLibrary:"),
+        library_key,
+    );
+    library_item.autorelease();
+    let _: () = msg_send![library_item, setTarget: menu_handler];
+    go_menu.addItem_(library_item);
+
+    // Import
+    let import_title = NSString::alloc(nil).init_str("Import");
+    let import_key = NSString::alloc(nil).init_str("2");
+    let import_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+        import_title,
+        selector("goImport:"),
+        import_key,
+    );
+    import_item.autorelease();
+    let _: () = msg_send![import_item, setTarget: menu_handler];
+    go_menu.addItem_(import_item);
+
+    let go_menu_item = NSMenuItem::new(nil);
+    go_menu_item.autorelease();
+    go_menu_item.setSubmenu_(go_menu);
+    main_menu.addItem_(go_menu_item);
+
     app.setMainMenu_(main_menu);
 }
 

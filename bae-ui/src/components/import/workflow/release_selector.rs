@@ -1,13 +1,13 @@
-//! Release selector view component
+//! Candidate selector view component
 
-use crate::display_types::DetectedRelease;
+use crate::display_types::DetectedCandidate;
 use dioxus::prelude::*;
 
-/// View for selecting multiple releases from a folder
+/// View for selecting multiple candidates from a folder
 #[component]
 pub fn ReleaseSelectorView(
-    /// List of detected releases
-    releases: Vec<DetectedRelease>,
+    /// List of detected candidates
+    candidates: Vec<DetectedCandidate>,
     /// Currently selected indices
     selected_indices: Vec<usize>,
     /// Called when selection changes
@@ -16,7 +16,7 @@ pub fn ReleaseSelectorView(
     on_import: EventHandler<Vec<usize>>,
 ) -> Element {
     let selected_count = selected_indices.len();
-    let total_count = releases.len();
+    let total_count = candidates.len();
 
     rsx! {
         div { class: "space-y-6",
@@ -47,9 +47,9 @@ pub fn ReleaseSelectorView(
                 }
             }
 
-            // Release list
+            // Candidate list
             div { class: "space-y-2 max-h-96 overflow-y-auto",
-                for (index , release) in releases.iter().enumerate() {
+                for (index , candidate) in candidates.iter().enumerate() {
                     {
                         let is_selected = selected_indices.contains(&index);
                         let checkbox_class = if is_selected {
@@ -82,8 +82,8 @@ pub fn ReleaseSelectorView(
                                     onclick: |e| e.stop_propagation(),
                                 }
                                 div { class: "flex-1 min-w-0",
-                                    div { class: "font-medium text-gray-100 mb-1", {release.name.clone()} }
-                                    div { class: "text-sm text-gray-400 truncate", {release.path.clone()} }
+                                    div { class: "font-medium text-gray-100 mb-1", {candidate.name.clone()} }
+                                    div { class: "text-sm text-gray-400 truncate", {candidate.path.clone()} }
                                 }
                             }
                         }

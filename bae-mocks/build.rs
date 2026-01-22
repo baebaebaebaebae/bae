@@ -28,10 +28,13 @@ fn generate_tailwind() {
     println!(
         "cargo:rerun-if-changed={}",
         Path::new(manifest_dir)
-            .join("../bae-ui/src")
-            .canonicalize()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|_| "../bae-ui/src".to_string())
+            .join("../bae-ui/theme.css")
+            .display(),
+    );
+    println!("cargo:rerun-if-changed=src");
+    println!(
+        "cargo:rerun-if-changed={}",
+        Path::new(manifest_dir).join("../bae-ui/src").display(),
     );
 
     // Use node_modules/.bin/tailwindcss directly - more reliable than npx in CI

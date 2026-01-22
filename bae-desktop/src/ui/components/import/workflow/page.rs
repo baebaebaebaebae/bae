@@ -3,25 +3,31 @@ use super::cd_import::CdImport;
 use super::folder_import::FolderImport;
 #[cfg(feature = "torrent")]
 use super::torrent_import::TorrentImport;
-use crate::ui::import_context::ImportContext;
+use crate::ui::app_service::use_app;
+use crate::ui::components::dialog_context::DialogContext;
+use crate::ui::import_helpers::try_switch_import_source;
+use bae_ui::stores::AppStateStoreExt;
 use bae_ui::{ImportSource, ImportView};
 use dioxus::prelude::*;
-use std::rc::Rc;
 
 #[component]
 pub fn ImportPage() -> Element {
-    let import_context = use_context::<Rc<ImportContext>>();
-    let selected_source = import_context.selected_import_source();
+    let app = use_app();
+    let dialog = use_context::<DialogContext>();
+
+    let import_store = app.state.import();
+    let selected_source = import_store.read().selected_import_source;
+
     let on_source_select = {
-        let import_context = import_context.clone();
+        let app = app.clone();
         move |source: ImportSource| {
-            import_context.try_switch_import_source(source);
+            try_switch_import_source(&app, &dialog, source);
         }
     };
 
     rsx! {
-        ImportView { selected_source: *selected_source.read(), on_source_select,
-            match *selected_source.read() {
+        ImportView { selected_source, on_source_select,
+            match selected_source {
                 ImportSource::Folder => rsx! {
                     FolderImport {}
                 },

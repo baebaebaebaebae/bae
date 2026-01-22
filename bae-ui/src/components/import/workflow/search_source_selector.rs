@@ -10,24 +10,30 @@ pub fn SearchSourceSelectorView(
     on_select: EventHandler<SearchSource>,
 ) -> Element {
     rsx! {
-        div { class: "flex gap-4 mb-4",
-            label { class: "flex items-center gap-2 cursor-pointer",
+        div { class: "flex gap-4",
+            label { class: "flex items-center gap-2 cursor-pointer group",
                 input {
                     r#type: "radio",
                     name: "search_source",
+                    class: "accent-gray-200",
                     checked: selected_source == SearchSource::MusicBrainz,
                     onchange: move |_| on_select.call(SearchSource::MusicBrainz),
                 }
-                span { class: "text-sm font-medium text-gray-300", "MusicBrainz" }
+                span { class: "text-xs text-gray-300 group-hover:text-white transition-colors",
+                    "MusicBrainz"
+                }
             }
-            label { class: "flex items-center gap-2 cursor-pointer",
+            label { class: "flex items-center gap-2 cursor-pointer group",
                 input {
                     r#type: "radio",
                     name: "search_source",
+                    class: "accent-gray-200",
                     checked: selected_source == SearchSource::Discogs,
                     onchange: move |_| on_select.call(SearchSource::Discogs),
                 }
-                span { class: "text-sm font-medium text-gray-300", "Discogs" }
+                span { class: "text-xs text-gray-300 group-hover:text-white transition-colors",
+                    "Discogs"
+                }
             }
         }
     }

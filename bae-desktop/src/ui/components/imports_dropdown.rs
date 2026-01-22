@@ -1,21 +1,22 @@
 //! Imports dropdown wrapper
 //!
-//! Thin wrapper that bridges ActiveImportsState context to ImportsDropdownView.
+//! Thin wrapper that bridges App state to ImportsDropdownView.
 
-use super::active_imports_context::use_active_imports;
-use crate::ui::{image_url, AppContext, Route};
-use bae_core::db::ImportOperationStatus;
+use crate::ui::app_service::use_app;
+use crate::ui::{image_url, Route};
 use bae_ui::display_types::{ActiveImport as DisplayActiveImport, ImportStatus};
+use bae_ui::stores::{ActiveImportsUiStateStoreExt, AppStateStoreExt, ImportOperationStatus};
 use bae_ui::ImportsDropdownView;
 use dioxus::prelude::*;
 
 /// Dropdown showing list of active imports with progress
 #[component]
 pub fn ImportsDropdown(mut is_open: Signal<bool>) -> Element {
-    let active_imports = use_active_imports();
-    let imports = active_imports.imports.read();
+    let app = use_app();
+    let active_imports_store = app.state.active_imports();
+    let imports_store = active_imports_store.imports();
+    let imports = imports_store.read();
     let navigator = use_navigator();
-    let app_context = use_context::<AppContext>();
 
     // Convert to display types
     let display_imports: Vec<DisplayActiveImport> = imports
@@ -32,12 +33,13 @@ pub fn ImportsDropdown(mut is_open: Signal<bool>) -> Element {
                 album_title: i.album_title.clone(),
                 artist_name: i.artist_name.clone(),
                 status: match i.status {
+                    ImportOperationStatus::Pending => ImportStatus::Preparing,
                     ImportOperationStatus::Preparing => ImportStatus::Preparing,
                     ImportOperationStatus::Importing => ImportStatus::Importing,
                     ImportOperationStatus::Complete => ImportStatus::Complete,
                     ImportOperationStatus::Failed => ImportStatus::Failed,
                 },
-                current_step_text: i.current_step.map(|s| s.display_text().to_string()),
+                current_step_text: i.current_step.map(|s| format!("{:?}", s)),
                 progress_percent: i.progress_percent,
                 release_id: i.release_id.clone(),
                 cover_url,
@@ -70,12 +72,18 @@ pub fn ImportsDropdown(mut is_open: Signal<bool>) -> Element {
                 }
             },
             on_import_dismiss: {
-                let library_manager = app_context.library_manager.clone();
+                let app = app.clone();
                 move |import_id: String| {
-                    active_imports.dismiss(&import_id);
+                    // Remove from UI state
+                    app.state
 
-                    // Also delete from DB so it doesn't reappear after restart
-                    let library_manager = library_manager.clone();
+                        // Also delete from DB so it doesn't reappear after restart
+                        .active_imports()
+                        .imports()
+                        .with_mut(|list| {
+                            list.retain(|i| i.import_id != import_id);
+                        });
+                    let library_manager = app.library_manager.clone();
                     spawn(async move {
                         if let Err(e) = library_manager.get().delete_import(&import_id).await {
                             tracing::warn!("Failed to delete import from DB: {}", e);
@@ -84,19 +92,19 @@ pub fn ImportsDropdown(mut is_open: Signal<bool>) -> Element {
                 }
             },
             on_clear_all: {
-                let library_manager = app_context.library_manager.clone();
-                let mut imports_signal = active_imports.imports;
+                let app = app.clone();
                 move |_| {
                     // Collect IDs before clearing the list
-                    let import_ids: Vec<String> = imports_signal
+                    let mut imports_store = app.state.active_imports().imports();
+                    let import_ids: Vec<String> = imports_store
                         .read()
                         .iter()
                         .map(|i| i.import_id.clone())
                         .collect();
-                    imports_signal.with_mut(|list| list.clear());
+                    imports_store.with_mut(|list| list.clear());
 
                     // Delete all from DB
-                    let library_manager = library_manager.clone();
+                    let library_manager = app.library_manager.clone();
                     spawn(async move {
                         for id in import_ids {
                             if let Err(e) = library_manager.get().delete_import(&id).await {

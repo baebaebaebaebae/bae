@@ -21,15 +21,14 @@ pub fn AlbumDetailView(
     album: Album,
     releases: Vec<Release>,
     artists: Vec<Artist>,
-    // Per-track signals for granular reactivity. Expected to be passed in display
-    // order (by disc/track number) - this view renders them as-is without sorting.
-    tracks: Vec<Signal<Track>>,
+    // Tracks for the selected release - reactivity from Store updates
+    tracks: ReadSignal<Vec<Track>>,
     selected_release_id: Option<String>,
     // UI state
     import_progress: ReadSignal<Option<u8>>,
     import_error: ReadSignal<Option<String>>,
     // Playback state for highlighting current track
-    #[props(default)] playback: PlaybackDisplay,
+    playback: PlaybackDisplay,
     // Navigation callback
     on_release_select: EventHandler<String>,
     // Album-level callbacks
@@ -74,8 +73,11 @@ pub fn AlbumDetailView(
         PlaybackDisplay::Stopped => None,
     };
 
-    // Track IDs for play album button (read from signals)
-    let track_ids: Vec<String> = tracks.iter().map(|s| s().id.clone()).collect();
+    // Read tracks from signal
+    let tracks_list = tracks();
+
+    // Track IDs for play album button
+    let track_ids: Vec<String> = tracks_list.iter().map(|t| t.id.clone()).collect();
 
     rsx! {
         div {
@@ -101,7 +103,7 @@ pub fn AlbumDetailView(
                     AlbumMetadata {
                         album: album.clone(),
                         artists: artists.clone(),
-                        track_count: tracks.len(),
+                        track_count: tracks_list.len(),
                         selected_release: releases.iter().find(|r| Some(r.id.clone()) == selected_release_id).cloned(),
                     }
                     PlayAlbumButton {
@@ -133,15 +135,14 @@ pub fn AlbumDetailView(
                         }
                     }
                     h2 { class: "text-xl font-bold text-white mb-4", "Tracklist" }
-                    if tracks.is_empty() {
+                    if tracks_list.is_empty() {
                         div { class: "text-center py-8 text-gray-400",
                             p { "No tracks found for this album." }
                         }
                     } else {
                         {
-                            // Read tracks to check for multiple discs
-                            let tracks_snapshot: Vec<Track> = tracks.iter().map(|s| s()).collect();
-                            let has_multiple_discs = tracks_snapshot
+                            // Check for multiple discs
+                            let has_multiple_discs = tracks_list
                                 .iter()
                                 .filter_map(|t| t.disc_number)
                                 .collect::<HashSet<_>>()
@@ -151,9 +152,8 @@ pub fn AlbumDetailView(
                                 let mut current_disc: Option<i32> = None;
                                 rsx! {
                                     div { class: "space-y-2",
-                                        for track_signal in &tracks {
+                                        for track in &tracks_list {
                                             {
-                                                let track = track_signal();
                                                 let show_disc_header = track.disc_number != current_disc;
                                                 if show_disc_header {
                                                     current_disc = track.disc_number;
@@ -176,7 +176,7 @@ pub fn AlbumDetailView(
                                                         }
                                                     }
                                                     TrackRow {
-                                                        track: *track_signal,
+                                                        track: track.clone(),
                                                         artists: artists.clone(),
                                                         release_id: release_id.clone(),
                                                         is_compilation: album.is_compilation,
@@ -199,9 +199,8 @@ pub fn AlbumDetailView(
                             } else {
                                 rsx! {
                                     div { class: "space-y-2",
-                                        for track_signal in &tracks {
+                                        for track in &tracks_list {
                                             {
-                                                let track = track_signal();
                                                 let is_this_track = current_track_id.as_ref() == Some(&track.id);
                                                 let is_playing = is_this_track
                                                     && matches!(playback, PlaybackDisplay::Playing { .. });
@@ -211,7 +210,7 @@ pub fn AlbumDetailView(
                                                     && matches!(playback, PlaybackDisplay::Loading { .. });
                                                 rsx! {
                                                     TrackRow {
-                                                        track: *track_signal,
+                                                        track: track.clone(),
                                                         artists: artists.clone(),
                                                         release_id: release_id.clone(),
                                                         is_compilation: album.is_compilation,

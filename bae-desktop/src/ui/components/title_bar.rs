@@ -3,12 +3,14 @@
 //! Wraps the shared TitleBarView with desktop-specific behavior:
 //! window dragging (macOS), zoom (macOS), and database-backed search.
 
+use crate::ui::app_service::use_app;
 use crate::ui::components::imports_button::ImportsButton;
 use crate::ui::components::imports_dropdown::ImportsDropdown;
-use crate::ui::components::use_library_search;
-use crate::ui::use_library_manager;
-use crate::ui::{image_url, Route};
-use bae_core::db::{DbAlbum, DbArtist};
+use crate::ui::Route;
+use bae_ui::display_types::Album;
+use bae_ui::stores::{
+    AppStateStoreExt, LibraryStateStoreExt, SearchStateStoreExt, UiStateStoreExt,
+};
 use bae_ui::{NavItem, SearchResult, TitleBarView, UpdateState};
 #[cfg(target_os = "macos")]
 use cocoa::appkit::NSApplication;
@@ -18,8 +20,9 @@ use cocoa::base::{id, nil};
 use dioxus::desktop::use_window;
 use dioxus::prelude::*;
 #[cfg(target_os = "macos")]
+use dispatch::Queue;
+#[cfg(target_os = "macos")]
 use objc::{msg_send, sel, sel_impl};
-use std::collections::HashMap;
 
 /// Custom title bar component with navigation and search
 /// On macOS: includes window dragging, zoom, and space for traffic lights
@@ -29,45 +32,30 @@ pub fn TitleBar() -> Element {
     #[cfg(target_os = "macos")]
     let window = use_window();
 
+    let app = use_app();
     let current_route = use_route::<Route>();
-    let library_manager = use_library_manager();
-    let mut search_query = use_library_search();
+    let search_store = app.state.ui().search();
+    let mut search_query_store = search_store.query();
     let mut show_results = use_signal(|| false);
-    let mut albums = use_signal(Vec::<DbAlbum>::new);
-    let mut album_artists = use_signal(HashMap::<String, Vec<DbArtist>>::new);
-    let mut filtered_albums = use_signal(Vec::<DbAlbum>::new);
+    let mut filtered_albums = use_signal(Vec::<Album>::new);
     let imports_dropdown_open = use_signal(|| false);
 
-    // Load albums for search
-    use_effect(move || {
-        let library_manager = library_manager.clone();
-        spawn(async move {
-            if let Ok(album_list) = library_manager.get().get_albums().await {
-                let mut artists_map = HashMap::new();
-                for album in &album_list {
-                    if let Ok(artists) =
-                        library_manager.get().get_artists_for_album(&album.id).await
-                    {
-                        artists_map.insert(album.id.clone(), artists);
-                    }
-                }
-                album_artists.set(artists_map);
-                albums.set(album_list);
-            }
-        });
-    });
+    // Read albums from global store (populated by App component)
+    let albums_store = app.state.library().albums();
+    let artists_store = app.state.library().artists_by_album();
 
     // Filter albums based on search query
     use_effect({
         move || {
-            let query = search_query().to_lowercase();
+            let query = search_query_store.read().to_lowercase();
             if query.is_empty() {
                 filtered_albums.set(Vec::new());
                 show_results.set(false);
             } else {
-                let artists_map = album_artists();
-                let filtered = albums()
-                    .into_iter()
+                let albums = albums_store.read();
+                let artists_map = artists_store.read();
+                let filtered = albums
+                    .iter()
                     .filter(|album| {
                         if album.title.to_lowercase().contains(&query) {
                             return true;
@@ -80,6 +68,7 @@ pub fn TitleBar() -> Element {
                         false
                     })
                     .take(10)
+                    .cloned()
                     .collect();
                 filtered_albums.set(filtered);
                 show_results.set(true);
@@ -124,36 +113,35 @@ pub fn TitleBar() -> Element {
     let update_state = update_state_signal();
 
     // Convert filtered albums to search results
-    let search_results: Vec<SearchResult> = filtered_albums()
-        .iter()
-        .map(|album| {
-            let artists = album_artists().get(&album.id).cloned().unwrap_or_default();
-            let artist_name = if artists.is_empty() {
-                "Unknown Artist".to_string()
-            } else {
-                artists
-                    .iter()
-                    .map(|a| a.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            };
-            let subtitle = if let Some(year) = album.year {
-                format!("{} • {}", artist_name, year)
-            } else {
-                artist_name
-            };
-            SearchResult {
-                id: album.id.clone(),
-                title: album.title.clone(),
-                subtitle,
-                cover_url: album
-                    .cover_image_id
-                    .as_ref()
-                    .map(|id| image_url(id))
-                    .or_else(|| album.cover_art_url.clone()),
-            }
-        })
-        .collect();
+    let search_results: Vec<SearchResult> = {
+        let artists_map = artists_store.read();
+        filtered_albums()
+            .iter()
+            .map(|album| {
+                let artists = artists_map.get(&album.id).cloned().unwrap_or_default();
+                let artist_name = if artists.is_empty() {
+                    "Unknown Artist".to_string()
+                } else {
+                    artists
+                        .iter()
+                        .map(|a| a.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+                let subtitle = if let Some(year) = album.year {
+                    format!("{} • {}", artist_name, year)
+                } else {
+                    artist_name
+                };
+                SearchResult {
+                    id: album.id.clone(),
+                    title: album.title.clone(),
+                    subtitle,
+                    cover_url: album.cover_url.clone(),
+                }
+            })
+            .collect()
+    };
 
     // Platform-specific: left padding for traffic lights on macOS
     #[cfg(target_os = "macos")]
@@ -186,12 +174,12 @@ pub fn TitleBar() -> Element {
                 };
                 navigator().push(route);
             },
-            search_value: search_query(),
-            on_search_change: move |value| search_query.set(value),
+            search_value: search_query_store.read().clone(),
+            on_search_change: move |value| search_query_store.set(value),
             search_results,
             on_search_result_click: move |album_id: String| {
                 show_results.set(false);
-                search_query.set(String::new());
+                search_query_store.set(String::new());
                 navigator()
                     .push(Route::AlbumDetail {
                         album_id,
@@ -201,7 +189,7 @@ pub fn TitleBar() -> Element {
             show_search_results: show_results(),
             on_search_dismiss: move |_| show_results.set(false),
             on_search_focus: move |_| {
-                if !search_query().is_empty() {
+                if !search_query_store.read().is_empty() {
                     show_results.set(true);
                 }
             },
@@ -229,13 +217,11 @@ pub fn TitleBar() -> Element {
 /// Perform window zoom (maximize/restore) using native macOS API
 #[cfg(target_os = "macos")]
 fn perform_zoom() {
-    unsafe {
+    Queue::main().exec_async(|| unsafe {
         let app = NSApplication::sharedApplication(nil);
         let window: id = msg_send![app, keyWindow];
         if window != nil {
-            let _: () = msg_send![
-                window, performSelector : sel!(performZoom :) withObject : nil
-            ];
+            let _: () = msg_send![window, performZoom: nil];
         }
-    }
+    });
 }

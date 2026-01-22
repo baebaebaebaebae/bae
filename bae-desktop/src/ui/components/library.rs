@@ -1,61 +1,28 @@
 //! Library page component
 //!
 //! Uses bae-ui's LibraryView with app-specific navigation callbacks.
+//! Reads library state from the global app store (populated by AppService).
 
+use crate::ui::app_service::use_app;
 use crate::ui::components::album_detail::utils::get_album_track_ids;
-use crate::ui::components::use_playback_service;
-use crate::ui::display_types::{album_from_db_ref, artist_from_db_ref, Album, Artist};
-use crate::ui::use_library_manager;
 use crate::ui::Route;
+use bae_ui::stores::{AppStateStoreExt, LibraryStateStoreExt};
 use bae_ui::LibraryView;
 use dioxus::prelude::*;
-use std::collections::HashMap;
-use tracing::debug;
 
-/// Library page component - loads data and passes to bae-ui's LibraryView
+/// Library page component - reads from global store and passes to bae-ui's LibraryView
 #[component]
 pub fn LibraryPage() -> Element {
-    let mut albums = use_signal(Vec::<Album>::new);
-    let mut artists_by_album = use_signal(HashMap::<String, Vec<Artist>>::new);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
+    let app = use_app();
+    let library_manager = app.library_manager.clone();
+    let playback = app.playback_handle.clone();
 
-    let library_manager = use_library_manager();
-    let playback = use_playback_service();
-
-    let library_manager_for_effect = library_manager.clone();
-    use_effect(move || {
-        debug!("Starting load_albums effect");
-        let library_manager = library_manager_for_effect.clone();
-        spawn(async move {
-            debug!("Inside async spawn, fetching albums");
-            loading.set(true);
-            error.set(None);
-            match library_manager.get().get_albums().await {
-                Ok(album_list) => {
-                    let mut artists_map = HashMap::new();
-                    for album in &album_list {
-                        if let Ok(db_artists) =
-                            library_manager.get().get_artists_for_album(&album.id).await
-                        {
-                            let artists: Vec<Artist> =
-                                db_artists.iter().map(artist_from_db_ref).collect();
-                            artists_map.insert(album.id.clone(), artists);
-                        }
-                    }
-                    let display_albums: Vec<Album> =
-                        album_list.iter().map(album_from_db_ref).collect();
-                    artists_by_album.set(artists_map);
-                    albums.set(display_albums);
-                    loading.set(false);
-                }
-                Err(e) => {
-                    error.set(Some(format!("Failed to load library: {}", e)));
-                    loading.set(false);
-                }
-            }
-        });
-    });
+    // Read signals from the Store
+    let library_store = app.state.library();
+    let albums = use_memo(move || library_store.albums().read().clone());
+    let artists_by_album = use_memo(move || library_store.artists_by_album().read().clone());
+    let loading = use_memo(move || *library_store.loading().read());
+    let error = use_memo(move || library_store.error().read().clone());
 
     // Navigation callback - navigate to album detail
     let on_album_click = move |album_id: String| {
@@ -102,10 +69,10 @@ pub fn LibraryPage() -> Element {
 
     rsx! {
         LibraryView {
-            albums: albums(),
-            artists_by_album: artists_by_album(),
-            loading: loading(),
-            error: error(),
+            albums,
+            artists_by_album,
+            loading,
+            error,
             on_album_click,
             on_play_album,
             on_add_album_to_queue,
