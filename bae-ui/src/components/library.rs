@@ -1,9 +1,14 @@
 //! Library view component - pure rendering, no data fetching
+//!
+//! ## Reactive State Pattern
+//! Accepts `ReadStore<LibraryState>` and uses lenses for granular reactivity.
+//! Only subscribes to specific fields needed for routing decisions.
 
 use crate::components::album_card::AlbumCard;
 use crate::components::helpers::{ErrorDisplay, LoadingSpinner, PageContainer};
 use crate::components::icons::ImageIcon;
 use crate::display_types::{Album, Artist};
+use crate::stores::library::{LibraryState, LibraryStateStoreExt};
 use dioxus::prelude::*;
 use dioxus_virtual_scroll::{KeyFn, RenderFn, ScrollTarget, VirtualGrid, VirtualGridConfig};
 use std::collections::HashMap;
@@ -17,14 +22,11 @@ struct AlbumGridItem {
 }
 
 /// Library view component - pure rendering, no data fetching
-/// Accepts individual reactive signals from the Store.
-/// All callbacks are required - pass noops if not needed.
+///
+/// Accepts `ReadStore<LibraryState>` and uses lenses for granular reactivity.
 #[component]
 pub fn LibraryView(
-    albums: ReadSignal<Vec<Album>>,
-    artists_by_album: ReadSignal<HashMap<String, Vec<Artist>>>,
-    loading: ReadSignal<bool>,
-    error: ReadSignal<Option<String>>,
+    state: ReadStore<LibraryState>,
     // Navigation callback - called with album_id when an album is clicked
     on_album_click: EventHandler<String>,
     // Action callbacks
@@ -33,10 +35,11 @@ pub fn LibraryView(
     // Empty state action (e.g., navigate to import)
     on_empty_action: EventHandler<()>,
 ) -> Element {
-    let loading = loading();
-    let error = error();
-    let albums = albums();
-    let artists_by_album = artists_by_album();
+    // Use lenses to subscribe only to specific fields for routing decisions
+    let loading = *state.loading().read();
+    let error = state.error().read().clone();
+    let albums = state.albums().read().clone();
+    let artists_by_album = state.artists_by_album().read().clone();
 
     rsx! {
         PageContainer {

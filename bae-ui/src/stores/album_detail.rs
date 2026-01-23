@@ -10,8 +10,14 @@ pub struct AlbumDetailState {
     pub album: Option<Album>,
     /// Artists for this album
     pub artists: Vec<Artist>,
-    /// Tracks for this album (with reactive import_state)
+    /// Tracks for this album (with per-track reactive import_state)
     pub tracks: Vec<Track>,
+    /// Track count - set when tracks are loaded, avoids subscribing to track changes
+    pub track_count: usize,
+    /// Track IDs - set when tracks are loaded, avoids subscribing to track changes
+    pub track_ids: Vec<String>,
+    /// Track disc info (disc_number, track_id) - for disc headers without subscribing to tracks
+    pub track_disc_info: Vec<(Option<i32>, String)>,
     /// Releases (editions) for this album
     pub releases: Vec<Release>,
     /// Files for the current release

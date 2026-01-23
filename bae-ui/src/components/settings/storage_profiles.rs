@@ -1,4 +1,7 @@
 //! Storage profiles section view
+//!
+//! ## Reactive State Pattern
+//! Accepts `ReadSignal` props and reads at leaf level for granular reactivity.
 
 use crate::components::icons::{CheckIcon, PencilIcon, PlusIcon, TrashIcon};
 use dioxus::prelude::*;
@@ -37,10 +40,12 @@ pub struct StorageProfile {
 }
 
 /// Storage profiles section view
+///
+/// Accepts `ReadSignal` props - reads at leaf level for granular reactivity.
 #[component]
 pub fn StorageProfilesSectionView(
-    profiles: Vec<StorageProfile>,
-    is_loading: bool,
+    profiles: ReadSignal<Vec<StorageProfile>>,
+    is_loading: ReadSignal<bool>,
     editing_profile: Option<StorageProfile>,
     is_creating: bool,
     on_create: EventHandler<()>,
@@ -50,6 +55,10 @@ pub fn StorageProfilesSectionView(
     on_save: EventHandler<StorageProfile>,
     on_cancel_edit: EventHandler<()>,
 ) -> Element {
+    // Read at this level - this is a leaf component
+    let profiles = profiles.read();
+    let is_loading = *is_loading.read();
+
     rsx! {
         div { class: "max-w-2xl",
             div { class: "flex items-center justify-between mb-6",

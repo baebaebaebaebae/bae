@@ -14,6 +14,8 @@ use rfd::AsyncFileDialog;
 use tracing::error;
 
 /// Album detail page showing album info and tracklist
+///
+/// Passes state lens to AlbumDetailView - no memos, just direct lens access.
 #[component]
 pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>) -> Element {
     let app = use_app();
@@ -32,24 +34,13 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
     let library_manager = app.library_manager.clone();
     let cache = app.cache.clone();
 
-    // Read album detail from Store
-    let album_detail = app.state.album_detail();
-    let loading = use_memo(move || *album_detail.loading().read());
-    let error = use_memo(move || album_detail.error().read().clone());
-    let album = use_memo(move || album_detail.album().read().clone());
-    let releases = use_memo(move || album_detail.releases().read().clone());
-    let artists = use_memo(move || album_detail.artists().read().clone());
-    let tracks = use_memo(move || {
-        let mut tracks = album_detail.tracks().read().clone();
-        tracks
-            .sort_by(|a, b| (a.disc_number, a.track_number).cmp(&(b.disc_number, b.track_number)));
-        tracks
-    });
-    let selected_release_id = use_memo(move || album_detail.selected_release_id().read().clone());
-    let import_progress = use_memo(move || *album_detail.import_progress().read());
-    let import_error = use_memo(move || album_detail.import_error().read().clone());
+    // Pass state lens directly - don't read here!
+    let state = app.state.album_detail();
+    // Pass tracks store separately for per-track reactivity via .iter()
+    let tracks = app.state.album_detail().tracks();
 
     // Read playback state from Store and convert to display type
+    // (This is from a different store, so we compute it here)
     let playback_store = app.state.playback();
     let playback_display = use_memo(move || {
         let track_id = playback_store
@@ -210,7 +201,7 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
             let status = *playback_store.status().read();
             if matches!(status, PlaybackStatus::Playing | PlaybackStatus::Paused) {
                 if let Some(current_release) = playback_store.current_release_id().read().clone() {
-                    let releases_list = releases();
+                    let releases_list = state.read().releases.clone();
                     if releases_list.iter().any(|r| r.id == current_release) {
                         playback.stop();
                     }
@@ -236,22 +227,22 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
         }
     };
 
+    // Use lenses for routing decisions
+    let loading = *state.loading().read();
+    let error = state.error().read().clone();
+    let has_album = state.album().read().is_some();
+
     rsx! {
         PageContainer {
             BackButton {}
-            if loading() {
+            if loading {
                 AlbumDetailLoading {}
-            } else if let Some(err) = error() {
+            } else if let Some(err) = error {
                 AlbumDetailError { message: err }
-            } else if let Some(display_album) = album() {
+            } else if has_album {
                 AlbumDetailView {
-                    album: display_album,
-                    releases: releases(),
-                    artists: artists(),
+                    state,
                     tracks,
-                    selected_release_id: selected_release_id(),
-                    import_progress,
-                    import_error,
                     playback: playback_display(),
                     on_release_select,
                     on_album_deleted,

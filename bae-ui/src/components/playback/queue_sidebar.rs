@@ -1,10 +1,14 @@
 //! Queue Sidebar view component
 //!
-//! Pure, props-based component for displaying the playback queue.
+//! ## Reactive State Pattern
+//! Accepts `ReadStore<PlaybackUiState>` and reads fields via lenses.
+//! Each section only re-renders when its specific data changes.
 
 use crate::components::icons::{ImageIcon, MenuIcon, XIcon};
 use crate::components::utils::format_duration;
 use crate::display_types::QueueItem;
+use crate::stores::playback::{PlaybackUiState, PlaybackUiStateStoreExt};
+use crate::stores::ui::{SidebarState, SidebarStateStoreExt};
 use dioxus::prelude::*;
 
 /// Shared state for queue sidebar visibility
@@ -13,20 +17,22 @@ pub struct QueueSidebarState {
     pub is_open: Signal<bool>,
 }
 
-/// Queue sidebar view (pure, props-based)
-/// All callbacks are required - pass noops if not needed.
+/// Queue sidebar view - accepts stores for granular reactivity
 #[component]
 pub fn QueueSidebarView(
-    is_open: bool,
-    current_track: Option<QueueItem>,
-    queue: Vec<QueueItem>,
-    current_track_id: Option<String>,
-    // Callbacks - all required
+    /// Sidebar UI state (for is_open)
+    sidebar: ReadStore<SidebarState>,
+    /// Playback state store
+    playback: ReadStore<PlaybackUiState>,
+    // Callbacks
     on_close: EventHandler<()>,
     on_clear: EventHandler<()>,
     on_remove: EventHandler<usize>,
     on_track_click: EventHandler<String>,
 ) -> Element {
+    // Read is_open via lens - only this check re-runs when visibility changes
+    let is_open = *sidebar.is_open().read();
+
     if !is_open {
         return rsx! {};
     }
@@ -34,47 +40,11 @@ pub fn QueueSidebarView(
     rsx! {
         div { class: "fixed top-0 right-0 h-full w-80 bg-gray-900 border-l border-gray-700 z-50 flex flex-col shadow-2xl",
             div { class: "flex-1 overflow-y-auto",
-                // Now playing section
-                div {
-                    div { class: "px-4 pt-4 pb-2",
-                        h3 { class: "text-sm font-semibold text-gray-400 uppercase tracking-wide",
-                            "Now playing"
-                        }
-                    }
-                    if let Some(ref item) = current_track {
-                        QueueItemView {
-                            item: item.clone(),
-                            index: 0,
-                            is_current: true,
-                            on_click: on_track_click,
-                            on_remove,
-                        }
-                    } else {
-                        div { class: "px-4 py-3 text-gray-500 text-sm", "Nothing playing" }
-                    }
-                }
-                // Up next section
-                div {
-                    div { class: "px-4 pt-4 pb-2",
-                        h3 { class: "text-sm font-semibold text-gray-400 uppercase tracking-wide",
-                            "Up next"
-                        }
-                    }
-                    if !queue.is_empty() {
-                        for (index , item) in queue.iter().enumerate() {
-                            QueueItemView {
-                                item: item.clone(),
-                                index,
-                                is_current: false,
-                                on_click: on_track_click,
-                                on_remove,
-                            }
-                        }
-                    } else {
-                        div { class: "px-4 py-3 text-gray-500 text-sm", "No tracks queued" }
-                    }
-                }
+                NowPlayingSection { playback, on_track_click, on_remove }
+
+                UpNextSection { playback, on_track_click, on_remove }
             }
+
             // Footer with controls
             div { class: "flex items-center justify-between p-4 border-t border-gray-700",
                 button {
@@ -87,6 +57,73 @@ pub fn QueueSidebarView(
                     onclick: move |_| on_close.call(()),
                     MenuIcon { class: "w-5 h-5" }
                 }
+            }
+        }
+    }
+}
+
+/// Now playing section - reads only current_track
+#[component]
+fn NowPlayingSection(
+    playback: ReadStore<PlaybackUiState>,
+    on_track_click: EventHandler<String>,
+    on_remove: EventHandler<usize>,
+) -> Element {
+    // Read only current_track via lens
+    let current_track = playback.current_track().read().clone();
+
+    rsx! {
+        div {
+            div { class: "px-4 pt-4 pb-2",
+                h3 { class: "text-sm font-semibold text-gray-400 uppercase tracking-wide",
+                    "Now playing"
+                }
+            }
+            if let Some(item) = current_track {
+                QueueItemView {
+                    item,
+                    index: 0,
+                    is_current: true,
+                    on_click: on_track_click,
+                    on_remove,
+                }
+            } else {
+                div { class: "px-4 py-3 text-gray-500 text-sm", "Nothing playing" }
+            }
+        }
+    }
+}
+
+/// Up next section - reads only queue_items
+#[component]
+fn UpNextSection(
+    playback: ReadStore<PlaybackUiState>,
+    on_track_click: EventHandler<String>,
+    on_remove: EventHandler<usize>,
+) -> Element {
+    // Read only queue_items via lens
+    let queue = playback.queue_items().read().clone();
+
+    rsx! {
+        div {
+            div { class: "px-4 pt-4 pb-2",
+                h3 { class: "text-sm font-semibold text-gray-400 uppercase tracking-wide",
+                    "Up next"
+                }
+            }
+            if !queue.is_empty() {
+                for (index , item) in queue.iter().enumerate() {
+                    QueueItemView {
+                        key: "{item.track.id}",
+                        item: item.clone(),
+                        index,
+                        is_current: false,
+                        on_click: on_track_click,
+                        on_remove,
+                    }
+                }
+            } else {
+                div { class: "px-4 py-3 text-gray-500 text-sm", "No tracks queued" }
             }
         }
     }

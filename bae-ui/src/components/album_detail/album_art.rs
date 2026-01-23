@@ -9,7 +9,7 @@ use dioxus::prelude::*;
 pub fn AlbumArt(
     title: String,
     cover_url: Option<String>,
-    import_progress: ReadSignal<Option<u8>>,
+    import_progress: Option<u8>,
     #[props(default = false)] is_ephemeral: bool,
 ) -> Element {
     let container_class = if is_ephemeral {
@@ -29,7 +29,7 @@ pub fn AlbumArt(
             } else {
                 ImageIcon { class: "w-16 h-16 text-gray-500" }
             }
-            if let Some(percent) = import_progress() {
+            if let Some(percent) = import_progress {
                 div { class: "absolute inset-0 bg-black/50 flex items-center justify-center",
                     div { class: "w-[30%] aspect-square",
                         svg {

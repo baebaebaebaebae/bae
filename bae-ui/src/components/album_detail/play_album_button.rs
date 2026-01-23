@@ -8,18 +8,18 @@ use dioxus::prelude::*;
 #[component]
 pub fn PlayAlbumButton(
     track_ids: Vec<String>,
-    import_progress: ReadSignal<Option<u8>>,
-    import_error: ReadSignal<Option<String>>,
-    is_deleting: ReadSignal<bool>,
+    import_progress: Option<u8>,
+    import_error: Option<String>,
+    is_deleting: bool,
     // Callbacks - all required
     on_play_album: EventHandler<Vec<String>>,
     on_add_to_queue: EventHandler<Vec<String>>,
 ) -> Element {
     let mut show_play_menu = use_signal(|| false);
-    let is_disabled = import_progress().is_some() || import_error().is_some() || is_deleting();
-    let button_text = if import_progress().is_some() {
+    let is_disabled = import_progress.is_some() || import_error.is_some() || is_deleting;
+    let button_text = if import_progress.is_some() {
         "Importing..."
-    } else if import_error().is_some() {
+    } else if import_error.is_some() {
         "Import Failed"
     } else {
         "Play Album"

@@ -6,23 +6,19 @@
 use crate::ui::app_service::use_app;
 use crate::ui::components::album_detail::utils::get_album_track_ids;
 use crate::ui::Route;
-use bae_ui::stores::{AppStateStoreExt, LibraryStateStoreExt};
+use bae_ui::stores::AppStateStoreExt;
 use bae_ui::LibraryView;
 use dioxus::prelude::*;
 
-/// Library page component - reads from global store and passes to bae-ui's LibraryView
+/// Library page component - passes state lens to bae-ui's LibraryView
 #[component]
 pub fn LibraryPage() -> Element {
     let app = use_app();
     let library_manager = app.library_manager.clone();
     let playback = app.playback_handle.clone();
 
-    // Read signals from the Store
-    let library_store = app.state.library();
-    let albums = use_memo(move || library_store.albums().read().clone());
-    let artists_by_album = use_memo(move || library_store.artists_by_album().read().clone());
-    let loading = use_memo(move || *library_store.loading().read());
-    let error = use_memo(move || library_store.error().read().clone());
+    // Pass the state lens directly - don't read here!
+    let state = app.state.library();
 
     // Navigation callback - navigate to album detail
     let on_album_click = move |album_id: String| {
@@ -69,10 +65,7 @@ pub fn LibraryPage() -> Element {
 
     rsx! {
         LibraryView {
-            albums,
-            artists_by_album,
-            loading,
-            error,
+            state,
             on_album_click,
             on_play_album,
             on_add_album_to_queue,

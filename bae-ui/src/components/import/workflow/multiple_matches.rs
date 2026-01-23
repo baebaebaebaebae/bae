@@ -6,13 +6,13 @@ use dioxus::prelude::*;
 
 /// Displays multiple DiscID matches for user to pick from
 ///
-/// Accepts `ReadSignal<ImportState>` and reads at leaf level for granular reactivity.
+/// Accepts `ReadStore<ImportState>` - reads at leaf level for granular reactivity.
 #[component]
 pub fn MultipleMatchesView(
-    state: ReadSignal<ImportState>,
+    state: ReadStore<ImportState>,
     on_select: EventHandler<usize>,
 ) -> Element {
-    // Read state at this leaf component
+    // Read state at leaf - these are computed values
     let st = state.read();
     let candidates = st.get_exact_match_candidates();
     let selected_index = st.get_selected_match_index();

@@ -10,7 +10,7 @@
 //! User reviews the match, selects cover art and storage profile, then imports.
 //!
 //! ## Reactive State Pattern
-//! Pass `ReadSignal<ImportState>` down to children. Only call `.read()` at leaf level.
+//! Pass `ReadStore<ImportState>` down to children. Use lenses where possible.
 
 use super::{
     ConfirmationView, DiscIdLookupErrorView, ImportErrorDisplayView, ManualSearchPanelView,
@@ -28,8 +28,8 @@ use dioxus::prelude::*;
 /// Props for torrent import workflow view
 #[derive(Clone, PartialEq, Props)]
 pub struct TorrentImportViewProps {
-    /// Import state (contains all workflow data)
-    pub state: ReadSignal<ImportState>,
+    /// Import state store (enables lensing into fields)
+    pub state: ReadStore<ImportState>,
 
     // === Torrent-specific state (not in ImportState) ===
     /// Torrent info (parsed from .torrent file)
@@ -154,7 +154,7 @@ pub fn TorrentImportView(props: TorrentImportViewProps) -> Element {
 /// Torrent Identify content - reads state at leaf level
 #[component]
 fn TorrentIdentifyContent(
-    state: ReadSignal<ImportState>,
+    state: ReadStore<ImportState>,
     torrent_path: String,
     torrent_info: Option<TorrentInfo>,
     tracker_statuses: Vec<TrackerStatus>,
@@ -242,7 +242,7 @@ fn TorrentIdentifyContent(
 /// Torrent Confirm content - reads state at leaf level
 #[component]
 fn TorrentConfirmContent(
-    state: ReadSignal<ImportState>,
+    state: ReadStore<ImportState>,
     torrent_path: String,
     torrent_info: Option<TorrentInfo>,
     tracker_statuses: Vec<TrackerStatus>,

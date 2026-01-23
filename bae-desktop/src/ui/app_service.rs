@@ -895,10 +895,24 @@ async fn load_album_detail(
         state.album_detail().artists().set(artists);
     }
 
-    // Load tracks for selected release
+    // Load tracks for selected release (sorted by disc/track number)
     match library_manager.get().get_tracks(&selected_release_id).await {
         Ok(db_tracks) => {
-            let tracks = db_tracks.iter().map(track_from_db_ref).collect();
+            let mut tracks: Vec<_> = db_tracks.iter().map(track_from_db_ref).collect();
+            tracks.sort_by(|a, b| {
+                (a.disc_number, a.track_number).cmp(&(b.disc_number, b.track_number))
+            });
+
+            // Set derived fields first to avoid subscribing to tracks for count/ids/disc info
+            let track_count = tracks.len();
+            let track_ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
+            let track_disc_info: Vec<(Option<i32>, String)> = tracks
+                .iter()
+                .map(|t| (t.disc_number, t.id.clone()))
+                .collect();
+            state.album_detail().track_count().set(track_count);
+            state.album_detail().track_ids().set(track_ids);
+            state.album_detail().track_disc_info().set(track_disc_info);
             state.album_detail().tracks().set(tracks);
         }
         Err(e) => {

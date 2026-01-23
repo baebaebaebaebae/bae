@@ -1,6 +1,7 @@
 //! LibraryView mock component
 
 use super::framework::{ControlRegistryBuilder, MockPage, MockPanel, Preset};
+use bae_ui::stores::LibraryState;
 use bae_ui::{Album, Artist, LibraryView};
 use dioxus::prelude::*;
 use std::collections::HashMap;
@@ -36,25 +37,25 @@ pub fn LibraryMock(initial_state: Option<String>) -> Element {
     let ui_state = registry.get_string("state");
     let album_count = registry.get_int("albums") as usize;
 
-    let ui_state_for_loading = ui_state.clone();
-    let ui_state_for_error = ui_state.clone();
-    let loading = use_memo(move || ui_state_for_loading == "Loading");
-    let error = use_memo(move || {
-        if ui_state_for_error == "Error" {
-            Some("Failed to load library: Database connection error".to_string())
-        } else {
-            None
-        }
-    });
-
-    let (album_data, artist_data) = if ui_state == "Populated" {
+    let (albums, artists_by_album) = if ui_state == "Populated" {
         mock_albums_with_artists(album_count)
     } else {
         (vec![], HashMap::new())
     };
 
-    let albums = use_memo(move || album_data.clone());
-    let artists_by_album = use_memo(move || artist_data.clone());
+    let loading = ui_state == "Loading";
+    let error = if ui_state == "Error" {
+        Some("Failed to load library: Database connection error".to_string())
+    } else {
+        None
+    };
+
+    let state = use_store(move || LibraryState {
+        albums,
+        artists_by_album,
+        loading,
+        error,
+    });
 
     let cycle_val = cycle();
 
@@ -62,10 +63,7 @@ pub fn LibraryMock(initial_state: Option<String>) -> Element {
         MockPanel { current_mock: MockPage::Library, registry, max_width: "6xl",
             LibraryView {
                 key: "{cycle_val}", // Change cycle to force complete remount
-                albums,
-                artists_by_album,
-                loading,
-                error,
+                state,
                 on_album_click: |_| {},
                 on_play_album: |_| {},
                 on_add_album_to_queue: |_| {},

@@ -13,9 +13,9 @@
 //!   - Bottom (fixed): SmartFileDisplay showing folder contents
 //!
 //! ## Reactive State Pattern
-//! Pass `ReadSignal<ImportState>` down through the tree. Only call `.read()`
-//! at the leaf level where you actually render values. This ensures only
-//! the leaf components re-render when their specific data changes.
+//! Pass `ReadStore<ImportState>` down through the tree. Use lenses to read
+//! individual fields. Only call `.read()` at the leaf level where you
+//! actually render values.
 
 use super::release_sidebar::{DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH};
 use super::{
@@ -26,7 +26,7 @@ use crate::components::icons::{FolderIcon, LoaderIcon};
 use crate::components::StorageProfile;
 use crate::components::{ResizablePanel, ResizeDirection};
 use crate::display_types::{IdentifyMode, ImportStep, MatchCandidate, SearchSource, SearchTab};
-use crate::stores::import::{CandidateState, ConfirmPhase, ImportState};
+use crate::stores::import::{CandidateState, ConfirmPhase, ImportState, ImportStateStoreExt};
 use dioxus::prelude::*;
 
 // ============================================================================
@@ -36,8 +36,8 @@ use dioxus::prelude::*;
 /// Props for the folder import workflow view
 #[derive(Clone, PartialEq, Props)]
 pub struct FolderImportViewProps {
-    /// Import state (contains all workflow data)
-    pub state: ReadSignal<ImportState>,
+    /// Import state store (enables lensing into fields)
+    pub state: ReadStore<ImportState>,
 
     // === UI-only state (not in ImportState) ===
     /// True if dragging over drop zone
@@ -154,7 +154,7 @@ pub fn FolderImportView(props: FolderImportViewProps) -> Element {
 /// Main content area - reads state to determine what to show
 #[component]
 fn MainContent(
-    state: ReadSignal<ImportState>,
+    state: ReadStore<ImportState>,
     storage_profiles: ReadSignal<Vec<StorageProfile>>,
     selected_text_file: Option<String>,
     text_file_content: Option<String>,
@@ -185,12 +185,11 @@ fn MainContent(
     on_configure_storage: EventHandler<()>,
     on_view_duplicate: EventHandler<String>,
 ) -> Element {
-    // Read here to determine which view to show - this is the "routing" level
-    let st = state.read();
-    let has_candidates = !st.detected_candidates.is_empty();
-    let is_scanning = st.is_scanning_candidates;
-    let step = st.get_import_step();
-    drop(st);
+    // Use lenses for routing decisions
+    let has_candidates = !state.detected_candidates().read().is_empty();
+    let is_scanning = *state.is_scanning_candidates().read();
+    // get_import_step() is a computed value, so we read just for that
+    let step = state.read().get_import_step();
 
     rsx! {
         div { class: "flex-1 flex flex-col min-w-0",
@@ -277,7 +276,7 @@ fn MainContent(
 /// Identify step - passes state down, reads at leaf level
 #[component]
 fn IdentifyStep(
-    state: ReadSignal<ImportState>,
+    state: ReadStore<ImportState>,
     on_skip_detection: EventHandler<()>,
     on_exact_match_select: EventHandler<usize>,
     on_search_source_change: EventHandler<SearchSource>,
@@ -327,12 +326,12 @@ fn IdentifyStep(
     }
 }
 
-/// DiscID error banner - reads state at leaf
+/// DiscID error banner - uses lenses where possible
 #[component]
-fn DiscIdErrorBanner(state: ReadSignal<ImportState>, on_retry: EventHandler<()>) -> Element {
-    let st = state.read();
-    let error = st.get_discid_lookup_error();
-    let is_retrying = st.is_looking_up;
+fn DiscIdErrorBanner(state: ReadStore<ImportState>, on_retry: EventHandler<()>) -> Element {
+    // get_discid_lookup_error() is computed, need full read for that
+    let error = state.read().get_discid_lookup_error();
+    let is_retrying = *state.is_looking_up().read();
 
     if error.is_some() {
         rsx! {
@@ -350,7 +349,7 @@ fn DiscIdErrorBanner(state: ReadSignal<ImportState>, on_retry: EventHandler<()>)
 /// Confirm step - reads state at leaf level for display
 #[component]
 fn ConfirmStep(
-    state: ReadSignal<ImportState>,
+    state: ReadStore<ImportState>,
     storage_profiles: ReadSignal<Vec<StorageProfile>>,
     on_select_remote_cover: EventHandler<String>,
     on_select_local_cover: EventHandler<String>,
@@ -429,7 +428,7 @@ fn ConfirmStep(
 /// Resizable bottom dock showing files
 #[component]
 fn FilesDock(
-    state: ReadSignal<ImportState>,
+    state: ReadStore<ImportState>,
     selected_text_file: Option<String>,
     text_file_content: Option<String>,
     on_text_file_select: EventHandler<String>,

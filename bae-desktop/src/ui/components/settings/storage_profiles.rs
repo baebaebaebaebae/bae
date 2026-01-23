@@ -10,10 +10,10 @@ use dioxus::prelude::*;
 pub fn StorageProfilesSection() -> Element {
     let app = use_app();
 
-    // Read from Store
+    // Pass lenses directly - don't read here!
     let store = app.state.storage_profiles();
-    let profiles = store.profiles().read().clone();
-    let is_loading = *store.loading().read();
+    let profiles = store.profiles();
+    let is_loading = store.loading();
 
     // Local UI state for editing
     let mut editing_profile = use_signal(|| Option::<StorageProfile>::None);

@@ -10,7 +10,7 @@
 //! User reviews the match, selects cover art and storage profile, then imports.
 //!
 //! ## Reactive State Pattern
-//! Pass `ReadSignal<ImportState>` down to children. Only call `.read()` at leaf level.
+//! Pass `ReadStore<ImportState>` down to children. Use lenses where possible.
 
 use super::{
     CdRipperView, CdTocDisplayView, ConfirmationView, DiscIdLookupErrorView,
@@ -26,8 +26,8 @@ use dioxus::prelude::*;
 /// Props for CD import workflow view
 #[derive(Clone, PartialEq, Props)]
 pub struct CdImportViewProps {
-    /// Import state (contains all workflow data)
-    pub state: ReadSignal<ImportState>,
+    /// Import state store (enables lensing into fields)
+    pub state: ReadStore<ImportState>,
 
     // === CD-specific state (not in ImportState) ===
     /// True while scanning for CD drives
@@ -136,7 +136,7 @@ pub fn CdImportView(props: CdImportViewProps) -> Element {
 /// CD Identify content - reads state at leaf level
 #[component]
 fn CdIdentifyContent(
-    state: ReadSignal<ImportState>,
+    state: ReadStore<ImportState>,
     cd_path: String,
     identify_mode: IdentifyMode,
     on_clear: EventHandler<()>,
@@ -213,7 +213,7 @@ fn CdIdentifyContent(
 /// CD Confirm content - reads state at leaf level
 #[component]
 fn CdConfirmContent(
-    state: ReadSignal<ImportState>,
+    state: ReadStore<ImportState>,
     storage_profiles: ReadSignal<Vec<StorageProfile>>,
     on_clear: EventHandler<()>,
     on_select_remote_cover: EventHandler<String>,

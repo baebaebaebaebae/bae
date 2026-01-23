@@ -2,7 +2,7 @@
 
 use crate::components::icons::{CheckIcon, EllipsisIcon, FolderIcon, LoaderIcon, PlusIcon, XIcon};
 use crate::display_types::DetectedCandidateStatus;
-use crate::stores::import::ImportState;
+use crate::stores::import::{ImportState, ImportStateStoreExt};
 use dioxus::prelude::*;
 
 pub const MIN_SIDEBAR_WIDTH: f64 = 350.0;
@@ -11,11 +11,11 @@ pub const DEFAULT_SIDEBAR_WIDTH: f64 = 375.0; // w-100
 
 /// Sidebar showing detected candidates with selection and status
 ///
-/// Accepts `ReadSignal<ImportState>` and reads at leaf level for granular reactivity.
+/// Accepts `ReadStore<ImportState>` - reads at leaf level for granular reactivity.
 #[component]
 pub fn ReleaseSidebarView(
-    /// Import state signal - read at leaf level
-    state: ReadSignal<ImportState>,
+    /// Import state store - read at leaf level
+    state: ReadStore<ImportState>,
     /// Called when a candidate is selected
     on_select: EventHandler<usize>,
     /// Called to add a folder
@@ -25,11 +25,11 @@ pub fn ReleaseSidebarView(
     /// Called to clear all folders
     on_clear_all: EventHandler<()>,
 ) -> Element {
-    // Read state at this leaf component
+    // Use lens for is_scanning, computed values need full read
+    let is_scanning = *state.is_scanning_candidates().read();
     let st = state.read();
     let candidates = st.get_detected_candidates_display();
     let selected_index = st.get_selected_candidate_index();
-    let is_scanning = st.is_scanning_candidates;
     drop(st);
 
     let mut show_menu = use_signal(|| false);

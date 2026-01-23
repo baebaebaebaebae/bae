@@ -2,10 +2,11 @@
 
 use crate::demo_data;
 use crate::Route;
+use bae_ui::stores::{PlaybackStatus, PlaybackUiState, SidebarState, SidebarStateStoreExt};
 use bae_ui::{
     ActiveImport, AppLayoutView, ImportStatus, ImportsButtonView, ImportsDropdownView, NavItem,
-    NowPlayingBarView, PlaybackDisplay, QueueItem, QueueSidebarView, SearchResult, TitleBarView,
-    Track, TrackImportState,
+    NowPlayingBarView, QueueItem, QueueSidebarView, SearchResult, TitleBarView, Track,
+    TrackImportState,
 };
 use dioxus::prelude::*;
 
@@ -81,22 +82,48 @@ fn mock_queue() -> Vec<QueueItem> {
                 is_available: true,
                 import_state: TrackImportState::Complete,
             },
-            album_title: "Proof by Induction".to_string(),
-            cover_url: Some("/covers/velvet-mathematics_proof-by-induction.png".to_string()),
+            album_title: "Set Theory".to_string(),
+            cover_url: Some("/covers/velvet-mathematics_set-theory.png".to_string()),
         },
     ]
 }
 
+/// Layout component wrapping shared AppLayoutView
 #[component]
 pub fn DemoLayout() -> Element {
     let current_route = use_route::<Route>();
     let mut search_query = use_signal(String::new);
     let mut show_search_results = use_signal(|| false);
-    let mut is_playing = use_signal(|| true);
-    let mut position_ms = use_signal(|| 45_000u64);
-    let mut queue_open = use_signal(|| false);
     let mut imports_open = use_signal(|| false);
     let mock_imports = mock_active_imports();
+
+    // Create mock track and queue data
+    let mock_track = mock_playing_track();
+    let current_queue_item = QueueItem {
+        track: mock_track.clone(),
+        album_title: "Neon Frequencies".to_string(),
+        cover_url: Some("/covers/the-midnight-signal_neon-frequencies.png".to_string()),
+    };
+
+    // Create playback store with mock data
+    let playback_store = use_store(move || PlaybackUiState {
+        status: PlaybackStatus::Playing,
+        queue: vec!["queue-track-1".to_string(), "queue-track-2".to_string()],
+        current_track_id: Some("mock-track-1".to_string()),
+        current_release_id: Some("release-1".to_string()),
+        current_track: Some(current_queue_item),
+        queue_items: mock_queue(),
+        position_ms: 45_000,
+        duration_ms: 245_000,
+        pregap_ms: None,
+        artist_name: "The Midnight Signal".to_string(),
+        cover_url: Some("/covers/the-midnight-signal_neon-frequencies.png".to_string()),
+        playback_error: None,
+        repeat_mode: Default::default(),
+    });
+
+    // Create sidebar store
+    let sidebar_store = use_store(|| SidebarState { is_open: false });
 
     // Mock search - filter albums by query
     let search_results: Vec<SearchResult> = {
@@ -151,28 +178,8 @@ pub fn DemoLayout() -> Element {
         },
     ];
 
-    // Mock track for playback bar
-    let mock_track = mock_playing_track();
-    let playback = if is_playing() {
-        PlaybackDisplay::Playing {
-            track_id: mock_track.id.clone(),
-            position_ms: position_ms(),
-            duration_ms: 245_000,
-        }
-    } else {
-        PlaybackDisplay::Paused {
-            track_id: mock_track.id.clone(),
-            position_ms: position_ms(),
-            duration_ms: 245_000,
-        }
-    };
-
-    // Current track for queue sidebar
-    let current_queue_item = QueueItem {
-        track: mock_track.clone(),
-        album_title: "Neon Frequencies".to_string(),
-        cover_url: Some("/covers/the-midnight-signal_neon-frequencies.png".to_string()),
-    };
+    // Get mutable stores for callbacks
+    let mut sidebar_is_open = sidebar_store.is_open();
 
     rsx! {
         AppLayoutView {
@@ -229,28 +236,24 @@ pub fn DemoLayout() -> Element {
             },
             playback_bar: rsx! {
                 NowPlayingBarView {
-                    track: Some(mock_track),
-                    artist_name: "The Midnight Signal".to_string(),
-                    cover_url: Some("/covers/the-midnight-signal_neon-frequencies.png".to_string()),
-                    playback,
-                    position_ms: position_ms(),
-                    duration_ms: 245_000,
+                    state: playback_store,
                     on_previous: move |_| {},
-                    on_pause: move |_| is_playing.set(false),
-                    on_resume: move |_| is_playing.set(true),
+                    on_pause: move |_| {},
+                    on_resume: move |_| {},
                     on_next: move |_| {},
-                    on_seek: move |pos| position_ms.set(pos),
-                    on_toggle_queue: move |_| queue_open.toggle(),
+                    on_seek: move |_pos| {},
+                    on_toggle_queue: move |_| {
+                        let current = *sidebar_is_open.read();
+                        sidebar_is_open.set(!current);
+                    },
                     on_track_click: move |_track_id: String| {},
                 }
             },
             queue_sidebar: rsx! {
                 QueueSidebarView {
-                    is_open: queue_open(),
-                    current_track: Some(current_queue_item),
-                    queue: mock_queue(),
-                    current_track_id: Some("mock-track-1".to_string()),
-                    on_close: move |_| queue_open.set(false),
+                    sidebar: sidebar_store,
+                    playback: playback_store,
+                    on_close: move |_| sidebar_is_open.set(false),
                     on_clear: move |_| {},
                     on_remove: move |_idx| {},
                     on_track_click: move |_track_id: String| {},

@@ -1,30 +1,23 @@
 //! Queue Sidebar component
 //!
-//! Wrapper component that connects bae-ui's QueueSidebarView to app state.
-//! All playback state is read from the Store (populated by AppService).
+//! Wrapper that passes stores to QueueSidebarView.
+//! The view reads fields via lenses for granular reactivity.
 
 use crate::ui::app_service::use_app;
 use crate::ui::Route;
-use bae_ui::stores::{
-    AppStateStoreExt, PlaybackUiStateStoreExt, SidebarStateStoreExt, UiStateStoreExt,
-};
+use bae_ui::stores::{AppStateStoreExt, SidebarStateStoreExt, UiStateStoreExt};
 use bae_ui::QueueSidebarView;
 use dioxus::prelude::*;
 
-/// Queue Sidebar wrapper that handles state subscription
+/// Queue Sidebar - passes stores to view
 #[component]
 pub fn QueueSidebar() -> Element {
     let app = use_app();
     let sidebar_store = app.state.ui().sidebar();
     let mut is_open = sidebar_store.is_open();
     let library_manager = app.library_manager.clone();
-    let playback = app.playback_handle.clone();
-
-    // Read from Store (updated by AppService)
+    let playback_handle = app.playback_handle.clone();
     let playback_store = app.state.playback();
-    let current_track_id = use_memo(move || playback_store.current_track_id().read().clone());
-    let current_track = use_memo(move || playback_store.current_track().read().clone());
-    let queue_items = use_memo(move || playback_store.queue_items().read().clone());
 
     // Navigation callback
     let on_track_click = {
@@ -46,21 +39,16 @@ pub fn QueueSidebar() -> Element {
         }
     };
 
+    let playback_for_clear = playback_handle.clone();
+    let playback_for_remove = playback_handle.clone();
+
     rsx! {
         QueueSidebarView {
-            is_open: is_open(),
-            current_track: current_track(),
-            queue: queue_items(),
-            current_track_id: current_track_id(),
+            sidebar: sidebar_store,
+            playback: playback_store,
             on_close: move |_| is_open.set(false),
-            on_clear: {
-                let playback = playback.clone();
-                move |_| playback.clear_queue()
-            },
-            on_remove: {
-                let playback = playback.clone();
-                move |idx: usize| playback.remove_from_queue(idx)
-            },
+            on_clear: move |_| playback_for_clear.clear_queue(),
+            on_remove: move |idx: usize| playback_for_remove.remove_from_queue(idx),
             on_track_click,
         }
     }

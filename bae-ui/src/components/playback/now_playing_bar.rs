@@ -1,28 +1,19 @@
 //! Now Playing Bar view component
 //!
-//! Pure, props-based component for displaying current playback state.
+//! ## Reactive State Pattern
+//! Accepts `ReadStore<PlaybackUiState>` and passes lenses to sub-components.
+//! Each sub-component reads only the fields it needs for granular reactivity.
 
 use crate::components::error_toast::ErrorToast;
 use crate::components::icons::{MenuIcon, PauseIcon, PlayIcon, SkipBackIcon, SkipForwardIcon};
-use crate::display_types::{PlaybackDisplay, Track};
+use crate::stores::playback::{PlaybackStatus, PlaybackUiState, PlaybackUiStateStoreExt};
 use dioxus::prelude::*;
 
-/// Now playing bar view (pure, props-based)
-/// All callbacks are required - pass noops if not needed.
+/// Now playing bar view - accepts store for granular reactivity
 #[component]
 pub fn NowPlayingBarView(
-    // Track info
-    track: Option<Track>,
-    artist_name: String,
-    cover_url: Option<String>,
-    // Playback state
-    playback: PlaybackDisplay,
-    position_ms: u64,
-    duration_ms: u64,
-    #[props(default)] pregap_ms: Option<i64>,
-    // Error display
-    #[props(default)] playback_error: Option<String>,
-    #[props(default)] on_dismiss_error: Option<EventHandler<()>>,
+    /// Playback state store - sub-components read only what they need
+    state: ReadStore<PlaybackUiState>,
     // Callbacks - all required
     on_previous: EventHandler<()>,
     on_pause: EventHandler<()>,
@@ -31,58 +22,24 @@ pub fn NowPlayingBarView(
     on_seek: EventHandler<u64>,
     on_toggle_queue: EventHandler<()>,
     on_track_click: EventHandler<String>,
+    #[props(default)] on_dismiss_error: Option<EventHandler<()>>,
 ) -> Element {
-    let is_playing = matches!(playback, PlaybackDisplay::Playing { .. });
-    let is_paused = matches!(playback, PlaybackDisplay::Paused { .. });
-    let is_loading = matches!(playback, PlaybackDisplay::Loading { .. });
-    let is_stopped = matches!(playback, PlaybackDisplay::Stopped);
-
     rsx! {
         div { class: "fixed bottom-0 left-0 right-0 bg-gray-800 text-white p-4 border-t border-gray-700",
             div { class: "flex items-center gap-4",
-                PlaybackControlsView {
-                    is_playing,
-                    is_paused,
-                    is_loading,
-                    is_stopped,
+                PlaybackControlsSection {
+                    state,
                     on_previous,
                     on_pause,
                     on_resume,
                     on_next,
                 }
 
-                AlbumCoverThumbnailView {
-                    cover_url: cover_url.clone(),
-                    on_click: {
-                        let track_id = track.as_ref().map(|t| t.id.clone());
-                        EventHandler::new(move |_: ()| {
-                            if let Some(ref id) = track_id {
-                                on_track_click.call(id.clone());
-                            }
-                        })
-                    },
-                }
+                AlbumCoverSection { state, on_track_click }
 
-                TrackInfoView {
-                    track: track.clone(),
-                    artist_name: artist_name.clone(),
-                    is_loading,
-                    on_click: {
-                        let track_id = track.as_ref().map(|t| t.id.clone());
-                        EventHandler::new(move |_: ()| {
-                            if let Some(ref id) = track_id {
-                                on_track_click.call(id.clone());
-                            }
-                        })
-                    },
-                }
+                TrackInfoSection { state, on_track_click }
 
-                PositionView {
-                    position_ms,
-                    duration_ms,
-                    pregap_ms,
-                    on_seek,
-                }
+                PositionSection { state, on_seek }
 
                 button {
                     class: "px-3 py-2 bg-gray-700 rounded hover:bg-gray-600",
@@ -91,32 +48,26 @@ pub fn NowPlayingBarView(
                 }
             }
         }
-        if let Some(error) = playback_error {
-            ErrorToast {
-                title: None,
-                message: error,
-                on_dismiss: move |_| {
-                    if let Some(handler) = on_dismiss_error {
-                        handler.call(());
-                    }
-                },
-            }
-        }
+
+        PlaybackErrorSection { state, on_dismiss_error }
     }
 }
 
+/// Playback controls - reads only status
 #[component]
-fn PlaybackControlsView(
-    is_playing: bool,
-    is_paused: bool,
-    is_loading: bool,
-    is_stopped: bool,
+fn PlaybackControlsSection(
+    state: ReadStore<PlaybackUiState>,
     on_previous: EventHandler<()>,
     on_pause: EventHandler<()>,
     on_resume: EventHandler<()>,
     on_next: EventHandler<()>,
 ) -> Element {
-    // Show spinner immediately when loading (no delay in shared component)
+    // Read only status via lens
+    let status = *state.status().read();
+
+    let is_playing = status == PlaybackStatus::Playing;
+    let is_loading = status == PlaybackStatus::Loading;
+    let is_stopped = status == PlaybackStatus::Stopped;
     let show_spinner = is_loading;
 
     let main_btn_base = "w-10 h-10 rounded flex items-center justify-center";
@@ -174,12 +125,24 @@ fn PlaybackControlsView(
     }
 }
 
+/// Album cover thumbnail - reads only cover_url and current_track_id
 #[component]
-fn AlbumCoverThumbnailView(cover_url: Option<String>, on_click: EventHandler<()>) -> Element {
+fn AlbumCoverSection(
+    state: ReadStore<PlaybackUiState>,
+    on_track_click: EventHandler<String>,
+) -> Element {
+    // Read only the fields we need
+    let cover_url = state.cover_url().read().clone();
+    let track_id = state.current_track_id().read().clone();
+
     rsx! {
         div {
             class: "w-10 h-10 bg-gray-700 rounded-sm flex items-center justify-center overflow-hidden flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity",
-            onclick: move |_| on_click.call(()),
+            onclick: move |_| {
+                if let Some(ref id) = track_id {
+                    on_track_click.call(id.clone());
+                }
+            },
             if let Some(ref url) = cover_url {
                 img {
                     src: "{url}",
@@ -193,19 +156,31 @@ fn AlbumCoverThumbnailView(cover_url: Option<String>, on_click: EventHandler<()>
     }
 }
 
+/// Track info display - reads current_track, artist_name, status
 #[component]
-fn TrackInfoView(
-    track: Option<Track>,
-    artist_name: String,
-    is_loading: bool,
-    on_click: EventHandler<()>,
+fn TrackInfoSection(
+    state: ReadStore<PlaybackUiState>,
+    on_track_click: EventHandler<String>,
 ) -> Element {
+    // Read only the fields we need
+    let current_track = state.current_track().read().clone();
+    let artist_name = state.artist_name().read().clone();
+    let status = *state.status().read();
+    let is_loading = status == PlaybackStatus::Loading;
+
+    let track = current_track.map(|qi| qi.track);
+    let track_id = track.as_ref().map(|t| t.id.clone());
+
     rsx! {
         div { class: "flex-1",
             if let Some(ref track) = track {
                 div {
                     class: "font-semibold cursor-pointer hover:text-blue-300 transition-colors",
-                    onclick: move |_| on_click.call(()),
+                    onclick: move |_| {
+                        if let Some(ref id) = track_id {
+                            on_track_click.call(id.clone());
+                        }
+                    },
                     "{track.title}"
                 }
                 div { class: "text-sm text-gray-400", "{artist_name}" }
@@ -220,37 +195,14 @@ fn TrackInfoView(
     }
 }
 
-fn format_duration_ms(ms: u64) -> String {
-    let total_secs = ms / 1000;
-    let mins = total_secs / 60;
-    let secs = total_secs % 60;
-    format!("{:02}:{:02}", mins, secs)
-}
-
-fn format_display_time(position_ms: u64, pregap_ms: Option<i64>) -> String {
-    let pregap = pregap_ms.unwrap_or(0).max(0) as u64;
-    if position_ms < pregap {
-        let remaining_ms = pregap - position_ms;
-        let total_secs = remaining_ms / 1000;
-        let mins = total_secs / 60;
-        let secs = total_secs % 60;
-        format!("-{:02}:{:02}", mins, secs)
-    } else {
-        let adjusted_ms = position_ms - pregap;
-        let total_secs = adjusted_ms / 1000;
-        let mins = total_secs / 60;
-        let secs = total_secs % 60;
-        format!("{:02}:{:02}", mins, secs)
-    }
-}
-
+/// Position/seek bar - reads position_ms, duration_ms, pregap_ms
 #[component]
-fn PositionView(
-    position_ms: u64,
-    duration_ms: u64,
-    pregap_ms: Option<i64>,
-    on_seek: EventHandler<u64>,
-) -> Element {
+fn PositionSection(state: ReadStore<PlaybackUiState>, on_seek: EventHandler<u64>) -> Element {
+    // Read position fields via lenses
+    let position_ms = *state.position_ms().read();
+    let duration_ms = *state.duration_ms().read();
+    let pregap_ms = *state.pregap_ms().read();
+
     // Local position used during and briefly after seeking to prevent flicker
     let mut seek_position_ms = use_signal(|| None::<u64>);
     let mut is_seeking = use_signal(|| false);
@@ -299,7 +251,6 @@ fn PositionView(
                                             on_seek.call(pos);
                                         }
                                         is_seeking.set(false);
-                                        // Keep seek_position_ms set - it will clear once position catches up
                                     }
                                 },
                                 oninput: move |evt| {
@@ -325,5 +276,55 @@ fn PositionView(
         } else {
             div { class: "w-72" }
         }
+    }
+}
+
+/// Playback error toast - reads only playback_error
+#[component]
+fn PlaybackErrorSection(
+    state: ReadStore<PlaybackUiState>,
+    on_dismiss_error: Option<EventHandler<()>>,
+) -> Element {
+    // Read only error via lens
+    let error = state.playback_error().read().clone();
+
+    if let Some(error_msg) = error {
+        rsx! {
+            ErrorToast {
+                title: None,
+                message: error_msg,
+                on_dismiss: move |_| {
+                    if let Some(handler) = on_dismiss_error {
+                        handler.call(());
+                    }
+                },
+            }
+        }
+    } else {
+        rsx! {}
+    }
+}
+
+fn format_duration_ms(ms: u64) -> String {
+    let total_secs = ms / 1000;
+    let mins = total_secs / 60;
+    let secs = total_secs % 60;
+    format!("{:02}:{:02}", mins, secs)
+}
+
+fn format_display_time(position_ms: u64, pregap_ms: Option<i64>) -> String {
+    let pregap = pregap_ms.unwrap_or(0).max(0) as u64;
+    if position_ms < pregap {
+        let remaining_ms = pregap - position_ms;
+        let total_secs = remaining_ms / 1000;
+        let mins = total_secs / 60;
+        let secs = total_secs % 60;
+        format!("-{:02}:{:02}", mins, secs)
+    } else {
+        let adjusted_ms = position_ms - pregap;
+        let total_secs = adjusted_ms / 1000;
+        let mins = total_secs / 60;
+        let secs = total_secs % 60;
+        format!("{:02}:{:02}", mins, secs)
     }
 }

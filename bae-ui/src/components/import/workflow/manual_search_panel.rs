@@ -8,10 +8,10 @@ use dioxus::prelude::*;
 
 /// Manual search panel with tabs for General/Catalog#/Barcode search
 ///
-/// Accepts `ReadSignal<ImportState>` and reads at leaf level for granular reactivity.
+/// Accepts `ReadStore<ImportState>` - reads at leaf level for granular reactivity.
 #[component]
 pub fn ManualSearchPanelView(
-    state: ReadSignal<ImportState>,
+    state: ReadStore<ImportState>,
     on_search_source_change: EventHandler<SearchSource>,
     on_tab_change: EventHandler<SearchTab>,
     on_artist_change: EventHandler<String>,

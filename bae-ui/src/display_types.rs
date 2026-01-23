@@ -35,7 +35,7 @@ pub enum TrackImportState {
 }
 
 /// Track display info
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Store)]
 pub struct Track {
     pub id: String,
     pub title: String,

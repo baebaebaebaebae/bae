@@ -1,25 +1,28 @@
 //! Track row component - displays a single track in the tracklist
+//!
+//! Accepts `ReadStore<Track>` for per-track reactivity.
+//! Only this row re-renders when its track's import state changes.
 
 use crate::components::icons::{EllipsisIcon, PauseIcon, PlayIcon};
 use crate::components::utils::format_duration;
-use crate::display_types::{Artist, Track, TrackImportState};
+use crate::display_types::{Artist, TrackImportState};
 use dioxus::prelude::*;
 
-/// Individual track row component (props-based, pure rendering)
+/// Individual track row component - reads from its track store for granular reactivity
 #[component]
 pub fn TrackRow(
-    // Track data
-    track: Track,
+    // Track data - ReadStore for per-track reactivity
+    track: ReadStore<crate::display_types::Track>,
     artists: Vec<Artist>,
     release_id: String,
     // Album context
     is_compilation: bool,
-    // Playback state
+    // Playback state (from external playback store)
     is_playing: bool,
     is_paused: bool,
     is_loading: bool,
     show_spinner: bool,
-    // Callbacks - all required, pass noops if not needed
+    // Callbacks
     on_play: EventHandler<String>,
     on_pause: EventHandler<()>,
     on_resume: EventHandler<()>,
@@ -27,6 +30,9 @@ pub fn TrackRow(
     on_add_to_queue: EventHandler<String>,
     on_export: EventHandler<String>,
 ) -> Element {
+    // Read track data at this leaf level
+    let track = track.read();
+
     let is_active = is_playing || is_paused;
 
     // Determine availability from import state
@@ -55,6 +61,10 @@ pub fn TrackRow(
     // For styling: unavailable tracks look like "importing"
     let is_importing = !is_available;
 
+    let track_id = track.id.clone();
+    let track_id_for_play = track_id.clone();
+    let track_id_for_menu = track_id.clone();
+
     rsx! {
         div { class: "{row_class}",
             div { class: "relative flex items-center w-full",
@@ -80,7 +90,7 @@ pub fn TrackRow(
                         button {
                             class: "w-6 h-6 rounded-full border border-blue-400 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-blue-400 hover:text-blue-300 hover:bg-blue-400/10",
                             onclick: {
-                                let track_id = track.id.clone();
+                                let track_id = track_id_for_play.clone();
                                 move |_| on_play.call(track_id.clone())
                             },
                             PlayIcon { class: "w-3 h-3" }
@@ -140,7 +150,7 @@ pub fn TrackRow(
                 // Context menu
                 if is_available {
                     TrackMenu {
-                        track_id: track.id.clone(),
+                        track_id: track_id_for_menu,
                         on_export,
                         on_add_next,
                         on_add_to_queue,

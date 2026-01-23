@@ -2,22 +2,22 @@
 
 use crate::demo_data;
 use crate::Route;
+use bae_ui::stores::LibraryState;
 use bae_ui::LibraryView;
 use dioxus::prelude::*;
 
 #[component]
 pub fn Library() -> Element {
-    let albums = use_memo(demo_data::get_albums);
-    let artists_by_album = use_memo(demo_data::get_artists_by_album);
-    let loading = use_memo(|| false);
-    let error = use_memo(|| None);
+    let state = use_store(|| LibraryState {
+        albums: demo_data::get_albums(),
+        artists_by_album: demo_data::get_artists_by_album(),
+        loading: false,
+        error: None,
+    });
 
     rsx! {
         LibraryView {
-            albums,
-            artists_by_album,
-            loading,
-            error,
+            state,
             on_album_click: move |album_id: String| {
                 navigator().push(Route::AlbumDetail { album_id });
             },

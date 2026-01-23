@@ -1,6 +1,7 @@
 //! AlbumDetailView mock component
 
 use super::framework::{ControlRegistryBuilder, MockPage, MockPanel, Preset};
+use bae_ui::stores::{AlbumDetailState, AlbumDetailStateStoreExt};
 use bae_ui::{Album, AlbumDetailView, Artist, PlaybackDisplay, Release, Track, TrackImportState};
 use dioxus::prelude::*;
 
@@ -32,8 +33,6 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
 
     // Local state
     let position_ms = use_signal(|| 45_000u64);
-    let import_progress = use_signal(|| None::<u8>);
-    let import_error = use_signal(|| None::<String>);
     let mut selected_release_id = use_signal(|| Some("release-1".to_string()));
 
     // Parse playback state from registry
@@ -82,7 +81,7 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
         },
     ];
 
-    let tracks_data: Vec<Track> = [
+    let tracks: Vec<Track> = [
         ("track-1", "Broadcast", 1, 198_000i64),
         ("track-2", "Static Dreams", 2, 245_000),
         ("track-3", "Frequency Drift", 3, 312_000),
@@ -103,7 +102,35 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
         import_state: TrackImportState::Complete,
     })
     .collect();
-    let tracks = use_memo(move || tracks_data.clone());
+
+    // Derive count/ids/disc_info before moving tracks
+    let track_count = tracks.len();
+    let track_ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
+    let track_disc_info: Vec<(Option<i32>, String)> = tracks
+        .iter()
+        .map(|t| (t.disc_number, t.id.clone()))
+        .collect();
+
+    // Create state store for lens support
+    let state = use_store(move || AlbumDetailState {
+        album: Some(album),
+        artists,
+        tracks,
+        track_count,
+        track_ids,
+        track_disc_info,
+        releases,
+        files: vec![],
+        images: vec![],
+        selected_release_id: selected_release_id(),
+        loading: false,
+        error: None,
+        import_progress: None,
+        import_error: None,
+    });
+
+    // Get tracks lens for per-track reactivity
+    let tracks = state.tracks();
 
     let playback = match playback_state.as_str() {
         "Stopped" => PlaybackDisplay::Stopped,
@@ -129,13 +156,8 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
             registry,
             max_width: "6xl",
             AlbumDetailView {
-                album,
-                releases,
-                artists,
+                state,
                 tracks,
-                selected_release_id: selected_release_id(),
-                import_progress,
-                import_error,
                 playback,
                 on_release_select: move |id| selected_release_id.set(Some(id)),
                 on_album_deleted: |_| {},

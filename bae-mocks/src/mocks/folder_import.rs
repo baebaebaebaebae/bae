@@ -506,7 +506,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         candidate_states.insert(folder_path.clone(), candidate_state);
     }
 
-    let import_state = use_signal(|| ImportState {
+    let import_state = use_store(|| ImportState {
         detected_candidates: detected_candidates.clone(),
         current_candidate_key: current_key,
         candidate_states,
