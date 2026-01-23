@@ -550,12 +550,7 @@ pub fn FolderImport() -> Element {
     let image_data: Vec<(String, String)> = display_folder_files
         .artwork
         .iter()
-        .map(|f| {
-            let folder_path = current_candidate_key.clone().unwrap_or_default();
-            let path = std::path::Path::new(&folder_path).join(&f.name);
-            let url = crate::ui::local_file_url::local_file_url(&path);
-            (f.name.clone(), url)
-        })
+        .map(crate::ui::local_file_url::local_file_url)
         .collect();
 
     rsx! {
