@@ -19,7 +19,7 @@ runs:
     - name: Cache Rust dependencies
       uses: Swatinem/rust-cache@v2
       with:
-        shared-key: rust-cache
+        shared-key: rust-${{ runner.arch }}
         cache-directories: ~/.cargo/bin
 
     - name: Add cargo bin to PATH
@@ -34,8 +34,8 @@ runs:
       if: inputs.install-dioxus == 'true'
       shell: bash
       run: |
-        if [[ -x "$HOME/.cargo/bin/dx" ]] && "$HOME/.cargo/bin/dx" --version | grep -q "0.7.2"; then
+        if [[ -x "$HOME/.cargo/bin/dx" ]] && "$HOME/.cargo/bin/dx" --version 2>/dev/null | grep -q "0.7.2"; then
           echo "dioxus-cli 0.7.2 already installed"
         else
-          cargo binstall dioxus-cli@0.7.2 --no-confirm --force
+          cargo install dioxus-cli@0.7.2 --locked
         fi

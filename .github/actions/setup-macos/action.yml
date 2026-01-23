@@ -9,14 +9,6 @@ runs:
       run: |
         brew install libdiscid libcdio libsodium pkg-config libtorrent-rasterbar boost ffmpeg openssl@3 switchaudio-osx
 
-    - name: Symlink OpenSSL for Intel binaries
-      shell: bash
-      run: |
-        if [[ -d "/opt/homebrew/opt/openssl@3" ]] && [[ ! -d "/usr/local/opt/openssl@3" ]]; then
-          sudo mkdir -p /usr/local/opt
-          sudo ln -sf /opt/homebrew/opt/openssl@3 /usr/local/opt/openssl@3
-        fi
-
     - name: Setup virtual audio device
       shell: bash
       run: |
