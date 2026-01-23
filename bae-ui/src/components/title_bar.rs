@@ -2,10 +2,14 @@
 //!
 //! Pure, props-based component for the app title bar with navigation and search.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use crate::components::icons::{ImageIcon, SettingsIcon};
 use crate::components::{Dropdown, Placement};
 use dioxus::prelude::*;
-use web_sys_x::js_sys;
+
+/// Counter for generating unique update button IDs
+static UPDATE_BUTTON_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Navigation item for title bar
 #[derive(Clone, PartialEq)]
@@ -65,7 +69,10 @@ pub fn TitleBarView(
 ) -> Element {
     let mut show_update_menu = use_signal(|| false);
     let is_update_menu_open: ReadSignal<bool> = show_update_menu.into();
-    let update_button_id = use_hook(|| format!("update-button-{}", js_sys::Math::random() as u64));
+    let update_button_id = use_hook(|| {
+        let id = UPDATE_BUTTON_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("update-button-{}", id)
+    });
 
     let (position_class, overlay_class, search_popover_class) = if relative {
         (

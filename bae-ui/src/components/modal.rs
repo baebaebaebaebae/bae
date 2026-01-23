@@ -6,9 +6,13 @@
 //! - Escape key to close
 //! - `::backdrop` styling
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use dioxus::prelude::*;
 use wasm_bindgen_x::JsCast;
-use web_sys_x::js_sys;
+
+/// Counter for generating unique modal IDs
+static MODAL_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Modal component that wraps content in a native `<dialog>` element
 #[component]
@@ -23,8 +27,11 @@ pub fn Modal(
     #[props(default)]
     class: Option<String>,
 ) -> Element {
-    // Generate unique ID for this dialog instance
-    let dialog_id = use_hook(|| format!("modal-{}", js_sys::Math::random() as u64));
+    // Generate unique ID for this dialog instance using atomic counter
+    let dialog_id = use_hook(|| {
+        let id = MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("modal-{}", id)
+    });
     let dialog_id_for_effect = dialog_id.clone();
     let dialog_id_for_rsx = dialog_id.clone();
 
@@ -43,16 +50,16 @@ pub fn Modal(
         };
 
         if is_open {
-            // Call showModal() via js_sys
-            if let Ok(show_modal) = js_sys::Reflect::get(&element, &"showModal".into()) {
-                if let Some(func) = show_modal.dyn_ref::<js_sys::Function>() {
+            // Call showModal()
+            if let Ok(show_modal) = js_sys_x::Reflect::get(&element, &"showModal".into()) {
+                if let Some(func) = show_modal.dyn_ref::<js_sys_x::Function>() {
                     let _ = func.call0(&element);
                 }
             }
         } else {
-            // Call close() via js_sys
-            if let Ok(close) = js_sys::Reflect::get(&element, &"close".into()) {
-                if let Some(func) = close.dyn_ref::<js_sys::Function>() {
+            // Call close()
+            if let Ok(close) = js_sys_x::Reflect::get(&element, &"close".into()) {
+                if let Some(func) = close.dyn_ref::<js_sys_x::Function>() {
                     let _ = func.call0(&element);
                 }
             }
