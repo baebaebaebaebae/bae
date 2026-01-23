@@ -804,8 +804,10 @@ version = "0.1.0"
 dependencies = [
  "dioxus",
  "dioxus-virtual-scroll",
+ "js-sys-x",
  "serde",
  "serde_json",
+ "wasm-bindgen-futures-x",
  "wasm-bindgen-x",
  "web-sys-x",
 ]

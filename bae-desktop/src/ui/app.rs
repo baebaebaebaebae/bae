@@ -11,6 +11,8 @@ use dioxus::prelude::*;
 pub const FAVICON: Asset = asset!("/assets/favicon.ico");
 pub const MAIN_CSS: Asset = asset!("/assets/main.css");
 pub const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
+pub const FLOATING_UI_CORE: Asset = asset!("/assets/floating-ui.core.min.js");
+pub const FLOATING_UI_DOM: Asset = asset!("/assets/floating-ui.dom.min.js");
 
 #[derive(Debug, Clone, Routable, PartialEq)]
 #[rustfmt::skip]

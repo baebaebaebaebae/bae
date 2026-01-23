@@ -25,7 +25,7 @@ export default defineConfig({
   webServer: {
     command: `cd .. && dx serve --release --port 8080`,
     url: 'http://localhost:8080',
-    reuseExistingServer: !isCI,
+    reuseExistingServer: true,
     timeout: isCI ? 300000 : 120000,
   },
 });

@@ -5,7 +5,6 @@ use crate::components::{Dropdown, Placement};
 use crate::display_types::DetectedCandidateStatus;
 use crate::stores::import::{ImportState, ImportStateStoreExt};
 use dioxus::prelude::*;
-use web_sys_x::js_sys;
 
 pub const MIN_SIDEBAR_WIDTH: f64 = 350.0;
 pub const MAX_SIDEBAR_WIDTH: f64 = 500.0;
@@ -36,7 +35,8 @@ pub fn ReleaseSidebarView(
 
     let mut show_menu = use_signal(|| false);
     let is_open: ReadSignal<bool> = show_menu.into();
-    let anchor_id = use_hook(|| format!("release-sidebar-menu-{}", js_sys::Math::random() as u64));
+    // Static ID - only one sidebar menu per page
+    let anchor_id = "release-sidebar-menu";
 
     rsx! {
         // Floating panel container with padding
@@ -85,7 +85,7 @@ pub fn ReleaseSidebarView(
                 // Dropdown menu for candidates list
                 if !candidates.is_empty() {
                     Dropdown {
-                        anchor_id: anchor_id.clone(),
+                        anchor_id: anchor_id.to_string(),
                         is_open,
                         on_close: move |_| show_menu.set(false),
                         placement: Placement::BottomEnd,

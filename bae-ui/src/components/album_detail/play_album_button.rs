@@ -3,7 +3,6 @@
 use crate::components::icons::{ChevronDownIcon, PlayIcon, PlusIcon};
 use crate::components::{Dropdown, Placement};
 use dioxus::prelude::*;
-use web_sys_x::js_sys;
 
 /// Play album button with dropdown for "add to queue"
 /// All callbacks are required - pass noops if actions are not needed.
@@ -28,8 +27,11 @@ pub fn PlayAlbumButton(
         "Play Album"
     };
 
-    // Unique anchor ID for the dropdown button
-    let anchor_id = use_hook(|| format!("play-album-btn-{}", js_sys::Math::random() as u64));
+    // Use first track_id for anchor uniqueness (one button per album detail page)
+    let anchor_id = format!(
+        "play-album-btn-{}",
+        track_ids.first().map(|s| s.as_str()).unwrap_or("unknown")
+    );
 
     rsx! {
         div { class: "relative mt-6",

@@ -9,3 +9,4 @@ dioxus = { git = "https://github.com/ealmloff/dioxus", branch = "wasm-bindgen", 
 web-sys-x = { version = "0.3.83-alpha.1", default-features = false }
 wasm-bindgen-x = "0.2.106-alpha.1"
 js-sys-x = "0.3.83-alpha.1"
+wasm-bindgen-futures-x = "0.4.56-alpha.1"

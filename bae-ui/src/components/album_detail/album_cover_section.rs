@@ -4,7 +4,6 @@ use super::album_art::AlbumArt;
 use crate::components::{Dropdown, Placement};
 use crate::display_types::Album;
 use dioxus::prelude::*;
-use web_sys_x::js_sys;
 
 /// Album cover section with action menu
 /// All callbacks are required - pass noops if actions are not needed.
@@ -24,7 +23,8 @@ pub fn AlbumCoverSection(
     let mut show_dropdown = use_signal(|| false);
     let is_open: ReadSignal<bool> = show_dropdown.into();
     let mut hover_cover = use_signal(|| false);
-    let anchor_id = use_hook(|| format!("album-cover-{}", js_sys::Math::random() as u64));
+    // Use album.id for anchor to ensure uniqueness
+    let anchor_id = format!("album-cover-btn-{}", album.id);
 
     rsx! {
         div {

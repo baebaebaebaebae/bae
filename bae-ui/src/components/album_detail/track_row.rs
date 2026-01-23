@@ -8,7 +8,6 @@ use crate::components::utils::format_duration;
 use crate::components::{Dropdown, Placement};
 use crate::display_types::{Artist, TrackImportState};
 use dioxus::prelude::*;
-use web_sys_x::js_sys;
 
 /// Individual track row component - reads from its track store for granular reactivity
 #[component]
@@ -173,7 +172,8 @@ fn TrackMenu(
 ) -> Element {
     let mut show_menu = use_signal(|| false);
     let is_open: ReadSignal<bool> = show_menu.into();
-    let anchor_id = use_hook(|| format!("track-menu-{}", js_sys::Math::random() as u64));
+    // Use track_id for anchor to ensure uniqueness even if component is recycled
+    let anchor_id = format!("track-menu-{}", track_id);
 
     rsx! {
         button {

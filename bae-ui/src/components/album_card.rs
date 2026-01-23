@@ -4,7 +4,6 @@ use crate::components::icons::{EllipsisIcon, ImageIcon, PlayIcon, PlusIcon};
 use crate::components::{Dropdown, Placement};
 use crate::display_types::{Album, Artist};
 use dioxus::prelude::*;
-use web_sys_x::js_sys;
 
 /// Individual album card component
 ///
@@ -27,7 +26,8 @@ pub fn AlbumCard(
 
     let mut show_dropdown = use_signal(|| false);
     let is_open: ReadSignal<bool> = show_dropdown.into();
-    let anchor_id = use_hook(|| format!("album-card-{}", js_sys::Math::random() as u64));
+    // Use album_id for anchor to ensure uniqueness even if component is recycled
+    let anchor_id = format!("album-card-btn-{}", album_id);
 
     let artist_name = if artists.is_empty() {
         "Unknown Artist".to_string()
@@ -66,11 +66,14 @@ pub fn AlbumCard(
                     ImageIcon { class: "w-12 h-12 text-gray-500" }
                 }
 
-                // Hover overlay with dropdown trigger
-                div { class: "absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-start justify-end p-2",
+                // Hover overlay with dropdown trigger - stays visible when dropdown is open
+                div {
+                    class: "absolute inset-0 transition-colors flex items-start justify-end p-2",
+                    class: if show_dropdown() { "bg-black/40" } else { "bg-black/0 group-hover:bg-black/40" },
                     button {
                         id: "{anchor_id}",
-                        class: "opacity-0 group-hover:opacity-100 transition-opacity bg-gray-900/80 hover:bg-gray-800 rounded-full w-8 h-8 flex items-center justify-center text-white",
+                        class: "transition-opacity bg-gray-900/80 hover:bg-gray-800 rounded-full w-8 h-8 flex items-center justify-center text-white",
+                        class: if show_dropdown() { "opacity-100" } else { "opacity-0 group-hover:opacity-100" },
                         onclick: move |evt| {
                             evt.stop_propagation();
                             show_dropdown.set(!show_dropdown());
