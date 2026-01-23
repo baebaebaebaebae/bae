@@ -647,12 +647,69 @@ impl ImportState {
         })
     }
 
+    /// Get display URL for the selected cover
+    ///
+    /// For remote covers, returns the URL directly.
+    /// For local covers, looks up the display_url from artwork files.
+    pub fn get_display_cover_url(&self) -> Option<String> {
+        let selected = self.get_selected_cover()?;
+        match selected {
+            SelectedCover::Remote { url, .. } => Some(url),
+            SelectedCover::Local { filename } => {
+                // Find the artwork file with matching name
+                self.current_candidate_state()
+                    .and_then(|s| {
+                        s.files()
+                            .artwork
+                            .iter()
+                            .find(|f| f.name == filename)
+                            .map(|f| f.display_url.clone())
+                    })
+                    .filter(|url| !url.is_empty())
+            }
+        }
+    }
+
     /// Get selected storage profile ID from current candidate state
     pub fn get_storage_profile_id(&self) -> Option<String> {
         self.current_candidate_state().and_then(|s| match s {
             CandidateState::Confirming(cs) => cs.selected_profile_id.clone(),
             _ => None,
         })
+    }
+
+    /// Get detected candidates with status computed from state machine
+    pub fn get_detected_candidates_display(&self) -> Vec<DetectedCandidate> {
+        self.detected_candidates
+            .iter()
+            .map(|c| {
+                let status = self
+                    .candidate_states
+                    .get(&c.path)
+                    .map(|s| {
+                        if s.is_imported() {
+                            crate::display_types::DetectedCandidateStatus::Imported
+                        } else if s.is_importing() {
+                            crate::display_types::DetectedCandidateStatus::Importing
+                        } else {
+                            crate::display_types::DetectedCandidateStatus::Pending
+                        }
+                    })
+                    .unwrap_or(crate::display_types::DetectedCandidateStatus::Pending);
+                DetectedCandidate {
+                    name: c.name.clone(),
+                    path: c.path.clone(),
+                    status,
+                }
+            })
+            .collect()
+    }
+
+    /// Get selected candidate index from current candidate key
+    pub fn get_selected_candidate_index(&self) -> Option<usize> {
+        self.current_candidate_key
+            .as_ref()
+            .and_then(|key| self.detected_candidates.iter().position(|c| &c.path == key))
     }
 
     /// Remove a detected release by index

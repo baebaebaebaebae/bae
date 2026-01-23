@@ -1,16 +1,23 @@
 //! Multiple DiscID matches view component
 
 use super::match_list::MatchListView;
-use crate::display_types::MatchCandidate;
+use crate::stores::import::ImportState;
 use dioxus::prelude::*;
 
 /// Displays multiple DiscID matches for user to pick from
+///
+/// Accepts `ReadSignal<ImportState>` and reads at leaf level for granular reactivity.
 #[component]
 pub fn MultipleMatchesView(
-    candidates: Vec<MatchCandidate>,
-    selected_index: Option<usize>,
+    state: ReadSignal<ImportState>,
     on_select: EventHandler<usize>,
 ) -> Element {
+    // Read state at this leaf component
+    let st = state.read();
+    let candidates = st.get_exact_match_candidates();
+    let selected_index = st.get_selected_match_index();
+    drop(st);
+
     if candidates.is_empty() {
         return rsx! {};
     }

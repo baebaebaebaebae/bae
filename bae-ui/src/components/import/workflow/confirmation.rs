@@ -1,9 +1,8 @@
 //! Confirmation view component
 
 use crate::components::icons::ImageIcon;
-use crate::display_types::{
-    FileInfo, MatchCandidate, MatchSourceType, SelectedCover, StorageProfileInfo,
-};
+use crate::components::StorageProfile;
+use crate::display_types::{FileInfo, MatchCandidate, MatchSourceType, SelectedCover};
 use dioxus::prelude::*;
 
 /// Final confirmation view before import
@@ -20,7 +19,7 @@ pub fn ConfirmationView(
     /// Remote cover URL from the match candidate
     remote_cover_url: Option<String>,
     /// Available storage profiles
-    storage_profiles: Vec<StorageProfileInfo>,
+    storage_profiles: ReadSignal<Vec<StorageProfile>>,
     /// Currently selected storage profile ID
     selected_profile_id: Option<String>,
     /// Whether import is in progress
@@ -204,7 +203,7 @@ pub fn ConfirmationView(
                         selected: selected_profile_id.is_none(),
                         "No Storage (files stay in place)"
                     }
-                    for profile in storage_profiles.iter() {
+                    for profile in storage_profiles.read().iter() {
                         option {
                             key: "{profile.id}",
                             value: "{profile.id}",

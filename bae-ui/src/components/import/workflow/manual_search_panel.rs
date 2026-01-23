@@ -3,64 +3,85 @@
 use super::match_list::MatchListView;
 use super::search_source_selector::SearchSourceSelectorView;
 use crate::display_types::{MatchCandidate, SearchSource, SearchTab};
+use crate::stores::import::ImportState;
 use dioxus::prelude::*;
 
 /// Manual search panel with tabs for General/Catalog#/Barcode search
 ///
-/// This component accepts reactive props (ReadSignal) for fine-grained reactivity.
-/// Only the specific fields that change will trigger re-renders.
+/// Accepts `ReadSignal<ImportState>` and reads at leaf level for granular reactivity.
 #[component]
 pub fn ManualSearchPanelView(
-    // Search source selection
-    search_source: ReadSignal<SearchSource>,
+    state: ReadSignal<ImportState>,
     on_search_source_change: EventHandler<SearchSource>,
-    // Active tab
-    active_tab: ReadSignal<SearchTab>,
     on_tab_change: EventHandler<SearchTab>,
-    // General search fields
-    search_artist: ReadSignal<String>,
     on_artist_change: EventHandler<String>,
-    search_album: ReadSignal<String>,
     on_album_change: EventHandler<String>,
-    search_year: ReadSignal<String>,
     on_year_change: EventHandler<String>,
-    search_label: ReadSignal<String>,
     on_label_change: EventHandler<String>,
-    // Catalog number search
-    search_catalog_number: ReadSignal<String>,
     on_catalog_number_change: EventHandler<String>,
-    // Barcode search
-    search_barcode: ReadSignal<String>,
     on_barcode_change: EventHandler<String>,
-    // Search tokens (suggestions from folder name)
-    search_tokens: ReadSignal<Vec<String>>,
-    // Search state
-    is_searching: ReadSignal<bool>,
-    error_message: ReadSignal<Option<String>>,
-    has_searched: ReadSignal<bool>,
-    // Results
-    match_candidates: ReadSignal<Vec<MatchCandidate>>,
-    selected_index: ReadSignal<Option<usize>>,
     on_match_select: EventHandler<usize>,
-    // Actions
     on_search: EventHandler<()>,
     on_confirm: EventHandler<MatchCandidate>,
 ) -> Element {
-    // Read values for use in the template
-    let source = search_source();
-    let tab = active_tab();
-    let artist = search_artist();
-    let album = search_album();
-    let year = search_year();
-    let label = search_label();
-    let catalog = search_catalog_number();
-    let barcode = search_barcode();
-    let tokens = search_tokens();
-    let searching = is_searching();
-    let error = error_message();
-    let searched = has_searched();
-    let candidates = match_candidates();
-    let selected = selected_index();
+    // Read state at this leaf component
+    let st = state.read();
+    let search_state = st.get_search_state();
+    let metadata = st.get_metadata();
+
+    let source = search_state
+        .as_ref()
+        .map(|s| s.search_source)
+        .unwrap_or(SearchSource::MusicBrainz);
+    let tab = search_state
+        .as_ref()
+        .map(|s| s.search_tab)
+        .unwrap_or(SearchTab::General);
+    let artist = search_state
+        .as_ref()
+        .map(|s| s.search_artist.clone())
+        .unwrap_or_default();
+    let album = search_state
+        .as_ref()
+        .map(|s| s.search_album.clone())
+        .unwrap_or_default();
+    let year = search_state
+        .as_ref()
+        .map(|s| s.search_year.clone())
+        .unwrap_or_default();
+    let label = search_state
+        .as_ref()
+        .map(|s| s.search_label.clone())
+        .unwrap_or_default();
+    let catalog = search_state
+        .as_ref()
+        .map(|s| s.search_catalog_number.clone())
+        .unwrap_or_default();
+    let barcode = search_state
+        .as_ref()
+        .map(|s| s.search_barcode.clone())
+        .unwrap_or_default();
+    let tokens = metadata
+        .as_ref()
+        .map(|m| m.folder_tokens.clone())
+        .unwrap_or_default();
+    let searching = search_state
+        .as_ref()
+        .map(|s| s.is_searching)
+        .unwrap_or(false);
+    let error = search_state.as_ref().and_then(|s| s.error_message.clone());
+    let searched = search_state
+        .as_ref()
+        .map(|s| s.has_searched)
+        .unwrap_or(false);
+    let candidates = search_state
+        .as_ref()
+        .map(|s| s.search_results.clone())
+        .unwrap_or_default();
+    let selected = search_state.as_ref().and_then(|s| s.selected_result_index);
+
+    drop(st);
+
     rsx! {
         div { class: "space-y-4",
             // Header with search source selector

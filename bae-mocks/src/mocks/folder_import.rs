@@ -1,13 +1,17 @@
 //! FolderImportView mock component
 
 use super::framework::{ControlRegistryBuilder, MockPage, MockPanel, Preset};
+use bae_ui::stores::import::{
+    CandidateState, ConfirmPhase, ConfirmingState, IdentifyingState, ImportState, ManualSearchState,
+};
 use bae_ui::{
     AudioContentInfo, CategorizedFileInfo, CueFlacPairInfo, DetectedCandidate,
     DetectedCandidateStatus, FileInfo, FolderImportView, FolderMetadata, IdentifyMode,
     ImportSource, ImportStep, ImportView, MatchCandidate, MatchSourceType, SearchSource, SearchTab,
-    SelectedCover, StorageProfileInfo,
+    SelectedCover, StorageLocation, StorageProfile,
 };
 use dioxus::prelude::*;
+use std::collections::HashMap;
 
 /// Helper to create mock FileInfo with a path derived from name
 fn mock_file(name: &str, size: u64, format: &str) -> FileInfo {
@@ -392,44 +396,24 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         ],
     });
 
-    // Generate artwork files for selection (with display URLs from current folder)
-    let cover_urls = [
-        "/covers/the-midnight-signal_neon-frequencies.png",
-        "/covers/velvet-mathematics_proof-by-induction.png",
-        "/covers/glass-harbor_pacific-standard.png",
-        "/covers/the-borrowed-time_interest.png",
-        "/covers/stairwell-echo_floors-1-12.png",
-        "/covers/newspaper-weather_tomorrows-forecast.png",
-        "/covers/parking-structure_level-4.png",
-    ];
-    let artwork_files: Vec<FileInfo> = folder_files
-        .artwork
-        .iter()
-        .enumerate()
-        .map(|(i, file)| FileInfo {
-            name: file.name.clone(),
-            path: file.path.clone(),
-            size: file.size,
-            format: file.format.clone(),
-            display_url: cover_urls
-                .get(i % cover_urls.len())
-                .unwrap_or(&cover_urls[0])
-                .to_string(),
-        })
-        .collect();
-
-    let storage_profiles = vec![
-        StorageProfileInfo {
-            id: "profile-1".to_string(),
-            name: "Cloud Storage".to_string(),
-            is_default: true,
-        },
-        StorageProfileInfo {
-            id: "profile-2".to_string(),
-            name: "Local Backup".to_string(),
-            is_default: false,
-        },
-    ];
+    let storage_profiles = use_signal(|| {
+        vec![
+            StorageProfile {
+                id: "profile-1".to_string(),
+                name: "Cloud Storage".to_string(),
+                location: StorageLocation::Cloud,
+                is_default: true,
+                ..Default::default()
+            },
+            StorageProfile {
+                id: "profile-2".to_string(),
+                name: "Local Backup".to_string(),
+                location: StorageLocation::Local,
+                is_default: false,
+                ..Default::default()
+            },
+        ]
+    });
 
     let import_error = if show_error {
         Some("Failed to import: Network timeout".to_string())
@@ -442,7 +426,105 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         None
     };
 
+    // Build the ImportState
+    let current_key = if has_releases {
+        Some(folder_path.clone())
+    } else {
+        None
+    };
+
+    // Build search state
+    let mock_search_state = ManualSearchState {
+        search_source: search_source(),
+        search_artist: search_artist(),
+        search_album: search_album(),
+        search_year: search_year(),
+        search_label: search_label(),
+        search_catalog_number: search_catalog_number(),
+        search_barcode: search_barcode(),
+        search_tab: search_tab(),
+        has_searched,
+        is_searching,
+        search_results: manual_match_candidates.clone(),
+        selected_result_index: selected_match_index(),
+        error_message: None,
+    };
+
+    // Build candidate state based on step
+    let candidate_state = match step {
+        bae_ui::ImportStep::Identify => CandidateState::Identifying(IdentifyingState {
+            files: folder_files.clone(),
+            metadata: detected_metadata.clone().unwrap_or_default(),
+            mode: identify_mode,
+            auto_matches: exact_match_candidates.clone(),
+            selected_match_index: selected_match_index(),
+            search_state: mock_search_state,
+            discid_lookup_error,
+        }),
+        bae_ui::ImportStep::Confirm => {
+            let phase = if is_importing {
+                ConfirmPhase::Importing
+            } else if let Some(ref err) = import_error {
+                ConfirmPhase::Failed(err.clone())
+            } else {
+                ConfirmPhase::Ready
+            };
+            CandidateState::Confirming(Box::new(ConfirmingState {
+                files: folder_files.clone(),
+                metadata: detected_metadata.clone().unwrap_or_default(),
+                confirmed_candidate: confirmed_candidate
+                    .clone()
+                    .or_else(|| exact_match_candidates.first().cloned())
+                    .unwrap_or_else(|| MatchCandidate {
+                        artist: "Unknown Artist".to_string(),
+                        title: "Unknown Album".to_string(),
+                        year: None,
+                        format: None,
+                        label: None,
+                        catalog_number: None,
+                        country: None,
+                        cover_url: None,
+                        source_type: MatchSourceType::MusicBrainz,
+                        original_year: None,
+                        musicbrainz_release_id: None,
+                        musicbrainz_release_group_id: None,
+                        discogs_release_id: None,
+                        discogs_master_id: None,
+                    }),
+                selected_cover: selected_cover(),
+                selected_profile_id: selected_profile_id(),
+                phase,
+                auto_matches: exact_match_candidates.clone(),
+                search_state: mock_search_state,
+            }))
+        }
+    };
+
+    // Build candidate_states HashMap
+    let mut candidate_states = HashMap::new();
+    if has_releases {
+        candidate_states.insert(folder_path.clone(), candidate_state);
+    }
+
+    let import_state = use_signal(|| ImportState {
+        detected_candidates: detected_candidates.clone(),
+        current_candidate_key: current_key,
+        candidate_states,
+        loading_candidates: HashMap::new(),
+        is_looking_up: is_retrying_discid_lookup,
+        duplicate_album_id: None,
+        import_error_message: import_error,
+        folder_files: folder_files.clone(),
+        is_scanning_candidates: false,
+        discid_lookup_attempted: std::collections::HashSet::new(),
+        selected_release_indices: Vec::new(),
+        current_release_index: 0,
+        selected_import_source: ImportSource::Folder,
+        cd_toc_info: None,
+    });
+
     let registry_for_clear = registry.clone();
+    let registry_for_search = registry.clone();
 
     rsx! {
         MockPanel {
@@ -453,62 +535,37 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                 selected_source: ImportSource::Folder,
                 on_source_select: |_| {},
                 FolderImportView {
-                    step,
-                    identify_mode,
-                    folder_path: folder_path.clone(),
-                    folder_files: folder_files.clone(),
+                    // Pass the state
+                    state: import_state,
+                    // UI-only props
+                    is_dragging,
                     selected_text_file: None,
                     text_file_content: None,
+                    // External data
+                    storage_profiles,
+                    // Callbacks
+                    on_folder_select_click: |_| {},
+                    on_release_select: move |idx| selected_candidate_index.set(Some(idx)),
                     on_text_file_select: |_| {},
                     on_text_file_close: |_| {},
-                    is_dragging,
-                    on_folder_select_click: |_| {},
-                    is_scanning_candidates: false,
-                    detected_candidates: detected_candidates.clone(),
-                    selected_candidate_index: selected_candidate_index(),
-                    on_release_select: move |idx| selected_candidate_index.set(Some(idx)),
+                    on_clear: move |_| registry_for_clear.set_string("step", "Identify".to_string()),
+                    on_reveal: |_| {},
+                    on_remove_release: |_| {},
+                    on_clear_all_releases: |_| {},
                     on_skip_detection: |_| {},
-                    exact_match_candidates: exact_match_candidates.clone(),
-                    selected_match_index: selected_match_index(),
                     on_exact_match_select: move |idx| selected_match_index.set(Some(idx)),
-                    detected_metadata: detected_metadata.clone(),
-                    search_source: search_source(),
                     on_search_source_change: move |src| search_source.set(src),
-                    search_tab: search_tab(),
                     on_search_tab_change: move |tab| search_tab.set(tab),
-                    search_artist: search_artist(),
                     on_artist_change: move |v| search_artist.set(v),
-                    search_album: search_album(),
                     on_album_change: move |v| search_album.set(v),
-                    search_year: search_year(),
                     on_year_change: move |v| search_year.set(v),
-                    search_label: search_label(),
                     on_label_change: move |v| search_label.set(v),
-                    search_catalog_number: search_catalog_number(),
                     on_catalog_number_change: move |v| search_catalog_number.set(v),
-                    search_barcode: search_barcode(),
                     on_barcode_change: move |v| search_barcode.set(v),
-                    is_searching,
-                    search_error: None,
-                    has_searched,
-                    manual_match_candidates,
                     on_manual_match_select: move |idx| selected_match_index.set(Some(idx)),
-                    on_search: {
-                        let registry = registry_for_clear.clone();
-                        move |_| registry.set_bool("searching", true)
-                    },
+                    on_search: move |_| registry_for_search.set_bool("searching", true),
                     on_manual_confirm: |_| {},
-                    discid_lookup_error,
-                    is_retrying_discid_lookup,
                     on_retry_discid_lookup: |_| {},
-                    confirmed_candidate,
-                    selected_cover: selected_cover(),
-                    display_cover_url: Some("/covers/the-midnight-signal_neon-frequencies.png".to_string()),
-                    artwork_files,
-                    storage_profiles,
-                    selected_profile_id: selected_profile_id(),
-                    is_importing,
-                    preparing_step_text: if is_importing { Some("Encoding tracks...".to_string()) } else { None },
                     on_select_remote_cover: move |url| {
                         selected_cover
                             .set(
@@ -523,12 +580,6 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                     on_edit: |_| {},
                     on_confirm: |_| {},
                     on_configure_storage: |_| {},
-                    on_clear: move |_| registry_for_clear.set_string("step", "Identify".to_string()),
-                    on_reveal: |_| {},
-                    on_remove_release: |_| {},
-                    on_clear_all_releases: |_| {},
-                    import_error,
-                    duplicate_album_id: None,
                     on_view_duplicate: |_| {},
                 }
             }

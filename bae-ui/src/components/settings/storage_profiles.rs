@@ -21,7 +21,7 @@ impl StorageLocation {
 }
 
 /// Storage profile display data
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Store)]
 pub struct StorageProfile {
     pub id: String,
     pub name: String,

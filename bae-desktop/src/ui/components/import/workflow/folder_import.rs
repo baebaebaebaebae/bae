@@ -6,9 +6,9 @@ use crate::ui::import_helpers::{
     search_by_catalog_number, search_general, DiscIdLookupResult,
 };
 use bae_ui::components::import::FolderImportView;
-use bae_ui::display_types::{DetectedCandidate, DetectedCandidateStatus, SearchSource, SearchTab};
+use bae_ui::display_types::{SearchSource, SearchTab};
 use bae_ui::stores::import::CandidateEvent;
-use bae_ui::stores::AppStateStoreExt;
+use bae_ui::stores::{AppStateStoreExt, StorageProfilesStateStoreExt};
 use bae_ui::ImportSource;
 use dioxus::prelude::*;
 use tracing::{info, warn};
@@ -20,79 +20,13 @@ pub fn FolderImport() -> Element {
 
     let is_dragging = use_signal(|| false);
 
-    // Get import store for reads
-    let import_store = app.state.import();
+    // Get lenses for reactive props - pass directly for granular reactivity
+    let import_state = app.state.import();
+    let storage_profiles = app.state.storage_profiles().profiles();
 
-    // Read state from the Store
-    let state = import_store.read();
-    let step = state.get_import_step();
-    let identify_mode = state.get_identify_mode();
-    let display_folder_files = state.folder_files.clone();
-    let current_candidate_key = state.current_candidate_key.clone();
-    let is_looking_up = state.is_looking_up;
-    let is_scanning_candidates = state.is_scanning_candidates;
-    let duplicate_album_id = state.duplicate_album_id.clone();
-    let import_error_message = state.import_error_message.clone();
-    let search_state = state.get_search_state();
-    let display_exact_candidates = state.get_exact_match_candidates();
-    let display_confirmed = state.get_confirmed_candidate();
-    let display_metadata = state.get_metadata();
-    let discid_lookup_error = state.get_discid_lookup_error();
-    let selected_match_index = state.current_candidate_state().and_then(|s| match s {
-        bae_ui::stores::import::CandidateState::Identifying(is) => is.selected_match_index,
-        _ => None,
-    });
-
-    // Convert detected candidates to display type with status from state machine
-    let display_detected_candidates: Vec<DetectedCandidate> = state
-        .detected_candidates
-        .iter()
-        .map(|c| {
-            let status = state
-                .candidate_states
-                .get(&c.path)
-                .map(|s| {
-                    if s.is_imported() {
-                        DetectedCandidateStatus::Imported
-                    } else if s.is_importing() {
-                        DetectedCandidateStatus::Importing
-                    } else {
-                        DetectedCandidateStatus::Pending
-                    }
-                })
-                .unwrap_or(DetectedCandidateStatus::Pending);
-            DetectedCandidate {
-                name: c.name.clone(),
-                path: c.path.clone(),
-                status,
-            }
-        })
-        .collect();
-
-    // Derive selected candidate index from current candidate key
-    let selected_candidate_index: Option<usize> = current_candidate_key.as_ref().and_then(|key| {
-        state
-            .detected_candidates
-            .iter()
-            .position(|c| &c.path == key)
-    });
-
-    // Get search state values
-    let has_searched = search_state
-        .as_ref()
-        .map(|s| s.has_searched)
-        .unwrap_or(false);
-    let error_message = search_state.as_ref().and_then(|s| s.error_message.clone());
-    let display_manual_candidates = search_state
-        .as_ref()
-        .map(|s| s.search_results.clone())
-        .unwrap_or_default();
-
-    // Clone detected candidates for async use
-    let detected_candidates_for_handlers = state.detected_candidates.clone();
-
-    // Drop the state borrow before creating handlers
-    drop(state);
+    // Extract values needed by handlers (handlers need current values, not lenses)
+    let current_candidate_key = import_state.read().current_candidate_key.clone();
+    let detected_candidates_for_handlers = import_state.read().detected_candidates.clone();
 
     // Handlers
     let on_folder_select = {
@@ -548,71 +482,43 @@ pub fn FolderImport() -> Element {
 
     rsx! {
         FolderImportView {
-            step,
-            identify_mode,
-            folder_path: current_candidate_key.clone().unwrap_or_default(),
-            folder_files: display_folder_files,
+            // Pass the entire state
+            state: import_state,
+            // UI-only state
+            is_dragging: *is_dragging.read(),
             selected_text_file: selected_text_file.read().clone(),
             text_file_content,
+            // External data
+            storage_profiles,
+            // Callbacks
+            on_folder_select_click: on_folder_select,
+            on_release_select,
             on_text_file_select: move |name| selected_text_file.set(Some(name)),
             on_text_file_close: move |_| selected_text_file.set(None),
-            is_dragging: *is_dragging.read(),
-            on_folder_select_click: on_folder_select,
-            is_scanning_candidates,
-            detected_candidates: display_detected_candidates,
-            selected_candidate_index,
-            on_release_select,
+            on_clear,
+            on_reveal,
+            on_remove_release,
+            on_clear_all_releases,
             on_skip_detection: |_| {},
-            exact_match_candidates: display_exact_candidates,
-            selected_match_index,
             on_exact_match_select,
-            detected_metadata: display_metadata,
-            search_source: search_state.as_ref().map(|s| s.search_source).unwrap_or(SearchSource::MusicBrainz),
             on_search_source_change,
-            search_tab: search_state.as_ref().map(|s| s.search_tab).unwrap_or(SearchTab::General),
             on_search_tab_change,
-            search_artist: search_state.as_ref().map(|s| s.search_artist.clone()).unwrap_or_default(),
             on_artist_change,
-            search_album: search_state.as_ref().map(|s| s.search_album.clone()).unwrap_or_default(),
             on_album_change,
-            search_year: search_state.as_ref().map(|s| s.search_year.clone()).unwrap_or_default(),
             on_year_change,
-            search_label: search_state.as_ref().map(|s| s.search_label.clone()).unwrap_or_default(),
             on_label_change,
-            search_catalog_number: search_state.as_ref().map(|s| s.search_catalog_number.clone()).unwrap_or_default(),
             on_catalog_number_change,
-            search_barcode: search_state.as_ref().map(|s| s.search_barcode.clone()).unwrap_or_default(),
             on_barcode_change,
-            is_searching: search_state.as_ref().map(|s| s.is_searching).unwrap_or(false),
-            search_error: error_message,
-            has_searched,
-            manual_match_candidates: display_manual_candidates,
             on_manual_match_select,
             on_search: move |_| perform_search(),
             on_manual_confirm,
-            discid_lookup_error,
-            is_retrying_discid_lookup: is_looking_up,
             on_retry_discid_lookup,
-            confirmed_candidate: display_confirmed,
-            selected_cover: None,
-            display_cover_url: None,
-            artwork_files: Vec::new(),
-            storage_profiles: Vec::new(),
-            selected_profile_id: None,
-            is_importing: false,
-            preparing_step_text: None,
             on_select_remote_cover: |_| {},
             on_select_local_cover: |_| {},
             on_storage_profile_change: |_| {},
             on_edit,
             on_confirm,
             on_configure_storage: |_| {},
-            on_clear,
-            on_reveal,
-            on_remove_release,
-            on_clear_all_releases,
-            import_error: import_error_message,
-            duplicate_album_id,
             on_view_duplicate: |_| {},
         }
     }

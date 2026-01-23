@@ -11,7 +11,7 @@ use bae_ui::display_types::{
     SearchSource, SearchTab, TorrentFileInfo, TorrentInfo as DisplayTorrentInfo,
 };
 use bae_ui::stores::import::CandidateEvent;
-use bae_ui::stores::AppStateStoreExt;
+use bae_ui::stores::{AppStateStoreExt, StorageProfilesStateStoreExt};
 use bae_ui::ImportSource;
 use bae_ui::TorrentInputMode;
 use dioxus::prelude::*;
@@ -76,41 +76,16 @@ pub fn TorrentImport() -> Element {
     let app = use_app();
     let navigator = use_navigator();
 
+    // Torrent-specific local state
     let is_dragging = use_signal(|| false);
     let mut input_mode = use_signal(|| TorrentInputMode::File);
-
-    // Torrent info stored locally (not in ImportState since it's torrent-specific)
     let torrent_info_signal = use_signal(|| Option::<BaeTorrentInfo>::None);
 
-    // Get import store for reads
-    let import_store = app.state.import();
-    let state = import_store.read();
+    // Get lenses for reactive props
+    let import_state = app.state.import();
+    let storage_profiles = app.state.storage_profiles().profiles();
 
-    // Read from state
-    let step = state.get_import_step();
-    let identify_mode = state.get_identify_mode();
-    let current_candidate_key = state.current_candidate_key.clone();
-    let is_looking_up = state.is_looking_up;
-    let import_error_message = state.import_error_message.clone();
-    let duplicate_album_id = state.duplicate_album_id.clone();
-    let folder_files = state.folder_files.clone();
-    let search_state = state.get_search_state();
-    let display_exact_candidates = state.get_exact_match_candidates();
-    let display_confirmed = state.get_confirmed_candidate();
-    let display_metadata = state.get_metadata();
-    let discid_lookup_error = state.get_discid_lookup_error();
-    let selected_match_index = state.get_selected_match_index();
-
-    let has_searched = search_state
-        .as_ref()
-        .map(|s| s.has_searched)
-        .unwrap_or(false);
-    let error_message = search_state.as_ref().and_then(|s| s.error_message.clone());
-
-    // Drop state borrow before handlers
-    drop(state);
-
-    // Prepare torrent display data
+    // Prepare torrent display data from local signal
     let torrent_info_read = torrent_info_signal.read();
     let tracker_statuses = torrent_info_read
         .as_ref()
@@ -122,20 +97,6 @@ pub fn TorrentImport() -> Element {
         .map(|info| info.files.clone())
         .unwrap_or_default();
     drop(torrent_info_read);
-
-    // Check for cue files (for metadata detection prompt)
-    let has_cue_files = folder_files
-        .documents
-        .iter()
-        .any(|f| f.format.to_lowercase() == "cue" || f.format.to_lowercase() == "log");
-
-    // Torrent metadata detection prompt - check if metadata is available from state machine
-    let show_metadata_detection_prompt = has_cue_files && display_metadata.is_none();
-
-    let display_manual_candidates = search_state
-        .as_ref()
-        .map(|s| s.search_results.clone())
-        .unwrap_or_default();
 
     // Handlers
     let on_file_select = {
@@ -152,7 +113,6 @@ pub fn TorrentImport() -> Element {
                     let path = PathBuf::from(file.path());
                     let path_str = path.to_string_lossy().to_string();
 
-                    // Parse torrent file
                     match bae_core::torrent::parse_torrent_info(&path) {
                         Ok(info) => {
                             torrent_info_signal.set(Some(info));
@@ -352,7 +312,6 @@ pub fn TorrentImport() -> Element {
             let app = app.clone();
             spawn(async move {
                 let mut import_store = app.state.import();
-
                 import_store
                     .write()
                     .dispatch(CandidateEvent::RetryDiscIdLookup);
@@ -403,7 +362,6 @@ pub fn TorrentImport() -> Element {
         }
     };
 
-    // Confirmation handlers
     let on_edit = {
         let app = app.clone();
         move |_| {
@@ -534,9 +492,9 @@ pub fn TorrentImport() -> Element {
 
     rsx! {
         TorrentImportView {
-            step,
-            identify_mode,
-            torrent_path: current_candidate_key.clone().unwrap_or_default(),
+            // Pass the state lens
+            state: import_state,
+            // Torrent-specific state
             torrent_info: display_torrent_info,
             tracker_statuses,
             torrent_files,
@@ -545,46 +503,23 @@ pub fn TorrentImport() -> Element {
             on_mode_change: move |mode| input_mode.set(mode),
             on_file_select,
             on_magnet_submit,
-            exact_match_candidates: display_exact_candidates,
-            selected_match_index,
+            // External data
+            storage_profiles,
+            // Callbacks
             on_exact_match_select,
-            detected_metadata: display_metadata,
-            search_source: search_state.as_ref().map(|s| s.search_source).unwrap_or(SearchSource::MusicBrainz),
             on_search_source_change,
-            search_tab: search_state.as_ref().map(|s| s.search_tab).unwrap_or(SearchTab::General),
             on_search_tab_change,
-            search_artist: search_state.as_ref().map(|s| s.search_artist.clone()).unwrap_or_default(),
             on_artist_change,
-            search_album: search_state.as_ref().map(|s| s.search_album.clone()).unwrap_or_default(),
             on_album_change,
-            search_year: search_state.as_ref().map(|s| s.search_year.clone()).unwrap_or_default(),
             on_year_change,
-            search_label: search_state.as_ref().map(|s| s.search_label.clone()).unwrap_or_default(),
             on_label_change,
-            search_catalog_number: search_state.as_ref().map(|s| s.search_catalog_number.clone()).unwrap_or_default(),
             on_catalog_number_change,
-            search_barcode: search_state.as_ref().map(|s| s.search_barcode.clone()).unwrap_or_default(),
             on_barcode_change,
-            is_searching: search_state.as_ref().map(|s| s.is_searching).unwrap_or(false),
-            search_error: error_message,
-            has_searched,
-            manual_match_candidates: display_manual_candidates,
             on_manual_match_select,
             on_search: move |_| perform_search(),
             on_manual_confirm,
-            discid_lookup_error,
-            is_retrying_discid_lookup: is_looking_up,
             on_retry_discid_lookup,
-            show_metadata_detection_prompt,
             on_detect_metadata,
-            confirmed_candidate: display_confirmed,
-            selected_cover: None,
-            display_cover_url: None,
-            artwork_files: Vec::new(),
-            storage_profiles: Vec::new(),
-            selected_profile_id: None,
-            is_importing: false,
-            preparing_step_text: None,
             on_select_remote_cover: |_| {},
             on_select_local_cover: |_| {},
             on_storage_profile_change: |_| {},
@@ -592,8 +527,6 @@ pub fn TorrentImport() -> Element {
             on_confirm,
             on_configure_storage: |_| {},
             on_clear,
-            import_error: import_error_message,
-            duplicate_album_id,
             on_view_duplicate: |_| {},
         }
     }

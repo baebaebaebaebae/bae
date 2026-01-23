@@ -310,14 +310,6 @@ pub struct TorrentInfo {
     pub files: Vec<TorrentFileInfo>,
 }
 
-/// Storage profile for UI display
-#[derive(Clone, Debug, PartialEq)]
-pub struct StorageProfileInfo {
-    pub id: String,
-    pub name: String,
-    pub is_default: bool,
-}
-
 /// Selected cover for import UI
 #[derive(Clone, Debug, PartialEq, Store)]
 pub enum SelectedCover {
