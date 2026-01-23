@@ -300,6 +300,7 @@ pub fn TorrentFilesDisplayView(files: Vec<TorrentFileInfo>) -> Element {
                 path: tf.path.clone(),
                 size: tf.size as u64,
                 format,
+                display_url: String::new(),
             }
         })
         .collect();

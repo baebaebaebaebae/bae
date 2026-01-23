@@ -1,13 +1,14 @@
 //! Image lightbox view component
 
 use crate::components::icons::XIcon;
+use crate::display_types::FileInfo;
 use dioxus::prelude::*;
 
 /// Image lightbox view for viewing images in full screen
 #[component]
 pub fn ImageLightboxView(
-    /// List of (filename, url) pairs
-    images: Vec<(String, String)>,
+    /// Artwork files with display_url
+    images: Vec<FileInfo>,
     /// Current image index
     current_index: usize,
     /// Called when lightbox is closed
@@ -28,7 +29,9 @@ pub fn ImageLightboxView(
     }
 
     let clamped_index = current_index.min(total - 1);
-    let (filename, url) = &images[clamped_index];
+    let file = &images[clamped_index];
+    let filename = &file.name;
+    let url = &file.display_url;
     let can_prev = clamped_index > 0;
     let can_next = clamped_index < total - 1;
 

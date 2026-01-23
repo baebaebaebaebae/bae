@@ -39,8 +39,6 @@ pub struct IdentifyStepProps {
     pub folder_path: String,
     /// Files in the folder
     pub folder_files: CategorizedFileInfo,
-    /// Image data for gallery (filename, display_url)
-    pub image_data: Vec<(String, String)>,
     /// Callback to clear/change folder
     pub on_clear: EventHandler<()>,
     /// Callback to reveal folder in file browser
@@ -180,8 +178,6 @@ pub struct ConfirmStepProps {
     pub folder_path: String,
     /// Files in the folder
     pub folder_files: CategorizedFileInfo,
-    /// Image data for gallery (filename, display_url)
-    pub image_data: Vec<(String, String)>,
     /// Callback to clear/change folder
     pub on_clear: EventHandler<()>,
     /// Callback to reveal folder in file browser
@@ -293,9 +289,6 @@ pub struct FolderImportViewProps {
     pub folder_path: String,
     /// Files in the folder
     pub folder_files: CategorizedFileInfo,
-    /// Image data for gallery
-    #[props(default)]
-    pub image_data: Vec<(String, String)>,
     /// Currently viewed text file name
     #[props(default)]
     pub selected_text_file: Option<String>,
@@ -487,7 +480,6 @@ pub fn FolderImportView(props: FolderImportViewProps) -> Element {
                                         mode: props.identify_mode,
                                         folder_path: props.folder_path.clone(),
                                         folder_files: props.folder_files.clone(),
-                                        image_data: props.image_data.clone(),
                                         on_clear: props.on_clear,
                                         on_reveal: props.on_reveal,
                                         on_skip_detection: props.on_skip_detection,
@@ -528,7 +520,6 @@ pub fn FolderImportView(props: FolderImportViewProps) -> Element {
                                         ConfirmStep {
                                             folder_path: props.folder_path.clone(),
                                             folder_files: props.folder_files.clone(),
-                                            image_data: props.image_data.clone(),
                                             on_clear: props.on_clear,
                                             on_reveal: props.on_reveal,
                                             confirmed_candidate: candidate.clone(),
@@ -558,7 +549,6 @@ pub fn FolderImportView(props: FolderImportViewProps) -> Element {
                     // Files are guaranteed to be present - state machine requires them by construction
                     FilesDock {
                         files: props.folder_files.clone(),
-                        image_data: props.image_data.clone(),
                         selected_text_file: props.selected_text_file.clone(),
                         text_file_content: props.text_file_content.clone(),
                         on_text_file_select: props.on_text_file_select,
@@ -574,7 +564,6 @@ pub fn FolderImportView(props: FolderImportViewProps) -> Element {
 #[component]
 fn FilesDock(
     files: CategorizedFileInfo,
-    image_data: Vec<(String, String)>,
     selected_text_file: Option<String>,
     text_file_content: Option<String>,
     on_text_file_select: EventHandler<String>,
@@ -591,7 +580,6 @@ fn FilesDock(
             DockCard { title: "Files", class: "w-fit max-w-3xl",
                 SmartFileDisplayView {
                     files,
-                    image_data,
                     selected_text_file,
                     text_file_content,
                     on_text_file_select,

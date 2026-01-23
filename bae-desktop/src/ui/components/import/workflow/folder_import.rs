@@ -546,20 +546,12 @@ pub fn FolderImport() -> Element {
 
     let text_file_content = text_file_contents_resource.read().clone().unwrap_or(None);
 
-    // Generate image URLs from artwork files
-    let image_data: Vec<(String, String)> = display_folder_files
-        .artwork
-        .iter()
-        .map(crate::ui::local_file_url::local_file_url)
-        .collect();
-
     rsx! {
         FolderImportView {
             step,
             identify_mode,
             folder_path: current_candidate_key.clone().unwrap_or_default(),
             folder_files: display_folder_files,
-            image_data,
             selected_text_file: selected_text_file.read().clone(),
             text_file_content,
             on_text_file_select: move |name| selected_text_file.set(Some(name)),

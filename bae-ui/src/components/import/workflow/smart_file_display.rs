@@ -59,8 +59,6 @@ fn AudioTileContent(
 pub fn SmartFileDisplayView(
     /// Categorized file info
     files: CategorizedFileInfo,
-    /// Image data for gallery (filename, display_url)
-    image_data: Vec<(String, String)>,
     /// Currently viewed text file name
     selected_text_file: Option<String>,
     /// Loaded text file content (for selected file)
@@ -88,11 +86,11 @@ pub fn SmartFileDisplayView(
             }
 
             // Artwork tiles
-            for (idx , (filename , url)) in image_data.iter().enumerate() {
+            for (idx , file) in files.artwork.iter().enumerate() {
                 GalleryThumbnailView {
-                    key: "{url}",
-                    filename: filename.clone(),
-                    url: url.clone(),
+                    key: "{file.path}",
+                    filename: file.name.clone(),
+                    url: file.display_url.clone(),
                     index: idx,
                     on_click: {
                         let mut viewing_image_index = viewing_image_index;
@@ -128,7 +126,7 @@ pub fn SmartFileDisplayView(
         // Image lightbox
         if let Some(index) = *viewing_image_index.read() {
             ImageLightboxView {
-                images: image_data.clone(),
+                images: files.artwork.clone(),
                 current_index: index,
                 on_close: move |_| viewing_image_index.set(None),
                 on_navigate: move |new_idx| viewing_image_index.set(Some(new_idx)),

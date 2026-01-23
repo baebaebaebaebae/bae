@@ -16,6 +16,7 @@ fn mock_file(name: &str, size: u64, format: &str) -> FileInfo {
         path: format!("/mock/{}", name),
         size,
         format: format.to_string(),
+        display_url: String::new(),
     }
 }
 
@@ -453,7 +454,6 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                     identify_mode,
                     folder_path: folder_path.clone(),
                     folder_files: folder_files.clone(),
-                    image_data: artwork_files.iter().map(|f| (f.name.clone(), f.display_url.clone())).collect(),
                     selected_text_file: None,
                     text_file_content: None,
                     on_text_file_select: |_| {},

@@ -983,12 +983,14 @@ fn scanned_to_file_info(
         .unwrap_or("")
         .to_string();
     let path = f.path.to_string_lossy().to_string();
+    let display_url = crate::ui::local_file_url::local_file_url(&f.path);
 
     bae_ui::display_types::FileInfo {
         name,
         path,
         size: f.size,
         format,
+        display_url,
     }
 }
 

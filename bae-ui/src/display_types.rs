@@ -224,12 +224,14 @@ pub struct FolderMetadata {
 }
 
 /// File info for UI display (simplified)
-#[derive(Clone, Debug, PartialEq, Store)]
+#[derive(Clone, Debug, Default, PartialEq, Store)]
 pub struct FileInfo {
     pub name: String,
     pub path: String,
     pub size: u64,
     pub format: String,
+    /// URL for displaying this file (e.g., bae://local/...)
+    pub display_url: String,
 }
 
 /// Artwork file info with display URL
