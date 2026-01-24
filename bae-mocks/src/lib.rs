@@ -24,28 +24,30 @@ pub const FLOATING_UI_DOM: Asset = asset!("/assets/floating-ui.dom.min.js");
 #[derive(Debug, Clone, Routable, PartialEq)]
 #[rustfmt::skip]
 pub enum Route {
-    #[layout(DemoLayout)]
+    // Mock index at root
     #[route("/")]
+    MockIndex {},
+    // Demo app with full layout
+    #[layout(DemoLayout)]
+    #[route("/app")]
     Library {},
-    #[route("/album/:album_id")]
+    #[route("/app/album/:album_id")]
     AlbumDetail { album_id: String },
-    #[route("/import")]
+    #[route("/app/import")]
     Import {},
-    #[route("/settings")]
+    #[route("/app/settings")]
     Settings {},
     #[end_layout]
-    // Mock routes (no app layout, with controls)
-    #[route("/mocks")]
-    MockIndex {},
-    #[route("/mock/folder-import?:state")]
+    // Mock pages with controls
+    #[route("/folder-import?:state")]
     MockFolderImport { state: Option<String> },
-    #[route("/mock/album-detail?:state")]
+    #[route("/album-detail?:state")]
     MockAlbumDetail { state: Option<String> },
-    #[route("/mock/library?:state")]
+    #[route("/library?:state")]
     MockLibrary { state: Option<String> },
-    #[route("/mock/title-bar?:state")]
+    #[route("/title-bar?:state")]
     MockTitleBar { state: Option<String> },
-    #[route("/mock/dropdown-test")]
+    #[route("/dropdown-test")]
     MockDropdownTest {},
 }
 

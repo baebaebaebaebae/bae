@@ -2,7 +2,7 @@ import { test, expect, Page } from '@playwright/test';
 
 test.describe('Dropdown Component', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/mock/dropdown-test');
+    await page.goto('/dropdown-test');
     // Wait for the grid to render
     await page.waitForSelector('[data-testid="album-card"]', { timeout: 10000 });
     await page.waitForTimeout(500);

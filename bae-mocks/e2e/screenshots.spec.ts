@@ -13,7 +13,7 @@ test.beforeAll(async () => {
 });
 
 test('capture library view', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/app');
   
   // Wait for the library to load (albums should be visible)
   await page.waitForSelector('.virtual-grid-content', { timeout: 10000 });
@@ -28,7 +28,7 @@ test('capture library view', async ({ page }) => {
 });
 
 test('capture album detail view', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/app');
   
   // Wait for albums to load
   await page.waitForSelector('[data-testid="album-card"]', { timeout: 10000 });

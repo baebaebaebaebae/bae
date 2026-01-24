@@ -3,13 +3,25 @@
 use crate::mocks::framework::MockPage;
 use crate::mocks::{AlbumDetailMock, FolderImportMock, LibraryMock, TitleBarMock};
 use crate::ui::LinkCard;
+use crate::Route;
 use dioxus::prelude::*;
 
 #[component]
 pub fn MockIndex() -> Element {
     rsx! {
         div { class: "min-h-screen bg-gray-900 text-white p-8",
-            h1 { class: "text-2xl font-bold mb-6", "Component mocks" }
+            h1 { class: "text-2xl font-bold mb-6", "bae mocks" }
+
+            h2 { class: "text-lg font-semibold text-gray-400 mb-3", "Demo App" }
+            div { class: "space-y-2 mb-8",
+                LinkCard {
+                    to: Route::Library {},
+                    title: "Full App",
+                    description: "Complete app with nav, playback bar, and all pages",
+                }
+            }
+
+            h2 { class: "text-lg font-semibold text-gray-400 mb-3", "Components" }
             div { class: "space-y-2",
                 for page in MockPage::ALL {
                     LinkCard {

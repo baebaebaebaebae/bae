@@ -1,4 +1,4 @@
-//! Demo app pages
+//! Demo and mock pages
 
 mod album_detail;
 mod import;
