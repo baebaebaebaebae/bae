@@ -100,7 +100,6 @@ pub fn TitleBarMock(initial_state: Option<String>) -> Element {
                 update_state,
                 on_update_click: Some(EventHandler::new(|_| {})),
                 left_padding: 16,
-                relative: true,
             }
         }
     }

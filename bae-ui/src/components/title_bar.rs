@@ -64,8 +64,6 @@ pub fn TitleBarView(
     #[props(default)] imports_indicator: Option<Element>,
     // Left padding for traffic lights on macOS
     #[props(default = 80)] left_padding: u32,
-    // Use relative positioning instead of fixed (for mocks)
-    #[props(default = false)] relative: bool,
 ) -> Element {
     let mut show_update_menu = use_signal(|| false);
     let is_update_menu_open: ReadSignal<bool> = show_update_menu.into();
@@ -74,38 +72,20 @@ pub fn TitleBarView(
         format!("update-button-{}", id)
     });
 
-    let (position_class, overlay_class, search_popover_class) = if relative {
-        (
-            "relative",
-            "absolute inset-0 z-[1500]",
-            "absolute top-full right-12 w-64 z-[2000]",
-        )
-    } else {
-        (
-            "fixed top-0 left-0 right-0",
-            "fixed inset-0 z-[1500]",
-            "fixed top-10 right-12 w-64 z-[2000]",
-        )
-    };
-
-    let show_overlay = show_search_results;
-
     rsx! {
-        div { class: if relative { "relative" } else { "" },
-            // Click-outside overlay to dismiss dropdowns
-            if show_overlay {
+        div { class: "relative",
+            // Click-outside overlay to dismiss search results
+            if show_search_results {
                 div {
-                    class: "{overlay_class}",
-                    onclick: move |_| {
-                        on_search_dismiss.call(());
-                    },
+                    class: "absolute inset-0 z-[1500]",
+                    onclick: move |_| on_search_dismiss.call(()),
                 }
             }
 
             // Title bar
             div {
                 id: "title-bar",
-                class: "{position_class} h-10 bg-surface-raised flex items-center justify-between px-2 cursor-default z-[1000] border-b border-border-subtle",
+                class: "relative h-10 bg-surface-raised flex items-center justify-between px-2 cursor-default z-[1000] border-b border-border-subtle",
                 style: "padding-left: {left_padding}px;",
                 onmousedown: move |_| {
                     if let Some(handler) = &on_bar_mousedown {
@@ -177,10 +157,10 @@ pub fn TitleBarView(
                 }
             }
 
-            // Search results popover (centered)
+            // Search results popover
             if show_search_results && !search_results.is_empty() {
                 div {
-                    class: "{search_popover_class}",
+                    class: "absolute top-full right-12 w-64 z-[2000]",
                     id: "search-popover",
                     onclick: move |evt| evt.stop_propagation(),
                     div { class: "mt-2 bg-surface-overlay border border-border-strong rounded-lg shadow-lg max-h-96 overflow-y-auto",
