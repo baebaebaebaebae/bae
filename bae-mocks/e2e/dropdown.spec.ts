@@ -1,13 +1,10 @@
 import { test, expect, Page } from '@playwright/test';
 
-// Skip in CI - these are development/debugging tests, not screenshot generation
-test.skip(() => !!process.env.CI, 'Dropdown tests only run locally');
-
 test.describe('Dropdown Component', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/dropdown-test');
-    // Wait for the grid to render
-    await page.waitForSelector('[data-testid="album-card"]', { timeout: 10000 });
+    // Wait for the grid to render (longer timeout for CI WASM builds)
+    await page.waitForSelector('[data-testid="album-card"]', { timeout: 30000 });
     await page.waitForTimeout(500);
   });
 
@@ -51,7 +48,7 @@ test.describe('Dropdown Component', () => {
 
   // Wait for dropdown to become visible (opacity: 1)
   // The dropdown starts with opacity: 0 and only becomes visible after positioning completes
-  async function waitForDropdownVisible(page: Page, timeout = 2000): Promise<{ x: number; y: number }> {
+  async function waitForDropdownVisible(page: Page, timeout = 5000): Promise<{ x: number; y: number }> {
     const popover = await getOpenPopover(page);
     
     // Wait for opacity to become 1 (positioning sets opacity: 1 after computing position)
