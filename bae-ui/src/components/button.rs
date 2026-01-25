@@ -54,6 +54,8 @@ pub enum ButtonVariant {
     Danger,
     /// No background - text only with hover
     Ghost,
+    /// Border only, no fill
+    Outline,
 }
 
 /// Button size
@@ -98,6 +100,9 @@ pub fn Button(
             "bg-red-600 hover:bg-red-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
         }
         ButtonVariant::Ghost => "text-gray-400 hover:text-white hover:bg-gray-700/50",
+        ButtonVariant::Outline => {
+            "border border-gray-600 text-gray-300 hover:border-gray-500 hover:text-white hover:bg-gray-700/30"
+        }
     };
 
     let computed_class = match &class {

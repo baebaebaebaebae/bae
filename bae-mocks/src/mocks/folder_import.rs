@@ -174,13 +174,13 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
 
     // Parse identify mode
     // For DiscIdLookup mode, use disc ID from detected metadata or a mock value
-    let mock_disc_id = "mock-disc-id-12345".to_string();
+    let mock_disc_id = "XzPS7vW.HPHsYemQh0HBUGr8vuU-".to_string();
     let identify_mode = match registry.get_string("identify_mode").as_str() {
         "Created" => IdentifyMode::Created,
         "DiscIdLookup" => IdentifyMode::DiscIdLookup(mock_disc_id),
         "MultipleExactMatches" => IdentifyMode::MultipleExactMatches,
         "ManualSearch" => IdentifyMode::ManualSearch,
-        _ => IdentifyMode::DiscIdLookup("mock-disc-id".to_string()),
+        _ => IdentifyMode::DiscIdLookup("XzPS7vW.HPHsYemQh0HBUGr8vuU-".to_string()),
     };
 
     let is_retrying_discid_lookup = registry.get_bool("retrying");

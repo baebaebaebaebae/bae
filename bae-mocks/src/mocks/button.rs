@@ -67,6 +67,7 @@ pub fn ButtonMock(initial_state: Option<String>) -> Element {
             ButtonVariant::Secondary => "Cancel",
             ButtonVariant::Danger => "Delete",
             ButtonVariant::Ghost => "Learn More",
+            ButtonVariant::Outline => "Skip",
         }
     };
 

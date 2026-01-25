@@ -459,9 +459,10 @@ fn DockCard(
 fn DiscIdLookupProgressView(disc_id: String, on_skip: EventHandler<()>) -> Element {
     rsx! {
         div { class: "flex-1 flex justify-center items-center",
-            div { class: "text-center space-y-3",
-                p { class: "text-sm text-gray-400",
-                    "Looking up Disc ID "
+            div { class: "text-center space-y-4",
+                p { class: "text-sm text-gray-400 flex items-center justify-center gap-2",
+                    LoaderIcon { class: "w-5 h-5 animate-spin" }
+                    "Searching automatically "
                     a {
                         href: "https://musicbrainz.org/cdtoc/{disc_id}",
                         target: "_blank",
@@ -470,8 +471,8 @@ fn DiscIdLookupProgressView(disc_id: String, on_skip: EventHandler<()>) -> Eleme
                     }
                 }
                 Button {
-                    variant: ButtonVariant::Primary,
-                    size: ButtonSize::Medium,
+                    variant: ButtonVariant::Outline,
+                    size: ButtonSize::Small,
                     onclick: move |_| on_skip.call(()),
                     "Skip and search manually"
                 }
