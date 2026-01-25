@@ -1,4 +1,4 @@
-//! Navbar layout wrapper for desktop app
+//! App layout wrapper for desktop app
 //!
 //! Wraps the shared AppLayoutView with desktop-specific components.
 
@@ -12,7 +12,7 @@ use dioxus::prelude::*;
 
 /// Layout component that includes title bar, content, playback bar, and sidebar
 #[component]
-pub fn Navbar() -> Element {
+pub fn AppLayout() -> Element {
     rsx! {
         ShortcutsHandler {
             AppLayoutView {

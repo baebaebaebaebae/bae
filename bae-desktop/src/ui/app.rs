@@ -17,7 +17,7 @@ pub const FLOATING_UI_DOM: Asset = asset!("/assets/floating-ui.dom.min.js");
 #[derive(Debug, Clone, Routable, PartialEq)]
 #[rustfmt::skip]
 pub enum Route {
-    #[layout(Navbar)]
+    #[layout(AppLayout)]
     #[route("/")]
     Library {},
     #[route("/album/:album_id?:release_id")]
