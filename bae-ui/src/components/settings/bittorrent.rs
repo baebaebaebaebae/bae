@@ -271,7 +271,7 @@ fn SectionSaveButtons(
     on_save: EventHandler<()>,
     on_cancel: EventHandler<()>,
 ) -> Element {
-    use crate::components::{Button, ButtonVariant};
+    use crate::components::{Button, ButtonSize, ButtonVariant};
 
     rsx! {
         div { class: "pt-4 space-y-3",
@@ -284,6 +284,7 @@ fn SectionSaveButtons(
             div { class: "flex gap-3",
                 Button {
                     variant: ButtonVariant::Primary,
+                    size: ButtonSize::Medium,
                     disabled: !has_changes || is_saving,
                     loading: is_saving,
                     onclick: move |_| on_save.call(()),
@@ -295,6 +296,7 @@ fn SectionSaveButtons(
                 }
                 Button {
                     variant: ButtonVariant::Secondary,
+                    size: ButtonSize::Medium,
                     onclick: move |_| on_cancel.call(()),
                     "Cancel"
                 }

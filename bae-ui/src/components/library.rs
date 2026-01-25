@@ -7,7 +7,7 @@
 use crate::components::album_card::AlbumCard;
 use crate::components::helpers::{ErrorDisplay, LoadingSpinner};
 use crate::components::icons::ImageIcon;
-use crate::components::Button;
+use crate::components::{Button, ButtonSize, ButtonVariant};
 use crate::display_types::{Album, Artist};
 use crate::stores::library::{LibraryState, LibraryStateStoreExt};
 use dioxus::prelude::*;
@@ -66,7 +66,12 @@ pub fn LibraryView(
                             "No albums in your library yet"
                         }
                         p { class: "text-gray-500 mb-4", "Import your first album to get started!" }
-                        Button { onclick: move |_| on_empty_action.call(()), "Import Album" }
+                        Button {
+                            variant: ButtonVariant::Primary,
+                            size: ButtonSize::Medium,
+                            onclick: move |_| on_empty_action.call(()),
+                            "Import Album"
+                        }
                     }
                 } else {
                     AlbumGrid {

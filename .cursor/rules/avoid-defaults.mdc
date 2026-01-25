@@ -1,4 +1,25 @@
-Avoid `#[default]` and `#[derive(Default)]` for enums and UI display types.
+---
+description: Do not use Default derive or #[default] on enums
+alwaysApply: true
+---
+Do not derive `Default` on enums or use `#[default]` attributes on enum variants.
 
-Prefer explicit initialization at call sites instead of implicit defaults.
-If a default is truly required, consult the user first and explain why.
+Enums represent explicit choices. Forcing callers to specify the variant makes code clearer and prevents accidental use of a default that may not be appropriate for the context.
+
+```rust
+// BAD
+#[derive(Default)]
+pub enum ButtonVariant {
+    #[default]
+    Primary,
+    Secondary,
+}
+
+// GOOD
+pub enum ButtonVariant {
+    Primary,
+    Secondary,
+}
+```
+
+Similarly, avoid `#[props(default)]` on enum-typed component props in Dioxus.

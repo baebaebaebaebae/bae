@@ -23,6 +23,7 @@ pub fn DiscIdLookupErrorView(
                     p { class: "text-sm text-amber-200", "{error}" }
                     div { class: "mt-3 flex gap-2",
                         Button {
+                            variant: ButtonVariant::Primary,
                             size: ButtonSize::Small,
                             disabled: is_retrying,
                             loading: is_retrying,

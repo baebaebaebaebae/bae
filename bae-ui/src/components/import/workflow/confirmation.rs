@@ -1,7 +1,7 @@
 //! Confirmation view component
 
 use crate::components::icons::ImageIcon;
-use crate::components::{Button, ButtonVariant, ChromelessButton, StorageProfile};
+use crate::components::{Button, ButtonSize, ButtonVariant, ChromelessButton, StorageProfile};
 use crate::display_types::{FileInfo, MatchCandidate, MatchSourceType, SelectedCover};
 use dioxus::prelude::*;
 
@@ -232,7 +232,7 @@ pub fn ConfirmationView(
                 }
                 Button {
                     variant: ButtonVariant::Ghost,
-                    size: crate::components::ButtonSize::Small,
+                    size: ButtonSize::Small,
                     class: Some("text-xs text-indigo-400 hover:text-indigo-300".to_string()),
                     onclick: move |_| on_configure_storage.call(()),
                     "Configure"
@@ -248,11 +248,14 @@ pub fn ConfirmationView(
                 }
                 Button {
                     variant: ButtonVariant::Secondary,
+                    size: ButtonSize::Medium,
                     disabled: is_importing,
                     onclick: move |_| on_edit.call(()),
                     "Edit"
                 }
                 Button {
+                    variant: ButtonVariant::Primary,
+                    size: ButtonSize::Medium,
                     disabled: is_importing,
                     loading: is_importing,
                     onclick: move |_| on_confirm.call(()),

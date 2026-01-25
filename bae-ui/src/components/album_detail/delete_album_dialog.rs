@@ -1,6 +1,6 @@
 //! Delete album confirmation dialog
 
-use crate::components::{Button, ButtonVariant, Modal};
+use crate::components::{Button, ButtonSize, ButtonVariant, Modal};
 use dioxus::prelude::*;
 
 #[component]
@@ -33,6 +33,7 @@ pub fn DeleteAlbumDialog(
                 div { class: "flex gap-3 justify-end",
                     Button {
                         variant: ButtonVariant::Secondary,
+                        size: ButtonSize::Medium,
                         disabled: is_deleting(),
                         onclick: move |_| {
                             if !is_deleting() {
@@ -43,6 +44,7 @@ pub fn DeleteAlbumDialog(
                     }
                     Button {
                         variant: ButtonVariant::Danger,
+                        size: ButtonSize::Medium,
                         disabled: is_deleting(),
                         loading: is_deleting(),
                         onclick: {

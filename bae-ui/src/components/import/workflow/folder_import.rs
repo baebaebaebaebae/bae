@@ -23,7 +23,9 @@ use super::{
 };
 use crate::components::icons::{FolderIcon, LoaderIcon};
 use crate::components::StorageProfile;
-use crate::components::{Button, PanelPosition, ResizablePanel, ResizeDirection};
+use crate::components::{
+    Button, ButtonSize, ButtonVariant, PanelPosition, ResizablePanel, ResizeDirection,
+};
 use crate::display_types::{IdentifyMode, ImportStep, MatchCandidate, SearchSource, SearchTab};
 use crate::stores::import::{CandidateState, ConfirmPhase, ImportState, ImportStateStoreExt};
 use dioxus::prelude::*;
@@ -154,7 +156,10 @@ fn EmptyView(is_scanning: bool, on_folder_select: EventHandler<()>) -> Element {
                     LoaderIcon { class: "w-5 h-5 text-gray-400 animate-spin mx-auto" }
                     p { class: "text-sm text-gray-400", "Scanning folder for releases..." }
                 } else {
-                    Button { onclick: move |_| on_folder_select.call(()),
+                    Button {
+                        variant: ButtonVariant::Primary,
+                        size: ButtonSize::Medium,
+                        onclick: move |_| on_folder_select.call(()),
                         FolderIcon { class: "w-4 h-4" }
                         "Select folder"
                     }

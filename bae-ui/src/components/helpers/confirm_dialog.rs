@@ -1,6 +1,6 @@
 //! Confirm dialog view component
 
-use crate::components::{Button, ButtonVariant, Modal};
+use crate::components::{Button, ButtonSize, ButtonVariant, Modal};
 use dioxus::prelude::*;
 
 /// A generic confirmation dialog view
@@ -29,11 +29,13 @@ pub fn ConfirmDialogView(
                 div { class: "flex gap-3 justify-end",
                     Button {
                         variant: ButtonVariant::Secondary,
+                        size: ButtonSize::Medium,
                         onclick: move |_| on_cancel.call(()),
                         "{cancel_label}"
                     }
                     Button {
                         variant: confirm_variant,
+                        size: ButtonSize::Medium,
                         onclick: move |_| on_confirm.call(()),
                         "{confirm_label}"
                     }

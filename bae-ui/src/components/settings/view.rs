@@ -1,6 +1,6 @@
 //! Settings view - tabbed layout shell
 
-use crate::components::{Button, ButtonVariant};
+use crate::components::{Button, ButtonSize, ButtonVariant};
 use dioxus::prelude::*;
 
 /// Available settings tabs
@@ -59,6 +59,7 @@ pub fn SettingsView(
                             li {
                                 Button {
                                     variant: if active_tab == *tab { ButtonVariant::Primary } else { ButtonVariant::Ghost },
+                                    size: ButtonSize::Medium,
                                     class: Some("w-full justify-start".to_string()),
                                     onclick: {
                                         let tab = *tab;

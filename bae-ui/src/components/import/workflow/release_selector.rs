@@ -97,6 +97,8 @@ pub fn ReleaseSelectorView(
             // Import button
             div { class: "flex justify-center pt-4",
                 Button {
+                    variant: ButtonVariant::Primary,
+                    size: ButtonSize::Medium,
                     disabled: selected_indices.is_empty(),
                     onclick: {
                         let indices = selected_indices.clone();

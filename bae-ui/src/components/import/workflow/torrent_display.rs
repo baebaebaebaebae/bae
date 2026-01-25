@@ -2,7 +2,7 @@
 
 use super::file_list::FileListView;
 use crate::components::icons::{ChevronDownIcon, ChevronRightIcon};
-use crate::components::{Button, ButtonVariant};
+use crate::components::{Button, ButtonSize, ButtonVariant};
 use crate::display_types::{FileInfo, TorrentFileInfo, TorrentInfo};
 use dioxus::prelude::*;
 
@@ -69,6 +69,7 @@ pub fn TorrentTrackerDisplayView(trackers: Vec<TrackerStatus>) -> Element {
         div { class: "mb-4",
             Button {
                 variant: ButtonVariant::Ghost,
+                size: ButtonSize::Medium,
                 class: Some(
                     "w-full justify-between p-3 bg-gray-800 border border-gray-700 hover:bg-gray-700"
                         .to_string(),
@@ -187,6 +188,7 @@ pub fn TorrentInfoDisplayView(info: TorrentInfo) -> Element {
         div { class: "mt-4",
             Button {
                 variant: ButtonVariant::Ghost,
+                size: ButtonSize::Medium,
                 class: Some(
                     "w-full justify-between p-3 bg-gray-800 border border-gray-700 hover:bg-gray-700"
                         .to_string(),
@@ -318,6 +320,7 @@ pub fn TorrentFilesDisplayView(files: Vec<TorrentFileInfo>) -> Element {
         div { class: "mt-4",
             Button {
                 variant: ButtonVariant::Ghost,
+                size: ButtonSize::Medium,
                 class: Some(
                     "w-full justify-between p-3 bg-gray-800 border border-gray-700 hover:bg-gray-700"
                         .to_string(),
@@ -355,7 +358,12 @@ pub fn MetadataDetectionPromptView(on_detect: EventHandler<()>) -> Element {
                         "CUE/log files found in torrent. Download and detect metadata automatically?"
                     }
                 }
-                Button { onclick: move |_| on_detect.call(()), "Detect from CUE/log files" }
+                Button {
+                    variant: ButtonVariant::Primary,
+                    size: ButtonSize::Medium,
+                    onclick: move |_| on_detect.call(()),
+                    "Detect from CUE/log files"
+                }
             }
         }
     }

@@ -1,6 +1,6 @@
 //! About section view
 
-use crate::components::Button;
+use crate::components::{Button, ButtonSize, ButtonVariant};
 use dioxus::prelude::*;
 
 /// About section view
@@ -30,7 +30,12 @@ pub fn AboutSectionView(
                     }
                 }
                 div { class: "mt-4 pt-4 border-t border-gray-700",
-                    Button { onclick: move |_| on_check_updates.call(()), "Check for Updates" }
+                    Button {
+                        variant: ButtonVariant::Primary,
+                        size: ButtonSize::Medium,
+                        onclick: move |_| on_check_updates.call(()),
+                        "Check for Updates"
+                    }
                 }
             }
 

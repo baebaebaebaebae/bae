@@ -166,6 +166,7 @@ fn ReleaseTab(
 
                 Button {
                     variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Medium,
                     disabled: is_deleting() || is_exporting(),
                     class: Some("w-full justify-start rounded-none".to_string()),
                     onclick: move |evt: MouseEvent| {
@@ -182,6 +183,7 @@ fn ReleaseTab(
                         if let Some(ref handler) = on_stop_seeding {
                             Button {
                                 variant: ButtonVariant::Ghost,
+                                size: ButtonSize::Medium,
                                 disabled: is_deleting() || is_exporting(),
                                 class: Some("w-full justify-start rounded-none".to_string()),
                                 onclick: {
@@ -201,6 +203,7 @@ fn ReleaseTab(
                         if let Some(ref handler) = on_start_seeding {
                             Button {
                                 variant: ButtonVariant::Ghost,
+                                size: ButtonSize::Medium,
                                 disabled: is_deleting() || is_exporting(),
                                 class: Some("w-full justify-start rounded-none".to_string()),
                                 onclick: {
@@ -220,6 +223,7 @@ fn ReleaseTab(
                 }
                 Button {
                     variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Medium,
                     disabled: is_deleting() || is_exporting(),
                     loading: is_exporting(),
                     class: Some("w-full justify-start rounded-none".to_string()),
@@ -238,6 +242,7 @@ fn ReleaseTab(
                 }
                 Button {
                     variant: ButtonVariant::Danger,
+                    size: ButtonSize::Medium,
                     disabled: is_deleting() || is_exporting(),
                     class: Some("w-full justify-start rounded-none".to_string()),
                     onclick: move |evt: MouseEvent| {

@@ -56,6 +56,7 @@ pub fn QueueSidebarView(
                 }
                 Button {
                     variant: ButtonVariant::Secondary,
+                    size: ButtonSize::Medium,
                     onclick: move |_| on_close.call(()),
                     MenuIcon { class: "w-5 h-5" }
                 }

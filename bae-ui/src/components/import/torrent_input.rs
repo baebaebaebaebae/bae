@@ -1,7 +1,7 @@
 //! Torrent input view component
 
 use crate::components::icons::UploadIcon;
-use crate::components::{Button, ButtonVariant};
+use crate::components::{Button, ButtonSize, ButtonVariant};
 use dioxus::prelude::*;
 
 /// Torrent input mode
@@ -41,11 +41,13 @@ pub fn TorrentInputView(
             div { class: "flex space-x-4 mb-4",
                 Button {
                     variant: if input_mode == TorrentInputMode::File { ButtonVariant::Primary } else { ButtonVariant::Secondary },
+                    size: ButtonSize::Medium,
                     onclick: move |_| on_mode_change.call(TorrentInputMode::File),
                     "File"
                 }
                 Button {
                     variant: if input_mode == TorrentInputMode::Magnet { ButtonVariant::Primary } else { ButtonVariant::Secondary },
+                    size: ButtonSize::Medium,
                     onclick: move |_| on_mode_change.call(TorrentInputMode::Magnet),
                     "Magnet Link"
                 }
@@ -62,7 +64,12 @@ pub fn TorrentInputView(
                                 h3 { class: "text-lg font-semibold text-gray-200", "Select a torrent file" }
                                 p { class: "text-sm text-gray-400", "Drop a .torrent file here or click to browse" }
                             }
-                            Button { onclick: move |_| on_select_click.call(()), "Select Torrent" }
+                            Button {
+                                variant: ButtonVariant::Primary,
+                                size: ButtonSize::Medium,
+                                onclick: move |_| on_select_click.call(()),
+                                "Select Torrent"
+                            }
                         }
                     }
                 },
@@ -79,6 +86,8 @@ pub fn TorrentInputView(
                             }
                         }
                         Button {
+                            variant: ButtonVariant::Primary,
+                            size: ButtonSize::Medium,
                             disabled: magnet_input.read().is_empty(),
                             onclick: move |_| {
                                 let value = magnet_input.read().clone();

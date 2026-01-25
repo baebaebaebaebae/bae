@@ -65,7 +65,10 @@ pub fn StorageProfilesSectionView(
             div { class: "flex items-center justify-between mb-6",
                 h2 { class: "text-xl font-semibold text-white", "Storage Profiles" }
                 if !is_creating && editing_profile.is_none() {
-                    Button { onclick: move |_| on_create.call(()),
+                    Button {
+                        variant: ButtonVariant::Primary,
+                        size: ButtonSize::Medium,
+                        onclick: move |_| on_create.call(()),
                         PlusIcon { class: "w-5 h-5" }
                         "New Profile"
                     }
@@ -556,9 +559,15 @@ pub fn StorageProfileEditorView(
                 }
 
                 div { class: "flex gap-3 pt-2",
-                    Button { onclick: handle_save, "Save" }
+                    Button {
+                        variant: ButtonVariant::Primary,
+                        size: ButtonSize::Medium,
+                        onclick: handle_save,
+                        "Save"
+                    }
                     Button {
                         variant: ButtonVariant::Secondary,
+                        size: ButtonSize::Medium,
                         onclick: move |_| on_cancel.call(()),
                         "Cancel"
                     }

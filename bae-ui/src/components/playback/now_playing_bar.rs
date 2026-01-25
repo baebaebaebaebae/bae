@@ -6,7 +6,7 @@
 
 use crate::components::error_toast::ErrorToast;
 use crate::components::icons::{MenuIcon, PauseIcon, PlayIcon, SkipBackIcon, SkipForwardIcon};
-use crate::components::{Button, ButtonVariant, ChromelessButton};
+use crate::components::{Button, ButtonSize, ButtonVariant, ChromelessButton};
 use crate::stores::playback::{PlaybackStatus, PlaybackUiState, PlaybackUiStateStoreExt};
 use dioxus::prelude::*;
 
@@ -44,6 +44,7 @@ pub fn NowPlayingBarView(
 
                 Button {
                     variant: ButtonVariant::Secondary,
+                    size: ButtonSize::Medium,
                     onclick: move |_| on_toggle_queue.call(()),
                     MenuIcon { class: "w-5 h-5" }
                 }

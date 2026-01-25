@@ -44,10 +44,9 @@ pub fn ChromelessButton(
 }
 
 /// Button visual variant
-#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ButtonVariant {
     /// Indigo background - for primary actions
-    #[default]
     Primary,
     /// Gray background - for secondary/cancel actions
     Secondary,
@@ -58,20 +57,19 @@ pub enum ButtonVariant {
 }
 
 /// Button size
-#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ButtonSize {
     /// Smaller padding, text-sm
     Small,
     /// Standard padding
-    #[default]
     Medium,
 }
 
 /// Reusable button component with consistent styling
 #[component]
 pub fn Button(
-    #[props(default)] variant: ButtonVariant,
-    #[props(default)] size: ButtonSize,
+    variant: ButtonVariant,
+    size: ButtonSize,
     #[props(default)] disabled: bool,
     #[props(default)] loading: bool,
     #[props(default)] class: Option<String>,

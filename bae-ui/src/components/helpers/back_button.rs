@@ -1,7 +1,7 @@
 //! Back button component
 
 use crate::components::icons::ChevronLeftIcon;
-use crate::components::{Button, ButtonVariant};
+use crate::components::{Button, ButtonSize, ButtonVariant};
 use dioxus::prelude::*;
 
 /// Back button with customizable text and callback
@@ -17,6 +17,7 @@ pub fn BackButton(
         div { class: "mb-6",
             Button {
                 variant: ButtonVariant::Ghost,
+                size: ButtonSize::Medium,
                 onclick: move |_| on_click.call(()),
                 ChevronLeftIcon { class: "w-5 h-5" }
                 "{text}"

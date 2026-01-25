@@ -1,7 +1,7 @@
 //! Play album button component
 
 use crate::components::icons::{ChevronDownIcon, PlayIcon, PlusIcon};
-use crate::components::{Button, ButtonVariant, Dropdown, Placement};
+use crate::components::{Button, ButtonSize, ButtonVariant, Dropdown, Placement};
 use dioxus::prelude::*;
 
 /// Play album button with dropdown for "add to queue"
@@ -38,6 +38,7 @@ pub fn PlayAlbumButton(
             div { class: "flex rounded-lg overflow-hidden",
                 Button {
                     variant: ButtonVariant::Primary,
+                    size: ButtonSize::Medium,
                     disabled: is_disabled,
                     class: Some("flex-1 rounded-r-none".to_string()),
                     onclick: {
@@ -53,6 +54,7 @@ pub fn PlayAlbumButton(
                     Button {
                         id: Some(anchor_id.clone()),
                         variant: ButtonVariant::Primary,
+                        size: ButtonSize::Medium,
                         disabled: is_disabled,
                         class: Some("rounded-l-none px-3".to_string()),
                         onclick: move |evt: MouseEvent| {
@@ -75,6 +77,7 @@ pub fn PlayAlbumButton(
                 class: "bg-gray-700 rounded-lg shadow-lg overflow-hidden border border-gray-600 min-w-[200px]",
                 Button {
                     variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Medium,
                     disabled: is_disabled,
                     class: Some("w-full justify-start rounded-none".to_string()),
                     onclick: {

@@ -68,6 +68,8 @@ pub fn ApiKeysSectionView(
 
                             div { class: "flex gap-3",
                                 Button {
+                                    variant: ButtonVariant::Primary,
+                                    size: ButtonSize::Medium,
                                     disabled: !has_changes || is_saving,
                                     loading: is_saving,
                                     onclick: move |_| on_save.call(()),
@@ -79,6 +81,7 @@ pub fn ApiKeysSectionView(
                                 }
                                 Button {
                                     variant: ButtonVariant::Secondary,
+                                    size: ButtonSize::Medium,
                                     onclick: move |_| on_cancel.call(()),
                                     "Cancel"
                                 }

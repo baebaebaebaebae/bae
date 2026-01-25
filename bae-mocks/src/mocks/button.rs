@@ -94,14 +94,30 @@ pub fn ButtonMock(initial_state: Option<String>) -> Element {
                 div { class: "mb-8",
                     h3 { class: "text-sm text-gray-400 mb-3", "All Variants" }
                     div { class: "flex flex-wrap items-center gap-3",
-                        Button { variant: ButtonVariant::Primary, onclick: |_| {}, "Primary" }
+                        Button {
+                            variant: ButtonVariant::Primary,
+                            size: ButtonSize::Medium,
+                            onclick: |_| {},
+                            "Primary"
+                        }
                         Button {
                             variant: ButtonVariant::Secondary,
+                            size: ButtonSize::Medium,
                             onclick: |_| {},
                             "Secondary"
                         }
-                        Button { variant: ButtonVariant::Danger, onclick: |_| {}, "Danger" }
-                        Button { variant: ButtonVariant::Ghost, onclick: |_| {}, "Ghost" }
+                        Button {
+                            variant: ButtonVariant::Danger,
+                            size: ButtonSize::Medium,
+                            onclick: |_| {},
+                            "Danger"
+                        }
+                        Button {
+                            variant: ButtonVariant::Ghost,
+                            size: ButtonSize::Medium,
+                            onclick: |_| {},
+                            "Ghost"
+                        }
                     }
                 }
 
@@ -109,8 +125,18 @@ pub fn ButtonMock(initial_state: Option<String>) -> Element {
                 div { class: "mb-8",
                     h3 { class: "text-sm text-gray-400 mb-3", "Sizes" }
                     div { class: "flex flex-wrap items-center gap-3",
-                        Button { size: ButtonSize::Small, onclick: |_| {}, "Small" }
-                        Button { size: ButtonSize::Medium, onclick: |_| {}, "Medium" }
+                        Button {
+                            variant: ButtonVariant::Primary,
+                            size: ButtonSize::Small,
+                            onclick: |_| {},
+                            "Small"
+                        }
+                        Button {
+                            variant: ButtonVariant::Primary,
+                            size: ButtonSize::Medium,
+                            onclick: |_| {},
+                            "Medium"
+                        }
                     }
                 }
 
@@ -120,18 +146,21 @@ pub fn ButtonMock(initial_state: Option<String>) -> Element {
                     div { class: "flex flex-wrap items-center gap-3",
                         Button {
                             variant: ButtonVariant::Primary,
+                            size: ButtonSize::Medium,
                             disabled: true,
                             onclick: |_| {},
                             "Primary"
                         }
                         Button {
                             variant: ButtonVariant::Secondary,
+                            size: ButtonSize::Medium,
                             disabled: true,
                             onclick: |_| {},
                             "Secondary"
                         }
                         Button {
                             variant: ButtonVariant::Danger,
+                            size: ButtonSize::Medium,
                             disabled: true,
                             onclick: |_| {},
                             "Danger"
@@ -147,11 +176,13 @@ pub fn ButtonMock(initial_state: Option<String>) -> Element {
                         div { class: "flex gap-3",
                             Button {
                                 variant: ButtonVariant::Primary,
+                                size: ButtonSize::Medium,
                                 onclick: |_| {},
                                 "Save"
                             }
                             Button {
                                 variant: ButtonVariant::Secondary,
+                                size: ButtonSize::Medium,
                                 onclick: |_| {},
                                 "Cancel"
                             }
@@ -160,11 +191,13 @@ pub fn ButtonMock(initial_state: Option<String>) -> Element {
                         div { class: "flex gap-3",
                             Button {
                                 variant: ButtonVariant::Secondary,
+                                size: ButtonSize::Medium,
                                 onclick: |_| {},
                                 "Cancel"
                             }
                             Button {
                                 variant: ButtonVariant::Danger,
+                                size: ButtonSize::Medium,
                                 onclick: |_| {},
                                 "Delete"
                             }
