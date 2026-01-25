@@ -162,7 +162,7 @@ jobs:
       run: cd bae-mocks/e2e && npx playwright install --with-deps chromium
 
     - name: Build screenshots
-      run: cd bae-mocks/e2e && npx playwright test screenshots.spec.ts
+      run: cd bae-mocks/e2e && npx playwright test screenshots/
 
     - name: Upload screenshots
       uses: actions/upload-artifact@v4
@@ -193,7 +193,7 @@ jobs:
       run: cd bae-mocks/e2e && npx playwright install --with-deps chromium
 
     - name: Run e2e tests
-      run: cd bae-mocks/e2e && npx playwright test dropdown.spec.ts
+      run: cd bae-mocks/e2e && npx playwright test tests/
 
   security:
     name: Security Audit

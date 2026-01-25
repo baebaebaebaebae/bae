@@ -5,7 +5,7 @@ import * as path from 'path';
 // Only run screenshot generation in CI
 test.skip(() => !process.env.CI, 'Screenshots only run in CI');
 
-const OUTPUT_DIR = path.join(__dirname, '../../website/public/screenshots');
+const OUTPUT_DIR = path.join(__dirname, '../../../website/public/screenshots');
 
 // Wait for all images in the viewport to finish loading
 async function waitForImages(page: Page, selector: string, timeout = 15000): Promise<void> {
