@@ -140,37 +140,6 @@ jobs:
         # Run CPU usage test in release mode for accurate measurements
         cargo test -p bae-core --release --target x86_64-pc-windows-gnu --features bae-core/test-utils --test test_playback_cpu --verbose
 
-  screenshots:
-    name: Build Screenshots
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ inputs.ref || github.sha }}
-        submodules: true
-
-    - name: Setup Rust environment
-      uses: ./.github/actions/setup-rust
-      with:
-        install-dioxus: 'true'
-
-    - name: Setup Node.js environment
-      uses: ./.github/actions/setup-node
-
-    - name: Install Playwright browsers
-      run: cd bae-mocks/e2e && npx playwright install --with-deps chromium
-
-    - name: Build screenshots
-      run: cd bae-mocks/e2e && npx playwright test screenshots/
-
-    - name: Upload screenshots
-      uses: actions/upload-artifact@v4
-      with:
-        name: screenshots
-        path: website/public/screenshots/
-        retention-days: 30
-
   e2e:
     name: E2E Tests
     runs-on: ubuntu-latest
