@@ -17,6 +17,7 @@ const VIEWPORT_KEY: &str = "mock_panel_viewport";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MockPage {
     Button,
+    Pill,
     Library,
     AlbumDetail,
     FolderImport,
@@ -27,6 +28,7 @@ impl MockPage {
     /// All variants - update when adding new mocks
     pub const ALL: &[MockPage] = &[
         MockPage::Button,
+        MockPage::Pill,
         MockPage::Library,
         MockPage::AlbumDetail,
         MockPage::FolderImport,
@@ -37,6 +39,7 @@ impl MockPage {
     pub fn label(self) -> &'static str {
         match self {
             MockPage::Button => "Button",
+            MockPage::Pill => "Pill",
             MockPage::Library => "LibraryView",
             MockPage::AlbumDetail => "AlbumDetailView",
             MockPage::FolderImport => "FolderImportView",
@@ -48,6 +51,7 @@ impl MockPage {
     pub fn key(self) -> &'static str {
         match self {
             MockPage::Button => "button",
+            MockPage::Pill => "pill",
             MockPage::Library => "library",
             MockPage::AlbumDetail => "album-detail",
             MockPage::FolderImport => "folder-import",
@@ -59,6 +63,7 @@ impl MockPage {
     pub fn description(self) -> &'static str {
         match self {
             MockPage::Button => "Button component with variants, sizes, and states",
+            MockPage::Pill => "Pill component for tokens, tags, and inline labels",
             MockPage::Library => "Album grid with loading/error/empty states",
             MockPage::AlbumDetail => "Album detail page with tracks and controls",
             MockPage::FolderImport => "Folder import workflow with all phases",
@@ -70,6 +75,7 @@ impl MockPage {
     pub fn to_route(self, state: Option<String>) -> Route {
         match self {
             MockPage::Button => Route::MockButton { state },
+            MockPage::Pill => Route::MockPill { state },
             MockPage::Library => Route::MockLibrary { state },
             MockPage::AlbumDetail => Route::MockAlbumDetail { state },
             MockPage::FolderImport => Route::MockFolderImport { state },

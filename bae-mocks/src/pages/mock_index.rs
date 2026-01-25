@@ -1,7 +1,9 @@
 //! Mock pages with URL state persistence
 
 use crate::mocks::framework::MockPage;
-use crate::mocks::{AlbumDetailMock, ButtonMock, FolderImportMock, LibraryMock, TitleBarMock};
+use crate::mocks::{
+    AlbumDetailMock, ButtonMock, FolderImportMock, LibraryMock, PillMock, TitleBarMock,
+};
 use crate::ui::LinkCard;
 use crate::Route;
 use dioxus::prelude::*;
@@ -76,6 +78,17 @@ pub fn MockAlbumDetail(state: Option<String>) -> Element {
 pub fn MockLibrary(state: Option<String>) -> Element {
     rsx! {
         LibraryMock { initial_state: state }
+    }
+}
+
+// ============================================================================
+// Pill page wrapper
+// ============================================================================
+
+#[component]
+pub fn MockPill(state: Option<String>) -> Element {
+    rsx! {
+        PillMock { initial_state: state }
     }
 }
 

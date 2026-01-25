@@ -14,6 +14,6 @@ pub use layout::DemoLayout;
 pub use library::Library;
 pub use mock_dropdown::MockDropdownTest;
 pub use mock_index::{
-    MockAlbumDetail, MockButton, MockFolderImport, MockIndex, MockLibrary, MockTitleBar,
+    MockAlbumDetail, MockButton, MockFolderImport, MockIndex, MockLibrary, MockPill, MockTitleBar,
 };
 pub use settings::Settings;
