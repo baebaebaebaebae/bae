@@ -45,7 +45,7 @@ pub fn LibraryView(
 
     rsx! {
         div {
-            class: "flex-grow overflow-y-auto overscroll-none flex flex-col py-10",
+            class: "flex-grow overflow-y-auto flex flex-col py-10",
             onmounted: move |evt| scroll_target.set(Some(evt.data())),
             div { class: "container mx-auto flex flex-col",
                 h1 { class: "text-3xl font-bold text-white mb-6", "Music Library" }

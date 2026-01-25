@@ -9,6 +9,11 @@ body {
     -webkit-user-select: none;
 }
 
+/* Disable overscroll bounce on all scrollable elements */
+* {
+    overscroll-behavior: none;
+}
+
 /* Opt-in text selection for content areas */
 input,
 textarea,
