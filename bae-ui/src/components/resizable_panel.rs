@@ -16,6 +16,22 @@ pub enum ResizeDirection {
     Vertical,
 }
 
+/// CSS position mode for the panel container
+#[derive(Clone, Copy, PartialEq)]
+pub enum PanelPosition {
+    Relative,
+    Absolute,
+}
+
+impl PanelPosition {
+    fn as_class(&self) -> &'static str {
+        match self {
+            PanelPosition::Relative => "relative",
+            PanelPosition::Absolute => "absolute",
+        }
+    }
+}
+
 /// A draggable grab bar for resizing panels
 #[component]
 pub fn GrabBar(
@@ -81,6 +97,11 @@ pub fn ResizablePanel(
     grabber_span_ratio: f64,
     /// Resize direction
     direction: ResizeDirection,
+    /// CSS position mode (relative or absolute)
+    position: PanelPosition,
+    /// Additional CSS classes
+    #[props(default = "")]
+    class: &'static str,
     /// Panel contents
     children: Element,
 ) -> Element {
@@ -182,9 +203,11 @@ pub fn ResizablePanel(
     rsx! {
         div {
             class: format!(
-                "relative flex flex-shrink-0 overflow-hidden {} {}",
+                "{} flex flex-shrink-0 overflow-hidden {} {} {}",
+                position.as_class(),
                 if is_horizontal { "self-stretch" } else { "self-stretch flex-col" },
                 if is_resizing() { "select-none" } else { "" },
+                class,
             ),
             style: "{size_style}",
 

@@ -6,7 +6,7 @@
 
 use super::source_selector::{ImportSource, ImportSourceSelectorView};
 use super::workflow::{DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH};
-use crate::components::{ResizablePanel, ResizeDirection};
+use crate::components::{PanelPosition, ResizablePanel, ResizeDirection};
 use dioxus::prelude::*;
 
 /// Import page view with resizable sidebar
@@ -28,6 +28,7 @@ pub fn ImportView(
                 default_size: DEFAULT_SIDEBAR_WIDTH,
                 grabber_span_ratio: 0.95,
                 direction: ResizeDirection::Horizontal,
+                position: PanelPosition::Relative,
                 div { class: "flex flex-col h-full",
                     // Header with title and source selector
                     div { class: "pt-6 px-5 pb-4 flex items-center gap-4",

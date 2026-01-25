@@ -53,7 +53,7 @@ pub use imports::{ImportsButtonView, ImportsDropdownView};
 pub use library::LibraryView;
 pub use modal::Modal;
 pub use playback::{NowPlayingBarView, QueueSidebarState, QueueSidebarView};
-pub use resizable_panel::{GrabBar, ResizablePanel, ResizeDirection};
+pub use resizable_panel::{GrabBar, PanelPosition, ResizablePanel, ResizeDirection};
 pub use settings::{
     AboutSectionView, ApiKeysSectionView, BitTorrentSectionView, BitTorrentSettings,
     EncryptionSectionView, SettingsTab, SettingsView, StorageLocation, StorageProfile,

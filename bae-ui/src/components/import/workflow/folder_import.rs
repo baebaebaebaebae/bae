@@ -23,7 +23,7 @@ use super::{
 };
 use crate::components::icons::{FolderIcon, LoaderIcon};
 use crate::components::StorageProfile;
-use crate::components::{Button, ResizablePanel, ResizeDirection};
+use crate::components::{Button, PanelPosition, ResizablePanel, ResizeDirection};
 use crate::display_types::{IdentifyMode, ImportStep, MatchCandidate, SearchSource, SearchTab};
 use crate::stores::import::{CandidateState, ConfirmPhase, ImportState, ImportStateStoreExt};
 use dioxus::prelude::*;
@@ -95,7 +95,7 @@ pub fn FolderImportView(props: FolderImportViewProps) -> Element {
     let step = state.read().get_import_step();
 
     rsx! {
-        div { class: "flex-1 flex flex-col min-w-0",
+        div { class: "relative flex-1 flex flex-col min-w-0",
             if !is_empty {
                 EmptyView {
                     is_scanning,
@@ -415,6 +415,8 @@ fn FilesDock(
             default_size: 156.0,
             grabber_span_ratio: 0.95,
             direction: ResizeDirection::Vertical,
+            position: PanelPosition::Absolute,
+            class: "bottom-0 left-0 right-0",
             DockCard { title: "Files", class: "w-fit max-w-3xl",
                 SmartFileDisplayView {
                     files,
