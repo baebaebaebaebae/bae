@@ -147,12 +147,12 @@ pub enum ImportStep {
 }
 
 /// Mode within the Identify step
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum IdentifyMode {
     /// Candidate created but lookup not started yet
     Created,
     /// Looking up release by DiscID (network call in flight)
-    DiscIdLookup,
+    DiscIdLookup(String),
     /// DiscID matched multiple candidates; user picks one
     MultipleExactMatches,
     /// No exact match; user searches manually

@@ -773,7 +773,7 @@ pub async fn load_selected_release(
     if let Some(mb_discid) = mb_discid {
         import_store
             .write()
-            .dispatch(CandidateEvent::RetryDiscIdLookup);
+            .dispatch(CandidateEvent::StartDiscIdLookup(mb_discid.clone()));
         import_store.write().is_looking_up = true;
 
         let result = lookup_discid(&mb_discid).await;

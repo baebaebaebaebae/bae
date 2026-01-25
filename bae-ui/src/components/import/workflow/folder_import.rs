@@ -268,8 +268,8 @@ fn IdentifyStep(
     rsx! {
         match mode {
             IdentifyMode::Created => rsx! {},
-            IdentifyMode::DiscIdLookup => rsx! {
-                DiscIdLookupProgressView { on_skip: on_skip_detection }
+            IdentifyMode::DiscIdLookup(disc_id) => rsx! {
+                DiscIdLookupProgressView { disc_id, on_skip: on_skip_detection }
             },
             IdentifyMode::MultipleExactMatches => rsx! {
                 MultipleExactMatchesView { state, on_select: on_exact_match_select }
@@ -456,11 +456,19 @@ fn DockCard(
 
 /// Shown while looking up the release via MusicBrainz disc ID
 #[component]
-fn DiscIdLookupProgressView(on_skip: EventHandler<()>) -> Element {
+fn DiscIdLookupProgressView(disc_id: String, on_skip: EventHandler<()>) -> Element {
     rsx! {
         div { class: "flex-1 flex justify-center items-center",
-            div { class: "text-center space-y-2",
-                p { class: "text-sm text-gray-400", "Looking up release by disc ID..." }
+            div { class: "text-center space-y-3",
+                p { class: "text-sm text-gray-400",
+                    "Looking up Disc ID "
+                    a {
+                        href: "https://musicbrainz.org/cdtoc/{disc_id}",
+                        target: "_blank",
+                        class: "font-mono text-xs bg-gray-700 px-2 py-0.5 rounded-full text-blue-400 hover:text-blue-300 transition-colors",
+                        "{disc_id}"
+                    }
+                }
                 Button {
                     variant: ButtonVariant::Primary,
                     size: ButtonSize::Medium,

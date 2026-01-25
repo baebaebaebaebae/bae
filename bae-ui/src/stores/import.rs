@@ -112,8 +112,8 @@ pub enum CandidateEvent {
     SwitchToManualSearch,
     /// User switches from ManualSearch back to MultipleExactMatches (if auto_matches available)
     SwitchToMultipleExactMatches,
-    /// User clicks retry on failed DiscID lookup
-    RetryDiscIdLookup,
+    /// Start or retry DiscID lookup with the given disc ID
+    StartDiscIdLookup(String),
     /// DiscID lookup completed (from async operation)
     DiscIdLookupComplete {
         matches: Vec<MatchCandidate>,
@@ -255,9 +255,9 @@ impl IdentifyingState {
                 }
                 CandidateState::Identifying(state)
             }
-            CandidateEvent::RetryDiscIdLookup => {
+            CandidateEvent::StartDiscIdLookup(disc_id) => {
                 let mut state = self;
-                state.mode = IdentifyMode::DiscIdLookup;
+                state.mode = IdentifyMode::DiscIdLookup(disc_id);
                 state.discid_lookup_error = None;
                 CandidateState::Identifying(state)
             }
@@ -414,7 +414,7 @@ impl ConfirmingState {
             CandidateEvent::SelectExactMatch(_)
             | CandidateEvent::SwitchToManualSearch
             | CandidateEvent::SwitchToMultipleExactMatches
-            | CandidateEvent::RetryDiscIdLookup
+            | CandidateEvent::StartDiscIdLookup(_)
             | CandidateEvent::DiscIdLookupComplete { .. }
             | CandidateEvent::UpdateSearchField { .. }
             | CandidateEvent::SetSearchTab(_)
@@ -586,7 +586,7 @@ impl ImportState {
     pub fn get_identify_mode(&self) -> IdentifyMode {
         self.current_candidate_state()
             .and_then(|s| match s {
-                CandidateState::Identifying(is) => Some(is.mode),
+                CandidateState::Identifying(is) => Some(is.mode.clone()),
                 _ => None,
             })
             .unwrap_or(IdentifyMode::Created)

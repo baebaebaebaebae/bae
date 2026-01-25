@@ -1,0 +1,48 @@
+---
+description: Enum variants should carry their associated data directly
+alwaysApply: true
+---
+
+# Enum Variants Should Carry Associated Data
+
+When an enum variant requires associated data, put it directly in the variant rather than in a separate field that must be kept in sync.
+
+```rust
+// BAD: Implicit coupling - mode and data must be kept in sync
+pub enum Mode {
+    Created,
+    Loading,
+    Ready,
+}
+
+pub struct State {
+    mode: Mode,
+    loading_id: Option<String>,  // Must be Some when mode == Loading
+}
+
+// Usage requires unwrap and hoping the invariant holds
+match state.mode {
+    Mode::Loading => {
+        let id = state.loading_id.unwrap_or_default();  // Implicit coupling
+        do_something(id);
+    }
+}
+```
+
+```rust
+// GOOD: Data is part of the variant - coupling is explicit
+pub enum Mode {
+    Created,
+    Loading(String),  // Carries the ID directly
+    Ready,
+}
+
+// Usage extracts data naturally from the match
+match state.mode {
+    Mode::Loading(id) => {
+        do_something(id);  // No unwrap, no implicit coupling
+    }
+}
+```
+
+This ensures the type system enforces that required data is present when in a specific state.

@@ -292,10 +292,6 @@ pub fn CdImport() -> Element {
             let app = app.clone();
             spawn(async move {
                 let mut import_store = app.state.import();
-                import_store
-                    .write()
-                    .dispatch(CandidateEvent::RetryDiscIdLookup);
-                import_store.write().is_looking_up = true;
 
                 let mb_discid = import_store
                     .read()
@@ -303,6 +299,11 @@ pub fn CdImport() -> Element {
                     .and_then(|m| m.mb_discid.clone());
 
                 if let Some(mb_discid) = mb_discid {
+                    import_store
+                        .write()
+                        .dispatch(CandidateEvent::StartDiscIdLookup(mb_discid.clone()));
+                    import_store.write().is_looking_up = true;
+
                     info!("Retrying DiscID lookup...");
                     match lookup_discid(&mb_discid).await {
                         Ok(result) => {

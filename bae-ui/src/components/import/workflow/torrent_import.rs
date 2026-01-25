@@ -204,7 +204,7 @@ fn TorrentIdentifyContent(
                 TorrentFilesDisplayView { files: torrent_files }
             }
             match identify_mode {
-                IdentifyMode::Created | IdentifyMode::DiscIdLookup => rsx! {},
+                IdentifyMode::Created | IdentifyMode::DiscIdLookup(_) => rsx! {},
                 IdentifyMode::MultipleExactMatches => rsx! {
                     MultipleExactMatchesView { state, on_select: on_exact_match_select }
                 },
