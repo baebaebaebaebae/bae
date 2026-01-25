@@ -44,7 +44,14 @@ fn generate_albums(count: usize) -> (Vec<Album>, HashMap<String, Vec<Artist>>) {
     for i in 0..count {
         let idx = i % base_albums.len();
         let base = &base_albums[idx];
-        let id = format!("album-{}", i + 1);
+
+        // First batch uses real IDs (so album detail navigation works),
+        // subsequent batches use generated IDs
+        let id = if i < base_albums.len() {
+            base.id.clone()
+        } else {
+            format!("album-{}", i + 1)
+        };
 
         albums.push(Album {
             id: id.clone(),
