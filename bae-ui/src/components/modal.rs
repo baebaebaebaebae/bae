@@ -6,6 +6,10 @@
 //! - Escape key to close
 //! - `::backdrop` styling
 //!
+//! The native `<dialog>` element handles its own visibility (display: none when closed,
+//! block when open via showModal). We don't override display - instead we use an inner
+//! fixed container for layout.
+//!
 //! Note: Unlike popover's `ontoggle`, dialog's `oncancel` only fires from user actions
 //! (Escape key), not from programmatic `close()` calls, so we don't need the same
 //! complexity as Dropdown. However, `showModal()` throws if already open, so we check
@@ -80,23 +84,27 @@ pub fn Modal(
 
     let dialog_class = class.unwrap_or_default();
 
-    // For backdrop click: clicking the dialog element itself (not children) closes it.
-    // The dialog fills the screen and centers content; clicking outside content closes.
+    // Native <dialog> handles its own display (none when closed, block when open).
+    // IMPORTANT: Do NOT add display-related classes (flex, block, grid, etc.) to the
+    // dialog element - they will override the native display:none and make the dialog
+    // visible even when closed. Use the inner container for layout instead.
+    // The ::backdrop pseudo-element provides the overlay styling.
     rsx! {
         dialog {
             id: "{dialog_id_for_rsx}",
-            class: "p-0 bg-transparent backdrop:bg-black/80 w-screen h-screen flex items-center justify-center {dialog_class}",
+            class: "p-0 bg-transparent backdrop:bg-black/80 {dialog_class}",
             // Escape key fires 'cancel' event
             oncancel: move |evt| {
                 evt.prevent_default();
                 on_close.call(());
             },
-            // Click on dialog backdrop (not content) closes
-            onclick: move |_| {
-                on_close.call(());
-            },
-            // Inner wrapper prevents click propagation so content clicks don't close
-            div { onclick: move |evt| evt.stop_propagation(), {children} }
+            // Fixed container for backdrop click handling and content centering
+            div {
+                class: "fixed inset-0 flex items-center justify-center",
+                onclick: move |_| on_close.call(()),
+                // Inner wrapper prevents click propagation so content clicks don't close
+                div { onclick: move |evt| evt.stop_propagation(), {children} }
+            }
         }
     }
 }

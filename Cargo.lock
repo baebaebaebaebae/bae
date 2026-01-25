@@ -807,6 +807,7 @@ dependencies = [
  "js-sys-x",
  "serde",
  "serde_json",
+ "tracing",
  "wasm-bindgen-futures-x",
  "wasm-bindgen-x",
  "web-sys-x",
