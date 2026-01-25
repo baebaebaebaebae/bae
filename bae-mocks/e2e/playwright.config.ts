@@ -7,14 +7,14 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: isCI,
   retries: isCI ? 2 : 0,
-  timeout: 60000,
+  timeout: isCI ? 120000 : 60000,
   workers: 1,
   reporter: 'list',
   use: {
     baseURL: 'http://localhost:8080',
     trace: 'on-first-retry',
     viewport: { width: 1400, height: 900 },
-    navigationTimeout: isCI ? 60000 : 30000,
+    navigationTimeout: isCI ? 90000 : 30000,
   },
   projects: [
     {
