@@ -46,6 +46,18 @@ test.describe('Dropdown Component', () => {
     return box ? { x: box.x, y: box.y } : null;
   }
 
+  // Wait for dropdown to become visible (opacity: 1)
+  // The dropdown starts with opacity: 0 and only becomes visible after positioning completes
+  async function waitForDropdownVisible(page: Page, timeout = 2000): Promise<{ x: number; y: number }> {
+    const popover = await getOpenPopover(page);
+    
+    // Wait for opacity to become 1 (positioning sets opacity: 1 after computing position)
+    await expect(popover).toHaveCSS('opacity', '1', { timeout });
+    
+    const box = await popover.boundingBox();
+    return box ? { x: box.x, y: box.y } : { x: 0, y: 0 };
+  }
+
   async function getTogglePosition(page: Page, albumId: string): Promise<{ x: number; y: number }> {
     const toggle = await getDropdownToggle(page, albumId);
     const box = await toggle.boundingBox();
@@ -324,11 +336,9 @@ test.describe('Dropdown Component', () => {
     const toggle1Pos = await getTogglePosition(page, 'album-1');
     
     await toggle1.click();
-    await page.waitForTimeout(300);
-    
-    const dropdown1Pos = await getDropdownPosition(page);
-    expect(dropdown1Pos).not.toBeNull();
-    console.log(`Album 1: Toggle at (${toggle1Pos.x}, ${toggle1Pos.y}), Dropdown at (${dropdown1Pos!.x}, ${dropdown1Pos!.y})`);
+    // Wait for dropdown to become visible (opacity changes to 1 only after positioning)
+    const dropdown1Pos = await waitForDropdownVisible(page);
+    console.log(`Album 1: Toggle at (${toggle1Pos.x}, ${toggle1Pos.y}), Dropdown at (${dropdown1Pos.x}, ${dropdown1Pos.y})`);
     
     // Close it
     await toggle1.click();
@@ -343,21 +353,19 @@ test.describe('Dropdown Component', () => {
     const toggle3Pos = await getTogglePosition(page, 'album-3');
     
     await toggle3.click();
-    await page.waitForTimeout(300);
-    
-    const dropdown3Pos = await getDropdownPosition(page);
-    expect(dropdown3Pos).not.toBeNull();
-    console.log(`Album 3: Toggle at (${toggle3Pos.x}, ${toggle3Pos.y}), Dropdown at (${dropdown3Pos!.x}, ${dropdown3Pos!.y})`);
+    // Wait for dropdown to become visible (opacity changes to 1 only after positioning)
+    const dropdown3Pos = await waitForDropdownVisible(page);
+    console.log(`Album 3: Toggle at (${toggle3Pos.x}, ${toggle3Pos.y}), Dropdown at (${dropdown3Pos.x}, ${dropdown3Pos.y})`);
     
     // The dropdown for album 3 should be near album 3's toggle, NOT album 1's
     const distanceToToggle3 = Math.sqrt(
-      Math.pow(dropdown3Pos!.x - toggle3Pos.x, 2) + 
-      Math.pow(dropdown3Pos!.y - toggle3Pos.y, 2)
+      Math.pow(dropdown3Pos.x - toggle3Pos.x, 2) + 
+      Math.pow(dropdown3Pos.y - toggle3Pos.y, 2)
     );
     
     const distanceToToggle1 = Math.sqrt(
-      Math.pow(dropdown3Pos!.x - toggle1Pos.x, 2) + 
-      Math.pow(dropdown3Pos!.y - toggle1Pos.y, 2)
+      Math.pow(dropdown3Pos.x - toggle1Pos.x, 2) + 
+      Math.pow(dropdown3Pos.y - toggle1Pos.y, 2)
     );
     
     expect(distanceToToggle3, 'Dropdown should be near album 3 toggle').toBeLessThan(200);
