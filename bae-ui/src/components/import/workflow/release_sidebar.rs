@@ -39,8 +39,8 @@ pub fn ReleaseSidebarView(
     let anchor_id = "release-sidebar-menu";
 
     rsx! {
-        // Floating panel container with padding
-        div { class: "flex-1 p-2 min-w-0 h-full",
+        // Panel container - padding comes from parent ImportView
+        div { class: "flex-1 px-2 pb-2 min-w-0 h-full",
             div { class: "flex flex-col h-full min-w-0 bg-surface-raised rounded-xl shadow-lg shadow-black/10 overflow-hidden",
                 // Header
                 div { class: "relative px-3 py-2.5 flex items-center justify-between",

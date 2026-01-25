@@ -7,8 +7,8 @@ use bae_ui::stores::import::{
 use bae_ui::{
     AudioContentInfo, CategorizedFileInfo, CueFlacPairInfo, DetectedCandidate,
     DetectedCandidateStatus, FileInfo, FolderImportView, FolderMetadata, IdentifyMode,
-    ImportSource, ImportStep, ImportView, MatchCandidate, MatchSourceType, SearchSource, SearchTab,
-    SelectedCover, StorageLocation, StorageProfile,
+    ImportSource, ImportStep, ImportView, MatchCandidate, MatchSourceType, ReleaseSidebarView,
+    SearchSource, SearchTab, SelectedCover, StorageLocation, StorageProfile,
 };
 use dioxus::prelude::*;
 use std::collections::HashMap;
@@ -66,8 +66,6 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         )
         .visible_when("has_releases", "true")
         .visible_when("step", "Identify")
-        .bool_control("dragging", "Dragging", false)
-        .visible_when("has_releases", "false")
         .bool_control("searching", "Searching", false)
         .doc("Shows spinner during manual search")
         .visible_when("step", "Identify")
@@ -162,7 +160,6 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         _ => IdentifyMode::DiscIdLookup,
     };
 
-    let is_dragging = registry.get_bool("dragging");
     let is_retrying_discid_lookup = registry.get_bool("retrying");
     let is_searching = registry.get_bool("searching");
     let has_searched = registry.get_bool("results");
@@ -523,8 +520,17 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         cd_toc_info: None,
     });
 
-    let registry_for_clear = registry.clone();
     let registry_for_search = registry.clone();
+
+    let sidebar = rsx! {
+        ReleaseSidebarView {
+            state: import_state,
+            on_select: move |idx| selected_candidate_index.set(Some(idx)),
+            on_add_folder: |_| {},
+            on_remove: |_| {},
+            on_clear_all: |_| {},
+        }
+    };
 
     rsx! {
         MockPanel {
@@ -534,24 +540,15 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             ImportView {
                 selected_source: ImportSource::Folder,
                 on_source_select: |_| {},
+                sidebar,
                 FolderImportView {
-                    // Pass the state
                     state: import_state,
-                    // UI-only props
-                    is_dragging,
                     selected_text_file: None,
                     text_file_content: None,
-                    // External data
                     storage_profiles,
-                    // Callbacks
                     on_folder_select_click: |_| {},
-                    on_release_select: move |idx| selected_candidate_index.set(Some(idx)),
                     on_text_file_select: |_| {},
                     on_text_file_close: |_| {},
-                    on_clear: move |_| registry_for_clear.set_string("step", "Identify".to_string()),
-                    on_reveal: |_| {},
-                    on_remove_release: |_| {},
-                    on_clear_all_releases: |_| {},
                     on_skip_detection: |_| {},
                     on_exact_match_select: move |idx| selected_match_index.set(Some(idx)),
                     on_search_source_change: move |src| search_source.set(src),

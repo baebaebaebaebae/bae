@@ -1,6 +1,6 @@
 #[cfg(feature = "cd-rip")]
 use super::cd_import::CdImport;
-use super::folder_import::FolderImport;
+use super::folder_import::{FolderImport, FolderImportSidebar};
 #[cfg(feature = "torrent")]
 use super::torrent_import::TorrentImport;
 use crate::ui::app_service::use_app;
@@ -58,8 +58,29 @@ pub fn ImportPage() -> Element {
         pending_switch.set(None);
     };
 
+    // Sidebar based on selected source
+    let sidebar = match selected_source {
+        ImportSource::Folder => rsx! {
+            FolderImportSidebar {}
+        },
+        #[cfg(feature = "torrent")]
+        ImportSource::Torrent => rsx! {
+            // TODO: TorrentImportSidebar with release list
+            div {}
+        },
+        #[cfg(feature = "cd-rip")]
+        ImportSource::Cd => rsx! {
+            // TODO: CdImportSidebar with CD drives
+            div {}
+        },
+        #[cfg(not(all(feature = "torrent", feature = "cd-rip")))]
+        _ => rsx! {
+            div {}
+        },
+    };
+
     rsx! {
-        ImportView { selected_source, on_source_select,
+        ImportView { selected_source, on_source_select, sidebar,
             match selected_source {
                 ImportSource::Folder => rsx! {
                     FolderImport {}

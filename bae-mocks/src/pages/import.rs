@@ -10,10 +10,16 @@ use dioxus::prelude::*;
 pub fn Import() -> Element {
     let mut selected_source = use_signal(|| ImportSource::Folder);
 
+    // Placeholder sidebar - in real app this would show releases/drives
+    let sidebar = rsx! {
+        div { class: "p-4 text-gray-400 text-sm", "No releases" }
+    };
+
     rsx! {
         ImportView {
             selected_source: *selected_source.read(),
             on_source_select: move |source| selected_source.set(source),
+            sidebar,
 
             match *selected_source.read() {
                 ImportSource::Folder => rsx! {

@@ -36,7 +36,9 @@ pub use match_list::MatchListView;
 pub use metadata_display::MetadataDisplayView;
 pub use multiple_matches::MultipleMatchesView;
 pub use release_selector::ReleaseSelectorView;
-pub use release_sidebar::ReleaseSidebarView;
+pub use release_sidebar::{
+    ReleaseSidebarView, DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH,
+};
 pub use search_source_selector::SearchSourceSelectorView;
 pub use shared::{
     DetectingMetadataView, DiscIdLookupErrorView, ImportErrorDisplayView, SelectedSourceView,

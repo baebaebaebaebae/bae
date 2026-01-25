@@ -5,7 +5,7 @@ use crate::ui::import_helpers::{
     confirm_and_start_import, load_selected_release, lookup_discid, search_by_barcode,
     search_by_catalog_number, search_general, DiscIdLookupResult,
 };
-use bae_ui::components::import::FolderImportView;
+use bae_ui::components::import::{FolderImportView, ReleaseSidebarView};
 use bae_ui::display_types::{SearchSource, SearchTab};
 use bae_ui::stores::import::CandidateEvent;
 use bae_ui::stores::{AppStateStoreExt, StorageProfilesStateStoreExt};
@@ -13,12 +13,97 @@ use bae_ui::ImportSource;
 use dioxus::prelude::*;
 use tracing::{info, warn};
 
+// ============================================================================
+// Sidebar Component
+// ============================================================================
+
+/// Folder import sidebar - shows detected releases
+#[component]
+pub fn FolderImportSidebar() -> Element {
+    let app = use_app();
+    let import_state = app.state.import();
+    let detected_candidates = import_state.read().detected_candidates.clone();
+
+    let on_folder_select = {
+        let app = app.clone();
+        move |_| {
+            let app = app.clone();
+            spawn(async move {
+                if let Some(path) = rfd::AsyncFileDialog::new().pick_folder().await {
+                    let path_str = path.path().to_string_lossy().to_string();
+                    let import_handle = app.import_handle.clone();
+
+                    {
+                        let mut import_store = app.state.import();
+                        if import_store.read().detected_candidates.is_empty() {
+                            import_store.write().reset();
+                        }
+                        import_store.write().is_scanning_candidates = true;
+                    }
+
+                    if let Err(e) =
+                        import_handle.enqueue_folder_scan(std::path::PathBuf::from(path_str))
+                    {
+                        warn!("Failed to add folder to scan: {}", e);
+                    }
+                }
+            });
+        }
+    };
+
+    let on_release_select = {
+        let app = app.clone();
+        let detected = detected_candidates.clone();
+        move |index: usize| {
+            let app = app.clone();
+            let detected = detected.clone();
+            spawn(async move {
+                if let Err(e) = load_selected_release(&app, index, &detected).await {
+                    warn!("Failed to switch to release: {}", e);
+                }
+            });
+        }
+    };
+
+    let on_remove_release = {
+        let app = app.clone();
+        move |index: usize| {
+            app.state.import().write().remove_detected_release(index);
+        }
+    };
+
+    let on_clear_all_releases = {
+        let app = app.clone();
+        move |_| {
+            let mut store = app.state.import();
+            let mut state = store.write();
+            state.detected_candidates.clear();
+            state.candidate_states.clear();
+            state.loading_candidates.clear();
+            state.discid_lookup_attempted.clear();
+            state.switch_candidate(None);
+        }
+    };
+
+    rsx! {
+        ReleaseSidebarView {
+            state: import_state,
+            on_select: on_release_select,
+            on_add_folder: on_folder_select,
+            on_remove: on_remove_release,
+            on_clear_all: on_clear_all_releases,
+        }
+    }
+}
+
+// ============================================================================
+// Main Content Component
+// ============================================================================
+
 #[component]
 pub fn FolderImport() -> Element {
     let app = use_app();
     let navigator = use_navigator();
-
-    let is_dragging = use_signal(|| false);
 
     // Get lenses for reactive props - pass directly for granular reactivity
     let import_state = app.state.import();
@@ -26,7 +111,6 @@ pub fn FolderImport() -> Element {
 
     // Extract values needed by handlers (handlers need current values, not lenses)
     let current_candidate_key = import_state.read().current_candidate_key.clone();
-    let detected_candidates_for_handlers = import_state.read().detected_candidates.clone();
 
     // Handlers
     let on_folder_select = {
@@ -57,53 +141,6 @@ pub fn FolderImport() -> Element {
         }
     };
 
-    let on_clear = {
-        let app = app.clone();
-        move |_| {
-            app.state.import().write().reset();
-        }
-    };
-
-    let on_reveal = {
-        let key = current_candidate_key.clone();
-        move |_| {
-            if let Some(path) = key.clone() {
-                #[cfg(target_os = "macos")]
-                {
-                    let _ = std::process::Command::new("open").arg(&path).spawn();
-                }
-                #[cfg(target_os = "linux")]
-                {
-                    let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
-                }
-                #[cfg(target_os = "windows")]
-                {
-                    let _ = std::process::Command::new("explorer").arg(&path).spawn();
-                }
-            }
-        }
-    };
-
-    let on_remove_release = {
-        let app = app.clone();
-        move |index: usize| {
-            app.state.import().write().remove_detected_release(index);
-        }
-    };
-
-    let on_clear_all_releases = {
-        let app = app.clone();
-        move |_| {
-            let mut store = app.state.import();
-            let mut state = store.write();
-            state.detected_candidates.clear();
-            state.candidate_states.clear();
-            state.loading_candidates.clear();
-            state.discid_lookup_attempted.clear();
-            state.switch_candidate(None);
-        }
-    };
-
     let on_exact_match_select = {
         let app = app.clone();
         move |index: usize| {
@@ -111,20 +148,6 @@ pub fn FolderImport() -> Element {
                 .import()
                 .write()
                 .dispatch(CandidateEvent::SelectExactMatch(index));
-        }
-    };
-
-    let on_release_select = {
-        let app = app.clone();
-        let detected = detected_candidates_for_handlers.clone();
-        move |index: usize| {
-            let app = app.clone();
-            let detected = detected.clone();
-            spawn(async move {
-                if let Err(e) = load_selected_release(&app, index, &detected).await {
-                    warn!("Failed to switch to release: {}", e);
-                }
-            });
         }
     };
 
@@ -482,23 +505,13 @@ pub fn FolderImport() -> Element {
 
     rsx! {
         FolderImportView {
-            // Pass the entire state
             state: import_state,
-            // UI-only state
-            is_dragging: *is_dragging.read(),
             selected_text_file: selected_text_file.read().clone(),
             text_file_content,
-            // External data
             storage_profiles,
-            // Callbacks
             on_folder_select_click: on_folder_select,
-            on_release_select,
             on_text_file_select: move |name| selected_text_file.set(Some(name)),
             on_text_file_close: move |_| selected_text_file.set(None),
-            on_clear,
-            on_reveal,
-            on_remove_release,
-            on_clear_all_releases,
             on_skip_detection: |_| {},
             on_exact_match_select,
             on_search_source_change,

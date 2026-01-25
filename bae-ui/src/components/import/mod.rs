@@ -19,8 +19,8 @@ pub use workflow::{
     DetectingMetadataView, DiscIdLookupErrorView, FileListView, FolderImportView,
     FolderImportViewProps, ImageLightboxView, ImportErrorDisplayView, ManualSearchPanelView,
     MatchItemView, MatchListView, MetadataDetectionPromptView, MetadataDisplayView,
-    MultipleMatchesView, ReleaseSelectorView, SearchSourceSelectorView, SelectedSourceView,
-    SmartFileDisplayView, TextFileModalView, TorrentFilesDisplayView, TorrentImportView,
-    TorrentImportViewProps, TorrentInfoDisplayView, TorrentTrackerDisplayView,
+    MultipleMatchesView, ReleaseSelectorView, ReleaseSidebarView, SearchSourceSelectorView,
+    SelectedSourceView, SmartFileDisplayView, TextFileModalView, TorrentFilesDisplayView,
+    TorrentImportView, TorrentImportViewProps, TorrentInfoDisplayView, TorrentTrackerDisplayView,
     TrackerConnectionStatus, TrackerStatus,
 };

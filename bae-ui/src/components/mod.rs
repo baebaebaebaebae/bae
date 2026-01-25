@@ -43,9 +43,9 @@ pub use import::{
     FileListView, FolderImportView, FolderImportViewProps, FolderSelectorView,
     ImportErrorDisplayView, ImportSource, ImportSourceSelectorView, ImportView,
     ManualSearchPanelView, MatchItemView, MatchListView, MetadataDetectionPromptView,
-    MultipleMatchesView, ReleaseSelectorView, SearchSourceSelectorView, SelectedSourceView,
-    TorrentFilesDisplayView, TorrentInfoDisplayView, TorrentInputMode, TorrentInputView,
-    TorrentTrackerDisplayView, TrackerConnectionStatus, TrackerStatus,
+    MultipleMatchesView, ReleaseSelectorView, ReleaseSidebarView, SearchSourceSelectorView,
+    SelectedSourceView, TorrentFilesDisplayView, TorrentInfoDisplayView, TorrentInputMode,
+    TorrentInputView, TorrentTrackerDisplayView, TrackerConnectionStatus, TrackerStatus,
 };
 pub use imports::{ImportsButtonView, ImportsDropdownView};
 pub use library::LibraryView;

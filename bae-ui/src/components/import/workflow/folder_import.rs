@@ -17,10 +17,9 @@
 //! individual fields. Only call `.read()` at the leaf level where you
 //! actually render values.
 
-use super::release_sidebar::{DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH};
 use super::{
     ConfirmationView, DetectingMetadataView, DiscIdLookupErrorView, ImportErrorDisplayView,
-    ManualSearchPanelView, MultipleMatchesView, ReleaseSidebarView, SmartFileDisplayView,
+    ManualSearchPanelView, MultipleMatchesView, SmartFileDisplayView,
 };
 use crate::components::icons::{FolderIcon, LoaderIcon};
 use crate::components::StorageProfile;
@@ -33,16 +32,16 @@ use dioxus::prelude::*;
 // Main Folder Import View
 // ============================================================================
 
-/// Props for the folder import workflow view
+/// Props for the folder import workflow view (main content area only)
+///
+/// The sidebar (ReleaseSidebarView) is rendered separately by the parent
+/// and passed to ImportView.
 #[derive(Clone, PartialEq, Props)]
 pub struct FolderImportViewProps {
     /// Import state store (enables lensing into fields)
     pub state: ReadStore<ImportState>,
 
     // === UI-only state (not in ImportState) ===
-    /// True if dragging over drop zone
-    #[props(default)]
-    pub is_dragging: bool,
     /// Currently viewed text file name
     #[props(default)]
     pub selected_text_file: Option<String>,
@@ -56,13 +55,8 @@ pub struct FolderImportViewProps {
 
     // === Callbacks ===
     pub on_folder_select_click: EventHandler<()>,
-    pub on_release_select: EventHandler<usize>,
     pub on_text_file_select: EventHandler<String>,
     pub on_text_file_close: EventHandler<()>,
-    pub on_clear: EventHandler<()>,
-    pub on_reveal: EventHandler<()>,
-    pub on_remove_release: EventHandler<usize>,
-    pub on_clear_all_releases: EventHandler<()>,
     pub on_skip_detection: EventHandler<()>,
     pub on_exact_match_select: EventHandler<usize>,
     pub on_search_source_change: EventHandler<SearchSource>,
@@ -86,67 +80,44 @@ pub struct FolderImportViewProps {
     pub on_view_duplicate: EventHandler<String>,
 }
 
-/// Folder import workflow view - two-pane layout with sidebar
+/// Folder import workflow view - main content area only
 ///
-/// Passes state signal down to children - no .read() here.
-/// Only leaf components call .read() when they render values.
+/// The sidebar (ReleaseSidebarView) is rendered by the parent via ImportView.
+/// This component renders the workflow steps and files dock.
 #[component]
 pub fn FolderImportView(props: FolderImportViewProps) -> Element {
-    // Pass state down - don't read here!
     let state = props.state;
 
     rsx! {
-        div { class: "flex flex-grow h-full bg-surface-base",
-            // Left sidebar
-            ResizablePanel {
-                storage_key: "import-sidebar-width",
-                min_size: MIN_SIDEBAR_WIDTH,
-                max_size: MAX_SIDEBAR_WIDTH,
-                default_size: DEFAULT_SIDEBAR_WIDTH,
-                grabber_span_ratio: 0.95,
-                direction: ResizeDirection::Horizontal,
-                ReleaseSidebarView {
-                    state,
-                    on_select: props.on_release_select,
-                    on_add_folder: props.on_folder_select_click,
-                    on_remove: props.on_remove_release,
-                    on_clear_all: props.on_clear_all_releases,
-                }
-            }
-
-            // Right main area
-            MainContent {
-                state,
-                storage_profiles: props.storage_profiles,
-                selected_text_file: props.selected_text_file.clone(),
-                text_file_content: props.text_file_content.clone(),
-                on_folder_select_click: props.on_folder_select_click,
-                on_text_file_select: props.on_text_file_select,
-                on_text_file_close: props.on_text_file_close,
-                on_clear: props.on_clear,
-                on_reveal: props.on_reveal,
-                on_skip_detection: props.on_skip_detection,
-                on_exact_match_select: props.on_exact_match_select,
-                on_search_source_change: props.on_search_source_change,
-                on_search_tab_change: props.on_search_tab_change,
-                on_artist_change: props.on_artist_change,
-                on_album_change: props.on_album_change,
-                on_year_change: props.on_year_change,
-                on_label_change: props.on_label_change,
-                on_catalog_number_change: props.on_catalog_number_change,
-                on_barcode_change: props.on_barcode_change,
-                on_manual_match_select: props.on_manual_match_select,
-                on_search: props.on_search,
-                on_manual_confirm: props.on_manual_confirm,
-                on_retry_discid_lookup: props.on_retry_discid_lookup,
-                on_select_remote_cover: props.on_select_remote_cover,
-                on_select_local_cover: props.on_select_local_cover,
-                on_storage_profile_change: props.on_storage_profile_change,
-                on_edit: props.on_edit,
-                on_confirm: props.on_confirm,
-                on_configure_storage: props.on_configure_storage,
-                on_view_duplicate: props.on_view_duplicate,
-            }
+        MainContent {
+            state,
+            storage_profiles: props.storage_profiles,
+            selected_text_file: props.selected_text_file.clone(),
+            text_file_content: props.text_file_content.clone(),
+            on_folder_select_click: props.on_folder_select_click,
+            on_text_file_select: props.on_text_file_select,
+            on_text_file_close: props.on_text_file_close,
+            on_skip_detection: props.on_skip_detection,
+            on_exact_match_select: props.on_exact_match_select,
+            on_search_source_change: props.on_search_source_change,
+            on_search_tab_change: props.on_search_tab_change,
+            on_artist_change: props.on_artist_change,
+            on_album_change: props.on_album_change,
+            on_year_change: props.on_year_change,
+            on_label_change: props.on_label_change,
+            on_catalog_number_change: props.on_catalog_number_change,
+            on_barcode_change: props.on_barcode_change,
+            on_manual_match_select: props.on_manual_match_select,
+            on_search: props.on_search,
+            on_manual_confirm: props.on_manual_confirm,
+            on_retry_discid_lookup: props.on_retry_discid_lookup,
+            on_select_remote_cover: props.on_select_remote_cover,
+            on_select_local_cover: props.on_select_local_cover,
+            on_storage_profile_change: props.on_storage_profile_change,
+            on_edit: props.on_edit,
+            on_confirm: props.on_confirm,
+            on_configure_storage: props.on_configure_storage,
+            on_view_duplicate: props.on_view_duplicate,
         }
     }
 }
@@ -161,8 +132,6 @@ fn MainContent(
     on_folder_select_click: EventHandler<()>,
     on_text_file_select: EventHandler<String>,
     on_text_file_close: EventHandler<()>,
-    on_clear: EventHandler<()>,
-    on_reveal: EventHandler<()>,
     on_skip_detection: EventHandler<()>,
     on_exact_match_select: EventHandler<usize>,
     on_search_source_change: EventHandler<SearchSource>,
