@@ -21,7 +21,7 @@ use super::{
     ConfirmationView, DiscIdLookupErrorView, ImportErrorDisplayView, ManualSearchPanelView,
     MultipleExactMatchesView, SmartFileDisplayView,
 };
-use crate::components::icons::{FolderIcon, LoaderIcon};
+use crate::components::icons::LoaderIcon;
 use crate::components::StorageProfile;
 use crate::components::{
     Button, ButtonSize, ButtonVariant, PanelPosition, ResizablePanel, ResizeDirection,
@@ -161,12 +161,9 @@ fn EmptyView(is_scanning: bool, on_folder_select: EventHandler<()>) -> Element {
                         variant: ButtonVariant::Primary,
                         size: ButtonSize::Medium,
                         onclick: move |_| on_folder_select.call(()),
-                        FolderIcon { class: "w-4 h-4" }
-                        "Scan folder"
+                        "Select folder"
                     }
-                    p { class: "text-sm text-gray-400",
-                        "We'll search this folder for releases to import"
-                    }
+                    p { class: "text-sm text-gray-400", "Scans for folders with music files" }
                 }
             }
         }
