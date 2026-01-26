@@ -91,15 +91,17 @@ pub fn Button(
 
     let variant_class = match variant {
         ButtonVariant::Primary => {
-            "bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            "border border-transparent bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
         }
         ButtonVariant::Secondary => {
-            "bg-gray-700 hover:bg-gray-600 text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+            "border border-transparent bg-gray-700 hover:bg-gray-600 text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
         }
         ButtonVariant::Danger => {
-            "bg-red-600 hover:bg-red-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            "border border-transparent bg-red-600 hover:bg-red-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
         }
-        ButtonVariant::Ghost => "text-gray-400 hover:text-white hover:bg-gray-700/50",
+        ButtonVariant::Ghost => {
+            "border border-transparent text-gray-400 hover:text-white hover:bg-gray-700/50"
+        }
         ButtonVariant::Outline => {
             "border border-gray-600 text-gray-300 hover:border-gray-500 hover:text-white hover:bg-gray-700/30"
         }
