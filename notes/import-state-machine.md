@@ -30,7 +30,7 @@ stateDiagram-v2
     Conf --> Load: auto-advance to next candidate
 ```
 
-**Loading** is before state machine entry (file scan + metadata detection). Once complete, we construct `CandidateState::Identifying` with `mode: IdentifyMode::DiscIdLookup` if discid found, or directly to `ManualSearch`.
+**Loading** is before state machine entry (file scan + metadata detection). Once complete, we construct `CandidateState::Identifying` with `mode: IdentifyMode::DiscIdLookup(disc_id)` if discid found, or directly to `ManualSearch`.
 
 The import workflow uses a strongly-typed hierarchical state machine in `bae-desktop`. States require data by construction—no invalid combinations are representable.
 
@@ -50,11 +50,18 @@ enum CandidateState {
 struct IdentifyingState {
     files: CategorizedFileInfo,           // required
     metadata: FolderMetadata,             // required - detection done before entry
-    mode: IdentifyMode,                   // Created | DiscIdLookup | MultipleExactMatches | ManualSearch
+    mode: IdentifyMode,                   // see below - variants carry associated data
     auto_matches: Vec<MatchCandidate>,    // cached, may be empty
     search_state: ManualSearchState,      // persisted even when in MultipleExactMatches
     discid_lookup_error: Option<String>,  // retryable network error (shown when in DiscIdLookup)
     disc_id_not_found: Option<String>,    // disc ID searched but no results (shown in ManualSearch)
+}
+
+enum IdentifyMode {
+    Created,                      // initial, quickly transitions
+    DiscIdLookup(String),         // carries disc_id being looked up
+    MultipleExactMatches(String), // carries disc_id that matched
+    ManualSearch,
 }
 
 struct ConfirmingState {
@@ -64,6 +71,7 @@ struct ConfirmingState {
     selected_cover: SelectedCover,
     selected_profile_id: String,
     phase: ConfirmPhase,
+    source_disc_id: Option<String>,       // disc_id if came from MultipleExactMatches (for GoBackToIdentify)
 }
 
 enum ConfirmPhase {
@@ -77,19 +85,21 @@ enum ConfirmPhase {
 
 The state machine reuses `bae-ui` enum types (`IdentifyMode`, `SearchTab`, `SearchSource`) as discriminants. No separate domain types.
 
+Note: State variants like `DiscIdLookup(String)` and `MultipleExactMatches(String)` carry their associated data explicitly. See "Explicit Data Flow" in `reactive-state-architecture.md` for the general principle.
+
 ## Behavior Rules
 
 1. **On candidate selection**: Load files + detect metadata (outside state machine). Once complete, construct `CandidateState::Identifying`.
 
 2. **Initial mode after entering Identifying**:
-   - If discid found → `mode: IdentifyMode::DiscIdLookup` (discid lookup in flight)
+   - If discid found → `mode: IdentifyMode::DiscIdLookup(disc_id)` (lookup in flight)
    - After discid lookup completes:
-     - Multiple auto matches → `mode: MultipleExactMatches`
-     - Single auto match → transition to `Confirming(Ready)` with option to switch to manual
+     - Multiple auto matches → `mode: MultipleExactMatches(disc_id)` (disc_id carried forward)
+     - Single auto match → transition to `Confirming` with `source_disc_id: Some(disc_id)`
      - No auto matches → `mode: ManualSearch` (with `disc_id_not_found` set)
    - If no discid → `mode: ManualSearch` immediately
 
-3. **Auto results cached**: Switching to ManualSearch keeps `auto_matches` in state; user can return to MultipleExactMatches.
+3. **Auto results cached**: Switching to ManualSearch keeps `auto_matches` in state. To return to MultipleExactMatches, the `SwitchToMultipleExactMatches(disc_id)` event must carry the disc_id (explicit data flow).
 
 4. **On Confirm click**: Transition phase to `Preparing` → `Importing`. When Importing:
    - Sidebar shows indicator (checkmark/spinner) for that candidate

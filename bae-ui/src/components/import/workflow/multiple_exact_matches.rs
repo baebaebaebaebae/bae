@@ -1,6 +1,8 @@
 //! Multiple DiscID matches view component
 
 use super::match_list::MatchListView;
+use super::DiscIdPill;
+use crate::display_types::IdentifyMode;
 use crate::stores::import::ImportState;
 use dioxus::prelude::*;
 
@@ -16,6 +18,11 @@ pub fn MultipleExactMatchesView(
     let st = state.read();
     let candidates = st.get_exact_match_candidates();
     let selected_index = st.get_selected_match_index();
+    // Extract disc_id from the mode - it's carried in MultipleExactMatches(disc_id)
+    let disc_id = match st.get_identify_mode() {
+        IdentifyMode::MultipleExactMatches(id) => Some(id),
+        _ => None,
+    };
     drop(st);
 
     if candidates.is_empty() {
@@ -23,17 +30,22 @@ pub fn MultipleExactMatchesView(
     }
 
     rsx! {
-        div { class: "bg-gray-900 rounded-lg shadow p-6",
-            h3 { class: "text-lg font-semibold text-white mb-4", "Multiple DiscID Matches" }
-            p { class: "text-sm text-gray-400 mb-4",
-                "This DiscID matches multiple releases. Select the correct one:"
-            }
-            div { class: "mt-4",
-                MatchListView {
-                    candidates,
-                    selected_index,
-                    on_select: move |index| on_select.call(index),
+        div { class: "p-4",
+            // Header
+            p { class: "text-white mb-1", "Multiple Disc ID matches" }
+
+            // Disc ID pill on its own line
+            if let Some(id) = disc_id {
+                p { class: "text-sm text-gray-400 mb-4",
+                    "Disc ID: "
+                    DiscIdPill { disc_id: id }
                 }
+            }
+
+            MatchListView {
+                candidates,
+                selected_index,
+                on_select: move |index| on_select.call(index),
             }
         }
     }

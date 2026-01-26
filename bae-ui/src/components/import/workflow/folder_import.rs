@@ -273,7 +273,7 @@ fn IdentifyStep(
                     on_retry: on_retry_discid_lookup,
                 }
             },
-            IdentifyMode::MultipleExactMatches => rsx! {
+            IdentifyMode::MultipleExactMatches(_) => rsx! {
                 MultipleExactMatchesView { state, on_select: on_exact_match_select }
             },
             IdentifyMode::ManualSearch => rsx! {

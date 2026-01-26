@@ -2,7 +2,8 @@
 
 use super::match_list::MatchListView;
 use super::search_source_selector::SearchSourceSelectorView;
-use crate::components::{Button, ButtonSize, ButtonVariant};
+use super::DiscIdPill;
+use crate::components::{Button, ButtonSize, ButtonVariant, Pill, PillVariant};
 use crate::display_types::{MatchCandidate, SearchSource, SearchTab};
 use crate::stores::import::ImportState;
 use dioxus::prelude::*;
@@ -29,6 +30,7 @@ pub fn ManualSearchPanelView(
     let st = state.read();
     let search_state = st.get_search_state();
     let metadata = st.get_metadata();
+    let disc_id_not_found = st.get_disc_id_not_found();
 
     let source = search_state
         .as_ref()
@@ -85,6 +87,16 @@ pub fn ManualSearchPanelView(
 
     rsx! {
         div { class: "space-y-4",
+            // Info banner if disc ID lookup found no results
+            if let Some(disc_id) = disc_id_not_found {
+                div { class: "bg-blue-500/15 rounded-lg p-3 flex items-center gap-2",
+                    p { class: "text-sm text-blue-300",
+                        "No releases found for Disc ID "
+                        DiscIdPill { disc_id }
+                    }
+                }
+            }
+
             // Header with search source selector
             div { class: "flex justify-between items-center",
                 h3 { class: "text-sm font-medium text-gray-200", "Search for Release" }
@@ -120,9 +132,7 @@ pub fn ManualSearchPanelView(
             if !tokens.is_empty() {
                 div { class: "flex flex-wrap gap-1.5",
                     for token in tokens.iter() {
-                        span { class: "px-2.5 py-1 text-xs bg-surface-raised text-gray-300 rounded-full",
-                            "{token}"
-                        }
+                        Pill { variant: PillVariant::Muted, "{token}" }
                     }
                 }
             }

@@ -154,7 +154,7 @@ pub enum IdentifyMode {
     /// Looking up release by DiscID (network call in flight)
     DiscIdLookup(String),
     /// DiscID matched multiple candidates; user picks one
-    MultipleExactMatches,
+    MultipleExactMatches(String),
     /// No exact match; user searches manually
     ManualSearch,
 }

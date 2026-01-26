@@ -35,12 +35,12 @@ pub fn MatchItemView(
 
     rsx! {
         div {
-            class: "border rounded-lg p-4 cursor-pointer hover:bg-gray-700 transition-colors {border_class}",
+            class: "border rounded-lg px-3 py-2 cursor-pointer hover:bg-gray-700 transition-colors {border_class}",
             onclick: move |_| on_select.call(()),
 
-            div { class: "flex items-start gap-4",
+            div { class: "flex items-center gap-3",
                 // Cover art
-                div { class: "w-16 h-16 flex-shrink-0 bg-gray-700 rounded overflow-hidden",
+                div { class: "w-10 h-10 flex-shrink-0 bg-gray-700 rounded overflow-hidden",
                     if let Some(ref cover_url) = candidate.cover_url {
                         img {
                             src: "{cover_url}",
@@ -49,31 +49,33 @@ pub fn MatchItemView(
                         }
                     } else {
                         div { class: "w-full h-full flex items-center justify-center text-gray-500",
-                            ImageIcon { class: "w-8 h-8" }
+                            ImageIcon { class: "w-5 h-5" }
                         }
                     }
                 }
 
                 // Info
                 div { class: "flex-1 min-w-0",
-                    div { class: "flex items-center gap-2 mb-1",
-                        h4 { class: "text-lg font-semibold text-white", "{candidate.title}" }
-                    }
-                    div { class: "text-sm text-gray-400 mb-2 space-y-1",
+                    h4 { class: "text-sm font-medium text-white truncate", "{candidate.title}" }
+                    div { class: "text-xs text-gray-400 flex flex-wrap gap-x-3",
                         if let Some(ref year) = candidate.year {
-                            p { "Year: {year}" }
+                            span { "{year}" }
                         }
                         if let Some(ref fmt) = format_text {
-                            p { "{fmt}" }
+                            span { "{fmt}" }
                         }
                         if let Some(ref country) = country_text {
-                            p { "{country}" }
+                            span { "{country}" }
                         }
-                        if let Some(ref label) = label_text {
-                            p { "{label}" }
-                        }
-                        if let Some(ref catalog) = catalog_text {
-                            p { class: "text-xs text-gray-500", "{catalog}" }
+                    }
+                    if label_text.is_some() || catalog_text.is_some() {
+                        div { class: "text-xs text-gray-500 flex flex-wrap gap-x-3",
+                            if let Some(ref label) = label_text {
+                                span { "{label}" }
+                            }
+                            if let Some(ref catalog) = catalog_text {
+                                span { "{catalog}" }
+                            }
                         }
                     }
                 }

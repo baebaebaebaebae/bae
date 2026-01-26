@@ -82,6 +82,8 @@ pub struct ConfirmingState {
     pub auto_matches: Vec<MatchCandidate>,
     /// Manual search state (for returning to Identify)
     pub search_state: ManualSearchState,
+    /// Disc ID that led to this confirmation (for returning to MultipleExactMatches)
+    pub source_disc_id: Option<String>,
 }
 
 /// Phase within the Confirm step
@@ -112,8 +114,8 @@ pub enum CandidateEvent {
     SelectExactMatch(usize),
     /// User switches from MultipleExactMatches to ManualSearch
     SwitchToManualSearch,
-    /// User switches from ManualSearch back to MultipleExactMatches (if auto_matches available)
-    SwitchToMultipleExactMatches,
+    /// User switches from ManualSearch back to MultipleExactMatches (carries the disc_id)
+    SwitchToMultipleExactMatches(String),
     /// Start or retry DiscID lookup with the given disc ID
     StartDiscIdLookup(String),
     /// DiscID lookup completed (from async operation)
@@ -231,6 +233,11 @@ impl IdentifyingState {
         match event {
             CandidateEvent::SelectExactMatch(idx) => {
                 if let Some(candidate) = self.auto_matches.get(idx).cloned() {
+                    // Extract disc_id from current mode if applicable
+                    let source_disc_id = match &self.mode {
+                        IdentifyMode::MultipleExactMatches(id) => Some(id.clone()),
+                        _ => None,
+                    };
                     CandidateState::Confirming(Box::new(ConfirmingState {
                         files: self.files,
                         metadata: self.metadata,
@@ -240,6 +247,7 @@ impl IdentifyingState {
                         phase: ConfirmPhase::Ready,
                         auto_matches: self.auto_matches,
                         search_state: self.search_state,
+                        source_disc_id,
                     }))
                 } else {
                     CandidateState::Identifying(self)
@@ -250,10 +258,10 @@ impl IdentifyingState {
                 state.mode = IdentifyMode::ManualSearch;
                 CandidateState::Identifying(state)
             }
-            CandidateEvent::SwitchToMultipleExactMatches => {
+            CandidateEvent::SwitchToMultipleExactMatches(disc_id) => {
                 let mut state = self;
                 if !state.auto_matches.is_empty() {
-                    state.mode = IdentifyMode::MultipleExactMatches;
+                    state.mode = IdentifyMode::MultipleExactMatches(disc_id);
                 }
                 CandidateState::Identifying(state)
             }
@@ -295,12 +303,15 @@ impl IdentifyingState {
                         phase: ConfirmPhase::Ready,
                         auto_matches: vec![],
                         search_state: state.search_state,
+                        source_disc_id: disc_id,
                     }));
                 } else {
                     // Multiple matches - let user choose
                     state.discid_lookup_error = None;
                     state.disc_id_not_found = None;
-                    state.mode = IdentifyMode::MultipleExactMatches;
+                    if let Some(id) = disc_id {
+                        state.mode = IdentifyMode::MultipleExactMatches(id);
+                    }
                 };
 
                 CandidateState::Identifying(state)
@@ -362,6 +373,7 @@ impl IdentifyingState {
                             phase: ConfirmPhase::Ready,
                             auto_matches: state.auto_matches,
                             search_state: state.search_state,
+                            source_disc_id: None, // Coming from manual search
                         }));
                     }
                 }
@@ -383,10 +395,9 @@ impl ConfirmingState {
     fn on_event(self, event: CandidateEvent) -> CandidateState {
         match event {
             CandidateEvent::GoBackToIdentify => {
-                let mode = if self.auto_matches.is_empty() {
-                    IdentifyMode::ManualSearch
-                } else {
-                    IdentifyMode::MultipleExactMatches
+                let mode = match (&self.source_disc_id, self.auto_matches.is_empty()) {
+                    (Some(disc_id), false) => IdentifyMode::MultipleExactMatches(disc_id.clone()),
+                    _ => IdentifyMode::ManualSearch,
                 };
                 CandidateState::Identifying(IdentifyingState {
                     files: self.files,
@@ -436,7 +447,7 @@ impl ConfirmingState {
             }
             CandidateEvent::SelectExactMatch(_)
             | CandidateEvent::SwitchToManualSearch
-            | CandidateEvent::SwitchToMultipleExactMatches
+            | CandidateEvent::SwitchToMultipleExactMatches(_)
             | CandidateEvent::StartDiscIdLookup(_)
             | CandidateEvent::DiscIdLookupComplete { .. }
             | CandidateEvent::UpdateSearchField { .. }

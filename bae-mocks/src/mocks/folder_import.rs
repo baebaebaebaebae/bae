@@ -166,7 +166,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
     let mock_disc_id = "XzPS7vW.HPHsYemQh0HBUGr8vuU-".to_string();
     let identify_mode = match registry.get_string("identify_mode").as_str() {
         "DiscIdLookup" => IdentifyMode::DiscIdLookup(mock_disc_id.clone()),
-        "MultipleExactMatches" => IdentifyMode::MultipleExactMatches,
+        "MultipleExactMatches" => IdentifyMode::MultipleExactMatches(mock_disc_id.clone()),
         _ => IdentifyMode::ManualSearch,
     };
 
@@ -511,6 +511,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                 phase,
                 auto_matches: exact_match_candidates.clone(),
                 search_state: mock_search_state,
+                source_disc_id: Some(mock_disc_id.clone()),
             }))
         }
     };

@@ -168,6 +168,70 @@ Instead, use the full type and let components access only the fields they need:
 let profiles = app.state.storage_profiles().profiles();
 ```
 
+## Events and State Transitions
+
+Stores hold state; events describe how state changes. An event is dispatched, a reducer handles it, and the store updates. Components that subscribed to affected paths re-render.
+
+```rust
+// Event enum - each variant is a discrete action
+enum CandidateEvent {
+    SelectExactMatch(usize),
+    SwitchToManualSearch,
+    StartDiscIdLookup(String),
+    DiscIdLookupComplete { matches: Vec<MatchCandidate>, error: Option<String> },
+    // ...
+}
+
+// Reducer - pure function: (state, event) -> state
+impl IdentifyingState {
+    fn on_event(self, event: CandidateEvent) -> CandidateState {
+        match event {
+            CandidateEvent::SelectExactMatch(idx) => { /* ... */ }
+            // ...
+        }
+    }
+}
+```
+
+### Explicit Data Flow
+
+Prefer states and events that **carry their associated data** rather than relying on optional fields and implicit context.
+
+**Bad**: Loose coupling with optionals
+```rust
+enum Mode { DiscIdLookup, MultipleExactMatches }
+struct State {
+    mode: Mode,
+    disc_id: Option<String>,  // must be Some when mode is DiscIdLookup or MultipleExactMatches
+}
+```
+Problems: implicit coupling, easy to forget to set, requires defensive unwrapping.
+
+**Good**: Data in the variant
+```rust
+enum Mode {
+    DiscIdLookup(String),         // disc_id required by construction
+    MultipleExactMatches(String), // disc_id required by construction
+    ManualSearch,
+}
+```
+The compiler enforces that `DiscIdLookup` and `MultipleExactMatches` always have a disc_id. No optionals, no implicit coupling.
+
+Same principle applies to events:
+```rust
+// Bad: event handler must fish disc_id from current state
+SwitchToMultipleExactMatches
+
+// Good: event carries what it needs
+SwitchToMultipleExactMatches(String)
+```
+
+When state A transitions to state B and B needs data from A, the event or the transition logic should explicitly pass that data—not hope it's still around in some optional field.
+
+### Where Events Live
+
+Events are defined alongside their state in `bae-ui/src/stores/`. Each domain (import, playback, etc.) has its own event enum and reducer logic. See `import-state-machine.md` for the import workflow's specific state machine.
+
 ## Summary
 
 1. **Never call `.read()` until you render** - pass signals through intermediate components
@@ -177,3 +241,5 @@ let profiles = app.state.storage_profiles().profiles();
 5. **Import extension traits** to use generated lens methods
 6. **Derive Store on nested types** to enable deep lensing
 7. **Use full types** instead of creating subset "info" variants
+8. **Events carry their data** - don't rely on optional fields and implicit context
+9. **Reducers are pure** - (state, event) -> new state
