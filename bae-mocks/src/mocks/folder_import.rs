@@ -80,13 +80,13 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             "Identify Mode",
             "ManualSearch",
             vec![
-                ("DiscIdLookup", "DiscID Lookup"),
+                ("DiscIdLookup", "Disc ID Lookup"),
                 ("MultipleExactMatches", "Multiple Exact Matches"),
                 ("ManualSearch", "Manual Search"),
             ],
         )
         .visible_when("state", "Identifying")
-        .bool_control("discid_lookup_error", "DiscID Lookup Error", false)
+        .bool_control("discid_lookup_error", "Disc ID Lookup Error", false)
         .doc("Shows error banner with retry button")
         .visible_when("state", "Identifying")
         .visible_when("identify_mode", "DiscIdLookup")
@@ -102,8 +102,8 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         )
         .visible_when("state", "Identifying")
         .visible_when("identify_mode", "ManualSearch")
-        .bool_control("disc_id_not_found", "DiscID Not Found", false)
-        .doc("Shows 'no releases found for DiscID' banner")
+        .bool_control("disc_id_not_found", "Disc ID Not Found", false)
+        .doc("Shows 'no releases found for Disc ID' banner")
         .visible_when("state", "Identifying")
         .visible_when("identify_mode", "ManualSearch")
         .enum_control(
@@ -121,7 +121,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         .visible_when("state", "Confirming")
         .with_presets(vec![
             Preset::new("No Candidates").set_string("state", "NoCandidates"),
-            Preset::new("DiscID Lookup")
+            Preset::new("Disc ID Lookup")
                 .set_string("state", "Identifying")
                 .set_string("identify_mode", "DiscIdLookup"),
             Preset::new("Multiple Exact Matches")
@@ -431,7 +431,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         None
     };
     let discid_lookup_error = if show_discid_lookup_error {
-        Some("DiscID lookup failed: Network error".to_string())
+        Some("Disc ID lookup failed: Network error".to_string())
     } else {
         None
     };

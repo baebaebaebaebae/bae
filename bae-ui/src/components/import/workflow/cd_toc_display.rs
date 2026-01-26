@@ -24,7 +24,7 @@ pub fn CdTocDisplayView(
             div { class: "mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg",
                 div { class: "space-y-2",
                     div { class: "flex items-center",
-                        span { class: "text-sm font-medium text-gray-700 w-24", "DiscID:" }
+                        span { class: "text-sm font-medium text-gray-700 w-24", "Disc ID:" }
                         span { class: "text-sm text-gray-900 font-mono", "{toc.disc_id}" }
                     }
                     div { class: "flex items-center",

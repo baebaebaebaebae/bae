@@ -81,7 +81,7 @@ pub fn CdSelectorView(
                                 CdIcon {}
                                 div {
                                     p { class: "text-white font-medium", "Audio CD detected" }
-                                    p { class: "text-sm text-gray-400", "{track_count} tracks · DiscID: {disc_id}" }
+                                    p { class: "text-sm text-gray-400", "{track_count} tracks · Disc ID: {disc_id}" }
                                 }
                             }
                             Button {
