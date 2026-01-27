@@ -720,11 +720,5 @@ fn discover_folder_files(folder: &Path) -> Result<Vec<DiscoveredFile>, String> {
             size: f.size,
         });
     }
-    for f in categorized.other {
-        files.push(DiscoveredFile {
-            path: f.path,
-            size: f.size,
-        });
-    }
     Ok(files)
 }

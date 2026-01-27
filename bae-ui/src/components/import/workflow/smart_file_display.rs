@@ -1,13 +1,13 @@
 //! Smart file display view component
 
 use super::{ImageLightboxView, TextFileModalView};
-use crate::components::icons::{DiscIcon, FileIcon, FileTextIcon, RowsIcon};
+use crate::components::icons::{DiscIcon, FileTextIcon, RowsIcon};
 use crate::display_types::{AudioContentInfo, CategorizedFileInfo, CueFlacPairInfo, FileInfo};
 use dioxus::prelude::*;
 
-/// Base file tile container - fixed 72x72px square tiles
+/// Base file row container - horizontal list item
 #[component]
-fn FileTile(
+fn FileRow(
     /// Background class (e.g., "bg-white/5")
     bg: &'static str,
     /// Click handler - if present, renders as button with hover states
@@ -15,39 +15,20 @@ fn FileTile(
     on_click: Option<EventHandler<()>>,
     children: Element,
 ) -> Element {
-    let base =
-        "w-[72px] h-[72px] flex-shrink-0 rounded-xl flex flex-col items-center justify-center p-2";
+    let base = "flex items-center gap-2 px-3 py-2 rounded-lg";
 
     if let Some(handler) = on_click {
         rsx! {
             button {
-                class: "{base} {bg} hover:bg-white/10 transition-all duration-150 cursor-pointer",
+                class: "{base} {bg} hover:bg-white/10 transition-all duration-150 cursor-pointer w-full text-left",
                 onclick: move |_| handler.call(()),
                 {children}
             }
         }
     } else {
         rsx! {
-            div { class: "{base} {bg}", {children} }
+            div { class: "{base} {bg} w-full", {children} }
         }
-    }
-}
-
-/// Audio tile content (icon + track count + format label)
-#[component]
-fn AudioTileContent(
-    track_count: usize,
-    format: &'static str,
-    /// Text color class (e.g., "text-blue-300")
-    text_color: &'static str,
-    children: Element,
-) -> Element {
-    rsx! {
-        {children}
-        span { class: "text-xs font-semibold text-center leading-tight {text_color}",
-            {format!("{} tracks", track_count)}
-        }
-        span { class: "text-[10px] text-gray-400 text-center leading-tight", "{format}" }
     }
 }
 
@@ -89,33 +70,27 @@ pub fn SmartFileDisplayView(
         };
     }
 
-    // Tile grid layout with larger gap
-    let tile_layout = "flex flex-wrap gap-2 content-start";
-
     // Check which sections have content
     let has_audio = !matches!(&files.audio, AudioContentInfo::TrackFiles(t) if t.is_empty());
     let has_artwork = !files.artwork.is_empty();
     let has_documents = !files.documents.is_empty();
-    let has_other = !files.other.is_empty();
 
     rsx! {
         div { class: "space-y-5",
-            // Audio section
+            // Audio section - list rows
             if has_audio {
                 FileSection { label: "Audio",
-                    div { class: "{tile_layout}",
-                        AudioTileView {
-                            audio: files.audio.clone(),
-                            on_cue_click: move |(name, _path): (String, String)| on_text_file_select.call(name),
-                        }
+                    AudioListView {
+                        audio: files.audio.clone(),
+                        on_cue_click: move |(name, _path): (String, String)| on_text_file_select.call(name),
                     }
                 }
             }
 
-            // Artwork section - covers, scans, booklets
+            // Images section - covers, scans, booklets
             if has_artwork {
-                FileSection { label: "Artwork",
-                    div { class: "{tile_layout}",
+                FileSection { label: "Images",
+                    div { class: "flex flex-wrap gap-2 content-start",
                         for (idx , file) in files.artwork.iter().enumerate() {
                             GalleryThumbnailView {
                                 key: "{file.path}",
@@ -132,27 +107,16 @@ pub fn SmartFileDisplayView(
                 }
             }
 
-            // Documents section - logs, nfo, txt
+            // Documents section - list rows
             if has_documents {
                 FileSection { label: "Documents",
-                    div { class: "{tile_layout}",
+                    div { class: "flex flex-col gap-1",
                         for doc in files.documents.iter() {
-                            DocumentTileView {
+                            DocumentRowView {
                                 key: "{doc.path}",
                                 file: doc.clone(),
                                 on_click: move |(name, _path): (String, String)| on_text_file_select.call(name),
                             }
-                        }
-                    }
-                }
-            }
-
-            // Other files
-            if has_other {
-                FileSection { label: "Other",
-                    div { class: "{tile_layout}",
-                        for file in files.other.iter() {
-                            OtherFileTileView { key: "{file.path}", file: file.clone() }
                         }
                     }
                 }
@@ -190,30 +154,31 @@ pub fn SmartFileDisplayView(
     }
 }
 
-/// Audio content tile (square format)
+/// Audio list view (row format)
 #[component]
-fn AudioTileView(audio: AudioContentInfo, on_cue_click: EventHandler<(String, String)>) -> Element {
+fn AudioListView(audio: AudioContentInfo, on_cue_click: EventHandler<(String, String)>) -> Element {
     match audio {
         AudioContentInfo::CueFlacPairs(pairs) => {
             rsx! {
-                for pair in pairs.iter() {
-                    CueFlacTileView {
-                        key: "{pair.cue_path}",
-                        pair: pair.clone(),
-                        on_click: move |(name, path)| on_cue_click.call((name, path)),
+                div { class: "flex flex-col gap-1",
+                    for pair in pairs.iter() {
+                        CueFlacRowView {
+                            key: "{pair.cue_path}",
+                            pair: pair.clone(),
+                            on_click: move |(name, path)| on_cue_click.call((name, path)),
+                        }
                     }
                 }
             }
         }
         AudioContentInfo::TrackFiles(tracks) if !tracks.is_empty() => {
             rsx! {
-                FileTile { bg: "bg-blue-500/10",
-                    AudioTileContent {
-                        track_count: tracks.len(),
-                        format: "FLAC",
-                        text_color: "text-blue-300",
-                        RowsIcon { class: "w-5 h-5 text-blue-400 mb-1" }
+                FileRow { bg: "bg-blue-500/10",
+                    RowsIcon { class: "w-4 h-4 text-blue-400 flex-shrink-0" }
+                    span { class: "text-xs font-medium text-blue-300",
+                        {format!("{} tracks", tracks.len())}
                     }
+                    span { class: "text-xs text-gray-500", "FLAC" }
                 }
             }
         }
@@ -221,25 +186,22 @@ fn AudioTileView(audio: AudioContentInfo, on_cue_click: EventHandler<(String, St
     }
 }
 
-/// CUE/FLAC pair tile (square format)
+/// CUE/FLAC pair row (list format)
 #[component]
-fn CueFlacTileView(pair: CueFlacPairInfo, on_click: EventHandler<(String, String)>) -> Element {
+fn CueFlacRowView(pair: CueFlacPairInfo, on_click: EventHandler<(String, String)>) -> Element {
     let cue_name = pair.cue_name.clone();
     let track_count = pair.track_count;
 
     rsx! {
-        FileTile {
+        FileRow {
             bg: "bg-purple-500/10",
             on_click: {
                 let name = cue_name.clone();
                 move |_| on_click.call((name.clone(), name.clone()))
             },
-            AudioTileContent {
-                track_count,
-                format: "CUE/FLAC",
-                text_color: "text-purple-300",
-                DiscIcon { class: "w-5 h-5 text-purple-400 mb-1" }
-            }
+            DiscIcon { class: "w-4 h-4 text-purple-400 flex-shrink-0" }
+            span { class: "text-xs font-medium text-purple-300", {format!("{} tracks", track_count)} }
+            span { class: "text-xs text-gray-500", "CUE/FLAC" }
         }
     }
 }
@@ -268,35 +230,20 @@ fn GalleryThumbnailView(
     }
 }
 
-/// Document tile (square format, clickable to view)
+/// Document row (list format, clickable to view)
 #[component]
-fn DocumentTileView(file: FileInfo, on_click: EventHandler<(String, String)>) -> Element {
+fn DocumentRowView(file: FileInfo, on_click: EventHandler<(String, String)>) -> Element {
     let filename = file.name.clone();
 
     rsx! {
-        FileTile {
+        FileRow {
             bg: "bg-white/5",
             on_click: {
                 let name = filename.clone();
                 move |_| on_click.call((name.clone(), name.clone()))
             },
-            FileTextIcon { class: "w-5 h-5 text-gray-400 mb-1" }
-            span { class: "text-xs text-gray-200 text-center truncate w-full leading-tight",
-                {file.name.clone()}
-            }
-        }
-    }
-}
-
-/// Other file tile (square format, non-clickable)
-#[component]
-fn OtherFileTileView(file: FileInfo) -> Element {
-    rsx! {
-        FileTile { bg: "bg-white/5",
-            FileIcon { class: "w-5 h-5 text-gray-500 mb-1" }
-            span { class: "text-xs text-gray-400 text-center truncate w-full leading-tight",
-                {file.name.clone()}
-            }
+            FileTextIcon { class: "w-4 h-4 text-gray-400 flex-shrink-0" }
+            span { class: "text-xs text-gray-200 truncate", {file.name.clone()} }
         }
     }
 }

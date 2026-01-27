@@ -54,8 +54,6 @@ pub struct CategorizedFiles {
     pub artwork: Vec<ScannedFile>,
     /// Document files (.log, .txt, .nfo) - CUE files in pairs are NOT included here
     pub documents: Vec<ScannedFile>,
-    /// Everything else
-    pub other: Vec<ScannedFile>,
 }
 /// A detected candidate (leaf directory) in a collection.
 /// Called "candidate" because it hasn't been identified yet.
@@ -290,13 +288,13 @@ where
 /// Collect all files from a release directory and categorize them
 ///
 /// This collects files recursively within a single release, preserving relative paths,
-/// and categorizes them into audio (CUE/FLAC pairs or track files), artwork, documents, and other.
+/// and categorizes them into audio (CUE/FLAC pairs or track files), artwork, and documents.
+/// Unrecognized file types are ignored.
 pub fn collect_release_files(release_root: &Path) -> Result<CategorizedFiles, String> {
     let mut all_audio: Vec<ScannedFile> = Vec::new();
     let mut all_cue: Vec<ScannedFile> = Vec::new();
     let mut artwork: Vec<ScannedFile> = Vec::new();
     let mut documents: Vec<ScannedFile> = Vec::new();
-    let mut other: Vec<ScannedFile> = Vec::new();
     collect_files_into_vectors(
         release_root,
         release_root,
@@ -304,7 +302,6 @@ pub fn collect_release_files(release_root: &Path) -> Result<CategorizedFiles, St
         &mut all_cue,
         &mut artwork,
         &mut documents,
-        &mut other,
     )?;
     let audio_paths: Vec<PathBuf> = all_audio.iter().map(|f| f.path.clone()).collect();
     let cue_paths: Vec<PathBuf> = all_cue.iter().map(|f| f.path.clone()).collect();
@@ -345,11 +342,7 @@ pub fn collect_release_files(release_root: &Path) -> Result<CategorizedFiles, St
                 track_count,
             });
         }
-        for audio in all_audio {
-            if !used_audio_paths.contains(&audio.path) {
-                other.push(audio);
-            }
-        }
+        // Unused audio files (not part of a CUE/FLAC pair) are ignored
         for cue in all_cue {
             if !used_cue_paths.contains(&cue.path) {
                 documents.push(cue);
@@ -365,12 +358,10 @@ pub fn collect_release_files(release_root: &Path) -> Result<CategorizedFiles, St
     };
     artwork.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
     documents.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
-    other.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
     Ok(CategorizedFiles {
         audio,
         artwork,
         documents,
-        other,
     })
 }
 /// Recursively collect files into separate vectors by type
@@ -381,7 +372,6 @@ fn collect_files_into_vectors(
     cue: &mut Vec<ScannedFile>,
     artwork: &mut Vec<ScannedFile>,
     documents: &mut Vec<ScannedFile>,
-    other: &mut Vec<ScannedFile>,
 ) -> Result<(), String> {
     let entries = fs::read_dir(current_dir)
         .map_err(|e| format!("Failed to read dir {:?}: {}", current_dir, e))?;
@@ -430,11 +420,10 @@ fn collect_files_into_vectors(
                 artwork.push(file);
             } else if is_document_file(&path) {
                 documents.push(file);
-            } else {
-                other.push(file);
             }
+            // Other file types are ignored
         } else if path.is_dir() {
-            collect_files_into_vectors(&path, release_root, audio, cue, artwork, documents, other)?;
+            collect_files_into_vectors(&path, release_root, audio, cue, artwork, documents)?;
         }
     }
     Ok(())
@@ -496,7 +485,6 @@ mod tests {
 
         // Check nothing from hidden dirs/files leaked through
         assert!(files.documents.is_empty());
-        assert!(files.other.is_empty());
     }
 
     /// Creates a minimal CUE file content that references the given FLAC filename

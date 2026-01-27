@@ -176,6 +176,15 @@ pub enum SearchSource {
     Discogs,
 }
 
+impl SearchSource {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            SearchSource::MusicBrainz => "MusicBrainz",
+            SearchSource::Discogs => "Discogs",
+        }
+    }
+}
+
 /// Match candidate source type
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MatchSourceType {
@@ -268,8 +277,6 @@ pub struct CategorizedFileInfo {
     pub artwork: Vec<FileInfo>,
     /// Document files (.log, .txt, .nfo) - CUE files in pairs are NOT here
     pub documents: Vec<FileInfo>,
-    /// Everything else
-    pub other: Vec<FileInfo>,
 }
 
 impl CategorizedFileInfo {
@@ -279,7 +286,7 @@ impl CategorizedFileInfo {
             AudioContentInfo::CueFlacPairs(pairs) => pairs.len() * 2,
             AudioContentInfo::TrackFiles(tracks) => tracks.len(),
         };
-        audio_count + self.artwork.len() + self.documents.len() + self.other.len()
+        audio_count + self.artwork.len() + self.documents.len()
     }
 
     /// Check if empty
