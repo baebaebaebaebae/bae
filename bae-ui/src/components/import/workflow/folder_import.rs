@@ -19,8 +19,8 @@
 //! actually render values.
 
 use super::{
-    ConfirmationView, DiscIdPill, ImportErrorDisplayView, LoadingIndicator,
-    ManualSearchPanelView, MultipleExactMatchesView, SmartFileDisplayView,
+    ConfirmationView, DiscIdPill, ImportErrorDisplayView, LoadingIndicator, ManualSearchPanelView,
+    MultipleExactMatchesView, SmartFileDisplayView,
 };
 use crate::components::icons::{CloudOffIcon, FolderIcon, LoaderIcon};
 use crate::components::StorageProfile;
