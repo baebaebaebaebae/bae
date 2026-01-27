@@ -102,6 +102,9 @@ pub fn ResizablePanel(
     /// Additional CSS classes
     #[props(default = "")]
     class: &'static str,
+    /// Optional snap points - size snaps to nearest point on drag end
+    #[props(default)]
+    snap_points: Option<Vec<f64>>,
     /// Panel contents
     children: Element,
 ) -> Element {
@@ -183,8 +186,27 @@ pub fn ResizablePanel(
             },
         );
 
+        let snap_points_clone = snap_points.clone();
         let mouseup =
             DocumentEventListener::new(document, "mouseup", move |_: wasm_bindgen_x::JsValue| {
+                // Snap to nearest point if snap_points provided
+                if let Some(ref points) = snap_points_clone {
+                    if !points.is_empty() {
+                        let current = size();
+                        let snapped = points
+                            .iter()
+                            .min_by(|a, b| {
+                                (current - **a)
+                                    .abs()
+                                    .partial_cmp(&(current - **b).abs())
+                                    .unwrap()
+                            })
+                            .copied()
+                            .unwrap_or(current);
+                        size.set(snapped);
+                    }
+                }
+
                 is_resizing.set(false);
             });
 
