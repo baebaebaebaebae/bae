@@ -136,8 +136,8 @@ pub fn ConfirmationView(
             }
 
             // Storage profile selection + Import button
-            div { class: "flex items-center gap-3",
-                label { class: "text-sm text-gray-400", "Storage:" }
+            div { class: "flex items-center gap-3 px-5",
+                label { class: "text-sm text-gray-400 ml-auto", "Storage:" }
                 select {
                     class: "bg-gray-700/50 text-white rounded px-3 py-1.5 text-sm border border-gray-600/50 focus:border-blue-500 focus:outline-none",
                     disabled: is_importing,
@@ -171,9 +171,6 @@ pub fn ConfirmationView(
                     "Configure"
                 }
 
-                // Spacer
-                div { class: "flex-1" }
-
                 // Import status and button
                 if is_importing {
                     if let Some(ref step) = preparing_step_text {
@@ -182,7 +179,7 @@ pub fn ConfirmationView(
                 }
                 Button {
                     variant: ButtonVariant::Primary,
-                    size: ButtonSize::Medium,
+                    size: ButtonSize::Small,
                     disabled: is_importing,
                     loading: is_importing,
                     onclick: move |_| on_confirm.call(()),
