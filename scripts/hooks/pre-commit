@@ -9,21 +9,11 @@ set -e
 #   bae-mocks: depends on bae-ui
 
 TMPFILE=$(mktemp)
-STASHED=0
 
 cleanup() {
     rm -f "$TMPFILE"
-    if [ "$STASHED" -eq 1 ]; then
-        git stash pop -q 2>/dev/null || true
-    fi
 }
 trap cleanup EXIT
-
-# Stash unstaged changes so checks only run against staged code
-if ! git diff --quiet; then
-    git stash -q --keep-index
-    STASHED=1
-fi
 
 # Get changed files (staged for commit)
 CHANGED_FILES=$(git --no-pager diff --cached --name-only)
@@ -50,14 +40,29 @@ run_check() {
     fi
 }
 
+# Auto-format all packages up front, then re-stage changed files
+run_check "cargo fmt" cargo fmt --all || {
+    echo "cargo fmt failed"
+    exit 1
+}
+for dir in bae-ui bae-desktop bae-mocks; do
+    if has_changes_in "$dir"; then
+        (cd "$dir" && run_check "dx fmt ($dir)" dx fmt) || {
+            echo "dx fmt failed in $dir"
+            exit 1
+        }
+    fi
+done
+# Re-stage any formatting changes
+git --no-pager diff --name-only | while read -r file; do
+    if echo "$CHANGED_FILES" | grep -qF "$file"; then
+        git add "$file"
+    fi
+done
+
 # bae-core checks
 if has_changes_in "bae-core"; then
     cd bae-core
-
-    run_check "cargo fmt (bae-core)" cargo fmt -- --check || {
-        echo "Run 'cargo fmt' in the bae-core directory to fix formatting"
-        exit 1
-    }
 
     run_check "clippy lib (bae-core)" cargo clippy --lib -- -D warnings -A unexpected_cfgs -A deprecated || {
         echo "Fix the warnings above and try again"
@@ -65,7 +70,6 @@ if has_changes_in "bae-core"; then
     }
 
     run_check "clippy tests (bae-core)" cargo clippy --tests --features test-utils -- -D warnings -A unexpected_cfgs -A deprecated || {
-        echo "Fix the warnings above and try again"
         exit 1
     }
 
@@ -88,16 +92,6 @@ fi
 if has_changes_in "bae-ui"; then
     cd bae-ui
 
-    run_check "cargo fmt (bae-ui)" cargo fmt -- --check || {
-        echo "Run 'cargo fmt' in the bae-ui directory to fix formatting"
-        exit 1
-    }
-
-    run_check "dx fmt (bae-ui)" dx fmt --check || {
-        echo "Run 'dx fmt' in the bae-ui directory to fix formatting"
-        exit 1
-    }
-
     run_check "clippy (bae-ui)" cargo clippy -- -D warnings || {
         echo "Fix the warnings above and try again"
         exit 1
@@ -115,16 +109,6 @@ fi
 if has_changes_in "bae-desktop" || has_changes_in "bae-core" || has_changes_in "bae-ui"; then
     cd bae-desktop
 
-    run_check "cargo fmt (bae-desktop)" cargo fmt -- --check || {
-        echo "Run 'cargo fmt' in the bae-desktop directory to fix formatting"
-        exit 1
-    }
-
-    run_check "dx fmt (bae-desktop)" dx fmt --check || {
-        echo "Run 'dx fmt' in the bae-desktop directory to fix formatting"
-        exit 1
-    }
-
     run_check "clippy (bae-desktop)" env BINDGEN_EXTRA_CLANG_ARGS="-I/opt/homebrew/include" cargo clippy -- -D warnings -A unexpected_cfgs -A deprecated || {
         echo "Fix the warnings above and try again"
         exit 1
@@ -136,16 +120,6 @@ fi
 # bae-mocks checks (depends on bae-ui)
 if has_changes_in "bae-mocks" || has_changes_in "bae-ui"; then
     cd bae-mocks
-
-    run_check "cargo fmt (bae-mocks)" cargo fmt -- --check || {
-        echo "Run 'cargo fmt' in the bae-mocks directory to fix formatting"
-        exit 1
-    }
-
-    run_check "dx fmt (bae-mocks)" dx fmt --check || {
-        echo "Run 'dx fmt' in the bae-mocks directory to fix formatting"
-        exit 1
-    }
 
     run_check "clippy (bae-mocks)" cargo clippy -- -D warnings || {
         echo "Fix the warnings above and try again"
