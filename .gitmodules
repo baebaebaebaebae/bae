@@ -1,3 +1,6 @@
 [submodule "dioxus-virtual-scroll"]
 	path = dioxus-virtual-scroll
 	url = git@github.com:hideselfview/dioxus-virtual-scroll.git
+[submodule "bae-ffmpeg"]
+	path = bae-ffmpeg
+	url = git@github.com:bae-fm/bae-ffmpeg.git

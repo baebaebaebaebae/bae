@@ -42,21 +42,31 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 cargo install dioxus-cli --locked
 
 # System libraries
-brew install cmake pkg-config libdiscid libcdio libtorrent-rasterbar boost ffmpeg
+brew install cmake pkg-config libdiscid libcdio libtorrent-rasterbar boost
 ```
 
 **Quick start:**
 
 ```bash
+# Clone and setup (with submodules)
+git clone --recurse-submodules <repository-url>
+cd bae
+
+# Setup bae-ffmpeg (downloads prebuilt binaries)
+./scripts/setup-ffmpeg.sh
+
+# Add to your shell profile (~/.zshrc):
+export FFMPEG_DIR="$PWD/bae-ffmpeg/dist"
+export PKG_CONFIG_PATH="$FFMPEG_DIR/lib/pkgconfig:$PKG_CONFIG_PATH"
+export LIBRARY_PATH="$FFMPEG_DIR/lib:$LIBRARY_PATH"
+export DYLD_LIBRARY_PATH="$FFMPEG_DIR/lib:$DYLD_LIBRARY_PATH"
+
 # Start MinIO for local S3
 docker run -d -p 9000:9000 -p 9001:9001 \
   -e MINIO_ROOT_USER=minioadmin \
   -e MINIO_ROOT_PASSWORD=minioadmin \
   quay.io/minio/minio server /data --console-address ":9001"
 
-# Clone and setup
-git clone <repository-url>
-cd bae
 ./scripts/install-hooks.sh
 npm install
 
