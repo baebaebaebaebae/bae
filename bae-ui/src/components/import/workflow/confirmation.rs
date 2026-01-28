@@ -1,7 +1,9 @@
 //! Confirmation view component
 
 use crate::components::icons::ImageIcon;
-use crate::components::{Button, ButtonSize, ButtonVariant, ChromelessButton, StorageProfile};
+use crate::components::{
+    Button, ButtonSize, ButtonVariant, ChromelessButton, Modal, StorageProfile,
+};
 use crate::display_types::{FileInfo, MatchCandidate, MatchSourceType, SelectedCover};
 use dioxus::prelude::*;
 
@@ -39,6 +41,9 @@ pub fn ConfirmationView(
     /// Called to navigate to settings
     on_configure_storage: EventHandler<()>,
 ) -> Element {
+    let mut show_cover_modal = use_signal(|| false);
+    let is_cover_modal_open: ReadSignal<bool> = show_cover_modal.into();
+
     let release_year = candidate.year.clone();
     let original_year = candidate.original_year.clone();
 
@@ -51,159 +56,90 @@ pub fn ConfirmationView(
         MatchSourceType::Discogs => (None, None, None),
     };
 
+    let has_cover_options = !artwork_files.is_empty() || remote_cover_url.is_some();
+
     rsx! {
         div { class: "p-5 space-y-5",
             // Release info card
-            div { class: "bg-gray-800/50 rounded-lg p-5 border border-gray-700/50",
-                div { class: "flex gap-6",
-                    // Cover art
-                    if let Some(ref url) = display_cover_url {
-                        div { class: "flex-shrink-0 w-32 h-32 rounded-lg border border-gray-600 shadow-lg overflow-hidden",
-                            img {
-                                src: "{url}",
-                                alt: "Album cover",
-                                class: "w-full h-full object-cover",
+            div { class: "bg-gray-800/50 rounded-lg px-5 py-4",
+                div { class: "flex items-center gap-5",
+                    // Cover art (clickable if options available)
+                    if has_cover_options {
+                        ChromelessButton {
+                            class: Some("flex-shrink-0".to_string()),
+                            onclick: move |_| show_cover_modal.set(true),
+                            if let Some(ref url) = display_cover_url {
+                                div { class: "w-20 h-20 rounded-lg overflow-hidden hover:ring-2 hover:ring-gray-500 transition-all",
+                                    img {
+                                        src: "{url}",
+                                        alt: "Album cover",
+                                        class: "w-full h-full object-cover",
+                                    }
+                                }
+                            } else {
+                                div { class: "w-20 h-20 rounded-lg bg-gray-700 flex items-center justify-center hover:ring-2 hover:ring-gray-500 transition-all",
+                                    ImageIcon { class: "w-8 h-8 text-gray-500" }
+                                }
                             }
                         }
                     } else {
-                        div { class: "flex-shrink-0 w-32 h-32 rounded-lg border border-gray-600 shadow-lg bg-gray-700 flex items-center justify-center",
-                            ImageIcon { class: "w-12 h-12 text-gray-500" }
+                        if let Some(ref url) = display_cover_url {
+                            div { class: "flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden",
+                                img {
+                                    src: "{url}",
+                                    alt: "Album cover",
+                                    class: "w-full h-full object-cover",
+                                }
+                            }
+                        } else {
+                            div { class: "flex-shrink-0 w-20 h-20 rounded-lg bg-gray-700 flex items-center justify-center",
+                                ImageIcon { class: "w-8 h-8 text-gray-500" }
+                            }
                         }
                     }
 
                     // Metadata
-                    div { class: "flex-1 space-y-3",
-                        p { class: "text-xl font-semibold text-white", "{candidate.title}" }
-                        div { class: "space-y-1 text-sm text-gray-300",
-                            if let Some(ref orig_year) = original_year {
-                                p {
-                                    span { class: "text-gray-400", "Original: " }
-                                    span { class: "text-white", "{orig_year}" }
-                                }
-                            }
+                    div { class: "flex-1 min-w-0",
+                        h4 { class: "text-base font-medium text-white truncate", "{candidate.title}" }
+                        div { class: "text-xs text-gray-400 flex flex-wrap gap-x-3",
                             if let Some(ref year) = release_year {
-                                p {
-                                    span { class: "text-gray-400", "This Release: " }
-                                    span { class: "text-white", "{year}" }
-                                }
+                                span { "{year}" }
                             }
                             if let Some(ref fmt) = format_text {
-                                p {
-                                    span { class: "text-gray-400", "Format: " }
-                                    span { class: "text-white", "{fmt}" }
-                                }
+                                span { "{fmt}" }
                             }
                             if let Some(ref country) = country_text {
-                                p {
-                                    span { class: "text-gray-400", "Country: " }
-                                    span { class: "text-white", "{country}" }
-                                }
+                                span { "{country}" }
                             }
-                            if let Some(ref label) = label_text {
-                                p {
-                                    span { class: "text-gray-400", "Label: " }
-                                    span { class: "text-white", "{label}" }
+                        }
+                        if label_text.is_some() || original_year.is_some() {
+                            div { class: "text-xs text-gray-500 flex flex-wrap gap-x-3",
+                                if let Some(ref label) = label_text {
+                                    span { "{label}" }
+                                }
+                                if original_year.is_some() && original_year != release_year {
+                                    span { "Original: {original_year.as_ref().unwrap()}" }
                                 }
                             }
                         }
+                    }
+
+                    // Edit button
+                    Button {
+                        variant: ButtonVariant::Outline,
+                        size: ButtonSize::Small,
+                        disabled: is_importing,
+                        onclick: move |_| on_edit.call(()),
+                        "Edit"
                     }
                 }
             }
 
-            // Cover art selection
-            if !artwork_files.is_empty() || remote_cover_url.is_some() {
-                div {
-                    h4 { class: "text-xs font-medium text-gray-400 uppercase tracking-wide mb-2",
-                        "Cover Art"
-                    }
-                    div { class: "flex flex-wrap gap-2",
-                        // Remote cover option
-                        if let Some(ref url) = remote_cover_url {
-                            {
-                                let is_selected = matches!(
-                                    selected_cover.as_ref(),
-                                    Some(SelectedCover::Remote { .. })
-                                );
-                                let url_for_click = url.clone();
-                                rsx! {
-                                    ChromelessButton {
-                                        class: Some(
-                                            if is_selected {
-                                                "relative w-16 h-16 rounded border-2 border-green-500 overflow-hidden"
-                                                    .to_string()
-                                            } else {
-                                                "relative w-16 h-16 rounded border-2 border-gray-600 hover:border-gray-500 overflow-hidden"
-                                                    .to_string()
-                                            },
-                                        ),
-                                        aria_label: Some("Select remote cover art".to_string()),
-                                        onclick: move |_| on_select_remote_cover.call(url_for_click.clone()),
-                                        img {
-                                            src: "{url}",
-                                            alt: "Remote cover",
-                                            class: "w-full h-full object-cover",
-                                        }
-                                        if is_selected {
-                                            div { class: "absolute top-0 right-0 bg-green-500 text-white text-xs px-1 rounded-bl",
-                                                "✓"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Local artwork options
-                        for img in artwork_files.iter() {
-                            {
-                                let img_name = img.name.clone();
-                                let is_selected = matches!(
-                                    selected_cover.as_ref(),
-                                    Some(SelectedCover::Local { filename })
-                                    if filename == &img_name
-                                );
-                                let img_url = img.display_url.clone();
-                                let name_for_click = img.name.clone();
-                                rsx! {
-                                    ChromelessButton {
-                                        key: "{img_url}",
-                                        class: Some(
-                                            if is_selected {
-                                                "relative w-16 h-16 rounded border-2 border-green-500 overflow-hidden"
-                                                    .to_string()
-                                            } else {
-                                                "relative w-16 h-16 rounded border-2 border-gray-600 hover:border-gray-500 overflow-hidden"
-                                                    .to_string()
-                                            },
-                                        ),
-                                        aria_label: Some(format!("Select cover art: {}", img.name)),
-                                        onclick: move |_| on_select_local_cover.call(name_for_click.clone()),
-                                        img {
-                                            src: "{img_url}",
-                                            alt: "{img.name}",
-                                            class: "w-full h-full object-cover",
-                                        }
-                                        if is_selected {
-                                            div { class: "absolute top-0 right-0 bg-green-500 text-white text-xs px-1 rounded-bl",
-                                                "✓"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    p { class: "text-xs text-gray-500 mt-1",
-                        "Click an image to set it as the album cover"
-                    }
-                }
-            }
-
-            // Storage profile selection
+            // Storage profile selection + Import button
             div { class: "flex items-center gap-3",
                 label { class: "text-sm text-gray-400", "Storage:" }
                 select {
-                    class: "bg-gray-700 text-white rounded px-3 py-1.5 text-sm border border-gray-600 focus:border-blue-500 focus:outline-none",
+                    class: "bg-gray-700/50 text-white rounded px-3 py-1.5 text-sm border border-gray-600/50 focus:border-blue-500 focus:outline-none",
                     disabled: is_importing,
                     onchange: move |evt: Event<FormData>| {
                         let value = evt.value();
@@ -229,27 +165,20 @@ pub fn ConfirmationView(
                     }
                 }
                 Button {
-                    variant: ButtonVariant::Ghost,
+                    variant: ButtonVariant::Outline,
                     size: ButtonSize::Small,
-                    class: Some("text-xs text-indigo-400 hover:text-indigo-300".to_string()),
                     onclick: move |_| on_configure_storage.call(()),
                     "Configure"
                 }
-            }
 
-            // Action buttons
-            div { class: "flex justify-end gap-3 items-center",
+                // Spacer
+                div { class: "flex-1" }
+
+                // Import status and button
                 if is_importing {
                     if let Some(ref step) = preparing_step_text {
                         span { class: "text-sm text-gray-400", "{step}" }
                     }
-                }
-                Button {
-                    variant: ButtonVariant::Secondary,
-                    size: ButtonSize::Medium,
-                    disabled: is_importing,
-                    onclick: move |_| on_edit.call(()),
-                    "Edit"
                 }
                 Button {
                     variant: ButtonVariant::Primary,
@@ -261,6 +190,101 @@ pub fn ConfirmationView(
                         div { class: "animate-spin rounded-full h-4 w-4 border-b-2 border-white" }
                     }
                     "Import"
+                }
+            }
+        }
+
+        // Cover art selection modal
+        Modal {
+            is_open: is_cover_modal_open,
+            on_close: move |_| show_cover_modal.set(false),
+            div { class: "bg-gray-800 rounded-xl p-6 max-w-md w-full mx-4",
+                h2 { class: "text-lg font-semibold text-white mb-4", "Select Cover Art" }
+                div { class: "flex flex-wrap gap-3",
+                    // Remote cover option
+                    if let Some(ref url) = remote_cover_url {
+                        {
+                            let is_selected = matches!(
+                                selected_cover.as_ref(),
+                                Some(SelectedCover::Remote { .. })
+                            );
+                            let url_for_click = url.clone();
+                            rsx! {
+                                ChromelessButton {
+                                    class: Some(
+                                        if is_selected {
+                                            "relative w-20 h-20 rounded-lg ring-2 ring-green-500 overflow-hidden"
+                                                .to_string()
+                                        } else {
+                                            "relative w-20 h-20 rounded-lg ring-1 ring-gray-600 hover:ring-gray-500 overflow-hidden"
+                                                .to_string()
+                                        },
+                                    ),
+                                    aria_label: Some("Select remote cover art".to_string()),
+                                    onclick: move |_| {
+                                        on_select_remote_cover.call(url_for_click.clone());
+                                        show_cover_modal.set(false);
+                                    },
+                                    img {
+                                        src: "{url}",
+                                        alt: "Remote cover",
+                                        class: "w-full h-full object-cover",
+                                    }
+                                    if is_selected {
+                                        div { class: "absolute top-0.5 right-0.5 bg-green-500 text-white text-xs w-4 h-4 rounded-full flex items-center justify-center",
+                                            "✓"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Local artwork options
+                    for img in artwork_files.iter() {
+                        {
+                            let img_name = img.name.clone();
+                            let is_selected = matches!(
+                                selected_cover.as_ref(),
+                                Some(SelectedCover::Local { filename })
+                                if filename == &img_name
+                            );
+                            let img_url = img.display_url.clone();
+                            let name_for_click = img.name.clone();
+                            rsx! {
+                                ChromelessButton {
+                                    key: "{img_url}",
+                                    class: Some(
+                                        if is_selected {
+                                            "relative w-20 h-20 rounded-lg ring-2 ring-green-500 overflow-hidden"
+                                                .to_string()
+                                        } else {
+                                            "relative w-20 h-20 rounded-lg ring-1 ring-gray-600 hover:ring-gray-500 overflow-hidden"
+                                                .to_string()
+                                        },
+                                    ),
+                                    aria_label: Some(format!("Select cover art: {}", img.name)),
+                                    onclick: move |_| {
+                                        on_select_local_cover.call(name_for_click.clone());
+                                        show_cover_modal.set(false);
+                                    },
+                                    img {
+                                        src: "{img_url}",
+                                        alt: "{img.name}",
+                                        class: "w-full h-full object-cover",
+                                    }
+                                    if is_selected {
+                                        div { class: "absolute top-0.5 right-0.5 bg-green-500 text-white text-xs w-4 h-4 rounded-full flex items-center justify-center",
+                                            "✓"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                p { class: "text-xs text-gray-500 mt-3",
+                    "Click an image to set it as the album cover"
                 }
             }
         }
