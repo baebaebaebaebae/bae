@@ -3,11 +3,15 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
+use dioxus_core::Task;
 
 use crate::floating_ui::{self, ComputePositionOptions, Placement};
 
 /// Counter for generating unique tooltip IDs
 static TOOLTIP_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Delay before showing tooltip (in milliseconds)
+const TOOLTIP_DELAY_MS: u64 = 400;
 
 /// A hover-triggered tooltip that displays text near an anchor element.
 ///
@@ -15,14 +19,23 @@ static TOOLTIP_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 #[component]
 pub fn Tooltip(
     /// The tooltip text to display
-    text: String,
-    /// Placement relative to anchor (default: Top)
-    #[props(default = Placement::Top)]
+    text: &'static str,
+    /// Placement relative to anchor
     placement: Placement,
+    /// Prevent text wrapping
+    nowrap: bool,
     /// Children (the element to attach tooltip to)
     children: Element,
 ) -> Element {
     let mut is_visible = use_signal(|| false);
+    let mut hover_task: Signal<Option<Task>> = use_signal(|| None);
+
+    // Cancel pending task on unmount
+    use_drop(move || {
+        if let Some(task) = hover_task.take() {
+            task.cancel();
+        }
+    });
 
     // Generate unique IDs for this tooltip instance
     let ids = use_hook(|| {
@@ -78,8 +91,24 @@ pub fn Tooltip(
         span {
             id: "{anchor_id}",
             class: "inline-flex",
-            onmouseenter: move |_| is_visible.set(true),
-            onmouseleave: move |_| is_visible.set(false),
+            onmouseenter: move |_| {
+                // Cancel any pending task and start delayed show
+                if let Some(task) = hover_task.take() {
+                    task.cancel();
+                }
+                let task = spawn(async move {
+                    gloo_timers::future::TimeoutFuture::new(TOOLTIP_DELAY_MS as u32).await;
+                    is_visible.set(true);
+                });
+                hover_task.set(Some(task));
+            },
+            onmouseleave: move |_| {
+                // Cancel any pending show and hide immediately
+                if let Some(task) = hover_task.take() {
+                    task.cancel();
+                }
+                is_visible.set(false);
+            },
             {children}
         }
 
@@ -87,7 +116,7 @@ pub fn Tooltip(
         if is_visible() {
             div {
                 id: "{tooltip_id}",
-                class: "z-50 px-3 py-2 text-sm text-gray-200 bg-gray-800 rounded-lg shadow-lg border border-gray-700 max-w-xs",
+                class: if nowrap { "z-50 px-3 py-2 text-sm text-gray-200 bg-gray-800 rounded-lg shadow-lg border border-gray-700 whitespace-nowrap" } else { "z-50 px-3 py-2 text-sm text-gray-200 bg-gray-800 rounded-lg shadow-lg border border-gray-700 max-w-xs" },
                 style: "position: fixed; top: -9999px; left: -9999px;",
                 role: "tooltip",
                 "{text}"

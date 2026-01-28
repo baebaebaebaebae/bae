@@ -1,8 +1,9 @@
 //! Error display views for import workflow
 
-use super::DiscIdPill;
+use super::{DiscIdPill, DiscIdSource};
 use crate::components::icons::AlertTriangleIcon;
 use crate::components::{Button, ButtonSize, ButtonVariant};
+use crate::floating_ui::Placement;
 use dioxus::prelude::*;
 
 /// Display DiscID lookup error with retry and optional skip buttons.
@@ -30,7 +31,11 @@ pub fn DiscIdLookupErrorView(
                         div { class: "flex-1 text-left",
                             p { class: "text-sm text-gray-400 flex items-center gap-2 mb-2",
                                 "Disc ID "
-                                DiscIdPill { disc_id }
+                                DiscIdPill {
+                                    disc_id,
+                                    source: DiscIdSource::Files,
+                                    tooltip_placement: Placement::Top,
+                                }
                             }
                             p { class: "text-sm text-amber-200", "{error}" }
                         }

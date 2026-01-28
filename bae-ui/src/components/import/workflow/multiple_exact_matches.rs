@@ -1,9 +1,10 @@
 //! Multiple DiscID matches view component
 
-use super::match_list::MatchListView;
-use super::DiscIdPill;
+use super::match_results_panel::MatchResultsPanel;
+use super::{DiscIdPill, DiscIdSource};
 use crate::components::{Button, ButtonSize, ButtonVariant};
-use crate::display_types::IdentifyMode;
+use crate::display_types::{IdentifyMode, MatchCandidate};
+use crate::floating_ui::Placement;
 use crate::stores::import::ImportState;
 use dioxus::prelude::*;
 
@@ -14,7 +15,7 @@ use dioxus::prelude::*;
 pub fn MultipleExactMatchesView(
     state: ReadStore<ImportState>,
     on_select: EventHandler<usize>,
-    on_confirm: EventHandler<()>,
+    on_confirm: EventHandler<MatchCandidate>,
     on_switch_to_manual_search: EventHandler<()>,
 ) -> Element {
     // Read state at leaf - these are computed values
@@ -34,37 +35,33 @@ pub fn MultipleExactMatchesView(
 
     rsx! {
         div { class: "p-5 space-y-4",
-            // Disc ID context
-            if let Some(id) = disc_id {
-                p { class: "text-sm text-gray-400 flex items-center gap-2",
-                    "Multiple exact matches for"
-                    DiscIdPill { disc_id: id }
-                }
-            }
-
-            MatchListView {
-                candidates,
-                selected_index,
-                on_select: move |index| on_select.call(index),
-            }
-
-            // Actions
+            // Disc ID context and manual search option
             div { class: "flex justify-between items-center",
+                if let Some(id) = disc_id {
+                    p { class: "text-sm text-gray-300 flex items-center gap-2",
+                        "Multiple exact matches for"
+                        DiscIdPill {
+                            disc_id: id,
+                            source: DiscIdSource::Files,
+                            tooltip_placement: Placement::Top,
+                        }
+                    }
+                }
+
                 Button {
-                    variant: ButtonVariant::Ghost,
+                    variant: ButtonVariant::Outline,
                     size: ButtonSize::Small,
                     onclick: move |_| on_switch_to_manual_search.call(()),
                     "Search manually"
                 }
+            }
 
-                if selected_index.is_some() {
-                    Button {
-                        variant: ButtonVariant::Primary,
-                        size: ButtonSize::Medium,
-                        onclick: move |_| on_confirm.call(()),
-                        "Continue"
-                    }
-                }
+            MatchResultsPanel {
+                candidates,
+                selected_index,
+                on_select: move |index| on_select.call(index),
+                on_confirm: move |candidate| on_confirm.call(candidate),
+                confirm_button_text: "Continue",
             }
         }
     }

@@ -4,7 +4,9 @@
 //! Accepts `ReadSignal` props and reads at leaf level for granular reactivity.
 
 use crate::components::icons::{CheckIcon, PencilIcon, PlusIcon, TrashIcon};
-use crate::components::{Button, ButtonSize, ButtonVariant, ChromelessButton};
+use crate::components::{
+    Button, ButtonSize, ButtonVariant, ChromelessButton, TextInput, TextInputSize,
+};
 use dioxus::prelude::*;
 
 /// Storage location type
@@ -389,13 +391,11 @@ pub fn StorageProfileEditorView(
             div { class: "space-y-4",
                 div {
                     label { class: "block text-sm font-medium text-gray-400 mb-2", "Name" }
-                    input {
-                        r#type: "text",
-                        autocomplete: "off",
-                        class: "w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                    TextInput {
+                        value: name(),
+                        on_input: move |v| name.set(v),
+                        size: TextInputSize::Medium,
                         placeholder: "My Storage Profile",
-                        value: "{name}",
-                        oninput: move |e| name.set(e.value()),
                     }
                 }
 
@@ -430,13 +430,11 @@ pub fn StorageProfileEditorView(
                         label { class: "block text-sm font-medium text-gray-400 mb-2",
                             "Directory Path"
                         }
-                        input {
-                            r#type: "text",
-                            autocomplete: "off",
-                            class: "w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                        TextInput {
+                            value: location_path(),
+                            on_input: move |v| location_path.set(v),
+                            size: TextInputSize::Medium,
                             placeholder: "/path/to/storage",
-                            value: "{location_path}",
-                            oninput: move |e| location_path.set(e.value()),
                         }
                     }
                 } else {
@@ -444,39 +442,33 @@ pub fn StorageProfileEditorView(
                         label { class: "block text-sm font-medium text-gray-400 mb-2",
                             "Bucket Name"
                         }
-                        input {
-                            r#type: "text",
-                            autocomplete: "off",
-                            class: "w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                        TextInput {
+                            value: cloud_bucket(),
+                            on_input: move |v| cloud_bucket.set(v),
+                            size: TextInputSize::Medium,
                             placeholder: "my-music-bucket",
-                            value: "{cloud_bucket}",
-                            oninput: move |e| cloud_bucket.set(e.value()),
                         }
                     }
                     div {
                         label { class: "block text-sm font-medium text-gray-400 mb-2",
                             "Region"
                         }
-                        input {
-                            r#type: "text",
-                            autocomplete: "off",
-                            class: "w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                        TextInput {
+                            value: cloud_region(),
+                            on_input: move |v| cloud_region.set(v),
+                            size: TextInputSize::Medium,
                             placeholder: "us-east-1",
-                            value: "{cloud_region}",
-                            oninput: move |e| cloud_region.set(e.value()),
                         }
                     }
                     div {
                         label { class: "block text-sm font-medium text-gray-400 mb-2",
                             "Custom Endpoint (optional)"
                         }
-                        input {
-                            r#type: "text",
-                            autocomplete: "off",
-                            class: "w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                        TextInput {
+                            value: cloud_endpoint(),
+                            on_input: move |v| cloud_endpoint.set(v),
+                            size: TextInputSize::Medium,
                             placeholder: "https://minio.example.com",
-                            value: "{cloud_endpoint}",
-                            oninput: move |e| cloud_endpoint.set(e.value()),
                         }
                         p { class: "text-xs text-gray-500 mt-1", "Leave empty for AWS S3" }
                     }

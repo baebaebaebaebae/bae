@@ -19,8 +19,8 @@
 //! actually render values.
 
 use super::{
-    ConfirmationView, DiscIdPill, ImportErrorDisplayView, LoadingIndicator, ManualSearchPanelView,
-    MultipleExactMatchesView, SmartFileDisplayView,
+    ConfirmationView, DiscIdPill, DiscIdSource, ImportErrorDisplayView, LoadingIndicator,
+    ManualSearchPanelView, MultipleExactMatchesView, SmartFileDisplayView,
 };
 use crate::components::icons::{CloudOffIcon, FolderIcon, LoaderIcon};
 use crate::components::StorageProfile;
@@ -61,7 +61,7 @@ pub struct FolderImportViewProps {
     pub on_text_file_close: EventHandler<()>,
     pub on_skip_detection: EventHandler<()>,
     pub on_exact_match_select: EventHandler<usize>,
-    pub on_confirm_exact_match: EventHandler<()>,
+    pub on_confirm_exact_match: EventHandler<MatchCandidate>,
     pub on_switch_to_manual_search: EventHandler<()>,
     pub on_switch_to_exact_matches: EventHandler<String>,
     pub on_search_source_change: EventHandler<SearchSource>,
@@ -72,6 +72,7 @@ pub struct FolderImportViewProps {
     pub on_barcode_change: EventHandler<String>,
     pub on_manual_match_select: EventHandler<usize>,
     pub on_search: EventHandler<()>,
+    pub on_cancel_search: EventHandler<()>,
     pub on_manual_confirm: EventHandler<MatchCandidate>,
     pub on_retry_discid_lookup: EventHandler<()>,
     pub on_select_remote_cover: EventHandler<String>,
@@ -111,7 +112,7 @@ pub fn FolderImportView(props: FolderImportViewProps) -> Element {
             // Uses subtle background and rounded corners to visually group Files + Workflow as one unit
             div { class: "flex-1 flex flex-col min-h-0 m-2 ml-0 bg-gray-900/40 rounded-xl overflow-hidden",
                 // Context header showing folder name and step
-                DetailHeader { state, step }
+                DetailHeader { state }
 
                 // Content: Files | Workflow
                 div { class: "flex-1 flex flex-row min-h-0",
@@ -143,6 +144,7 @@ pub fn FolderImportView(props: FolderImportViewProps) -> Element {
                             on_barcode_change: props.on_barcode_change,
                             on_manual_match_select: props.on_manual_match_select,
                             on_search: props.on_search,
+                            on_cancel_search: props.on_cancel_search,
                             on_manual_confirm: props.on_manual_confirm,
                             on_retry_discid_lookup: props.on_retry_discid_lookup,
                             on_select_remote_cover: props.on_select_remote_cover,
@@ -195,7 +197,7 @@ fn WorkflowContent(
     storage_profiles: ReadSignal<Vec<StorageProfile>>,
     on_skip_detection: EventHandler<()>,
     on_exact_match_select: EventHandler<usize>,
-    on_confirm_exact_match: EventHandler<()>,
+    on_confirm_exact_match: EventHandler<MatchCandidate>,
     on_switch_to_manual_search: EventHandler<()>,
     on_switch_to_exact_matches: EventHandler<String>,
     on_search_source_change: EventHandler<SearchSource>,
@@ -206,6 +208,7 @@ fn WorkflowContent(
     on_barcode_change: EventHandler<String>,
     on_manual_match_select: EventHandler<usize>,
     on_search: EventHandler<()>,
+    on_cancel_search: EventHandler<()>,
     on_manual_confirm: EventHandler<MatchCandidate>,
     on_retry_discid_lookup: EventHandler<()>,
     on_select_remote_cover: EventHandler<String>,
@@ -234,6 +237,7 @@ fn WorkflowContent(
                     on_barcode_change,
                     on_manual_match_select,
                     on_search,
+                    on_cancel_search,
                     on_manual_confirm,
                     on_retry_discid_lookup,
                 }
@@ -265,7 +269,7 @@ fn IdentifyStep(
     state: ReadStore<ImportState>,
     on_skip_detection: EventHandler<()>,
     on_exact_match_select: EventHandler<usize>,
-    on_confirm_exact_match: EventHandler<()>,
+    on_confirm_exact_match: EventHandler<MatchCandidate>,
     on_switch_to_manual_search: EventHandler<()>,
     on_switch_to_exact_matches: EventHandler<String>,
     on_search_source_change: EventHandler<SearchSource>,
@@ -276,6 +280,7 @@ fn IdentifyStep(
     on_barcode_change: EventHandler<String>,
     on_manual_match_select: EventHandler<usize>,
     on_search: EventHandler<()>,
+    on_cancel_search: EventHandler<()>,
     on_manual_confirm: EventHandler<MatchCandidate>,
     on_retry_discid_lookup: EventHandler<()>,
 ) -> Element {
@@ -312,6 +317,7 @@ fn IdentifyStep(
                     on_barcode_change,
                     on_match_select: on_manual_match_select,
                     on_search,
+                    on_cancel_search,
                     on_confirm: on_manual_confirm,
                     on_switch_to_exact_matches,
                 }
@@ -403,32 +409,20 @@ fn ConfirmStep(
 // Detail Header
 // ============================================================================
 
-/// Header showing the selected folder name and current step
+/// Header showing the selected folder name
 #[component]
-fn DetailHeader(state: ReadStore<ImportState>, step: ImportStep) -> Element {
+fn DetailHeader(state: ReadStore<ImportState>) -> Element {
     let folder_name = state.read().get_current_candidate_name();
-
-    let step_label = match step {
-        ImportStep::Identify => "Identifying",
-        ImportStep::Confirm => "Confirming",
-    };
 
     let Some(name) = folder_name else {
         return rsx! {};
     };
 
     rsx! {
-        div { class: "flex-shrink-0 px-5 py-4 border-b border-gray-700/50 bg-gray-800/30",
-            div { class: "flex items-center gap-2.5",
-                // Folder icon
+        div { class: "flex-shrink-0 px-3 py-4 bg-gray-800/30",
+            div { class: "inline-flex items-center gap-2 px-4 py-2 border border-gray-600/50 rounded-full",
                 FolderIcon { class: "w-4 h-4 flex-shrink-0 text-gray-400" }
-
-                // Folder name (primary)
-                span { class: "text-sm font-medium text-gray-200 truncate", "{name}" }
-
-                // Step indicator
-                span { class: "text-xs text-gray-500", "•" }
-                span { class: "text-xs text-gray-400", "{step_label}" }
+                span { class: "text-sm font-medium text-gray-300 truncate", "{name}" }
             }
         }
     }
@@ -473,7 +467,7 @@ fn FilesColumn(
             direction: ResizeDirection::Horizontal,
             position: PanelPosition::Relative,
             snap_points,
-            div { class: "h-full border-r border-gray-700/50 overflow-y-auto p-4",
+            div { class: "h-full overflow-y-auto p-4 bg-gray-800/30",
                 SmartFileDisplayView {
                     files,
                     selected_text_file,
@@ -510,7 +504,11 @@ fn DiscIdLookupProgressView(
                     LoadingIndicator { message: "Checking MusicBrainz...".to_string() }
                     p { class: "text-xs text-gray-500 flex items-center justify-center gap-2 pt-1",
                         "Disc ID:"
-                        DiscIdPill { disc_id: disc_id.clone() }
+                        DiscIdPill {
+                            disc_id: disc_id.clone(),
+                            source: DiscIdSource::Files,
+                            tooltip_placement: crate::floating_ui::Placement::Bottom,
+                        }
                     }
                 } else if error.is_some() {
                     // Error state - mirrors loading state structure
@@ -520,7 +518,11 @@ fn DiscIdLookupProgressView(
                     }
                     p { class: "text-xs text-gray-500 flex items-center justify-center gap-2 pt-1",
                         "Disc ID:"
-                        DiscIdPill { disc_id: disc_id.clone() }
+                        DiscIdPill {
+                            disc_id: disc_id.clone(),
+                            source: DiscIdSource::Files,
+                            tooltip_placement: crate::floating_ui::Placement::Bottom,
+                        }
                     }
 
                     // Actions

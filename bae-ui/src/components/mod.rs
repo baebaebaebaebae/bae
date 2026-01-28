@@ -16,6 +16,7 @@ pub mod pill;
 pub mod playback;
 pub mod resizable_panel;
 pub mod settings;
+pub mod text_input;
 pub mod title_bar;
 pub mod utils;
 
@@ -61,5 +62,6 @@ pub use settings::{
     EncryptionSectionView, SettingsTab, SettingsView, StorageLocation, StorageProfile,
     StorageProfileEditorView, StorageProfilesSectionView, SubsonicSectionView,
 };
+pub use text_input::{TextInput, TextInputSize};
 pub use title_bar::{NavItem, SearchResult, TitleBarView, UpdateState};
 pub use utils::{format_duration, format_file_size};

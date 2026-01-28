@@ -540,6 +540,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
     });
 
     let registry_for_search = registry.clone();
+    let registry_for_cancel = registry.clone();
 
     let sidebar = rsx! {
         ReleaseSidebarView {
@@ -581,6 +582,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                     on_barcode_change: move |v| search_barcode.set(v),
                     on_manual_match_select: move |idx| selected_match_index.set(Some(idx)),
                     on_search: move |_| registry_for_search.set_string("search_phase", "Searching".to_string()),
+                    on_cancel_search: move |_| registry_for_cancel.set_string("search_phase", "Empty".to_string()),
                     on_manual_confirm: |_| {},
                     on_retry_discid_lookup: |_| {},
                     on_select_remote_cover: move |url| {

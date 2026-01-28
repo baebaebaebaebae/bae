@@ -1,7 +1,7 @@
 //! Torrent input view component
 
 use crate::components::icons::UploadIcon;
-use crate::components::{Button, ButtonSize, ButtonVariant};
+use crate::components::{Button, ButtonSize, ButtonVariant, TextInput, TextInputSize};
 use dioxus::prelude::*;
 
 /// Torrent input mode
@@ -77,12 +77,12 @@ pub fn TorrentInputView(
                     div { class: "space-y-4",
                         div {
                             label { class: "block text-sm font-medium text-gray-400 mb-2", "Magnet Link" }
-                            input {
-                                r#type: "text",
-                                class: "w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm",
+                            TextInput {
+                                value: magnet_input(),
+                                on_input: move |v| magnet_input.set(v),
+                                size: TextInputSize::Medium,
                                 placeholder: "magnet:?xt=urn:btih:...",
-                                value: "{magnet_input}",
-                                oninput: move |e| magnet_input.set(e.value()),
+                                monospace: true,
                             }
                         }
                         Button {

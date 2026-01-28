@@ -1,10 +1,11 @@
 //! Manual search panel view component
 
-use super::match_list::MatchListView;
+use super::match_results_panel::MatchResultsPanel;
 use super::search_source_selector::SearchSourceSelectorView;
-use super::{DiscIdPill, LoadingIndicator};
-use crate::components::{Button, ButtonSize, ButtonVariant};
+use super::{DiscIdPill, DiscIdSource, LoadingIndicator};
+use crate::components::{Button, ButtonSize, ButtonVariant, TextInput, TextInputSize};
 use crate::display_types::{MatchCandidate, SearchSource, SearchTab};
+use crate::floating_ui::Placement;
 use crate::stores::import::ImportState;
 use dioxus::prelude::*;
 
@@ -22,6 +23,7 @@ pub fn ManualSearchPanelView(
     on_barcode_change: EventHandler<String>,
     on_match_select: EventHandler<usize>,
     on_search: EventHandler<()>,
+    on_cancel_search: EventHandler<()>,
     on_confirm: EventHandler<MatchCandidate>,
     on_switch_to_exact_matches: EventHandler<String>,
 ) -> Element {
@@ -80,7 +82,11 @@ pub fn ManualSearchPanelView(
                 div { class: "bg-blue-500/15 rounded-lg p-3 flex items-center gap-2",
                     p { class: "text-sm text-blue-300",
                         "No releases found for Disc ID "
-                        DiscIdPill { disc_id }
+                        DiscIdPill {
+                            disc_id,
+                            source: DiscIdSource::Files,
+                            tooltip_placement: Placement::Top,
+                        }
                     }
                 }
             }
@@ -88,13 +94,17 @@ pub fn ManualSearchPanelView(
             // Link back to exact matches if they exist
             if !exact_matches.is_empty() {
                 if let Some(disc_id) = source_disc_id.clone() {
-                    div { class: "flex items-center gap-2",
-                        p { class: "text-sm text-gray-400 flex items-center gap-2",
+                    div { class: "bg-gray-600/20 rounded-lg p-3 flex items-center justify-between",
+                        p { class: "text-sm text-gray-300 flex items-center gap-2",
                             "{exact_matches.len()} exact matches for"
-                            DiscIdPill { disc_id: disc_id.clone() }
+                            DiscIdPill {
+                                disc_id: disc_id.clone(),
+                                source: DiscIdSource::Files,
+                                tooltip_placement: Placement::Top,
+                            }
                         }
                         Button {
-                            variant: ButtonVariant::Ghost,
+                            variant: ButtonVariant::Outline,
                             size: ButtonSize::Small,
                             onclick: move |_| on_switch_to_exact_matches.call(disc_id.clone()),
                             "View"
@@ -103,130 +113,124 @@ pub fn ManualSearchPanelView(
                 }
             }
 
-            // Header row: tabs + source selector
-            div { class: "flex items-center justify-between gap-4",
-                div { class: "flex gap-1",
-                    Button {
-                        variant: if tab == SearchTab::General { ButtonVariant::Primary } else { ButtonVariant::Ghost },
-                        size: ButtonSize::Small,
-                        onclick: move |_| on_tab_change.call(SearchTab::General),
-                        "Title"
+            // Search controls panel
+            div { class: "bg-gray-800/20 rounded-lg p-4 space-y-4",
+                // Header row: tabs + source selector
+                div { class: "flex items-center justify-between gap-4",
+                    div { class: "flex gap-1 bg-gray-800/50 rounded-lg p-1",
+                        Button {
+                            variant: if tab == SearchTab::General { ButtonVariant::Primary } else { ButtonVariant::Ghost },
+                            size: ButtonSize::Small,
+                            onclick: move |_| on_tab_change.call(SearchTab::General),
+                            "Title"
+                        }
+                        Button {
+                            variant: if tab == SearchTab::CatalogNumber { ButtonVariant::Primary } else { ButtonVariant::Ghost },
+                            size: ButtonSize::Small,
+                            onclick: move |_| on_tab_change.call(SearchTab::CatalogNumber),
+                            "Catalog #"
+                        }
+                        Button {
+                            variant: if tab == SearchTab::Barcode { ButtonVariant::Primary } else { ButtonVariant::Ghost },
+                            size: ButtonSize::Small,
+                            onclick: move |_| on_tab_change.call(SearchTab::Barcode),
+                            "Barcode"
+                        }
                     }
-                    Button {
-                        variant: if tab == SearchTab::CatalogNumber { ButtonVariant::Primary } else { ButtonVariant::Ghost },
-                        size: ButtonSize::Small,
-                        onclick: move |_| on_tab_change.call(SearchTab::CatalogNumber),
-                        "Catalog #"
-                    }
-                    Button {
-                        variant: if tab == SearchTab::Barcode { ButtonVariant::Primary } else { ButtonVariant::Ghost },
-                        size: ButtonSize::Small,
-                        onclick: move |_| on_tab_change.call(SearchTab::Barcode),
-                        "Barcode"
+
+                    SearchSourceSelectorView {
+                        selected_source: source,
+                        on_select: on_search_source_change,
                     }
                 }
 
-                SearchSourceSelectorView {
-                    selected_source: source,
-                    on_select: on_search_source_change,
-                }
-            }
-
-            // Search form based on active tab
-            div { class: "space-y-3",
-                match tab {
-                    SearchTab::General => rsx! {
-                        div { class: "flex gap-3",
-                            div { class: "flex-1",
-                                label { class: "block text-xs text-gray-400 mb-1.5", "Artist" }
-                                input {
-                                    r#type: "text",
-                                    class: "w-full px-3 py-2 bg-surface-input rounded-lg focus:outline-none focus:ring-1 focus:ring-accent/50 text-white placeholder-gray-500",
-                                    value: "{artist}",
-                                    oninput: move |e| on_artist_change.call(e.value()),
+                // Search form based on active tab
+                div {
+                    match tab {
+                        SearchTab::General => rsx! {
+                            div { class: "flex gap-3",
+                                div { class: "flex-1",
+                                    label { class: "block text-xs text-gray-400 mb-1.5", "Artist" }
+                                    TextInput {
+                                        value: artist,
+                                        on_input: move |v| on_artist_change.call(v),
+                                        size: TextInputSize::Medium,
+                                        autofocus: true,
+                                        disabled: searching,
+                                    }
                                 }
-                            }
-                            div { class: "flex-1",
-                                label { class: "block text-xs text-gray-400 mb-1.5", "Album" }
-                                input {
-                                    r#type: "text",
-                                    class: "w-full px-3 py-2 bg-surface-input rounded-lg focus:outline-none focus:ring-1 focus:ring-accent/50 text-white placeholder-gray-500",
-                                    value: "{album}",
-                                    oninput: move |e| on_album_change.call(e.value()),
+                                div { class: "flex-1",
+                                    label { class: "block text-xs text-gray-400 mb-1.5", "Album" }
+                                    TextInput {
+                                        value: album,
+                                        on_input: move |v| on_album_change.call(v),
+                                        size: TextInputSize::Medium,
+                                        disabled: searching,
+                                    }
                                 }
-                            }
-                            div { class: "flex items-end",
-                                Button {
-                                    variant: ButtonVariant::Primary,
-                                    size: ButtonSize::Medium,
-                                    disabled: searching,
-                                    loading: searching,
-                                    onclick: move |_| on_search.call(()),
-                                    if searching {
-                                        "Searching..."
-                                    } else {
+                                div { class: "flex items-end shrink-0",
+                                    Button {
+                                        variant: ButtonVariant::Primary,
+                                        size: ButtonSize::Medium,
+                                        disabled: searching,
+                                        loading: searching,
+                                        onclick: move |_| on_search.call(()),
                                         "Search"
                                     }
                                 }
                             }
-                        }
-                    },
-                    SearchTab::CatalogNumber => rsx! {
-                        div { class: "flex gap-3",
-                            div { class: "flex-1",
-                                label { class: "block text-xs text-gray-400 mb-1.5", "Catalog Number" }
-                                input {
-                                    r#type: "text",
-                                    class: "w-full px-3 py-2 bg-surface-input rounded-lg focus:outline-none focus:ring-1 focus:ring-accent/50 text-white placeholder-gray-500",
-                                    placeholder: "e.g. WPCR-80001",
-                                    value: "{catalog}",
-                                    oninput: move |e| on_catalog_number_change.call(e.value()),
+                        },
+                        SearchTab::CatalogNumber => rsx! {
+                            div { class: "flex gap-3",
+                                div { class: "flex-1",
+                                    label { class: "block text-xs text-gray-400 mb-1.5", "Catalog Number" }
+                                    TextInput {
+                                        value: catalog,
+                                        on_input: move |v| on_catalog_number_change.call(v),
+                                        size: TextInputSize::Medium,
+                                        placeholder: "e.g. WPCR-80001",
+                                        autofocus: true,
+                                        disabled: searching,
+                                    }
                                 }
-                            }
-                            div { class: "flex items-end",
-                                Button {
-                                    variant: ButtonVariant::Primary,
-                                    size: ButtonSize::Medium,
-                                    disabled: searching,
-                                    loading: searching,
-                                    onclick: move |_| on_search.call(()),
-                                    if searching {
-                                        "Searching..."
-                                    } else {
+                                div { class: "flex items-end shrink-0",
+                                    Button {
+                                        variant: ButtonVariant::Primary,
+                                        size: ButtonSize::Medium,
+                                        disabled: searching,
+                                        loading: searching,
+                                        onclick: move |_| on_search.call(()),
                                         "Search"
                                     }
                                 }
                             }
-                        }
-                    },
-                    SearchTab::Barcode => rsx! {
-                        div { class: "flex gap-3",
-                            div { class: "flex-1",
-                                label { class: "block text-xs text-gray-400 mb-1.5", "Barcode" }
-                                input {
-                                    r#type: "text",
-                                    class: "w-full px-3 py-2 bg-surface-input rounded-lg focus:outline-none focus:ring-1 focus:ring-accent/50 text-white placeholder-gray-500",
-                                    placeholder: "e.g. 4943674251780",
-                                    value: "{barcode}",
-                                    oninput: move |e| on_barcode_change.call(e.value()),
+                        },
+                        SearchTab::Barcode => rsx! {
+                            div { class: "flex gap-3",
+                                div { class: "flex-1",
+                                    label { class: "block text-xs text-gray-400 mb-1.5", "Barcode" }
+                                    TextInput {
+                                        value: barcode,
+                                        on_input: move |v| on_barcode_change.call(v),
+                                        size: TextInputSize::Medium,
+                                        placeholder: "e.g. 4943674251780",
+                                        autofocus: true,
+                                        disabled: searching,
+                                    }
                                 }
-                            }
-                            div { class: "flex items-end",
-                                Button {
-                                    variant: ButtonVariant::Primary,
-                                    size: ButtonSize::Medium,
-                                    disabled: searching,
-                                    loading: searching,
-                                    onclick: move |_| on_search.call(()),
-                                    if searching {
-                                        "Searching..."
-                                    } else {
+                                div { class: "flex items-end shrink-0",
+                                    Button {
+                                        variant: ButtonVariant::Primary,
+                                        size: ButtonSize::Medium,
+                                        disabled: searching,
+                                        loading: searching,
+                                        onclick: move |_| on_search.call(()),
                                         "Search"
                                     }
                                 }
                             }
-                        }
-                    },
+                        },
+                    }
                 }
             }
 
@@ -239,38 +243,26 @@ pub fn ManualSearchPanelView(
 
             // Results
             if searching {
-                div { class: "flex justify-center py-8",
+                div { class: "flex flex-col items-center gap-4 py-8",
                     LoadingIndicator { message: format!("Searching {}...", source.display_name()) }
+                    Button {
+                        variant: ButtonVariant::Outline,
+                        size: ButtonSize::Small,
+                        onclick: move |_| on_cancel_search.call(()),
+                        "Cancel"
+                    }
                 }
             } else if candidates.is_empty() && searched {
                 div { class: "text-center py-8",
                     p { class: "text-gray-400", "No results found" }
                 }
             } else if !candidates.is_empty() {
-                div { class: "space-y-4 mt-4",
-                    MatchListView {
-                        candidates: candidates.clone(),
-                        selected_index: selected,
-                        on_select: move |index| on_match_select.call(index),
-                    }
-
-                    if selected.is_some() {
-                        div { class: "flex justify-end",
-                            Button {
-                                variant: ButtonVariant::Primary,
-                                size: ButtonSize::Small,
-                                class: Some("bg-green-500/25 text-green-300 hover:bg-green-500/35".to_string()),
-                                onclick: move |_| {
-                                    if let Some(index) = selected {
-                                        if let Some(candidate) = candidates.get(index) {
-                                            on_confirm.call(candidate.clone());
-                                        }
-                                    }
-                                },
-                                "Confirm Selection"
-                            }
-                        }
-                    }
+                MatchResultsPanel {
+                    candidates,
+                    selected_index: selected,
+                    on_select: move |index| on_match_select.call(index),
+                    on_confirm,
+                    confirm_button_text: "Confirm",
                 }
             }
         }

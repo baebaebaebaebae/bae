@@ -45,7 +45,7 @@ pub struct CdImportViewProps {
 
     // === Callbacks ===
     pub on_exact_match_select: EventHandler<usize>,
-    pub on_confirm_exact_match: EventHandler<()>,
+    pub on_confirm_exact_match: EventHandler<MatchCandidate>,
     pub on_switch_to_manual_search: EventHandler<()>,
     pub on_switch_to_exact_matches: EventHandler<String>,
     pub on_search_source_change: EventHandler<SearchSource>,
@@ -56,6 +56,7 @@ pub struct CdImportViewProps {
     pub on_barcode_change: EventHandler<String>,
     pub on_manual_match_select: EventHandler<usize>,
     pub on_search: EventHandler<()>,
+    pub on_cancel_search: EventHandler<()>,
     pub on_manual_confirm: EventHandler<MatchCandidate>,
     pub on_retry_discid_lookup: EventHandler<()>,
     pub on_select_remote_cover: EventHandler<String>,
@@ -111,6 +112,7 @@ pub fn CdImportView(props: CdImportViewProps) -> Element {
                             on_barcode_change: props.on_barcode_change,
                             on_manual_match_select: props.on_manual_match_select,
                             on_search: props.on_search,
+                            on_cancel_search: props.on_cancel_search,
                             on_manual_confirm: props.on_manual_confirm,
                             on_retry_discid_lookup: props.on_retry_discid_lookup,
                         }
@@ -143,7 +145,7 @@ fn CdIdentifyContent(
     identify_mode: IdentifyMode,
     on_clear: EventHandler<()>,
     on_exact_match_select: EventHandler<usize>,
-    on_confirm_exact_match: EventHandler<()>,
+    on_confirm_exact_match: EventHandler<MatchCandidate>,
     on_switch_to_manual_search: EventHandler<()>,
     on_switch_to_exact_matches: EventHandler<String>,
     on_search_source_change: EventHandler<SearchSource>,
@@ -154,6 +156,7 @@ fn CdIdentifyContent(
     on_barcode_change: EventHandler<String>,
     on_manual_match_select: EventHandler<usize>,
     on_search: EventHandler<()>,
+    on_cancel_search: EventHandler<()>,
     on_manual_confirm: EventHandler<MatchCandidate>,
     on_retry_discid_lookup: EventHandler<()>,
 ) -> Element {
@@ -208,6 +211,7 @@ fn CdIdentifyContent(
                         on_barcode_change,
                         on_match_select: on_manual_match_select,
                         on_search,
+                        on_cancel_search,
                         on_confirm: on_manual_confirm,
                         on_switch_to_exact_matches,
                     }

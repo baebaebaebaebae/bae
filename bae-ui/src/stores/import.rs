@@ -137,6 +137,8 @@ pub enum CandidateEvent {
     SetSearchSource(SearchSource),
     /// User initiates a search
     StartSearch,
+    /// User cancels an in-progress search
+    CancelSearch,
     /// Search completed (from async operation)
     SearchComplete {
         results: Vec<MatchCandidate>,
@@ -359,6 +361,11 @@ impl IdentifyingState {
                 state.search_state.error_message = None;
                 CandidateState::Identifying(state)
             }
+            CandidateEvent::CancelSearch => {
+                let mut state = self;
+                state.search_state.is_searching = false;
+                CandidateState::Identifying(state)
+            }
             CandidateEvent::SearchComplete { results, error } => {
                 let mut state = self;
                 state.search_state.is_searching = false;
@@ -471,6 +478,7 @@ impl ConfirmingState {
             | CandidateEvent::SetSearchTab(_)
             | CandidateEvent::SetSearchSource(_)
             | CandidateEvent::StartSearch
+            | CandidateEvent::CancelSearch
             | CandidateEvent::SearchComplete { .. }
             | CandidateEvent::SelectSearchResult(_)
             | CandidateEvent::ConfirmSearchResult => CandidateState::Confirming(Box::new(self)),

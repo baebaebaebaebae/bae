@@ -13,11 +13,30 @@ use dioxus::prelude::*;
 const COLLAPSED_KEY: &str = "mock_panel_collapsed";
 const VIEWPORT_KEY: &str = "mock_panel_viewport";
 
+/// Mock page section for grouping
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MockSection {
+    DesignSystem,
+    Components,
+}
+
+impl MockSection {
+    pub fn label(self) -> &'static str {
+        match self {
+            MockSection::DesignSystem => "Design System",
+            MockSection::Components => "Components",
+        }
+    }
+}
+
 /// All available mock pages - add new mocks here
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MockPage {
+    // Design System
     Button,
     Pill,
+    TextInput,
+    // Components
     Library,
     AlbumDetail,
     FolderImport,
@@ -27,19 +46,31 @@ pub enum MockPage {
 impl MockPage {
     /// All variants - update when adding new mocks
     pub const ALL: &[MockPage] = &[
+        // Design System
         MockPage::Button,
         MockPage::Pill,
+        MockPage::TextInput,
+        // Components
         MockPage::Library,
         MockPage::AlbumDetail,
         MockPage::FolderImport,
         MockPage::TitleBar,
     ];
 
+    /// Section this mock belongs to
+    pub fn section(self) -> MockSection {
+        match self {
+            MockPage::Button | MockPage::Pill | MockPage::TextInput => MockSection::DesignSystem,
+            _ => MockSection::Components,
+        }
+    }
+
     /// Display name shown in UI
     pub fn label(self) -> &'static str {
         match self {
             MockPage::Button => "Button",
             MockPage::Pill => "Pill",
+            MockPage::TextInput => "TextInput",
             MockPage::Library => "LibraryView",
             MockPage::AlbumDetail => "AlbumDetailView",
             MockPage::FolderImport => "FolderImportView",
@@ -52,6 +83,7 @@ impl MockPage {
         match self {
             MockPage::Button => "button",
             MockPage::Pill => "pill",
+            MockPage::TextInput => "text-input",
             MockPage::Library => "library",
             MockPage::AlbumDetail => "album-detail",
             MockPage::FolderImport => "folder-import",
@@ -64,6 +96,7 @@ impl MockPage {
         match self {
             MockPage::Button => "Button component with variants, sizes, and states",
             MockPage::Pill => "Pill component for tokens, tags, and inline labels",
+            MockPage::TextInput => "Text input component with sizes and states",
             MockPage::Library => "Album grid with loading/error/empty states",
             MockPage::AlbumDetail => "Album detail page with tracks and controls",
             MockPage::FolderImport => "Folder import workflow with all phases",
@@ -76,6 +109,7 @@ impl MockPage {
         match self {
             MockPage::Button => Route::MockButton { state },
             MockPage::Pill => Route::MockPill { state },
+            MockPage::TextInput => Route::MockTextInput { state },
             MockPage::Library => Route::MockLibrary { state },
             MockPage::AlbumDetail => Route::MockAlbumDetail { state },
             MockPage::FolderImport => Route::MockFolderImport { state },

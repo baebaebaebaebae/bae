@@ -12,6 +12,7 @@ mod image_lightbox;
 mod manual_search_panel;
 mod match_item;
 mod match_list;
+mod match_results_panel;
 mod metadata_display;
 mod multiple_exact_matches;
 mod release_selector;
@@ -33,6 +34,7 @@ pub use image_lightbox::ImageLightboxView;
 pub use manual_search_panel::ManualSearchPanelView;
 pub use match_item::MatchItemView;
 pub use match_list::MatchListView;
+pub use match_results_panel::MatchResultsPanel;
 pub use metadata_display::MetadataDisplayView;
 pub use multiple_exact_matches::MultipleExactMatchesView;
 pub use release_selector::ReleaseSelectorView;
@@ -41,7 +43,8 @@ pub use release_sidebar::{
 };
 pub use search_source_selector::SearchSourceSelectorView;
 pub use shared::{
-    DiscIdLookupErrorView, DiscIdPill, ImportErrorDisplayView, LoadingIndicator, SelectedSourceView,
+    DiscIdLookupErrorView, DiscIdPill, DiscIdSource, ImportErrorDisplayView, LoadingIndicator,
+    SelectedSourceView,
 };
 pub use smart_file_display::SmartFileDisplayView;
 pub use text_file_modal::TextFileModalView;

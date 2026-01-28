@@ -68,13 +68,15 @@ pub fn AlbumDetailView(
     }
 
     rsx! {
+        // Scrollable container
         div {
-            class: "grid grid-cols-1 lg:grid-cols-3 gap-8",
+            class: "flex-grow min-h-0 overflow-y-auto",
             "data-testid": "album-detail",
 
-            // Left column - album info, cover, metadata, play button
-            div { class: "lg:col-span-1",
-                div { class: "bg-gray-800 rounded-lg p-6",
+            // Content wrapper with flex layout
+            div { class: "flex gap-8 p-6",
+                // Left column - album info, cover, metadata, play button (sticky)
+                div { class: "flex-shrink-0 w-[360px] self-start sticky top-6",
                     AlbumInfoSection {
                         state,
                         is_deleting,
@@ -90,11 +92,9 @@ pub fn AlbumDetailView(
                         on_add_to_queue: on_add_album_to_queue,
                     }
                 }
-            }
 
-            // Right column - release tabs + tracklist
-            div { class: "lg:col-span-2",
-                div { class: "bg-gray-800 rounded-lg p-6",
+                // Right column - release tabs + tracklist
+                div { class: "flex-1 min-w-0",
                     ReleaseTabsSectionWrapper {
                         state,
                         is_deleting,

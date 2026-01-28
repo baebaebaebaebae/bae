@@ -1,6 +1,6 @@
 //! BitTorrent section view
 
-use crate::components::{Button, ButtonSize, ButtonVariant};
+use crate::components::{Button, ButtonSize, ButtonVariant, TextInput, TextInputSize};
 use dioxus::prelude::*;
 
 /// BitTorrent settings display data
@@ -213,12 +213,11 @@ pub fn BitTorrentSectionView(
                 if editing_section.as_deref() == Some("interface") {
                     div { class: "space-y-4",
                         div { class: "space-y-2",
-                            input {
-                                r#type: "text",
-                                class: "w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                            TextInput {
+                                value: edit_bind_interface.to_string(),
+                                on_input: move |v| on_bind_interface_change.call(v),
+                                size: TextInputSize::Medium,
                                 placeholder: "e.g., eth0, tun0, 192.168.1.100",
-                                value: "{edit_bind_interface}",
-                                oninput: move |e| on_bind_interface_change.call(e.value()),
                             }
                             p { class: "text-xs text-gray-500",
                                 "Bind to a specific interface (e.g., VPN tunnel). Leave empty for default."

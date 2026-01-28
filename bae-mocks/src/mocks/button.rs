@@ -16,6 +16,7 @@ pub fn ButtonMock(initial_state: Option<String>) -> Element {
                 ("secondary", "Secondary"),
                 ("danger", "Danger"),
                 ("ghost", "Ghost"),
+                ("outline", "Outline"),
             ],
         )
         .enum_control(
@@ -51,6 +52,7 @@ pub fn ButtonMock(initial_state: Option<String>) -> Element {
         "secondary" => ButtonVariant::Secondary,
         "danger" => ButtonVariant::Danger,
         "ghost" => ButtonVariant::Ghost,
+        "outline" => ButtonVariant::Outline,
         _ => ButtonVariant::Primary,
     };
 
@@ -118,6 +120,12 @@ pub fn ButtonMock(initial_state: Option<String>) -> Element {
                             size: ButtonSize::Medium,
                             onclick: |_| {},
                             "Ghost"
+                        }
+                        Button {
+                            variant: ButtonVariant::Outline,
+                            size: ButtonSize::Medium,
+                            onclick: |_| {},
+                            "Outline"
                         }
                     }
                 }

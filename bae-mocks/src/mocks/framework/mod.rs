@@ -10,6 +10,6 @@ mod preset;
 mod registry;
 mod viewport;
 
-pub use panel::{MockPage, MockPanel};
+pub use panel::{MockPage, MockPanel, MockSection};
 pub use preset::Preset;
 pub use registry::ControlRegistryBuilder;

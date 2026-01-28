@@ -8,7 +8,7 @@ use crate::ui::import_helpers::{
 use bae_core::torrent::ffi::TorrentInfo as BaeTorrentInfo;
 use bae_ui::components::import::{TorrentImportView, TrackerConnectionStatus, TrackerStatus};
 use bae_ui::display_types::{
-    SearchSource, SearchTab, TorrentFileInfo, TorrentInfo as DisplayTorrentInfo,
+    MatchCandidate, SearchSource, SearchTab, TorrentFileInfo, TorrentInfo as DisplayTorrentInfo,
 };
 use bae_ui::stores::import::CandidateEvent;
 use bae_ui::stores::{AppStateStoreExt, StorageProfilesStateStoreExt};
@@ -154,7 +154,7 @@ pub fn TorrentImport() -> Element {
 
     let on_confirm_exact_match = {
         let app = app.clone();
-        move |_| {
+        move |_: MatchCandidate| {
             app.state
                 .import()
                 .write()
@@ -313,6 +313,17 @@ pub fn TorrentImport() -> Element {
                     }
                 }
             });
+        }
+    };
+
+    // Cancel search handler
+    let cancel_search = {
+        let app = app.clone();
+        move || {
+            app.state
+                .import()
+                .write()
+                .dispatch(CandidateEvent::CancelSearch);
         }
     };
 
@@ -523,6 +534,7 @@ pub fn TorrentImport() -> Element {
             on_barcode_change,
             on_manual_match_select,
             on_search: move |_| perform_search(),
+            on_cancel_search: move |_| cancel_search(),
             on_manual_confirm,
             on_retry_discid_lookup,
             on_detect_metadata,

@@ -6,6 +6,7 @@ mod folder_import;
 pub mod framework;
 mod library;
 mod pill;
+mod text_input;
 mod title_bar;
 pub mod url_state;
 
@@ -14,4 +15,5 @@ pub use button::ButtonMock;
 pub use folder_import::FolderImportMock;
 pub use library::LibraryMock;
 pub use pill::PillMock;
+pub use text_input::TextInputMock;
 pub use title_bar::TitleBarMock;

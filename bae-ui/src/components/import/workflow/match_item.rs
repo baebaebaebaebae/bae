@@ -12,9 +12,9 @@ pub fn MatchItemView(
     on_select: EventHandler<()>,
 ) -> Element {
     let border_class = if is_selected {
-        "border-blue-500 bg-blue-900/30"
+        "border-transparent bg-blue-900/30 ring-1 ring-blue-500"
     } else {
-        "border-gray-700 hover:border-gray-600"
+        "border-transparent bg-gray-800/50 hover:bg-gray-800/70"
     };
 
     let radio_border = if is_selected {
@@ -41,7 +41,7 @@ pub fn MatchItemView(
 
     rsx! {
         div {
-            class: "border rounded-lg px-3 py-2 cursor-pointer hover:bg-gray-700 transition-colors {border_class}",
+            class: "border rounded-lg px-3 py-2 cursor-pointer transition-colors {border_class}",
             onclick: move |_| on_select.call(()),
 
             div { class: "flex items-center gap-3",
