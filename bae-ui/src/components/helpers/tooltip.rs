@@ -19,7 +19,7 @@ const TOOLTIP_DELAY_MS: u64 = 400;
 #[component]
 pub fn Tooltip(
     /// The tooltip text to display
-    text: &'static str,
+    text: String,
     /// Placement relative to anchor
     placement: Placement,
     /// Prevent text wrapping

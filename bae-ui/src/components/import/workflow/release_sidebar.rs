@@ -135,6 +135,7 @@ pub fn ReleaseSidebarView(
                                             "text-gray-200 hover:bg-surface-overlay hover:text-white"
                                         },
                                     ),
+                                    title: "{candidate.path}",
                                     onclick: move |_| on_select.call(index),
                                     // Status icon: folder (pending), spinner (importing), check (imported)
                                     match status {
@@ -148,7 +149,7 @@ pub fn ReleaseSidebarView(
                                             CheckIcon { class: "w-4 h-4 flex-shrink-0 text-green-500" }
                                         },
                                     }
-                                    div { class: "flex-1 text-[13px] truncate min-w-0", {candidate.name.clone()} }
+                                    div { class: "flex-1 text-xs truncate min-w-0", {candidate.name.clone()} }
                                     // Only show remove button for pending candidates
                                     if status == DetectedCandidateStatus::Pending {
                                         button {

@@ -22,7 +22,7 @@ use super::{
     ConfirmationView, DiscIdPill, DiscIdSource, ImportErrorDisplayView, LoadingIndicator,
     ManualSearchPanelView, MultipleExactMatchesView, SmartFileDisplayView,
 };
-use crate::components::icons::{CloudOffIcon, FolderIcon, LoaderIcon};
+use crate::components::icons::{CloudOffIcon, LoaderIcon};
 use crate::components::StorageProfile;
 use crate::components::{Button, ButtonSize, ButtonVariant};
 use crate::components::{PanelPosition, ResizablePanel, ResizeDirection};
@@ -412,17 +412,21 @@ fn ConfirmStep(
 /// Header showing the selected folder name
 #[component]
 fn DetailHeader(state: ReadStore<ImportState>) -> Element {
-    let folder_name = state.read().get_current_candidate_name();
+    let st = state.read();
+    let folder_path = st.current_candidate_key.clone();
+    let folder_name = st.get_current_candidate_name();
+    drop(st);
 
     let Some(name) = folder_name else {
         return rsx! {};
     };
 
+    let tooltip = folder_path.unwrap_or_default();
+
     rsx! {
-        div { class: "flex-shrink-0 px-3 py-4 bg-gray-800/30",
-            div { class: "inline-flex items-center gap-2 px-4 py-2 border border-gray-600/50 rounded-full",
-                FolderIcon { class: "w-4 h-4 flex-shrink-0 text-gray-400" }
-                span { class: "text-sm font-medium text-gray-300 truncate", "{name}" }
+        div { class: "flex-shrink-0 px-4 py-4 bg-gray-800/30",
+            div { class: "cursor-default", title: "{tooltip}",
+                span { class: "text-base font-medium text-gray-400 truncate", "{name}" }
             }
         }
     }
@@ -467,7 +471,7 @@ fn FilesColumn(
             direction: ResizeDirection::Horizontal,
             position: PanelPosition::Relative,
             snap_points,
-            div { class: "h-full overflow-y-auto p-4 bg-gray-800/30",
+            div { class: "h-full overflow-y-auto pt-1 px-4 pb-4 bg-gray-800/30",
                 SmartFileDisplayView {
                     files,
                     selected_text_file,

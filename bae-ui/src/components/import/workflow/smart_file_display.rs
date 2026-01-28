@@ -15,7 +15,7 @@ fn FileRow(
     on_click: Option<EventHandler<()>>,
     children: Element,
 ) -> Element {
-    let base = "flex items-center gap-2 px-3 py-2 rounded-lg";
+    let base = "flex items-center gap-2 px-3 py-2.5 rounded-lg";
 
     if let Some(handler) = on_click {
         rsx! {
