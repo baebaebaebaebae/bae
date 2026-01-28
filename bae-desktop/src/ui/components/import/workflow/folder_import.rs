@@ -5,8 +5,9 @@ use crate::ui::import_helpers::{
     confirm_and_start_import, lookup_discid, search_by_barcode, search_by_catalog_number,
     search_general, DiscIdLookupResult,
 };
+use crate::ui::Route;
 use bae_ui::components::import::FolderImportView;
-use bae_ui::display_types::{MatchCandidate, SearchSource, SearchTab};
+use bae_ui::display_types::{MatchCandidate, SearchSource, SearchTab, SelectedCover};
 use bae_ui::stores::import::CandidateEvent;
 use bae_ui::stores::{AppStateStoreExt, StorageProfilesStateStoreExt};
 use bae_ui::ImportSource;
@@ -417,6 +418,67 @@ pub fn FolderImport() -> Element {
         }
     };
 
+    // Skip detection - go directly to manual search
+    let on_skip_detection = {
+        let app = app.clone();
+        move |_| {
+            app.state
+                .import()
+                .write()
+                .dispatch(CandidateEvent::SwitchToManualSearch);
+        }
+    };
+
+    // Cover selection handlers
+    let on_select_remote_cover = {
+        let app = app.clone();
+        move |url: String| {
+            app.state
+                .import()
+                .write()
+                .dispatch(CandidateEvent::SelectCover(Some(SelectedCover::Remote {
+                    url,
+                    source: String::new(),
+                })));
+        }
+    };
+
+    let on_select_local_cover = {
+        let app = app.clone();
+        move |filename: String| {
+            app.state
+                .import()
+                .write()
+                .dispatch(CandidateEvent::SelectCover(Some(SelectedCover::Local {
+                    filename,
+                })));
+        }
+    };
+
+    // Storage profile change
+    let on_storage_profile_change = {
+        let app = app.clone();
+        move |profile_id: Option<String>| {
+            app.state
+                .import()
+                .write()
+                .dispatch(CandidateEvent::SelectStorageProfile(profile_id));
+        }
+    };
+
+    // Configure storage - navigate to settings
+    let on_configure_storage = move |_| {
+        navigator.push(Route::Settings {});
+    };
+
+    // View duplicate album
+    let on_view_duplicate = move |album_id: String| {
+        navigator.push(Route::AlbumDetail {
+            album_id,
+            release_id: String::new(),
+        });
+    };
+
     // Text file viewing
     let mut selected_text_file = use_signal(|| None::<String>);
 
@@ -443,7 +505,7 @@ pub fn FolderImport() -> Element {
             on_folder_select_click: on_folder_select,
             on_text_file_select: move |name| selected_text_file.set(Some(name)),
             on_text_file_close: move |_| selected_text_file.set(None),
-            on_skip_detection: |_| {},
+            on_skip_detection,
             on_exact_match_select,
             on_confirm_exact_match,
             on_switch_to_manual_search,
@@ -459,13 +521,13 @@ pub fn FolderImport() -> Element {
             on_cancel_search: move |_| cancel_search(),
             on_manual_confirm,
             on_retry_discid_lookup,
-            on_select_remote_cover: |_| {},
-            on_select_local_cover: |_| {},
-            on_storage_profile_change: |_| {},
+            on_select_remote_cover,
+            on_select_local_cover,
+            on_storage_profile_change,
             on_edit,
             on_confirm,
-            on_configure_storage: |_| {},
-            on_view_duplicate: |_| {},
+            on_configure_storage,
+            on_view_duplicate,
         }
     }
 }
