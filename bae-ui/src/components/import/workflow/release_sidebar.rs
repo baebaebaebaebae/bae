@@ -43,7 +43,7 @@ pub fn ReleaseSidebarView(
         div { class: "flex-1 px-2 pb-2 min-w-0 h-full",
             div { class: "flex flex-col h-full min-w-0 bg-surface-raised rounded-xl shadow-lg shadow-black/10 overflow-clip",
                 // Header
-                div { class: "relative px-3 py-2.5 flex items-center justify-between",
+                div { class: "relative pt-2.5 px-3 pb-1 flex items-center justify-between",
                     span { class: "text-xs font-medium text-gray-300",
                         {
                             let count = candidates.len();
