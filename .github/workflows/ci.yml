@@ -36,17 +36,9 @@ jobs:
         ref: ${{ inputs.ref || github.sha }}
         submodules: true
 
-    - name: Install Linux dependencies
+    - name: Setup Linux environment
       if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libxdo-dev libasound2-dev libdiscid-dev libcdio-dev libiso9660-dev libudf-dev libsodium-dev pkg-config libtorrent-rasterbar-dev libboost-all-dev libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libavfilter-dev libavdevice-dev pulseaudio ffmpeg
-
-    - name: Start virtual audio device (Linux)
-      if: runner.os == 'Linux'
-      run: |
-        pulseaudio --start --exit-idle-time=-1
-        pactl load-module module-null-sink sink_name=DummyOutput sink_properties=device.description="Virtual_Output"
+      uses: ./.github/actions/setup-linux
 
     - name: Setup macOS environment
       if: runner.os == 'macOS'
@@ -66,7 +58,16 @@ jobs:
           mingw-w64-x86_64-libtorrent-rasterbar
           mingw-w64-x86_64-boost
           mingw-w64-x86_64-pkg-config
-          mingw-w64-x86_64-ffmpeg
+
+    - name: Download bae-ffmpeg (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $ffmpegDir = "C:\bae-ffmpeg"
+        New-Item -ItemType Directory -Force -Path $ffmpegDir | Out-Null
+        Invoke-WebRequest -Uri "https://github.com/bae-fm/bae-ffmpeg/releases/download/v8.0.1-bae1/ffmpeg-windows-x86_64.zip" -OutFile "$env:TEMP\ffmpeg.zip"
+        Expand-Archive -Path "$env:TEMP\ffmpeg.zip" -DestinationPath $ffmpegDir -Force
+        echo "FFMPEG_DIR=$ffmpegDir" >> $env:GITHUB_ENV
 
     - name: Install MinGW Rust target (Windows)
       if: runner.os == 'Windows'
@@ -76,7 +77,8 @@ jobs:
       if: runner.os == 'Windows'
       run: |
         echo "C:\msys64\mingw64\bin" >> $env:GITHUB_PATH
-        echo "PKG_CONFIG_PATH=C:\msys64\mingw64\lib\pkgconfig" >> $env:GITHUB_ENV
+        echo "C:\bae-ffmpeg\bin" >> $env:GITHUB_PATH
+        echo "PKG_CONFIG_PATH=C:\msys64\mingw64\lib\pkgconfig;C:\bae-ffmpeg\lib\pkgconfig" >> $env:GITHUB_ENV
       shell: pwsh
 
     - name: Setup Rust environment

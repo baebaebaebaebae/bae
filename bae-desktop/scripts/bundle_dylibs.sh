@@ -52,8 +52,8 @@ resolve_rpath() {
         fi
     fi
     
-    # Try common Homebrew locations
-    for base in "/opt/homebrew/lib" "/usr/local/lib"; do
+    # Try common library locations (Homebrew and bae-ffmpeg)
+    for base in "/opt/homebrew/lib" "/usr/local/lib" "${FFMPEG_DIR:-}/lib" "/opt/bae-ffmpeg/lib"; do
         local candidate="$base/$lib_name"
         if [[ -f "$candidate" ]]; then
             echo "$candidate"
@@ -195,7 +195,7 @@ echo ""
 echo "Verifying no unbundled dylibs remain..."
 
 # Check binary
-REMAINING=$(otool -L "$BINARY" | grep -E "/opt/homebrew|/usr/local/Cellar" || true)
+REMAINING=$(otool -L "$BINARY" | grep -E "/opt/homebrew|/usr/local/Cellar|/opt/bae-ffmpeg" || true)
 if [[ -n "$REMAINING" ]]; then
     echo "ERROR: Binary still references unbundled dylibs:"
     echo "$REMAINING"
@@ -204,7 +204,7 @@ fi
 
 # Check all bundled dylibs
 while IFS='|' read -r _ bundled_name; do
-    REMAINING=$(otool -L "$FRAMEWORKS_DIR/$bundled_name" | grep -E "/opt/homebrew|/usr/local/Cellar" || true)
+    REMAINING=$(otool -L "$FRAMEWORKS_DIR/$bundled_name" | grep -E "/opt/homebrew|/usr/local/Cellar|/opt/bae-ffmpeg" || true)
     if [[ -n "$REMAINING" ]]; then
         echo "ERROR: $bundled_name still references unbundled dylibs:"
         echo "$REMAINING"

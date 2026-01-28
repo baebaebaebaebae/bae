@@ -42,7 +42,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 cargo install dioxus-cli --locked
 
 # System libraries
-brew install cmake pkg-config libdiscid libcdio libtorrent-rasterbar boost
+brew install cmake pkg-config libdiscid libcdio libtorrent-rasterbar boost ffmpeg
 ```
 
 **Quick start:**
