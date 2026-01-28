@@ -26,6 +26,7 @@ runs:
         echo "FFMPEG_DIR=$FFMPEG_DIR" >> $GITHUB_ENV
         echo "PKG_CONFIG_PATH=$FFMPEG_DIR/lib/pkgconfig" >> $GITHUB_ENV
         echo "LIBRARY_PATH=$FFMPEG_DIR/lib" >> $GITHUB_ENV
+        echo "DYLD_LIBRARY_PATH=$FFMPEG_DIR/lib" >> $GITHUB_ENV
         echo "BINDGEN_EXTRA_CLANG_ARGS=-I$FFMPEG_DIR/include" >> $GITHUB_ENV
 
     - name: Setup virtual audio device
