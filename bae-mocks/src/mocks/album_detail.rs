@@ -20,11 +20,18 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
                 ("Loading", "Loading"),
             ],
         )
+        .enum_control(
+            "releases",
+            "Releases",
+            "Multiple",
+            vec![("Single", "Single"), ("Multiple", "Multiple")],
+        )
         .with_presets(vec![
             Preset::new("Default"),
             Preset::new("Playing").set_string("playback", "Playing"),
             Preset::new("Paused").set_string("playback", "Paused"),
             Preset::new("Loading").set_string("playback", "Loading"),
+            Preset::new("Single Release").set_string("releases", "Single"),
         ])
         .build(initial_state);
 
@@ -35,8 +42,9 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
     let position_ms = use_signal(|| 45_000u64);
     let mut selected_release_id = use_signal(|| Some("release-1".to_string()));
 
-    // Parse playback state from registry
+    // Parse state from registry
     let playback_state = registry.get_string("playback");
+    let releases_mode = registry.get_string("releases");
 
     // Mock data
     let album = Album {
@@ -52,7 +60,7 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
         name: "The Midnight Signal".to_string(),
     }];
 
-    let releases = vec![
+    let all_releases = vec![
         Release {
             id: "release-1".to_string(),
             album_id: "album-1".to_string(),
@@ -80,6 +88,12 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
             musicbrainz_release_id: Some("def-456".to_string()),
         },
     ];
+
+    let releases = if releases_mode == "Single" {
+        vec![all_releases.into_iter().next().unwrap()]
+    } else {
+        all_releases
+    };
 
     let tracks: Vec<Track> = [
         ("track-1", "Broadcast", 1, 198_000i64),
