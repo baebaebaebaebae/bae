@@ -53,7 +53,7 @@ pub fn MatchItemView(
                 }
 
                 // Cover art
-                div { class: "w-10 h-10 flex-shrink-0 bg-gray-700 rounded overflow-hidden",
+                div { class: "w-10 h-10 flex-shrink-0 bg-gray-700 rounded overflow-clip",
                     if let Some(ref cover_url) = candidate.cover_url {
                         img {
                             src: "{cover_url}",

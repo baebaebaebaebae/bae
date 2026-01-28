@@ -161,7 +161,7 @@ fn AlbumCoverSection(
 
     rsx! {
         div {
-            class: "w-10 h-10 bg-gray-700 rounded-sm flex items-center justify-center overflow-hidden flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity",
+            class: "w-10 h-10 bg-gray-700 rounded-sm flex items-center justify-center overflow-clip flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity",
             onclick: move |_| {
                 if let Some(ref id) = track_id {
                     on_track_click.call(id.clone());

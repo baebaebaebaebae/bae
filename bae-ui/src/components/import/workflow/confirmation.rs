@@ -69,7 +69,7 @@ pub fn ConfirmationView(
                             class: Some("flex-shrink-0".to_string()),
                             onclick: move |_| show_cover_modal.set(true),
                             if let Some(ref url) = display_cover_url {
-                                div { class: "w-20 h-20 rounded-lg overflow-hidden hover:ring-2 hover:ring-gray-500 transition-all",
+                                div { class: "w-20 h-20 rounded-lg overflow-clip hover:ring-2 hover:ring-gray-500 transition-all",
                                     img {
                                         src: "{url}",
                                         alt: "Album cover",
@@ -84,7 +84,7 @@ pub fn ConfirmationView(
                         }
                     } else {
                         if let Some(ref url) = display_cover_url {
-                            div { class: "flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden",
+                            div { class: "flex-shrink-0 w-20 h-20 rounded-lg overflow-clip",
                                 img {
                                     src: "{url}",
                                     alt: "Album cover",
@@ -213,10 +213,10 @@ pub fn ConfirmationView(
                                 ChromelessButton {
                                     class: Some(
                                         if is_selected {
-                                            "relative w-20 h-20 rounded-lg ring-2 ring-green-500 overflow-hidden"
+                                            "relative w-20 h-20 rounded-lg ring-2 ring-green-500 overflow-clip"
                                                 .to_string()
                                         } else {
-                                            "relative w-20 h-20 rounded-lg ring-1 ring-gray-600 hover:ring-gray-500 overflow-hidden"
+                                            "relative w-20 h-20 rounded-lg ring-1 ring-gray-600 hover:ring-gray-500 overflow-clip"
                                                 .to_string()
                                         },
                                     ),
@@ -256,10 +256,10 @@ pub fn ConfirmationView(
                                     key: "{img_url}",
                                     class: Some(
                                         if is_selected {
-                                            "relative w-20 h-20 rounded-lg ring-2 ring-green-500 overflow-hidden"
+                                            "relative w-20 h-20 rounded-lg ring-2 ring-green-500 overflow-clip"
                                                 .to_string()
                                         } else {
-                                            "relative w-20 h-20 rounded-lg ring-1 ring-gray-600 hover:ring-gray-500 overflow-hidden"
+                                            "relative w-20 h-20 rounded-lg ring-1 ring-gray-600 hover:ring-gray-500 overflow-clip"
                                                 .to_string()
                                         },
                                     ),

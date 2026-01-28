@@ -143,7 +143,7 @@ fn QueueItemView(
     rsx! {
         div { class: if is_current { "flex items-center gap-3 p-3 border-b border-gray-700 bg-blue-500/10 hover:bg-blue-500/15 group" } else { "flex items-center gap-3 p-3 border-b border-gray-700 hover:bg-gray-800 group" },
             // Album cover
-            div { class: "w-12 h-12 flex-shrink-0 bg-gray-700 rounded overflow-hidden",
+            div { class: "w-12 h-12 flex-shrink-0 bg-gray-700 rounded overflow-clip",
                 if let Some(ref url) = item.cover_url {
                     img {
                         src: "{url}",

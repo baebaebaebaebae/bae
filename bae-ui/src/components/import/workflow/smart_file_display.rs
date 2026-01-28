@@ -216,7 +216,7 @@ fn GalleryThumbnailView(
 ) -> Element {
     rsx! {
         button {
-            class: "relative w-[72px] h-[72px] flex-shrink-0 rounded-xl overflow-hidden hover:ring-2 hover:ring-white/20 transition-all duration-150 group",
+            class: "relative w-[72px] h-[72px] flex-shrink-0 rounded-xl overflow-clip hover:ring-2 hover:ring-white/20 transition-all duration-150 group",
             onclick: move |_| on_click.call(index),
             img {
                 src: "{url}",

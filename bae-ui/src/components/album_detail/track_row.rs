@@ -51,12 +51,12 @@ pub fn TrackRow(
 
     let row_class = if is_available {
         if is_active {
-            "relative flex items-center py-3 px-4 rounded-lg group overflow-hidden bg-blue-500/10 hover:bg-blue-500/15 transition-colors"
+            "relative flex items-center py-3 px-4 rounded-lg group overflow-clip bg-blue-500/10 hover:bg-blue-500/15 transition-colors"
         } else {
-            "relative flex items-center py-3 px-4 rounded-lg group overflow-hidden hover:bg-gray-700 transition-colors"
+            "relative flex items-center py-3 px-4 rounded-lg group overflow-clip hover:bg-gray-700 transition-colors"
         }
     } else {
-        "relative flex items-center py-3 px-4 rounded-lg group overflow-hidden"
+        "relative flex items-center py-3 px-4 rounded-lg group overflow-clip"
     };
 
     // For styling: unavailable tracks look like "importing"

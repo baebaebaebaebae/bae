@@ -41,7 +41,8 @@ pub fn AlbumCard(
             .join(", ")
     };
 
-    let card_class = "bg-gray-800 rounded-lg overflow-hidden shadow-lg hover:shadow-xl transition-shadow duration-300 cursor-pointer group relative";
+    // Note: overflow-clip (not overflow-hidden) to clip rounded corners without blocking scroll propagation
+    let card_class = "bg-gray-800 rounded-lg overflow-clip shadow-lg hover:shadow-xl transition-shadow duration-300 cursor-pointer group relative";
 
     rsx! {
         div {
