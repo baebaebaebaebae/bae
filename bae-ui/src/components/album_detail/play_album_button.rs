@@ -1,7 +1,7 @@
 //! Play album button component
 
 use crate::components::icons::{ChevronDownIcon, PlayIcon, PlusIcon};
-use crate::components::{Button, ButtonSize, ButtonVariant, ChromelessButton, Dropdown, Placement};
+use crate::components::{Button, ButtonSize, ButtonVariant, MenuDropdown, MenuItem, Placement};
 use dioxus::prelude::*;
 
 /// Play album button with dropdown for "add to queue"
@@ -67,21 +67,16 @@ pub fn PlayAlbumButton(
             }
 
             // Dropdown menu
-            Dropdown {
+            MenuDropdown {
                 anchor_id: anchor_id.clone(),
                 is_open,
                 on_close: move |_| show_play_menu.set(false),
                 placement: Placement::BottomEnd,
-                class: "bg-gray-800 border border-gray-700 rounded shadow-lg min-w-[200px]",
-                ChromelessButton {
-                    class: Some(
-                        "w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-gray-700 flex items-center gap-2"
-                            .to_string(),
-                    ),
+
+                MenuItem {
                     onclick: {
                         let track_ids = track_ids.clone();
-                        move |evt: MouseEvent| {
-                            evt.stop_propagation();
+                        move |_| {
                             show_play_menu.set(false);
                             on_add_to_queue.call(track_ids.clone());
                         }

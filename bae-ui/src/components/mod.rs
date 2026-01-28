@@ -11,6 +11,7 @@ pub mod icons;
 pub mod import;
 pub mod imports;
 pub mod library;
+pub mod menu;
 pub mod modal;
 pub mod pill;
 pub mod playback;
@@ -55,6 +56,7 @@ pub use import::{
 };
 pub use imports::{ImportsButtonView, ImportsDropdownView};
 pub use library::LibraryView;
+pub use menu::{MenuDivider, MenuDropdown, MenuItem};
 pub use modal::Modal;
 pub use pill::{Pill, PillVariant};
 pub use playback::{NowPlayingBarView, QueueSidebarState, QueueSidebarView};

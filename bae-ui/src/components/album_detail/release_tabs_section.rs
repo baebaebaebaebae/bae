@@ -1,6 +1,6 @@
 //! Release tabs section for multi-release albums
 
-use crate::components::{ChromelessButton, Dropdown, Placement};
+use crate::components::{ChromelessButton, MenuDropdown, MenuItem, Placement};
 use crate::display_types::Release;
 use dioxus::prelude::*;
 
@@ -160,12 +160,11 @@ fn ReleaseTab(
                 "⋮"
             }
 
-            Dropdown {
+            MenuDropdown {
                 anchor_id: anchor_id.clone(),
                 is_open,
                 on_close: move |_| show_release_dropdown.set(None),
                 placement: Placement::BottomEnd,
-                class: "bg-surface-overlay rounded-lg shadow-lg border border-border-subtle p-1 min-w-[160px]",
 
                 MenuItem {
                     disabled: is_deleting() || is_exporting(),
@@ -228,41 +227,6 @@ fn ReleaseTab(
                     "Delete Release"
                 }
             }
-        }
-    }
-}
-
-/// Menu item component for dropdown menus
-#[component]
-fn MenuItem(
-    #[props(default)] disabled: bool,
-    #[props(default)] danger: bool,
-    onclick: EventHandler<MouseEvent>,
-    children: Element,
-) -> Element {
-    let base = "w-full text-left px-3 py-2 text-sm rounded-md transition-colors";
-    let variant = if danger {
-        "text-red-400 hover:bg-red-500/10"
-    } else {
-        "text-gray-300 hover:bg-hover hover:text-white"
-    };
-    let disabled_class = if disabled {
-        "opacity-50 cursor-not-allowed"
-    } else {
-        ""
-    };
-
-    rsx! {
-        ChromelessButton {
-            disabled,
-            class: Some(format!("{base} {variant} {disabled_class}")),
-            onclick: move |e: MouseEvent| {
-                e.stop_propagation();
-                if !disabled {
-                    onclick.call(e);
-                }
-            },
-            {children}
         }
     }
 }

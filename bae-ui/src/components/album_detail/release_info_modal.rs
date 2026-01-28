@@ -7,7 +7,7 @@ use crate::display_types::{File, Image, Release};
 use dioxus::prelude::*;
 
 #[derive(Clone, Copy, PartialEq)]
-enum Tab {
+pub enum Tab {
     Details,
     Files,
     Gallery,
@@ -26,8 +26,17 @@ pub fn ReleaseInfoModal(
     #[props(default)] is_loading_images: bool,
     #[props(default)] files_error: Option<String>,
     #[props(default)] images_error: Option<String>,
+    #[props(default = Tab::Details)] initial_tab: Tab,
 ) -> Element {
-    let mut active_tab = use_signal(|| Tab::Details);
+    let mut active_tab = use_signal(|| initial_tab);
+
+    // Reset to initial_tab when modal opens
+    use_effect(move || {
+        if is_open() {
+            active_tab.set(initial_tab);
+        }
+    });
+
     let current_tab = *active_tab.read();
 
     rsx! {

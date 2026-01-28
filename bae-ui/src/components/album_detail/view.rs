@@ -12,7 +12,7 @@ use super::delete_album_dialog::DeleteAlbumDialog;
 use super::delete_release_dialog::DeleteReleaseDialog;
 use super::export_error_toast::ExportErrorToast;
 use super::play_album_button::PlayAlbumButton;
-use super::release_info_modal::ReleaseInfoModal;
+use super::release_info_modal::{ReleaseInfoModal, Tab};
 use super::release_tabs_section::{ReleaseTabsSection, ReleaseTorrentInfo};
 use super::track_row::TrackRow;
 use crate::display_types::{File, Image, PlaybackDisplay, Track};
@@ -60,7 +60,7 @@ pub fn AlbumDetailView(
     let mut export_error = use_signal(|| None::<String>);
     let mut show_album_delete_confirm = use_signal(|| false);
     let mut show_release_delete_confirm = use_signal(|| None::<String>);
-    let mut show_release_info_modal = use_signal(|| None::<String>);
+    let mut show_release_info_modal = use_signal(|| None::<(String, Tab)>);
 
     // Check if album exists - only subscribe to this field via lens
     if state.album().read().is_none() {
@@ -86,7 +86,10 @@ pub fn AlbumDetailView(
                             show_album_delete_confirm.set(true);
                         }),
                         on_view_release_info: EventHandler::new(move |id: String| {
-                            show_release_info_modal.set(Some(id));
+                            show_release_info_modal.set(Some((id, Tab::Details)));
+                        }),
+                        on_open_gallery: EventHandler::new(move |id: String| {
+                            show_release_info_modal.set(Some((id, Tab::Gallery)));
                         }),
                         on_play_album,
                         on_add_to_queue: on_add_album_to_queue,
@@ -102,7 +105,7 @@ pub fn AlbumDetailView(
                         export_error,
                         torrent_info: torrent_info.clone(),
                         on_release_select,
-                        on_view_files: move |id| show_release_info_modal.set(Some(id)),
+                        on_view_files: move |id| show_release_info_modal.set(Some((id, Tab::Details))),
                         on_delete_release: move |id| show_release_delete_confirm.set(Some(id)),
                         on_export: on_export_release,
                         on_start_seeding,
@@ -174,6 +177,7 @@ fn AlbumInfoSection(
     on_export: EventHandler<String>,
     on_delete_album: EventHandler<String>,
     on_view_release_info: EventHandler<String>,
+    on_open_gallery: EventHandler<String>,
     on_play_album: EventHandler<Vec<String>>,
     on_add_to_queue: EventHandler<Vec<String>>,
 ) -> Element {
@@ -203,6 +207,7 @@ fn AlbumInfoSection(
             on_export,
             on_delete_album,
             on_view_release_info,
+            on_open_gallery,
         }
         AlbumMetadata {
             album: album.clone(),
@@ -457,7 +462,7 @@ fn DeleteReleaseDialogWrapper(
 #[component]
 fn ReleaseInfoModalWrapper(
     state: ReadStore<AlbumDetailState>,
-    show: Signal<Option<String>>,
+    show: Signal<Option<(String, Tab)>>,
     modal_files: Vec<File>,
     modal_images: Vec<Image>,
     modal_loading_files: bool,
@@ -466,7 +471,9 @@ fn ReleaseInfoModalWrapper(
     modal_images_error: Option<String>,
 ) -> Element {
     // Get release if available
-    let release_id = show().unwrap_or_default();
+    let Some((release_id, initial_tab)) = show() else {
+        return rsx! {};
+    };
     let release = state
         .releases()
         .read()
@@ -494,6 +501,7 @@ fn ReleaseInfoModalWrapper(
             is_loading_images: modal_loading_images,
             files_error: modal_files_error,
             images_error: modal_images_error,
+            initial_tab,
         }
     }
 }

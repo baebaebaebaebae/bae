@@ -1,7 +1,7 @@
 //! Album cover section with action menu
 
 use super::album_art::AlbumArt;
-use crate::components::{Dropdown, Placement};
+use crate::components::{MenuDropdown, MenuItem, Placement};
 use crate::display_types::Album;
 use dioxus::prelude::*;
 
@@ -19,6 +19,7 @@ pub fn AlbumCoverSection(
     on_export: EventHandler<String>,
     on_delete_album: EventHandler<String>,
     on_view_release_info: EventHandler<String>,
+    on_open_gallery: EventHandler<String>,
 ) -> Element {
     let mut show_dropdown = use_signal(|| false);
     let is_open: ReadSignal<bool> = show_dropdown.into();
@@ -26,16 +27,33 @@ pub fn AlbumCoverSection(
     // Use album.id for anchor to ensure uniqueness
     let anchor_id = format!("album-cover-btn-{}", album.id);
 
+    let can_click = first_release_id.is_some() && import_progress.is_none() && !is_deleting;
+
     rsx! {
         div {
             class: "mb-6 relative",
             onmouseenter: move |_| hover_cover.set(true),
             onmouseleave: move |_| hover_cover.set(false),
-            AlbumArt {
-                title: album.title.clone(),
-                cover_url: album.cover_url.clone(),
-                import_progress,
-                is_ephemeral: false,
+
+            // Clickable album art - opens gallery
+            div {
+                class: if can_click { "cursor-pointer" } else { "" },
+                onclick: {
+                    let release_id = first_release_id.clone();
+                    move |_| {
+                        if let Some(ref id) = release_id {
+                            if can_click {
+                                on_open_gallery.call(id.clone());
+                            }
+                        }
+                    }
+                },
+                AlbumArt {
+                    title: album.title.clone(),
+                    cover_url: album.cover_url.clone(),
+                    import_progress,
+                    is_ephemeral: false,
+                }
             }
 
             // Show dropdown button on hover
@@ -62,36 +80,31 @@ pub fn AlbumCoverSection(
             }
 
             // Dropdown menu
-            Dropdown {
+            MenuDropdown {
                 anchor_id: anchor_id.clone(),
                 is_open,
                 on_close: move |_| show_dropdown.set(false),
                 placement: Placement::BottomEnd,
-                class: "bg-gray-700 rounded-lg shadow-lg overflow-clip border border-gray-600 min-w-[160px]",
 
                 // Release Info - only for single release
                 if has_single_release {
                     if let Some(ref release_id) = first_release_id {
-                        button {
-                            class: "w-full px-4 py-3 text-left text-white hover:bg-gray-600 transition-colors flex items-center gap-2",
+                        MenuItem {
                             disabled: is_deleting || is_exporting,
                             onclick: {
                                 let release_id = release_id.clone();
-                                move |evt| {
-                                    evt.stop_propagation();
+                                move |_| {
                                     show_dropdown.set(false);
                                     on_view_release_info.call(release_id.clone());
                                 }
                             },
                             "Release Info"
                         }
-                        button {
-                            class: "w-full px-4 py-3 text-left text-white hover:bg-gray-600 transition-colors flex items-center gap-2",
+                        MenuItem {
                             disabled: is_deleting || is_exporting,
                             onclick: {
                                 let release_id = release_id.clone();
-                                move |evt| {
-                                    evt.stop_propagation();
+                                move |_| {
                                     show_dropdown.set(false);
                                     on_export.call(release_id.clone());
                                 }
@@ -104,13 +117,12 @@ pub fn AlbumCoverSection(
                         }
                     }
                 }
-                button {
-                    class: "w-full px-4 py-3 text-left text-red-400 hover:bg-gray-600 transition-colors flex items-center gap-2",
+                MenuItem {
                     disabled: is_deleting,
+                    danger: true,
                     onclick: {
                         let album_id = album.id.clone();
-                        move |evt| {
-                            evt.stop_propagation();
+                        move |_| {
                             show_dropdown.set(false);
                             on_delete_album.call(album_id.clone());
                         }

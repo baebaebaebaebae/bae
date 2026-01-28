@@ -5,7 +5,7 @@
 
 use crate::components::icons::{EllipsisIcon, PauseIcon, PlayIcon};
 use crate::components::utils::format_duration;
-use crate::components::{ChromelessButton, Dropdown, Placement};
+use crate::components::{ChromelessButton, MenuDropdown, MenuItem, Placement};
 use crate::display_types::{Artist, TrackImportState};
 use dioxus::prelude::*;
 
@@ -201,17 +201,13 @@ fn TrackMenu(
             EllipsisIcon { class: "w-4 h-4" }
         }
 
-        Dropdown {
+        MenuDropdown {
             anchor_id: anchor_id.clone(),
             is_open,
             on_close: move |_| show_menu.set(false),
             placement: Placement::BottomEnd,
-            class: "bg-surface-overlay border border-border-subtle rounded-lg shadow-lg p-1 min-w-32",
-            ChromelessButton {
-                class: Some(
-                    "w-full text-left px-3 py-2 text-sm text-gray-300 hover:text-white hover:bg-hover rounded-md transition-colors"
-                        .to_string(),
-                ),
+
+            MenuItem {
                 onclick: {
                     let track_id = track_id.clone();
                     move |_| {
@@ -221,11 +217,7 @@ fn TrackMenu(
                 },
                 "Export File"
             }
-            ChromelessButton {
-                class: Some(
-                    "w-full text-left px-3 py-2 text-sm text-gray-300 hover:text-white hover:bg-hover rounded-md transition-colors"
-                        .to_string(),
-                ),
+            MenuItem {
                 onclick: {
                     let track_id = track_id.clone();
                     move |_| {
@@ -235,11 +227,7 @@ fn TrackMenu(
                 },
                 "Play Next"
             }
-            ChromelessButton {
-                class: Some(
-                    "w-full text-left px-3 py-2 text-sm text-gray-300 hover:text-white hover:bg-hover rounded-md transition-colors"
-                        .to_string(),
-                ),
+            MenuItem {
                 onclick: {
                     let track_id = track_id.clone();
                     move |_| {

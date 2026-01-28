@@ -1,7 +1,7 @@
 //! Album card component - pure view with callbacks
 
 use crate::components::icons::{EllipsisIcon, ImageIcon, PlayIcon, PlusIcon};
-use crate::components::{Dropdown, Placement};
+use crate::components::{MenuDropdown, MenuItem, Placement};
 use crate::display_types::{Album, Artist};
 use dioxus::prelude::*;
 
@@ -100,37 +100,33 @@ pub fn AlbumCard(
             }
 
             // Dropdown menu
-            Dropdown {
+            MenuDropdown {
                 anchor_id: anchor_id.clone(),
                 is_open,
                 on_close: move |_| show_dropdown.set(false),
                 placement: Placement::BottomEnd,
-                class: "bg-gray-800 border border-gray-700 rounded-lg shadow-xl min-w-[140px] overflow-clip",
-                button {
-                    class: "w-full px-4 py-2 text-left text-white hover:bg-gray-700 transition-colors flex items-center gap-2",
+
+                MenuItem {
                     onclick: {
                         let album_id = album_id.clone();
-                        move |evt| {
-                            evt.stop_propagation();
+                        move |_| {
                             show_dropdown.set(false);
                             on_play.call(album_id.clone());
                         }
                     },
                     PlayIcon { class: "w-4 h-4" }
-                    span { "Play" }
+                    "Play"
                 }
-                button {
-                    class: "w-full px-4 py-2 text-left text-white hover:bg-gray-700 transition-colors flex items-center gap-2",
+                MenuItem {
                     onclick: {
                         let album_id = album_id.clone();
-                        move |evt| {
-                            evt.stop_propagation();
+                        move |_| {
                             show_dropdown.set(false);
                             on_add_to_queue.call(album_id.clone());
                         }
                     },
                     PlusIcon { class: "w-4 h-4" }
-                    span { "Add to Queue" }
+                    "Add to Queue"
                 }
             }
         }
