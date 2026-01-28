@@ -1,5 +1,6 @@
 //! Import page
 
+use bae_ui::stores::import::ImportState;
 use bae_ui::{
     CdDriveStatus, CdSelectorView, ImportSource, ImportView, TorrentInputMode, TorrentInputView,
 };
@@ -8,17 +9,17 @@ use dioxus::prelude::*;
 #[component]
 pub fn Import() -> Element {
     let mut selected_source = use_signal(|| ImportSource::Folder);
-
-    // Placeholder sidebar - in real app this would show releases/drives
-    let sidebar = rsx! {
-        div { class: "p-4 text-gray-400 text-sm", "No releases" }
-    };
+    let import_state = use_store(ImportState::default);
 
     rsx! {
         ImportView {
             selected_source: *selected_source.read(),
             on_source_select: move |source| selected_source.set(source),
-            sidebar,
+            state: import_state,
+            on_candidate_select: |_| {},
+            on_add_folder: |_| {},
+            on_remove_candidate: |_| {},
+            on_clear_all: |_| {},
 
             match *selected_source.read() {
                 ImportSource::Folder => rsx! {

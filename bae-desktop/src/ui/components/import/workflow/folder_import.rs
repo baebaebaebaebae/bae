@@ -2,99 +2,16 @@
 
 use crate::ui::app_service::use_app;
 use crate::ui::import_helpers::{
-    confirm_and_start_import, load_selected_release, lookup_discid, search_by_barcode,
-    search_by_catalog_number, search_general, DiscIdLookupResult,
+    confirm_and_start_import, lookup_discid, search_by_barcode, search_by_catalog_number,
+    search_general, DiscIdLookupResult,
 };
-use bae_ui::components::import::{FolderImportView, ReleaseSidebarView};
+use bae_ui::components::import::FolderImportView;
 use bae_ui::display_types::{MatchCandidate, SearchSource, SearchTab};
 use bae_ui::stores::import::CandidateEvent;
 use bae_ui::stores::{AppStateStoreExt, StorageProfilesStateStoreExt};
 use bae_ui::ImportSource;
 use dioxus::prelude::*;
 use tracing::{info, warn};
-
-// ============================================================================
-// Sidebar Component
-// ============================================================================
-
-/// Folder import sidebar - shows detected releases
-#[component]
-pub fn FolderImportSidebar() -> Element {
-    let app = use_app();
-    let import_state = app.state.import();
-    let detected_candidates = import_state.read().detected_candidates.clone();
-
-    let on_folder_select = {
-        let app = app.clone();
-        move |_| {
-            let app = app.clone();
-            spawn(async move {
-                if let Some(path) = rfd::AsyncFileDialog::new().pick_folder().await {
-                    let path_str = path.path().to_string_lossy().to_string();
-                    let import_handle = app.import_handle.clone();
-
-                    {
-                        let mut import_store = app.state.import();
-                        if import_store.read().detected_candidates.is_empty() {
-                            import_store.write().reset();
-                        }
-                        import_store.write().is_scanning_candidates = true;
-                    }
-
-                    if let Err(e) =
-                        import_handle.enqueue_folder_scan(std::path::PathBuf::from(path_str))
-                    {
-                        warn!("Failed to add folder to scan: {}", e);
-                    }
-                }
-            });
-        }
-    };
-
-    let on_release_select = {
-        let app = app.clone();
-        let detected = detected_candidates.clone();
-        move |index: usize| {
-            let app = app.clone();
-            let detected = detected.clone();
-            spawn(async move {
-                if let Err(e) = load_selected_release(&app, index, &detected).await {
-                    warn!("Failed to switch to release: {}", e);
-                }
-            });
-        }
-    };
-
-    let on_remove_release = {
-        let app = app.clone();
-        move |index: usize| {
-            app.state.import().write().remove_detected_release(index);
-        }
-    };
-
-    let on_clear_all_releases = {
-        let app = app.clone();
-        move |_| {
-            let mut store = app.state.import();
-            let mut state = store.write();
-            state.detected_candidates.clear();
-            state.candidate_states.clear();
-            state.loading_candidates.clear();
-            state.discid_lookup_attempted.clear();
-            state.switch_candidate(None);
-        }
-    };
-
-    rsx! {
-        ReleaseSidebarView {
-            state: import_state,
-            on_select: on_release_select,
-            on_add_folder: on_folder_select,
-            on_remove: on_remove_release,
-            on_clear_all: on_clear_all_releases,
-        }
-    }
-}
 
 // ============================================================================
 // Main Content Component

@@ -7,8 +7,8 @@ use bae_ui::stores::import::{
 use bae_ui::{
     AudioContentInfo, CategorizedFileInfo, CueFlacPairInfo, DetectedCandidate,
     DetectedCandidateStatus, FileInfo, FolderImportView, FolderMetadata, IdentifyMode,
-    ImportSource, ImportStep, ImportView, MatchCandidate, MatchSourceType, ReleaseSidebarView,
-    SearchSource, SearchTab, SelectedCover, StorageLocation, StorageProfile,
+    ImportSource, ImportStep, ImportView, MatchCandidate, MatchSourceType, SearchSource, SearchTab,
+    SelectedCover, StorageLocation, StorageProfile,
 };
 use dioxus::prelude::*;
 use std::collections::HashMap;
@@ -542,16 +542,6 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
     let registry_for_search = registry.clone();
     let registry_for_cancel = registry.clone();
 
-    let sidebar = rsx! {
-        ReleaseSidebarView {
-            state: import_state,
-            on_select: move |idx| selected_candidate_index.set(Some(idx)),
-            on_add_folder: |_| {},
-            on_remove: |_| {},
-            on_clear_all: |_| {},
-        }
-    };
-
     rsx! {
         MockPanel {
             current_mock: MockPage::FolderImport,
@@ -560,7 +550,11 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             ImportView {
                 selected_source: ImportSource::Folder,
                 on_source_select: |_| {},
-                sidebar,
+                state: import_state,
+                on_candidate_select: move |idx| selected_candidate_index.set(Some(idx)),
+                on_add_folder: |_| {},
+                on_remove_candidate: |_| {},
+                on_clear_all: |_| {},
                 FolderImportView {
                     state: import_state,
                     selected_text_file: None,

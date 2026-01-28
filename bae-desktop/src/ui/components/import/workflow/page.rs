@@ -1,13 +1,14 @@
 #[cfg(feature = "cd-rip")]
 use super::cd_import::CdImport;
-use super::folder_import::{FolderImport, FolderImportSidebar};
+use super::folder_import::FolderImport;
 #[cfg(feature = "torrent")]
 use super::torrent_import::TorrentImport;
 use crate::ui::app_service::use_app;
-use crate::ui::import_helpers::has_unclean_state;
+use crate::ui::import_helpers::{has_unclean_state, load_selected_release};
 use bae_ui::stores::AppStateStoreExt;
 use bae_ui::{ConfirmDialogView, ImportSource, ImportView};
 use dioxus::prelude::*;
+use tracing::warn;
 
 #[component]
 pub fn ImportPage() -> Element {
@@ -58,29 +59,77 @@ pub fn ImportPage() -> Element {
         pending_switch.set(None);
     };
 
-    // Sidebar based on selected source
-    let sidebar = match selected_source {
-        ImportSource::Folder => rsx! {
-            FolderImportSidebar {}
-        },
-        #[cfg(feature = "torrent")]
-        ImportSource::Torrent => rsx! {
-            // TODO: TorrentImportSidebar with release list
-            div {}
-        },
-        #[cfg(feature = "cd-rip")]
-        ImportSource::Cd => rsx! {
-            // TODO: CdImportSidebar with CD drives
-            div {}
-        },
-        #[cfg(not(all(feature = "torrent", feature = "cd-rip")))]
-        _ => rsx! {
-            div {}
-        },
+    // Sidebar handlers
+    let on_add_folder = {
+        let app = app.clone();
+        move |_| {
+            let app = app.clone();
+            spawn(async move {
+                if let Some(path) = rfd::AsyncFileDialog::new().pick_folder().await {
+                    let path_str = path.path().to_string_lossy().to_string();
+                    let import_handle = app.import_handle.clone();
+
+                    {
+                        let mut import_store = app.state.import();
+                        if import_store.read().detected_candidates.is_empty() {
+                            import_store.write().reset();
+                        }
+                        import_store.write().is_scanning_candidates = true;
+                    }
+
+                    if let Err(e) =
+                        import_handle.enqueue_folder_scan(std::path::PathBuf::from(path_str))
+                    {
+                        warn!("Failed to add folder to scan: {}", e);
+                    }
+                }
+            });
+        }
+    };
+
+    let on_candidate_select = {
+        let app = app.clone();
+        move |index: usize| {
+            let app = app.clone();
+            let detected = app.state.import().read().detected_candidates.clone();
+            spawn(async move {
+                if let Err(e) = load_selected_release(&app, index, &detected).await {
+                    warn!("Failed to switch to release: {}", e);
+                }
+            });
+        }
+    };
+
+    let on_remove_candidate = {
+        let app = app.clone();
+        move |index: usize| {
+            app.state.import().write().remove_detected_release(index);
+        }
+    };
+
+    let on_clear_all = {
+        let app = app.clone();
+        move |_| {
+            let mut store = app.state.import();
+            let mut state = store.write();
+            state.detected_candidates.clear();
+            state.candidate_states.clear();
+            state.loading_candidates.clear();
+            state.discid_lookup_attempted.clear();
+            state.switch_candidate(None);
+        }
     };
 
     rsx! {
-        ImportView { selected_source, on_source_select, sidebar,
+        ImportView {
+            selected_source,
+            on_source_select,
+            state: import_store,
+            on_candidate_select,
+            on_add_folder,
+            on_remove_candidate,
+            on_clear_all,
+
             match selected_source {
                 ImportSource::Folder => rsx! {
                     FolderImport {}
