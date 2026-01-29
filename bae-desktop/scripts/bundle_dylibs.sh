@@ -146,6 +146,10 @@ DYLIB_PATHS=$(otool -L "$BINARY" | tail -n +2 | awk '{print $1}' | grep -v "/Sys
 for dylib in $DYLIB_PATHS; do
     if [[ -f "$dylib" ]]; then
         process_dylib "$dylib"
+    elif [[ "$dylib" == "@rpath"* ]]; then
+        # Resolve @rpath references from the main binary
+        resolved=$(resolve_rpath "$BINARY" "$dylib") && process_dylib "$resolved" || \
+            echo "Warning: Could not resolve $dylib"
     fi
 done
 
@@ -159,6 +163,18 @@ while IFS='|' read -r original_path bundled_name; do
         "@executable_path/../Frameworks/$bundled_name" \
         "$BINARY"
 done < "$DYLIB_LIST"
+
+# Fix @rpath references in main binary that point to bundled libraries
+rpath_deps=$(otool -L "$BINARY" | tail -n +2 | awk '{print $1}' | grep "^@rpath/" || true)
+for rpath_dep in $rpath_deps; do
+    lib_name=$(echo "$rpath_dep" | sed 's|@rpath/||')
+    if grep -q "|$lib_name$" "$DYLIB_LIST"; then
+        install_name_tool -change \
+            "$rpath_dep" \
+            "@executable_path/../Frameworks/$lib_name" \
+            "$BINARY"
+    fi
+done
 
 echo "Fixing paths in bundled dylibs..."
 
