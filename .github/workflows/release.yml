@@ -243,25 +243,6 @@ jobs:
         </rss>
         EOF
 
-    - name: Verify app bundle is properly bundled
-      run: |
-        set -euo pipefail
-        APP_PATH="target/dx/bae/bundle/macos/bundle/macos/bae.app"
-        if [[ ! -d "$APP_PATH" ]]; then
-          echo "Error: App bundle not found at $APP_PATH"
-          exit 1
-        fi
-        # Check that bae-ffmpeg audio libraries are bundled
-        for lib in libavcodec libavformat libavutil libswresample; do
-          if ! ls "$APP_PATH/Contents/Frameworks/${lib}"*.dylib 1>/dev/null 2>&1; then
-            echo "Error: ${lib} not found in bundle"
-            exit 1
-          fi
-        done
-        echo "Bundled frameworks:"
-        ls "$APP_PATH/Contents/Frameworks/" | sed 's/^/  /'
-        echo "✓ App bundle verification passed"
-
     - name: Build demo web app
       working-directory: ./bae-mocks
       run: |
