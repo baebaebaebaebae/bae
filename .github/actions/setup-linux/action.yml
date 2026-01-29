@@ -5,7 +5,7 @@ inputs:
   ffmpeg-version:
     description: 'bae-ffmpeg release tag'
     required: false
-    default: 'v8.0.1-bae2'
+    default: 'v8.0.1-bae3'
 
 runs:
   using: 'composite'
