@@ -1,6 +1,9 @@
 //! Candidate sidebar view component for import
 
-use crate::components::icons::{CheckIcon, EllipsisIcon, FolderIcon, LoaderIcon, PlusIcon, XIcon};
+use crate::components::helpers::ConfirmDialogView;
+use crate::components::icons::{
+    CheckIcon, EllipsisIcon, FolderIcon, LoaderIcon, PlusIcon, TrashIcon, XIcon,
+};
 use crate::components::{Dropdown, Placement};
 use crate::display_types::DetectedCandidateStatus;
 use crate::stores::import::{ImportState, ImportStateStoreExt};
@@ -25,6 +28,8 @@ pub fn ReleaseSidebarView(
     on_remove: EventHandler<usize>,
     /// Called to clear all folders
     on_clear_all: EventHandler<()>,
+    /// Called to open a folder in the native file manager
+    on_open_folder: EventHandler<String>,
 ) -> Element {
     // Use lens for is_scanning, computed values need full read
     let is_scanning = *state.is_scanning_candidates().read();
@@ -35,6 +40,8 @@ pub fn ReleaseSidebarView(
 
     let mut show_menu = use_signal(|| false);
     let is_open: ReadSignal<bool> = show_menu.into();
+    let mut show_clear_confirm = use_signal(|| false);
+    let is_clear_confirm_open: ReadSignal<bool> = show_clear_confirm.into();
     // Static ID - only one sidebar menu per page
     let anchor_id = "release-sidebar-menu";
 
@@ -89,27 +96,25 @@ pub fn ReleaseSidebarView(
                         is_open,
                         on_close: move |_| show_menu.set(false),
                         placement: Placement::BottomEnd,
-                        class: "bg-gray-800 border border-gray-700 rounded-lg shadow-xl min-w-[120px] overflow-clip",
+                        class: "bg-gray-900 border border-white/5 rounded-lg shadow-xl min-w-[120px] p-1 overflow-clip",
                         button {
-                            class: "w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700 transition-colors",
+                            class: "w-full px-2.5 py-1.5 text-left text-sm text-gray-200 hover:bg-gray-700 hover:text-white rounded transition-colors flex items-center gap-2",
                             onclick: move |evt| {
                                 evt.stop_propagation();
                                 show_menu.set(false);
                                 on_add_folder.call(());
                             },
+                            FolderIcon { class: "w-3.5 h-3.5 text-gray-400" }
                             span { "Add" }
                         }
                         button {
-                            class: "w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700 transition-colors",
+                            class: "w-full px-2.5 py-1.5 text-left text-sm text-gray-200 hover:bg-gray-700 hover:text-white rounded transition-colors flex items-center gap-2",
                             onclick: move |evt| {
                                 evt.stop_propagation();
                                 show_menu.set(false);
-                                if let Some(window) = web_sys_x::window() {
-                                    if window.confirm_with_message("Clear all folders?").unwrap_or(false) {
-                                        on_clear_all.call(());
-                                    }
-                                }
+                                show_clear_confirm.set(true);
                             },
+                            TrashIcon { class: "w-3.5 h-3.5 text-gray-400" }
                             span { "Clear" }
                         }
                     }
@@ -128,32 +133,42 @@ pub fn ReleaseSidebarView(
                                 div {
                                     key: "{index}",
                                     class: format!(
-                                        "group w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-150 min-w-0 cursor-pointer {}",
+                                        "group relative w-full flex items-center gap-2.5 pl-3 pr-2.5 py-2 rounded-lg transition-all duration-150 min-w-0 cursor-pointer {}",
                                         if is_selected {
                                             "bg-hover text-white"
                                         } else {
                                             "text-gray-200 hover:bg-surface-overlay hover:text-white"
                                         },
                                     ),
-                                    title: "{candidate.path}",
                                     onclick: move |_| on_select.call(index),
                                     // Status icon: folder (pending), spinner (importing), check (imported)
-                                    match status {
-                                        DetectedCandidateStatus::Pending => rsx! {
-                                            FolderIcon { class: "w-4 h-4 flex-shrink-0 text-gray-400" }
-                                        },
-                                        DetectedCandidateStatus::Importing => rsx! {
-                                            LoaderIcon { class: "w-4 h-4 flex-shrink-0 text-blue-400 animate-spin" }
-                                        },
-                                        DetectedCandidateStatus::Imported => rsx! {
-                                            CheckIcon { class: "w-4 h-4 flex-shrink-0 text-green-500" }
-                                        },
+                                    {
+                                        let path = candidate.path.clone();
+                                        match status {
+                                            DetectedCandidateStatus::Pending => rsx! {
+                                                button {
+                                                    class: "flex-shrink-0 text-gray-400 hover:text-white transition-colors",
+                                                    title: "{path}",
+                                                    onclick: move |e: MouseEvent| {
+                                                        e.stop_propagation();
+                                                        on_open_folder.call(path.clone());
+                                                    },
+                                                    FolderIcon { class: "w-4 h-4" }
+                                                }
+                                            },
+                                            DetectedCandidateStatus::Importing => rsx! {
+                                                LoaderIcon { class: "w-4 h-4 flex-shrink-0 text-blue-400 animate-spin" }
+                                            },
+                                            DetectedCandidateStatus::Imported => rsx! {
+                                                CheckIcon { class: "w-4 h-4 flex-shrink-0 text-green-500" }
+                                            },
+                                        }
                                     }
                                     div { class: "flex-1 text-xs truncate min-w-0", {candidate.name.clone()} }
                                     // Only show remove button for pending candidates
                                     if status == DetectedCandidateStatus::Pending {
                                         button {
-                                            class: "opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-white rounded transition-opacity",
+                                            class: "absolute right-1 opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-white rounded transition-opacity bg-surface-raised",
                                             title: "Remove",
                                             onclick: move |e: MouseEvent| {
                                                 e.stop_propagation();
@@ -168,6 +183,22 @@ pub fn ReleaseSidebarView(
                     }
                 }
             }
+        }
+
+        ConfirmDialogView {
+            is_open: is_clear_confirm_open,
+            title: "Clear all folders?".to_string(),
+            message: "This will remove all detected folders from the list.".to_string(),
+            confirm_label: "Clear".to_string(),
+            cancel_label: "Cancel".to_string(),
+            is_destructive: true,
+            on_confirm: move |_| {
+                show_clear_confirm.set(false);
+                on_clear_all.call(());
+            },
+            on_cancel: move |_| {
+                show_clear_confirm.set(false);
+            },
         }
     }
 }

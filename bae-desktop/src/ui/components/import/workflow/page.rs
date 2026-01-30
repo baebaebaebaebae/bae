@@ -120,6 +120,10 @@ pub fn ImportPage() -> Element {
         }
     };
 
+    let on_open_folder = move |path: String| {
+        let _ = std::process::Command::new("open").arg(&path).spawn();
+    };
+
     rsx! {
         ImportView {
             selected_source,
@@ -129,6 +133,7 @@ pub fn ImportPage() -> Element {
             on_add_folder,
             on_remove_candidate,
             on_clear_all,
+            on_open_folder,
 
             match selected_source {
                 ImportSource::Folder => rsx! {

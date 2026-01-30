@@ -27,6 +27,8 @@ pub fn ImportView(
     on_remove_candidate: EventHandler<usize>,
     /// Sidebar: called to clear all candidates
     on_clear_all: EventHandler<()>,
+    /// Sidebar: called to open a folder in the native file manager
+    on_open_folder: EventHandler<String>,
     children: Element,
 ) -> Element {
     // Determine if sidebar should be shown based on state
@@ -65,6 +67,7 @@ pub fn ImportView(
                                 on_add_folder,
                                 on_remove: on_remove_candidate,
                                 on_clear_all,
+                                on_open_folder,
                             }
                         }
                     }
