@@ -243,29 +243,6 @@ jobs:
         </rss>
         EOF
 
-    - name: Build demo web app
-      working-directory: ./bae-mocks
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        dx build --release --platform web
-
-    - name: Install Playwright dependencies
-      working-directory: ./bae-mocks/e2e
-      run: |
-        npm ci
-        npx playwright install chromium
-
-    - name: Generate screenshots
-      working-directory: ./bae-mocks/e2e
-      run: npx playwright test screenshots/
-
-    - name: Upload screenshots
-      uses: actions/upload-artifact@v4
-      with:
-        name: website-screenshots
-        path: website/public/screenshots/
-        retention-days: 1
-
     - name: Create git tag
       run: |
         VERSION="${{ needs.calculate-version.outputs.version }}"
@@ -297,5 +274,5 @@ jobs:
     needs: [release]
     uses: ./.github/workflows/deploy-website.yml
     with:
-      screenshots_artifact: website-screenshots
+      screenshots_artifact: ''
     secrets: inherit
