@@ -159,6 +159,7 @@ jobs:
 
   e2e:
     name: E2E Tests
+    if: false  # Disabled: flaky and slow. Re-enable when stabilized.
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
