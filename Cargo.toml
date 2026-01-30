@@ -12,3 +12,8 @@ js-sys-x = "0.3.83-alpha.1"
 wasm-bindgen-futures-x = "0.4.56-alpha.1"
 # Logging
 tracing = "0.1.41"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
