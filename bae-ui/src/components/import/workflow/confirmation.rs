@@ -1,6 +1,6 @@
 //! Confirmation view component
 
-use crate::components::icons::ImageIcon;
+use crate::components::icons::{ImageIcon, PencilIcon};
 use crate::components::{
     Button, ButtonSize, ButtonVariant, ChromelessButton, Modal, Select, SelectOption,
     StorageProfile,
@@ -70,10 +70,10 @@ pub fn ConfirmationView(
                     // Cover art (clickable if options available)
                     if has_cover_options {
                         ChromelessButton {
-                            class: Some("flex-shrink-0".to_string()),
+                            class: Some("flex-shrink-0 relative group".to_string()),
                             onclick: move |_| show_cover_modal.set(true),
                             if let Some(ref url) = display_cover_url {
-                                div { class: "w-20 h-20 rounded-lg overflow-clip hover:ring-2 hover:ring-gray-500 transition-all",
+                                div { class: "w-20 h-20 rounded-lg overflow-clip ring-0 group-hover:ring-2 group-hover:ring-gray-500 transition-all",
                                     img {
                                         src: "{url}",
                                         alt: "Album cover",
@@ -81,9 +81,12 @@ pub fn ConfirmationView(
                                     }
                                 }
                             } else {
-                                div { class: "w-20 h-20 rounded-lg bg-gray-700 flex items-center justify-center hover:ring-2 hover:ring-gray-500 transition-all",
+                                div { class: "w-20 h-20 rounded-lg bg-gray-700 flex items-center justify-center ring-0 group-hover:ring-2 group-hover:ring-gray-500 transition-all",
                                     ImageIcon { class: "w-8 h-8 text-gray-500" }
                                 }
+                            }
+                            div { class: "absolute top-0.5 right-0.5 bg-black/40 group-hover:bg-black/60 backdrop-blur-sm rounded-md p-1 transition-colors",
+                                PencilIcon { class: "w-3.5 h-3.5 text-gray-300 group-hover:text-white" }
                             }
                         }
                     } else {
