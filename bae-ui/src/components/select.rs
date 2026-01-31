@@ -26,7 +26,7 @@ static SELECT_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Context shared between Select and its SelectOption children
 #[derive(Clone)]
 struct SelectContext {
-    current_value: String,
+    current_value: Signal<String>,
     onchange: EventHandler<String>,
     close: Callback<()>,
     /// Registered options: (value, label)
@@ -49,6 +49,12 @@ pub fn Select(
     let mut is_open = use_signal(|| false);
     let is_open_read: ReadSignal<bool> = is_open.into();
     let options: Signal<Vec<(String, String)>> = use_signal(Vec::new);
+    let mut current_value = use_signal(|| value.clone());
+
+    // Keep current_value signal in sync with the value prop
+    if *current_value.peek() != value {
+        current_value.set(value.clone());
+    }
 
     let anchor_id = use_hook(|| {
         let id = SELECT_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -60,7 +66,7 @@ pub fn Select(
     });
 
     let ctx = SelectContext {
-        current_value: value.clone(),
+        current_value,
         onchange,
         close: close_cb,
         options,
@@ -115,18 +121,23 @@ pub fn SelectOption(
     label: String,
 ) -> Element {
     let ctx = use_context::<SelectContext>();
-    let is_selected = ctx.current_value == value;
+    let is_selected = *ctx.current_value.read() == value;
 
-    // Register this option's value and label
+    // Register this option's value and label on mount, remove on unmount
     {
-        let value = value.clone();
+        let value_for_hook = value.clone();
+        let value_for_drop = value.clone();
         let label = label.clone();
         let mut options = ctx.options;
         use_hook(move || {
             let mut opts = options.write();
-            if !opts.iter().any(|(v, _)| *v == value) {
-                opts.push((value, label));
+            if !opts.iter().any(|(v, _)| *v == value_for_hook) {
+                opts.push((value_for_hook, label));
             }
+        });
+        use_drop(move || {
+            let mut opts = options.write();
+            opts.retain(|(v, _)| *v != value_for_drop);
         });
     }
 

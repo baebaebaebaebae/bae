@@ -1,34 +1,42 @@
 //! URL state persistence for mock pages
 //!
-//! Provides a simple state string format: key=value,key=value
-//! e.g. "phase=MultipleExactMatches,error=1"
+//! Serializes control state as base64-encoded JSON in the query string,
+//! keeping URLs opaque and avoiding conflicts with query parameter names.
 
-/// Parse state string into key-value pairs
-pub fn parse_state(state: &str) -> Vec<(String, String)> {
-    if state.is_empty() {
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use std::collections::BTreeMap;
+
+/// Decode a state string from a URL query parameter into key-value pairs.
+pub fn parse_state(encoded: &str) -> Vec<(String, String)> {
+    if encoded.is_empty() {
         return Vec::new();
     }
-    state
-        .split(',')
-        .filter_map(|pair| {
-            let mut parts = pair.splitn(2, '=');
-            let key = parts.next()?.to_string();
-            let value = parts.next().unwrap_or("").to_string();
-            Some((key, value))
-        })
-        .collect()
+
+    let json_bytes = match URL_SAFE_NO_PAD.decode(encoded) {
+        Ok(b) => b,
+        Err(_) => return Vec::new(),
+    };
+
+    let map: BTreeMap<String, String> = match serde_json::from_slice(&json_bytes) {
+        Ok(m) => m,
+        Err(_) => return Vec::new(),
+    };
+
+    map.into_iter().collect()
 }
 
-/// Build state string from key-value pairs
+/// Encode key-value pairs into a base64 state string for the URL.
 pub fn build_state(pairs: &[(String, String)]) -> String {
-    pairs
+    let map: BTreeMap<&str, &str> = pairs
         .iter()
-        .map(|(k, v)| format!("{}={}", k, v))
-        .collect::<Vec<_>>()
-        .join(",")
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    let json = serde_json::to_string(&map).expect("state map is always serializable");
+    URL_SAFE_NO_PAD.encode(json.as_bytes())
 }
 
-/// Builder to collect state changes and produce a state string
+/// Builder to collect state changes and produce an encoded state string
 pub struct StateBuilder {
     pairs: Vec<(String, String)>,
 }
@@ -49,17 +57,15 @@ impl StateBuilder {
         self.pairs.push((key.to_string(), value.to_string()));
     }
 
-    pub fn build(mut self) -> String {
-        self.pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    pub fn build(self) -> String {
         build_state(&self.pairs)
     }
 
     pub fn build_option(self) -> Option<String> {
-        let s = self.build();
-        if s.is_empty() {
+        if self.pairs.is_empty() {
             None
         } else {
-            Some(s)
+            Some(self.build())
         }
     }
 }
