@@ -103,21 +103,18 @@ pub enum PlaybackAction {
     Previous,
 }
 
-/// Check if the platform modifier key is pressed (Cmd on macOS, Ctrl elsewhere).
+/// Check if the platform modifier key is pressed (Ctrl on Windows/Linux).
+/// On macOS, shortcuts are handled by the native menu instead.
+#[cfg(not(target_os = "macos"))]
 fn has_platform_modifier(evt: &KeyboardEvent) -> bool {
     let mods = evt.modifiers();
-    #[cfg(target_os = "macos")]
-    {
-        mods.meta() && !mods.ctrl() && !mods.alt() && !mods.shift()
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        mods.ctrl() && !mods.meta() && !mods.alt() && !mods.shift()
-    }
+    mods.ctrl() && !mods.meta() && !mods.alt() && !mods.shift()
 }
 
 /// Try to handle a keyboard event as an app shortcut.
 /// Returns `Some(NavAction)` if the event matches a shortcut, `None` otherwise.
+/// On macOS, these shortcuts are handled by the native menu instead.
+#[cfg(not(target_os = "macos"))]
 pub fn handle_shortcut(evt: &KeyboardEvent) -> Option<NavAction> {
     if !has_platform_modifier(evt) {
         return None;
@@ -154,14 +151,23 @@ pub fn ShortcutsHandler(children: Element) -> Element {
         });
     });
 
-    let onkeydown = move |evt| {
+    // On macOS, keyboard shortcuts are handled by the native menu.
+    // On other platforms, handle them via the Dioxus keydown event.
+    #[cfg(not(target_os = "macos"))]
+    let onkeydown = move |evt: KeyboardEvent| {
         if let Some(action) = handle_shortcut(&evt) {
             evt.prevent_default();
             execute_nav_action(action);
         }
     };
 
-    rsx! {
+    #[cfg(not(target_os = "macos"))]
+    return rsx! {
         div { class: "contents", onkeydown, {children} }
+    };
+
+    #[cfg(target_os = "macos")]
+    rsx! {
+        div { class: "contents", {children} }
     }
 }
