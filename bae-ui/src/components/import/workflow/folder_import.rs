@@ -220,7 +220,7 @@ fn WorkflowContent(
     on_view_duplicate: EventHandler<String>,
 ) -> Element {
     rsx! {
-        div { class: "flex-1 min-h-0 overflow-auto bg-gray-900/40 rounded-tl-xl",
+        div { class: "flex-1 min-h-0 overflow-auto bg-gray-900/40 rounded-tl-xl flex flex-col",
             match step {
                 ImportStep::Identify => rsx! {
                     IdentifyStep {
