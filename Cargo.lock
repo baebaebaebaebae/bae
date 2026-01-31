@@ -791,6 +791,7 @@ name = "bae-mocks"
 version = "0.1.0"
 dependencies = [
  "bae-ui",
+ "base64",
  "dioxus",
  "getrandom 0.2.17",
  "serde",

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+base64 = "0.22"
 bae-ui = { path = "../bae-ui" }
 dioxus = { workspace = true, features = ["router", "web", "asset", "document", "launch"] }
 serde = { version = "1.0", features = ["derive"] }
