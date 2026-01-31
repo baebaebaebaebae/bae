@@ -88,6 +88,27 @@ pub struct ConfirmingState {
     pub source_disc_id: Option<String>,
 }
 
+/// Pick a default cover: remote (MB/Discogs) > managed artwork > release artwork > none
+fn default_cover(candidate: &MatchCandidate, files: &CategorizedFileInfo) -> Option<SelectedCover> {
+    if let Some(url) = &candidate.cover_url {
+        return Some(SelectedCover::Remote {
+            url: url.clone(),
+            source: String::new(),
+        });
+    }
+    if let Some(img) = files.managed_artwork.first() {
+        return Some(SelectedCover::Local {
+            filename: img.name.clone(),
+        });
+    }
+    if let Some(img) = files.artwork.first() {
+        return Some(SelectedCover::Local {
+            filename: img.name.clone(),
+        });
+    }
+    None
+}
+
 /// Phase within the Confirm step
 #[derive(Clone, Debug, Default, PartialEq, Store)]
 pub enum ConfirmPhase {
@@ -254,11 +275,12 @@ impl IdentifyingState {
                             IdentifyMode::MultipleExactMatches(id) => Some(id.clone()),
                             _ => None,
                         };
+                        let selected_cover = default_cover(&candidate, &self.files);
                         return CandidateState::Confirming(Box::new(ConfirmingState {
                             files: self.files,
                             metadata: self.metadata,
                             confirmed_candidate: candidate,
-                            selected_cover: None,
+                            selected_cover,
                             selected_profile_id: None,
                             phase: ConfirmPhase::Ready,
                             auto_matches: self.auto_matches,
@@ -310,11 +332,13 @@ impl IdentifyingState {
                     state.mode = IdentifyMode::ManualSearch;
                 } else if matches.len() == 1 {
                     // Single match - auto-confirm
+                    let candidate = matches.into_iter().next().unwrap();
+                    let selected_cover = default_cover(&candidate, &state.files);
                     return CandidateState::Confirming(Box::new(ConfirmingState {
                         files: state.files,
                         metadata: state.metadata,
-                        confirmed_candidate: matches.into_iter().next().unwrap(),
-                        selected_cover: None,
+                        confirmed_candidate: candidate,
+                        selected_cover,
                         selected_profile_id: None,
                         phase: ConfirmPhase::Ready,
                         auto_matches: vec![],
@@ -386,11 +410,12 @@ impl IdentifyingState {
                 let state = self;
                 if let Some(idx) = state.search_state.selected_result_index {
                     if let Some(candidate) = state.search_state.search_results.get(idx).cloned() {
+                        let selected_cover = default_cover(&candidate, &state.files);
                         return CandidateState::Confirming(Box::new(ConfirmingState {
                             files: state.files,
                             metadata: state.metadata,
                             confirmed_candidate: candidate,
-                            selected_cover: None,
+                            selected_cover,
                             selected_profile_id: None,
                             phase: ConfirmPhase::Ready,
                             auto_matches: state.auto_matches,
@@ -733,12 +758,14 @@ impl ImportState {
         match selected {
             SelectedCover::Remote { url, .. } => Some(url),
             SelectedCover::Local { filename } => {
-                // Find the artwork file with matching name
+                // Find the artwork file with matching name (check both release and managed artwork)
                 self.current_candidate_state()
                     .and_then(|s| {
-                        s.files()
+                        let files = s.files();
+                        files
                             .artwork
                             .iter()
+                            .chain(files.managed_artwork.iter())
                             .find(|f| f.name == filename)
                             .map(|f| f.display_url.clone())
                     })
