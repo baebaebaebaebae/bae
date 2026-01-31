@@ -91,12 +91,42 @@ impl TooltipHandle {
 /// ```
 pub fn use_tooltip_handle() -> TooltipHandle {
     let anchor = use_signal(|| None::<Rc<MountedData>>);
-    let is_visible = use_signal(|| false);
-    let hover_task = use_signal(|| None::<Task>);
+    let mut is_visible = use_signal(|| false);
+    let mut hover_task = use_signal(|| None::<Task>);
+
+    // Hide tooltip when the window loses focus (e.g. switching to Finder).
+    // Store the closure so we can remove the listener on unmount.
+    let mut blur_cleanup: Signal<Option<BlurCleanup>> = use_signal(|| None);
+
+    use_hook(move || {
+        let Some(window) = web_sys_x::window() else {
+            return;
+        };
+
+        let cb = wasm_bindgen_x::closure::Closure::wrap(Box::new(move || {
+            if let Some(task) = hover_task.take() {
+                task.cancel();
+            }
+            is_visible.set(false);
+        }) as Box<dyn FnMut()>);
+
+        let _ = window.add_event_listener_with_callback("blur", cb.as_ref().unchecked_ref());
+
+        blur_cleanup.set(Some(BlurCleanup {
+            window,
+            callback: cb,
+        }));
+    });
 
     use_drop(move || {
         if let Some(task) = hover_task.peek().as_ref() {
             task.cancel();
+        }
+        if let Some(cleanup) = blur_cleanup.peek().as_ref() {
+            let _ = cleanup.window.remove_event_listener_with_callback(
+                "blur",
+                cleanup.callback.as_ref().unchecked_ref(),
+            );
         }
     });
 
@@ -105,6 +135,12 @@ pub fn use_tooltip_handle() -> TooltipHandle {
         is_visible,
         hover_task,
     }
+}
+
+/// Stored state for cleaning up the window blur listener.
+struct BlurCleanup {
+    window: web_sys_x::Window,
+    callback: wasm_bindgen_x::closure::Closure<dyn FnMut()>,
 }
 
 /// Tooltip bubble positioned via popover API + floating-ui.
@@ -125,12 +161,16 @@ pub fn TooltipPopover(
     #[props(default)]
     cross_axis_offset: Option<i32>,
 ) -> Element {
-    let is_visible = handle.is_visible;
-    let anchor = handle.anchor;
+    // Copy parent-owned signals into local signals so use_effect reads from this
+    // component's scope (avoids Dioxus "not a descendant" false positive warning).
+    let mut local_visible = use_signal(|| false);
+    local_visible.set((handle.is_visible)());
+    let mut local_anchor: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
+    local_anchor.set((handle.anchor)());
     let mut floating_ref: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
 
     use_effect(move || {
-        let visible = is_visible();
+        let visible = local_visible();
 
         let Some(floating_mounted) = floating_ref() else {
             return;
@@ -165,7 +205,7 @@ pub fn TooltipPopover(
                 }
             }
 
-            let Some(anchor_mounted) = anchor() else {
+            let Some(anchor_mounted) = local_anchor() else {
                 return;
             };
             let Some(anchor_el) = anchor_mounted.downcast::<web_sys_x::Element>().cloned() else {
