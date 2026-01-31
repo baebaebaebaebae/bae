@@ -246,9 +246,25 @@ fn CandidateRow(
                 DetectedCandidateStatus::Imported => rsx! {
                     CheckIcon { class: "w-4 h-4 flex-shrink-0 text-green-500" }
                 },
-                DetectedCandidateStatus::Incomplete { .. } => rsx! {
-                    FolderIcon { class: "w-4 h-4 flex-shrink-0 text-gray-600" }
-                },
+                DetectedCandidateStatus::Incomplete { .. } => {
+                    let open_path = path.clone();
+                    rsx! {
+                        Tooltip {
+                            text: platform::reveal_in_file_manager().to_string(),
+                            placement: Placement::TopStart,
+                            nowrap: true,
+                            cross_axis_offset: -TOOLTIP_PADDING_X,
+                            button {
+                                class: "flex-shrink-0 text-gray-600 hover:text-white transition-colors",
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    on_open_folder.call(open_path.clone());
+                                },
+                                FolderIcon { class: "w-4 h-4" }
+                            }
+                        }
+                    }
+                }
             }
 
             div { class: "flex-1 min-w-0",

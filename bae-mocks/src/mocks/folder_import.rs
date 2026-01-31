@@ -284,7 +284,8 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                 ]),
                 artwork: vec![mock_artwork("AlbumArt.jpg", 450_000, "JPEG", 5)],
                 documents: vec![],
-                ..Default::default()
+                bad_audio_count: 2,
+                bad_image_count: 1,
             },
         ),
         // Folder 5: Vinyl rip with extensive documentation
@@ -522,6 +523,28 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
     let mut candidate_states = HashMap::new();
     if has_candidates {
         candidate_states.insert(folder_path.clone(), candidate_state);
+
+        // Add state for the incomplete candidate so its status is computed correctly
+        for (candidate, files) in &folder_data {
+            if candidate.path != folder_path
+                && (files.bad_audio_count > 0 || files.bad_image_count > 0)
+            {
+                candidate_states.insert(
+                    candidate.path.clone(),
+                    CandidateState::Identifying(IdentifyingState {
+                        files: files.clone(),
+                        metadata: FolderMetadata::default(),
+                        mode: IdentifyMode::ManualSearch,
+                        auto_matches: vec![],
+                        selected_match_index: None,
+                        search_state: ManualSearchState::default(),
+                        discid_lookup_error: None,
+                        disc_id_not_found: None,
+                        source_disc_id: None,
+                    }),
+                );
+            }
+        }
     }
 
     // Create store once, then update when registry values change
