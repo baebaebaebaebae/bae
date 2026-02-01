@@ -30,6 +30,7 @@ chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3.31"
 uuid = { version = "1.0", features = ["v4"] }
 dirs = "5.0"
+backtrace = "0.3.76"
 
 [target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'.dependencies]
 souvlaki = "0.8"
