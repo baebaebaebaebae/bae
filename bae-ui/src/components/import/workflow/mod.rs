@@ -8,6 +8,7 @@ mod cd_toc_display;
 mod confirmation;
 mod file_list;
 mod folder_import;
+mod gallery_lightbox;
 mod image_lightbox;
 mod manual_search_panel;
 mod match_item;

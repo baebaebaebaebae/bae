@@ -26,7 +26,9 @@ use crate::components::icons::{CloudOffIcon, LoaderIcon};
 use crate::components::StorageProfile;
 use crate::components::{Button, ButtonSize, ButtonVariant};
 use crate::components::{PanelPosition, ResizablePanel, ResizeDirection};
-use crate::display_types::{IdentifyMode, ImportStep, MatchCandidate, SearchSource, SearchTab};
+use crate::display_types::{
+    IdentifyMode, ImportStep, MatchCandidate, SearchSource, SearchTab, SelectedCover,
+};
 use crate::stores::import::{CandidateState, ConfirmPhase, ImportState, ImportStateStoreExt};
 use dioxus::prelude::*;
 
@@ -75,8 +77,7 @@ pub struct FolderImportViewProps {
     pub on_cancel_search: EventHandler<()>,
     pub on_manual_confirm: EventHandler<MatchCandidate>,
     pub on_retry_discid_lookup: EventHandler<()>,
-    pub on_select_remote_cover: EventHandler<String>,
-    pub on_select_local_cover: EventHandler<String>,
+    pub on_select_cover: EventHandler<SelectedCover>,
     pub on_storage_profile_change: EventHandler<Option<String>>,
     pub on_edit: EventHandler<()>,
     pub on_confirm: EventHandler<()>,
@@ -147,8 +148,7 @@ pub fn FolderImportView(props: FolderImportViewProps) -> Element {
                             on_cancel_search: props.on_cancel_search,
                             on_manual_confirm: props.on_manual_confirm,
                             on_retry_discid_lookup: props.on_retry_discid_lookup,
-                            on_select_remote_cover: props.on_select_remote_cover,
-                            on_select_local_cover: props.on_select_local_cover,
+                            on_select_cover: props.on_select_cover,
                             on_storage_profile_change: props.on_storage_profile_change,
                             on_edit: props.on_edit,
                             on_confirm: props.on_confirm,
@@ -211,8 +211,7 @@ fn WorkflowContent(
     on_cancel_search: EventHandler<()>,
     on_manual_confirm: EventHandler<MatchCandidate>,
     on_retry_discid_lookup: EventHandler<()>,
-    on_select_remote_cover: EventHandler<String>,
-    on_select_local_cover: EventHandler<String>,
+    on_select_cover: EventHandler<SelectedCover>,
     on_storage_profile_change: EventHandler<Option<String>>,
     on_edit: EventHandler<()>,
     on_confirm: EventHandler<()>,
@@ -247,8 +246,7 @@ fn WorkflowContent(
                     ConfirmStep {
                         state,
                         storage_profiles,
-                        on_select_remote_cover,
-                        on_select_local_cover,
+                        on_select_cover,
                         on_storage_profile_change,
                         on_edit,
                         on_confirm,
@@ -337,8 +335,7 @@ fn IdentifyStep(
 fn ConfirmStep(
     state: ReadStore<ImportState>,
     storage_profiles: ReadSignal<Vec<StorageProfile>>,
-    on_select_remote_cover: EventHandler<String>,
-    on_select_local_cover: EventHandler<String>,
+    on_select_cover: EventHandler<SelectedCover>,
     on_storage_profile_change: EventHandler<Option<String>>,
     on_edit: EventHandler<()>,
     on_confirm: EventHandler<()>,
@@ -353,6 +350,10 @@ fn ConfirmStep(
     let artwork_files = st
         .current_candidate_state()
         .map(|s| s.files().artwork.clone())
+        .unwrap_or_default();
+    let managed_artwork = st
+        .current_candidate_state()
+        .map(|s| s.files().managed_artwork.clone())
         .unwrap_or_default();
     let selected_profile_id = st.get_storage_profile_id();
 
@@ -385,13 +386,13 @@ fn ConfirmStep(
                 selected_cover,
                 display_cover_url,
                 artwork_files,
+                managed_artwork,
                 remote_cover_url: candidate.cover_url.clone(),
                 storage_profiles,
                 selected_profile_id,
                 is_importing,
                 preparing_step_text,
-                on_select_remote_cover,
-                on_select_local_cover,
+                on_select_cover,
                 on_storage_profile_change,
                 on_edit,
                 on_confirm,

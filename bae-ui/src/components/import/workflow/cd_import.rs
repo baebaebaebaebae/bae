@@ -18,7 +18,7 @@ use super::{
 };
 use crate::components::StorageProfile;
 use crate::display_types::{
-    CdDriveInfo, IdentifyMode, ImportStep, MatchCandidate, SearchSource, SearchTab,
+    CdDriveInfo, IdentifyMode, ImportStep, MatchCandidate, SearchSource, SearchTab, SelectedCover,
 };
 use crate::stores::import::{CandidateState, ConfirmPhase, ImportState};
 use dioxus::prelude::*;
@@ -59,8 +59,7 @@ pub struct CdImportViewProps {
     pub on_cancel_search: EventHandler<()>,
     pub on_manual_confirm: EventHandler<MatchCandidate>,
     pub on_retry_discid_lookup: EventHandler<()>,
-    pub on_select_remote_cover: EventHandler<String>,
-    pub on_select_local_cover: EventHandler<String>,
+    pub on_select_cover: EventHandler<SelectedCover>,
     pub on_storage_profile_change: EventHandler<Option<String>>,
     pub on_edit: EventHandler<()>,
     pub on_confirm: EventHandler<()>,
@@ -123,8 +122,7 @@ pub fn CdImportView(props: CdImportViewProps) -> Element {
                         state,
                         storage_profiles: props.storage_profiles,
                         on_clear: props.on_clear,
-                        on_select_remote_cover: props.on_select_remote_cover,
-                        on_select_local_cover: props.on_select_local_cover,
+                        on_select_cover: props.on_select_cover,
                         on_storage_profile_change: props.on_storage_profile_change,
                         on_edit: props.on_edit,
                         on_confirm: props.on_confirm,
@@ -227,8 +225,7 @@ fn CdConfirmContent(
     state: ReadStore<ImportState>,
     storage_profiles: ReadSignal<Vec<StorageProfile>>,
     on_clear: EventHandler<()>,
-    on_select_remote_cover: EventHandler<String>,
-    on_select_local_cover: EventHandler<String>,
+    on_select_cover: EventHandler<SelectedCover>,
     on_storage_profile_change: EventHandler<Option<String>>,
     on_edit: EventHandler<()>,
     on_confirm: EventHandler<()>,
@@ -292,13 +289,13 @@ fn CdConfirmContent(
                 selected_cover,
                 display_cover_url,
                 artwork_files,
+                managed_artwork: vec![],
                 remote_cover_url: candidate.cover_url.clone(),
                 storage_profiles,
                 selected_profile_id,
                 is_importing,
                 preparing_step_text,
-                on_select_remote_cover,
-                on_select_local_cover,
+                on_select_cover,
                 on_storage_profile_change,
                 on_edit,
                 on_confirm,

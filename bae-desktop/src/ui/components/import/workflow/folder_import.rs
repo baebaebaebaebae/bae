@@ -429,29 +429,14 @@ pub fn FolderImport() -> Element {
         }
     };
 
-    // Cover selection handlers
-    let on_select_remote_cover = {
+    // Cover selection handler
+    let on_select_cover = {
         let app = app.clone();
-        move |url: String| {
+        move |cover: SelectedCover| {
             app.state
                 .import()
                 .write()
-                .dispatch(CandidateEvent::SelectCover(Some(SelectedCover::Remote {
-                    url,
-                    source: String::new(),
-                })));
-        }
-    };
-
-    let on_select_local_cover = {
-        let app = app.clone();
-        move |filename: String| {
-            app.state
-                .import()
-                .write()
-                .dispatch(CandidateEvent::SelectCover(Some(SelectedCover::Local {
-                    filename,
-                })));
+                .dispatch(CandidateEvent::SelectCover(Some(cover)));
         }
     };
 
@@ -521,8 +506,7 @@ pub fn FolderImport() -> Element {
             on_cancel_search: move |_| cancel_search(),
             on_manual_confirm,
             on_retry_discid_lookup,
-            on_select_remote_cover,
-            on_select_local_cover,
+            on_select_cover,
             on_storage_profile_change,
             on_edit,
             on_confirm,
