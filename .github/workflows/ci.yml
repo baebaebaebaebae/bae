@@ -106,25 +106,14 @@ jobs:
         cargo clippy -p bae-ui --target wasm32-unknown-unknown -- -D warnings
         cargo clippy -p bae-mocks --target wasm32-unknown-unknown -- -D warnings
         # Check integration tests with test-utils feature
-        for test_file in bae-core/tests/*.rs; do
-          if [ -f "$test_file" ]; then
-            test_name=$(basename "$test_file" .rs)
-            echo "Checking integration test: $test_name"
-            cargo clippy -p bae-core --test "$test_name" --features bae-core/test-utils -- -D warnings
-          fi
-        done
+        cargo clippy -p bae-core --tests --features bae-core/test-utils -- -D warnings
 
     - name: Run Clippy (Windows)
       if: runner.os == 'Windows'
       shell: cmd
       run: |
         cargo clippy --workspace --target x86_64-pc-windows-gnu -- -D warnings
-        for %%f in (bae-core\tests\*.rs) do (
-          for %%n in ("%%~nf") do (
-            echo Checking integration test: %%~n
-            cargo clippy -p bae-core --target x86_64-pc-windows-gnu --test "%%~n" --features bae-core/test-utils -- -D warnings
-          )
-        )
+        cargo clippy -p bae-core --tests --target x86_64-pc-windows-gnu --features bae-core/test-utils -- -D warnings
 
     - name: Check for WASM-only APIs in desktop code
       if: runner.os != 'Windows'
