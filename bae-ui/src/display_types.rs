@@ -333,6 +333,17 @@ pub enum SelectedCover {
     Local { filename: String },
 }
 
+impl SelectedCover {
+    /// Compare covers by identity (URL for remote, filename for local), ignoring metadata like `source`
+    pub fn same_cover(&self, other: &SelectedCover) -> bool {
+        match (self, other) {
+            (SelectedCover::Remote { url: a, .. }, SelectedCover::Remote { url: b, .. }) => a == b,
+            (SelectedCover::Local { filename: a }, SelectedCover::Local { filename: b }) => a == b,
+            _ => false,
+        }
+    }
+}
+
 /// Status of a detected candidate during import
 #[derive(Clone, Debug, PartialEq, Default)]
 pub enum DetectedCandidateStatus {

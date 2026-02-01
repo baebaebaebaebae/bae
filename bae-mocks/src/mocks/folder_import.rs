@@ -150,7 +150,12 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
     let search_label = use_signal(String::new);
     let mut search_catalog_number = use_signal(String::new);
     let mut search_barcode = use_signal(String::new);
-    let mut selected_cover = use_signal(|| None::<SelectedCover>);
+    let mut selected_cover = use_signal(|| {
+        Some(SelectedCover::Remote {
+            url: "/covers/the-midnight-signal_neon-frequencies.png".to_string(),
+            source: String::new(),
+        })
+    });
     let mut selected_profile_id = use_signal(|| Some("profile-1".to_string()));
 
     // Parse state from registry
@@ -284,6 +289,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                 ]),
                 artwork: vec![mock_artwork("AlbumArt.jpg", 450_000, "JPEG", 5)],
                 documents: vec![],
+                managed_artwork: vec![],
                 bad_audio_count: 2,
                 bad_image_count: 1,
             },
@@ -608,16 +614,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                     on_cancel_search: move |_| registry_for_cancel.set_string("search_phase", "Empty".to_string()),
                     on_manual_confirm: |_| {},
                     on_retry_discid_lookup: |_| {},
-                    on_select_remote_cover: move |url| {
-                        selected_cover
-                            .set(
-                                Some(SelectedCover::Remote {
-                                    url,
-                                    source: "MusicBrainz".to_string(),
-                                }),
-                            )
-                    },
-                    on_select_local_cover: move |filename| { selected_cover.set(Some(SelectedCover::Local { filename })) },
+                    on_select_cover: move |cover| selected_cover.set(Some(cover)),
                     on_storage_profile_change: move |id| selected_profile_id.set(id),
                     on_edit: |_| {},
                     on_confirm: |_| {},
