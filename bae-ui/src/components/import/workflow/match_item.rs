@@ -1,6 +1,7 @@
 //! Match item view component
 
 use crate::components::icons::ImageIcon;
+use crate::components::{Button, ButtonSize, ButtonVariant};
 use crate::display_types::{MatchCandidate, MatchSourceType};
 use dioxus::prelude::*;
 
@@ -10,6 +11,8 @@ pub fn MatchItemView(
     candidate: MatchCandidate,
     is_selected: bool,
     on_select: EventHandler<()>,
+    on_confirm: EventHandler<()>,
+    confirm_button_text: &'static str,
 ) -> Element {
     let border_class = if is_selected {
         "border-transparent bg-blue-900/30 ring-1 ring-blue-500"
@@ -89,6 +92,20 @@ pub fn MatchItemView(
                             if let Some(ref catalog) = catalog_text {
                                 span { "{catalog}" }
                             }
+                        }
+                    }
+                }
+
+                // Confirm button (only when selected)
+                if is_selected {
+                    div {
+                        class: "flex-shrink-0",
+                        onclick: move |e| e.stop_propagation(),
+                        Button {
+                            variant: ButtonVariant::Primary,
+                            size: ButtonSize::Small,
+                            onclick: move |_| on_confirm.call(()),
+                            "{confirm_button_text}"
                         }
                     }
                 }

@@ -1,7 +1,6 @@
 //! Match results panel component
 
-use super::match_list::MatchListView;
-use crate::components::{Button, ButtonSize, ButtonVariant};
+use super::match_item::MatchItemView;
 use crate::display_types::MatchCandidate;
 use dioxus::prelude::*;
 
@@ -19,25 +18,19 @@ pub fn MatchResultsPanel(
     }
 
     rsx! {
-        div { class: "bg-gray-800/20 rounded-lg p-4 space-y-4",
-            MatchListView {
-                candidates: candidates.clone(),
-                selected_index,
-                on_select: move |index| on_select.call(index),
-            }
-
-            if let Some(index) = selected_index {
-                if let Some(candidate) = candidates.get(index) {
-                    div { class: "flex justify-end",
-                        Button {
-                            variant: ButtonVariant::Primary,
-                            size: ButtonSize::Medium,
-                            onclick: {
-                                let candidate = candidate.clone();
-                                move |_| on_confirm.call(candidate.clone())
-                            },
-                            "{confirm_button_text}"
-                        }
+        div { class: "bg-gray-800/20 rounded-lg p-4",
+            div { class: "space-y-2",
+                for (index , candidate) in candidates.iter().enumerate() {
+                    MatchItemView {
+                        key: "{index}",
+                        candidate: candidate.clone(),
+                        is_selected: selected_index == Some(index),
+                        on_select: move |_| on_select.call(index),
+                        on_confirm: {
+                            let candidate = candidate.clone();
+                            move |_| on_confirm.call(candidate.clone())
+                        },
+                        confirm_button_text,
                     }
                 }
             }

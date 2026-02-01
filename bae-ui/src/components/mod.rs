@@ -49,7 +49,7 @@ pub use icons::{
 pub use import::{
     CdDriveStatus, CdSelectorView, ConfirmationView, DiscIdLookupErrorView, FileListView,
     FolderImportView, FolderImportViewProps, ImportErrorDisplayView, ImportSource,
-    ImportSourceSelectorView, ImportView, ManualSearchPanelView, MatchItemView, MatchListView,
+    ImportSourceSelectorView, ImportView, ManualSearchPanelView, MatchItemView,
     MetadataDetectionPromptView, MultipleExactMatchesView, ReleaseSelectorView, ReleaseSidebarView,
     SearchSourceSelectorView, SelectedSourceView, TorrentFilesDisplayView, TorrentInfoDisplayView,
     TorrentInputMode, TorrentInputView, TorrentTrackerDisplayView, TrackerConnectionStatus,
