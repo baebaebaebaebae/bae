@@ -65,10 +65,8 @@ pub fn GalleryLightbox(
     rsx! {
         Modal { is_open, on_close,
             div {
-                tabindex: 0,
-                autofocus: true,
                 onkeydown: on_keydown,
-                class: "flex flex-col items-center",
+                class: "flex flex-col items-center min-w-[50vw]",
 
                 // Close button
                 button {
@@ -121,7 +119,7 @@ pub fn GalleryLightbox(
                         }
                         div { class: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/40 to-transparent rounded-b-lg px-4 py-3 flex items-center gap-3",
                             span { class: "text-white text-sm", {label.clone()} }
-                            div { class: "ml-auto h-8 flex items-center",
+                            div { class: "ml-auto h-8 flex items-center whitespace-nowrap",
                                 if is_current_selected {
                                     span { class: "text-green-400 text-sm flex items-center gap-1 px-3",
                                         CheckIcon { class: "w-4 h-4" }
