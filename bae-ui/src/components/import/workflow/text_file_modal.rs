@@ -5,6 +5,8 @@ use crate::components::{ChromelessButton, Modal};
 use dioxus::prelude::*;
 
 /// Modal for viewing text file contents (CUE files, logs, etc.)
+///
+/// Always rendered by parent. Visibility controlled via `is_open` signal.
 #[component]
 pub fn TextFileModalView(
     /// Controls whether the modal is open
