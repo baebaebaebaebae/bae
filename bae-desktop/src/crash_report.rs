@@ -5,6 +5,24 @@ fn crash_log_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".bae").join("crash.log"))
 }
 
+/// Get the ASLR slide for the main executable.
+///
+/// Combined with the raw addresses in the backtrace, this lets you
+/// symbolicate offline: `atos -o bae.dSYM -s <slide> <addr1> <addr2> ...`
+#[cfg(target_os = "macos")]
+fn aslr_slide() -> isize {
+    extern "C" {
+        fn _dyld_get_image_vmaddr_slide(image_index: u32) -> isize;
+    }
+    // SAFETY: Index 0 is always the main executable. Read-only query.
+    unsafe { _dyld_get_image_vmaddr_slide(0) }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn aslr_slide() -> isize {
+    0
+}
+
 /// Capture backtrace as raw instruction pointer addresses.
 ///
 /// `std::backtrace::Backtrace` resolves symbols at capture time, which
@@ -79,11 +97,12 @@ pub fn install_panic_hook() {
                 .unwrap_or_else(|| "unknown".to_string());
 
             let backtrace = capture_backtrace();
+            let slide = aslr_slide();
             let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
             let version = env!("BAE_VERSION");
 
             let report = format!(
-                "bae crash report\n================\nTime: {now}\nVersion: {version}\n\nPanic: {message}\nLocation: {location}\n\nBacktrace:\n{backtrace}",
+                "bae crash report\n================\nTime: {now}\nVersion: {version}\nSlide: 0x{slide:x}\n\nPanic: {message}\nLocation: {location}\n\nBacktrace:\n{backtrace}",
             );
 
             std::fs::write(&path, report)?;
