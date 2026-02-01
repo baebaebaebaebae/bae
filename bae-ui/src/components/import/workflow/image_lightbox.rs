@@ -7,6 +7,8 @@ use dioxus::prelude::*;
 /// Image lightbox view for viewing images in full screen
 #[component]
 pub fn ImageLightboxView(
+    /// Controls whether the lightbox is open
+    is_open: ReadSignal<bool>,
     /// Artwork files with display_url
     images: Vec<FileInfo>,
     /// Current image index
@@ -26,6 +28,7 @@ pub fn ImageLightboxView(
 
     rsx! {
         GalleryLightbox {
+            is_open,
             images: gallery_images,
             initial_index: current_index,
             on_close,

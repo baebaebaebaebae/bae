@@ -238,24 +238,28 @@ pub fn ConfirmationView(
             }
         }
 
-        // Cover picker lightbox
-        if *show_cover_picker.read() {
-            GalleryLightbox {
-                key: "{picker_open_count}",
-                images: picker_images.clone(),
-                initial_index: current_cover_index.unwrap_or(0),
-                on_close: move |_| show_cover_picker.set(false),
-                on_navigate: |_| {},
-                selected_index: current_cover_index,
-                on_select: {
-                    let picker_covers = picker_covers.clone();
-                    move |idx: usize| {
-                        if let Some(cover) = picker_covers.get(idx) {
-                            on_select_cover.call(cover.clone());
+        // Cover picker lightbox - always rendered, visibility controlled by signal
+        {
+            let is_open: ReadSignal<bool> = show_cover_picker.into();
+            rsx! {
+                GalleryLightbox {
+                    is_open,
+                    key: "{picker_open_count}",
+                    images: picker_images.clone(),
+                    initial_index: current_cover_index.unwrap_or(0),
+                    on_close: move |_| show_cover_picker.set(false),
+                    on_navigate: |_| {},
+                    selected_index: current_cover_index,
+                    on_select: {
+                        let picker_covers = picker_covers.clone();
+                        move |idx: usize| {
+                            if let Some(cover) = picker_covers.get(idx) {
+                                on_select_cover.call(cover.clone());
+                            }
+                            show_cover_picker.set(false);
                         }
-                        show_cover_picker.set(false);
-                    }
-                },
+                    },
+                }
             }
         }
     }

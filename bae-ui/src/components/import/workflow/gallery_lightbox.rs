@@ -16,10 +16,12 @@ pub struct GalleryImage {
 
 /// Gallery lightbox with optional cover selection
 ///
+/// Always rendered by parent. Visibility controlled via `is_open` signal.
 /// When `selected_index` is None, this is a plain image viewer.
 /// When `selected_index` is Some, shows "Select as Cover" button and green selection badges.
 #[component]
 pub fn GalleryLightbox(
+    is_open: ReadSignal<bool>,
     images: Vec<GalleryImage>,
     initial_index: usize,
     on_close: EventHandler<()>,
@@ -27,7 +29,6 @@ pub fn GalleryLightbox(
     selected_index: Option<usize>,
     on_select: EventHandler<usize>,
 ) -> Element {
-    let is_open = use_memo(|| true);
     let mut current_index = use_signal(|| initial_index);
     let has_selection = selected_index.is_some();
 

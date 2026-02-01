@@ -109,7 +109,7 @@ pub fn SmartFileDisplayView(
 
             // Documents section - list rows
             if has_documents {
-                FileSection { label: "Documents",
+                FileSection { label: "Text",
                     div { class: "flex flex-col gap-1",
                         for doc in files.documents.iter() {
                             DocumentRowView {
@@ -123,32 +123,35 @@ pub fn SmartFileDisplayView(
             }
         }
 
-        // Text file modal
+        // Text file modal - always rendered, visibility controlled by signal
         {
-            let selected_text_file_for_memo = selected_text_file.clone();
-            let is_open_memo = use_memo(move || selected_text_file_for_memo.is_some());
-            let is_open: ReadSignal<bool> = is_open_memo.into();
-            let filename = selected_text_file.clone().unwrap_or_default();
-            let content = text_file_content
-                .clone()
-                .unwrap_or_else(|| "File not available".to_string());
+            let mut is_text_file_open = use_signal(|| selected_text_file.is_some());
+            if *is_text_file_open.peek() != selected_text_file.is_some() {
+                is_text_file_open.set(selected_text_file.is_some());
+            }
+            let is_open: ReadSignal<bool> = is_text_file_open.into();
             rsx! {
                 TextFileModalView {
                     is_open,
-                    filename,
-                    content,
+                    filename: selected_text_file.clone().unwrap_or_default(),
+                    content: text_file_content.clone().unwrap_or_else(|| "Loading...".to_string()),
                     on_close: move |_| on_text_file_close.call(()),
                 }
             }
         }
 
-        // Image lightbox
-        if let Some(index) = *viewing_image_index.read() {
-            ImageLightboxView {
-                images: files.artwork.clone(),
-                current_index: index,
-                on_close: move |_| viewing_image_index.set(None),
-                on_navigate: move |new_idx| viewing_image_index.set(Some(new_idx)),
+        // Image lightbox - always rendered, visibility controlled by signal
+        {
+            let is_image_open = use_memo(move || viewing_image_index().is_some());
+            let is_open: ReadSignal<bool> = is_image_open.into();
+            rsx! {
+                ImageLightboxView {
+                    is_open,
+                    images: files.artwork.clone(),
+                    current_index: viewing_image_index().unwrap_or(0),
+                    on_close: move |_| viewing_image_index.set(None),
+                    on_navigate: move |new_idx| viewing_image_index.set(Some(new_idx)),
+                }
             }
         }
     }

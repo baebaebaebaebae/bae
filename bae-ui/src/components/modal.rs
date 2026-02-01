@@ -98,12 +98,15 @@ pub fn Modal(
                 evt.prevent_default();
                 on_close.call(());
             },
-            // Fixed container for backdrop click handling and content centering
-            div {
-                class: "fixed inset-0 flex items-center justify-center",
-                onclick: move |_| on_close.call(()),
-                // Inner wrapper prevents click propagation so content clicks don't close
-                div { onclick: move |evt| evt.stop_propagation(), {children} }
+            // Only render children when open - no need for DOM when dialog is closed
+            if is_open() {
+                // Fixed container for backdrop click handling and content centering
+                div {
+                    class: "fixed inset-0 flex items-center justify-center",
+                    onclick: move |_| on_close.call(()),
+                    // Inner wrapper prevents click propagation so content clicks don't close
+                    div { onclick: move |evt| evt.stop_propagation(), {children} }
+                }
             }
         }
     }
