@@ -146,6 +146,11 @@ pub fn ManualSearchPanelView(
 
                 // Search form based on active tab
                 div {
+                    onkeydown: move |evt: KeyboardEvent| {
+                        if evt.key() == Key::Enter && !searching {
+                            on_search.call(());
+                        }
+                    },
                     match tab {
                         SearchTab::General => rsx! {
                             div { class: "flex gap-3",
