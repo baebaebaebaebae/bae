@@ -23,6 +23,10 @@ runs:
     - name: Setup sccache
       uses: mozilla-actions/sccache-action@v0.0.9
 
+    - name: Enable sccache GHA cache
+      shell: bash
+      run: echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+
     - name: Install cargo-binstall
       shell: bash
       run: curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
