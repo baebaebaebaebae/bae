@@ -1,7 +1,28 @@
+use std::fmt::Write;
 use std::path::PathBuf;
 
 fn crash_log_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".bae").join("crash.log"))
+}
+
+/// Capture backtrace as raw instruction pointer addresses.
+///
+/// `std::backtrace::Backtrace` resolves symbols at capture time, which
+/// produces useless output in stripped release builds (every frame shows as
+/// `__mh_execute_header`). By recording raw addresses instead, the report
+/// can be symbolicated offline against the .dSYM bundle using `atos`.
+fn capture_backtrace() -> String {
+    let mut out = String::new();
+    let mut frame_no = 0usize;
+
+    backtrace::trace(|frame| {
+        let ip = frame.ip() as usize;
+        let _ = writeln!(out, "  {frame_no:>3}: 0x{ip:016x}");
+        frame_no += 1;
+        true
+    });
+
+    out
 }
 
 pub fn install_panic_hook() {
@@ -30,7 +51,7 @@ pub fn install_panic_hook() {
                 .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
                 .unwrap_or_else(|| "unknown".to_string());
 
-            let backtrace = std::backtrace::Backtrace::force_capture();
+            let backtrace = capture_backtrace();
             let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
             let version = env!("BAE_VERSION");
 
