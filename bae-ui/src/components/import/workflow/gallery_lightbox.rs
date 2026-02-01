@@ -117,8 +117,8 @@ pub fn GalleryLightbox(
                             alt: "{label}",
                             class: "max-w-[90vw] max-h-[60vh] object-contain rounded-lg shadow-2xl",
                         }
-                        div { class: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/40 to-transparent rounded-b-lg px-4 py-3 flex items-center gap-3",
-                            span { class: "text-white text-sm", {label.clone()} }
+                        div { class: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/40 to-transparent rounded-b-lg px-4 py-3 flex items-end gap-3",
+                            span { class: "text-white text-xs", {label.clone()} }
                             div { class: "ml-auto h-8 flex items-center whitespace-nowrap",
                                 if is_current_selected {
                                     span { class: "text-green-400 text-sm flex items-center gap-1 px-3",
