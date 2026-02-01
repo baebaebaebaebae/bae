@@ -1,11 +1,9 @@
 //! Confirmation view component
 
-use crate::components::icons::{
-    CheckIcon, ChevronLeftIcon, ChevronRightIcon, ImageIcon, PencilIcon, XIcon,
-};
+use super::gallery_lightbox::{GalleryImage, GalleryLightbox};
+use crate::components::icons::{ImageIcon, PencilIcon};
 use crate::components::{
-    Button, ButtonSize, ButtonVariant, ChromelessButton, Modal, Select, SelectOption,
-    StorageProfile,
+    Button, ButtonSize, ButtonVariant, ChromelessButton, Select, SelectOption, StorageProfile,
 };
 use crate::display_types::{FileInfo, MatchCandidate, MatchSourceType, SelectedCover};
 use dioxus::prelude::*;
@@ -63,46 +61,47 @@ pub fn ConfirmationView(
         !artwork_files.is_empty() || !managed_artwork.is_empty() || remote_cover_url.is_some();
 
     // Build combined image list for picker: remote + managed + release artwork
-    let mut picker_images: Vec<CoverOption> = Vec::new();
+    // Each entry pairs a GalleryImage with the SelectedCover it represents
+    let mut picker_covers: Vec<SelectedCover> = Vec::new();
+    let mut picker_images: Vec<GalleryImage> = Vec::new();
+
     if let Some(ref url) = remote_cover_url {
         let source_label = match candidate.source_type {
             MatchSourceType::MusicBrainz => "MusicBrainz",
             MatchSourceType::Discogs => "Discogs",
         };
-        picker_images.push(CoverOption {
+        picker_images.push(GalleryImage {
             display_url: url.clone(),
             label: format!("{source_label} cover"),
-            cover: SelectedCover::Remote {
-                url: url.clone(),
-                source: String::new(),
-            },
+        });
+        picker_covers.push(SelectedCover::Remote {
+            url: url.clone(),
+            source: String::new(),
         });
     }
     for img in managed_artwork.iter() {
-        picker_images.push(CoverOption {
+        picker_images.push(GalleryImage {
             display_url: img.display_url.clone(),
             label: img.name.clone(),
-            cover: SelectedCover::Local {
-                filename: img.name.clone(),
-            },
+        });
+        picker_covers.push(SelectedCover::Local {
+            filename: img.name.clone(),
         });
     }
     for img in artwork_files.iter() {
-        picker_images.push(CoverOption {
+        picker_images.push(GalleryImage {
             display_url: img.display_url.clone(),
             label: img.name.clone(),
-            cover: SelectedCover::Local {
-                filename: img.name.clone(),
-            },
+        });
+        picker_covers.push(SelectedCover::Local {
+            filename: img.name.clone(),
         });
     }
 
     // Find current cover's index for opening picker at the right image
-    let current_cover_index = selected_cover.as_ref().and_then(|sc| {
-        picker_images
-            .iter()
-            .position(|opt| sc.same_cover(&opt.cover))
-    });
+    let current_cover_index = selected_cover
+        .as_ref()
+        .and_then(|sc| picker_covers.iter().position(|c| sc.same_cover(c)));
 
     rsx! {
         div { class: "p-5 space-y-5",
@@ -241,192 +240,22 @@ pub fn ConfirmationView(
 
         // Cover picker lightbox
         if *show_cover_picker.read() {
-            CoverPickerLightbox {
+            GalleryLightbox {
                 key: "{picker_open_count}",
                 images: picker_images.clone(),
-                selected_cover: selected_cover.clone(),
                 initial_index: current_cover_index.unwrap_or(0),
-                on_select: move |cover: SelectedCover| {
-                    on_select_cover.call(cover);
-                    show_cover_picker.set(false);
-                },
                 on_close: move |_| show_cover_picker.set(false),
-            }
-        }
-    }
-}
-
-/// A cover art option in the picker
-#[derive(Clone, Debug, PartialEq)]
-struct CoverOption {
-    display_url: String,
-    label: String,
-    cover: SelectedCover,
-}
-
-/// Lightbox-based cover picker with gallery strip and select button
-#[component]
-fn CoverPickerLightbox(
-    images: Vec<CoverOption>,
-    selected_cover: Option<SelectedCover>,
-    initial_index: usize,
-    on_select: EventHandler<SelectedCover>,
-    on_close: EventHandler<()>,
-) -> Element {
-    let is_open = use_memo(|| true);
-    let mut current_index = use_signal(|| initial_index);
-
-    let total = images.len();
-
-    if total == 0 {
-        return rsx! {
-            Modal { is_open, on_close,
-                div { class: "text-white", "No images available" }
-            }
-        };
-    }
-
-    let idx = (*current_index.read()).min(total - 1);
-    let current_image = &images[idx];
-    let url = &current_image.display_url;
-    let label = &current_image.label;
-    let can_prev = idx > 0;
-    let can_next = idx < total - 1;
-
-    let is_current_selected = selected_cover
-        .as_ref()
-        .is_some_and(|sc| sc.same_cover(&current_image.cover));
-
-    let images_for_keydown = images.clone();
-    let on_keydown = move |evt: KeyboardEvent| match evt.key() {
-        Key::ArrowLeft if can_prev => current_index.set(idx - 1),
-        Key::ArrowRight if can_next => current_index.set(idx + 1),
-        Key::Enter => {
-            let cover = images_for_keydown[*current_index.read()].cover.clone();
-            on_select.call(cover);
-        }
-        _ => {}
-    };
-
-    rsx! {
-        Modal { is_open, on_close,
-            div {
-                tabindex: 0,
-                autofocus: true,
-                onkeydown: on_keydown,
-                class: "flex flex-col items-center",
-
-                // Close button
-                button {
-                    class: "fixed top-4 right-4 text-gray-400 hover:text-white transition-colors z-10",
-                    onclick: move |e| {
-                        e.stop_propagation();
-                        on_close.call(());
-                    },
-                    XIcon { class: "w-6 h-6" }
-                }
-
-                // Previous button
-                if can_prev {
-                    button {
-                        class: "fixed left-4 top-1/2 -translate-y-1/2 w-14 h-14 bg-gray-800/60 hover:bg-gray-700/80 rounded-full flex items-center justify-center transition-colors z-10",
-                        onclick: move |e| {
-                            e.stop_propagation();
-                            current_index.set(idx - 1);
-                        },
-                        ChevronLeftIcon {
-                            class: "w-8 h-8 text-gray-300 -translate-x-0.5",
-                            stroke_width: "1.5",
+                on_navigate: |_| {},
+                selected_index: current_cover_index,
+                on_select: {
+                    let picker_covers = picker_covers.clone();
+                    move |idx: usize| {
+                        if let Some(cover) = picker_covers.get(idx) {
+                            on_select_cover.call(cover.clone());
                         }
+                        show_cover_picker.set(false);
                     }
-                }
-
-                // Next button
-                if can_next {
-                    button {
-                        class: "fixed right-4 top-1/2 -translate-y-1/2 w-14 h-14 bg-gray-800/60 hover:bg-gray-700/80 rounded-full flex items-center justify-center transition-colors z-10",
-                        onclick: move |e| {
-                            e.stop_propagation();
-                            current_index.set(idx + 1);
-                        },
-                        ChevronRightIcon {
-                            class: "w-8 h-8 text-gray-300 translate-x-0.5",
-                            stroke_width: "1.5",
-                        }
-                    }
-                }
-
-                // Main image with overlay
-                div { class: "relative max-w-[90vw] max-h-[60vh]",
-                    img {
-                        src: "{url}",
-                        alt: "{label}",
-                        class: "max-w-[90vw] max-h-[60vh] object-contain rounded-lg shadow-2xl",
-                    }
-
-                    // Bottom overlay with label and select button
-                    div { class: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/40 to-transparent rounded-b-lg px-4 py-3 flex items-center gap-3",
-                        span { class: "text-white text-sm", {label.clone()} }
-                        div { class: "ml-auto h-8 flex items-center",
-                            if is_current_selected {
-                                span { class: "text-green-400 text-sm flex items-center gap-1 px-3",
-                                    CheckIcon { class: "w-4 h-4" }
-                                    "Selected"
-                                }
-                            } else {
-                                Button {
-                                    variant: ButtonVariant::Primary,
-                                    size: ButtonSize::Small,
-                                    onclick: {
-                                        let cover = current_image.cover.clone();
-                                        move |_| on_select.call(cover.clone())
-                                    },
-                                    "Select as Cover"
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Gallery strip
-                if total > 1 {
-                    div { class: "mt-6 flex gap-2 overflow-x-auto max-w-[90vw] p-1",
-                        for (i , opt) in images.iter().enumerate() {
-                            {
-                                let is_active = i == idx;
-                                let is_selected_cover = selected_cover
-                                    .as_ref()
-                                    .is_some_and(|sc| sc.same_cover(&opt.cover));
-                                let ring_class = if is_active {
-                                    "ring-2 ring-white"
-                                } else if is_selected_cover {
-                                    "ring-2 ring-green-500"
-                                } else {
-                                    "ring-1 ring-gray-600 hover:ring-gray-500"
-                                };
-                                rsx! {
-                                    ChromelessButton {
-                                        key: "{opt.display_url}",
-                                        class: Some(format!("relative flex-shrink-0 w-16 h-16 rounded-md {ring_class}")),
-                                        onclick: move |_| current_index.set(i),
-                                        div { class: "w-full h-full rounded-md overflow-clip",
-                                            img {
-                                                src: "{opt.display_url}",
-                                                alt: "{opt.label}",
-                                                class: "w-full h-full object-cover",
-                                            }
-                                        }
-                                        if is_selected_cover {
-                                            div { class: "absolute top-0.5 right-0.5 bg-green-500 text-white w-3.5 h-3.5 rounded-full flex items-center justify-center",
-                                                CheckIcon { class: "w-2.5 h-2.5" }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                },
             }
         }
     }
