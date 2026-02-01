@@ -100,7 +100,7 @@ pub fn Button(
             "border border-transparent bg-red-600 hover:bg-red-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
         }
         ButtonVariant::Ghost => {
-            "border border-transparent text-gray-400 hover:text-white hover:bg-gray-700/50"
+            "border border-transparent text-gray-400 hover:text-white ghost-text-glow"
         }
         ButtonVariant::Outline => {
             "border border-gray-600 text-gray-300 hover:border-gray-500 hover:text-white hover:bg-gray-700/30"

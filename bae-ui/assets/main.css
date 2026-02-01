@@ -140,3 +140,14 @@ textarea,
 .animate-pulse-glow {
     animation: pulse-glow 2s ease-in-out infinite;
 }
+
+/* Ghost button text glow on hover */
+.ghost-text-glow {
+    transition-property: color, text-shadow;
+    transition-duration: 200ms;
+    transition-timing-function: ease;
+}
+
+.ghost-text-glow:hover {
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+}
