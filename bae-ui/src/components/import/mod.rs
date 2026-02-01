@@ -15,7 +15,7 @@ pub use view::ImportView;
 pub use workflow::{
     CdImportView, CdImportViewProps, CdRipperView, CdTocDisplayView, CdTocInfo, ConfirmationView,
     DiscIdLookupErrorView, FileListView, FolderImportView, FolderImportViewProps,
-    ImageLightboxView, ImportErrorDisplayView, ManualSearchPanelView, MatchItemView, MatchListView,
+    ImageLightboxView, ImportErrorDisplayView, ManualSearchPanelView, MatchItemView,
     MetadataDetectionPromptView, MetadataDisplayView, MultipleExactMatchesView,
     ReleaseSelectorView, ReleaseSidebarView, SearchSourceSelectorView, SelectedSourceView,
     SmartFileDisplayView, TextFileModalView, TorrentFilesDisplayView, TorrentImportView,
