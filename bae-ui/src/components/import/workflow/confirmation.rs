@@ -162,7 +162,7 @@ pub fn ConfirmationView(
                     }
                 }
                 Button {
-                    variant: ButtonVariant::Outline,
+                    variant: ButtonVariant::Ghost,
                     size: ButtonSize::Small,
                     onclick: move |_| on_configure_storage.call(()),
                     "Configure"
