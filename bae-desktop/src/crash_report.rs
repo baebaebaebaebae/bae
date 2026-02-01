@@ -25,6 +25,33 @@ fn capture_backtrace() -> String {
     out
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backtrace_contains_hex_addresses() {
+        let bt = capture_backtrace();
+        let lines: Vec<&str> = bt.lines().collect();
+
+        assert!(
+            !lines.is_empty(),
+            "backtrace should have at least one frame"
+        );
+
+        for line in &lines {
+            assert!(
+                line.contains("0x"),
+                "frame should contain a hex address: {line}"
+            );
+            assert!(
+                !line.contains("__mh_execute_header"),
+                "frame should be a raw address, not an unresolved symbol: {line}"
+            );
+        }
+    }
+}
+
 pub fn install_panic_hook() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
