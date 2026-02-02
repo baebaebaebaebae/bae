@@ -188,7 +188,7 @@ fn TorrentIdentifyContent(
     let detected_metadata = st.get_metadata();
     let has_searched = st
         .get_search_state()
-        .map(|s| s.has_searched)
+        .map(|s| s.general.has_searched || s.catalog_number.has_searched || s.barcode.has_searched)
         .unwrap_or(false);
     drop(st);
 

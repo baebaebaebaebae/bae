@@ -47,6 +47,15 @@ pub struct IdentifyingState {
     pub source_disc_id: Option<String>,
 }
 
+/// Per-tab search results and status
+#[derive(Clone, Debug, Default, PartialEq, Store)]
+pub struct TabSearchState {
+    pub has_searched: bool,
+    pub search_results: Vec<MatchCandidate>,
+    pub selected_result_index: Option<usize>,
+    pub error_message: Option<String>,
+}
+
 /// State for manual search within Identify step
 #[derive(Clone, Debug, Default, PartialEq, Store)]
 pub struct ManualSearchState {
@@ -58,11 +67,28 @@ pub struct ManualSearchState {
     pub search_catalog_number: String,
     pub search_barcode: String,
     pub search_tab: SearchTab,
-    pub has_searched: bool,
     pub is_searching: bool,
-    pub search_results: Vec<MatchCandidate>,
-    pub selected_result_index: Option<usize>,
-    pub error_message: Option<String>,
+    pub general: TabSearchState,
+    pub catalog_number: TabSearchState,
+    pub barcode: TabSearchState,
+}
+
+impl ManualSearchState {
+    pub fn current_tab_state(&self) -> &TabSearchState {
+        match self.search_tab {
+            SearchTab::General => &self.general,
+            SearchTab::CatalogNumber => &self.catalog_number,
+            SearchTab::Barcode => &self.barcode,
+        }
+    }
+
+    pub fn current_tab_state_mut(&mut self) -> &mut TabSearchState {
+        match self.search_tab {
+            SearchTab::General => &mut self.general,
+            SearchTab::CatalogNumber => &mut self.catalog_number,
+            SearchTab::Barcode => &mut self.barcode,
+        }
+    }
 }
 
 /// State for the Confirm step
@@ -359,6 +385,7 @@ impl IdentifyingState {
             }
             CandidateEvent::UpdateSearchField { field, value } => {
                 let mut state = self;
+                state.search_state.current_tab_state_mut().error_message = None;
                 match field {
                     SearchField::Artist => state.search_state.search_artist = value,
                     SearchField::Album => state.search_state.search_album = value,
@@ -382,7 +409,7 @@ impl IdentifyingState {
             CandidateEvent::StartSearch => {
                 let mut state = self;
                 state.search_state.is_searching = true;
-                state.search_state.error_message = None;
+                state.search_state.current_tab_state_mut().error_message = None;
                 CandidateState::Identifying(state)
             }
             CandidateEvent::CancelSearch => {
@@ -393,23 +420,26 @@ impl IdentifyingState {
             CandidateEvent::SearchComplete { results, error } => {
                 let mut state = self;
                 state.search_state.is_searching = false;
-                state.search_state.has_searched = true;
-                state.search_state.search_results = results;
-                state.search_state.error_message = error;
-                state.search_state.selected_result_index = None;
+                let tab = state.search_state.current_tab_state_mut();
+                tab.has_searched = true;
+                tab.search_results = results;
+                tab.error_message = error;
+                tab.selected_result_index = None;
                 CandidateState::Identifying(state)
             }
             CandidateEvent::SelectSearchResult(idx) => {
                 let mut state = self;
-                if idx < state.search_state.search_results.len() {
-                    state.search_state.selected_result_index = Some(idx);
+                let tab = state.search_state.current_tab_state_mut();
+                if idx < tab.search_results.len() {
+                    tab.selected_result_index = Some(idx);
                 }
                 CandidateState::Identifying(state)
             }
             CandidateEvent::ConfirmSearchResult => {
                 let state = self;
-                if let Some(idx) = state.search_state.selected_result_index {
-                    if let Some(candidate) = state.search_state.search_results.get(idx).cloned() {
+                let tab = state.search_state.current_tab_state();
+                if let Some(idx) = tab.selected_result_index {
+                    if let Some(candidate) = tab.search_results.get(idx).cloned() {
                         let selected_cover = default_cover(&candidate, &state.files);
                         return CandidateState::Confirming(Box::new(ConfirmingState {
                             files: state.files,

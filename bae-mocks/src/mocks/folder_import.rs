@@ -2,7 +2,8 @@
 
 use super::framework::{ControlRegistryBuilder, MockPage, MockPanel, Preset};
 use bae_ui::stores::import::{
-    CandidateState, ConfirmPhase, ConfirmingState, IdentifyingState, ImportState, ManualSearchState,
+    CandidateState, ConfirmPhase, ConfirmingState, IdentifyingState, ImportState,
+    ManualSearchState, TabSearchState,
 };
 use bae_ui::{
     AudioContentInfo, CategorizedFileInfo, CueFlacPairInfo, DetectedCandidate,
@@ -447,7 +448,14 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         None
     };
 
-    // Build search state
+    // Build search state with per-tab results
+    let current_tab = search_tab();
+    let active_tab_state = TabSearchState {
+        has_searched,
+        search_results: manual_match_candidates.clone(),
+        selected_result_index: selected_match_index(),
+        error_message: None,
+    };
     let mock_search_state = ManualSearchState {
         search_source: search_source(),
         search_artist: search_artist(),
@@ -456,12 +464,23 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         search_label: search_label(),
         search_catalog_number: search_catalog_number(),
         search_barcode: search_barcode(),
-        search_tab: search_tab(),
-        has_searched,
+        search_tab: current_tab,
         is_searching,
-        search_results: manual_match_candidates.clone(),
-        selected_result_index: selected_match_index(),
-        error_message: None,
+        general: if current_tab == SearchTab::General {
+            active_tab_state.clone()
+        } else {
+            TabSearchState::default()
+        },
+        catalog_number: if current_tab == SearchTab::CatalogNumber {
+            active_tab_state.clone()
+        } else {
+            TabSearchState::default()
+        },
+        barcode: if current_tab == SearchTab::Barcode {
+            active_tab_state
+        } else {
+            TabSearchState::default()
+        },
     };
 
     // Build candidate state based on step
