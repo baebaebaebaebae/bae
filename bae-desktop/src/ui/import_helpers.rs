@@ -7,7 +7,6 @@ use crate::ui::app_service::AppService;
 use crate::ui::Route;
 use bae_core::discogs::client::DiscogsSearchParams;
 use bae_core::discogs::{DiscogsClient, DiscogsRelease};
-use bae_core::import::cover_art::fetch_cover_art_from_archive;
 use bae_core::import::{
     cover_art, detect_folder_contents, DetectedCandidate as CoreDetectedCandidate, ImportProgress,
     ImportRequest, MatchCandidate, MatchSource, ScanEvent,
@@ -28,7 +27,7 @@ use dioxus::router::Navigator;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use tokio::sync::broadcast;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 // ============================================================================
 // Conversion helpers (from old import_context/state.rs)
@@ -305,29 +304,18 @@ async fn search_mb_and_rank(
                         .collect()
                 };
 
-                let cover_art_futures: Vec<_> = candidates
-                    .iter()
-                    .map(|candidate| {
-                        let release_id = match &candidate.source {
-                            MatchSource::MusicBrainz(release) => release.release_id.clone(),
-                            _ => String::new(),
-                        };
-                        async move {
-                            if !release_id.is_empty() {
-                                debug!("Fetching cover art for release {}", release_id);
-                                fetch_cover_art_from_archive(&release_id).await
-                            } else {
-                                None
+                // Use deterministic CAA thumbnail URLs — the webview loads them
+                // lazily, avoiding 25 blocking HTTP requests per search.
+                for candidate in &mut candidates {
+                    if candidate.cover_art_url.is_none() {
+                        if let MatchSource::MusicBrainz(release) = &candidate.source {
+                            if !release.release_id.is_empty() {
+                                candidate.cover_art_url = Some(format!(
+                                    "https://coverartarchive.org/release/{}/front-250",
+                                    release.release_id
+                                ));
                             }
                         }
-                    })
-                    .collect();
-                let cover_art_results = futures::future::join_all(cover_art_futures).await;
-                for (candidate, cover_url) in
-                    candidates.iter_mut().zip(cover_art_results.into_iter())
-                {
-                    if candidate.cover_art_url.is_none() {
-                        candidate.cover_art_url = cover_url;
                     }
                 }
 

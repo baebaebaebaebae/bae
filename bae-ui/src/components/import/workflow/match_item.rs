@@ -60,8 +60,8 @@ pub fn MatchItemView(
                     if let Some(ref cover_url) = candidate.cover_url {
                         img {
                             src: "{cover_url}",
-                            alt: "Album cover",
-                            class: "w-full h-full object-cover",
+                            alt: "",
+                            class: "w-full h-full object-cover text-transparent",
                         }
                     } else {
                         div { class: "w-full h-full flex items-center justify-center text-gray-500",
