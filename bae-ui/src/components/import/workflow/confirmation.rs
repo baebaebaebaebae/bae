@@ -1,6 +1,6 @@
 //! Confirmation view component
 
-use super::gallery_lightbox::{GalleryImage, GalleryLightbox};
+use super::gallery_lightbox::{GalleryItem, GalleryItemContent, GalleryLightbox};
 use crate::components::icons::{ImageIcon, PencilIcon};
 use crate::components::{
     Button, ButtonSize, ButtonVariant, ChromelessButton, Select, SelectOption, StorageProfile,
@@ -61,18 +61,18 @@ pub fn ConfirmationView(
         !artwork_files.is_empty() || !managed_artwork.is_empty() || remote_cover_url.is_some();
 
     // Build combined image list for picker: remote + managed + release artwork
-    // Each entry pairs a GalleryImage with the SelectedCover it represents
+    // Each entry pairs a GalleryItem with the SelectedCover it represents
     let mut picker_covers: Vec<SelectedCover> = Vec::new();
-    let mut picker_images: Vec<GalleryImage> = Vec::new();
+    let mut picker_items: Vec<GalleryItem> = Vec::new();
 
     if let Some(ref url) = remote_cover_url {
         let source_label = match candidate.source_type {
             MatchSourceType::MusicBrainz => "MusicBrainz",
             MatchSourceType::Discogs => "Discogs",
         };
-        picker_images.push(GalleryImage {
-            display_url: url.clone(),
+        picker_items.push(GalleryItem {
             label: format!("{source_label} cover"),
+            content: GalleryItemContent::Image { url: url.clone() },
         });
         picker_covers.push(SelectedCover::Remote {
             url: url.clone(),
@@ -80,18 +80,22 @@ pub fn ConfirmationView(
         });
     }
     for img in managed_artwork.iter() {
-        picker_images.push(GalleryImage {
-            display_url: img.display_url.clone(),
+        picker_items.push(GalleryItem {
             label: img.name.clone(),
+            content: GalleryItemContent::Image {
+                url: img.display_url.clone(),
+            },
         });
         picker_covers.push(SelectedCover::Local {
             filename: img.name.clone(),
         });
     }
     for img in artwork_files.iter() {
-        picker_images.push(GalleryImage {
-            display_url: img.display_url.clone(),
+        picker_items.push(GalleryItem {
             label: img.name.clone(),
+            content: GalleryItemContent::Image {
+                url: img.display_url.clone(),
+            },
         });
         picker_covers.push(SelectedCover::Local {
             filename: img.name.clone(),
@@ -238,24 +242,28 @@ pub fn ConfirmationView(
             }
         }
 
-        // Cover picker lightbox
-        if *show_cover_picker.read() {
-            GalleryLightbox {
-                key: "{picker_open_count}",
-                images: picker_images.clone(),
-                initial_index: current_cover_index.unwrap_or(0),
-                on_close: move |_| show_cover_picker.set(false),
-                on_navigate: |_| {},
-                selected_index: current_cover_index,
-                on_select: {
-                    let picker_covers = picker_covers.clone();
-                    move |idx: usize| {
-                        if let Some(cover) = picker_covers.get(idx) {
-                            on_select_cover.call(cover.clone());
+        // Cover picker lightbox - always rendered, visibility controlled by signal
+        {
+            let is_open: ReadSignal<bool> = show_cover_picker.into();
+            rsx! {
+                GalleryLightbox {
+                    is_open,
+                    key: "{picker_open_count}",
+                    items: picker_items.clone(),
+                    initial_index: current_cover_index.unwrap_or(0),
+                    on_close: move |_| show_cover_picker.set(false),
+                    on_navigate: |_| {},
+                    selected_index: current_cover_index,
+                    on_select: {
+                        let picker_covers = picker_covers.clone();
+                        move |idx: usize| {
+                            if let Some(cover) = picker_covers.get(idx) {
+                                on_select_cover.call(cover.clone());
+                            }
+                            show_cover_picker.set(false);
                         }
-                        show_cover_picker.set(false);
-                    }
-                },
+                    },
+                }
             }
         }
     }

@@ -157,6 +157,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         })
     });
     let mut selected_profile_id = use_signal(|| Some("profile-1".to_string()));
+    let mut selected_text_file = use_signal(|| None::<String>);
 
     // Parse state from registry
     let state_str = registry.get_string("state");
@@ -592,12 +593,19 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                 on_open_folder: |_| {},
                 FolderImportView {
                     state: import_state,
-                    selected_text_file: None,
-                    text_file_content: None,
+                    selected_text_file: selected_text_file.read().clone(),
+                    text_file_content: selected_text_file
+                        .read()
+                        .as_ref()
+                        .map(|name| {
+                            format!(
+                                "Mock content for {name}\n\nThis is placeholder text for the file viewer.\nLine 3\nLine 4\nLine 5",
+                            )
+                        }),
                     storage_profiles,
                     on_folder_select_click: |_| {},
-                    on_text_file_select: |_| {},
-                    on_text_file_close: |_| {},
+                    on_text_file_select: move |name| selected_text_file.set(Some(name)),
+                    on_text_file_close: move |_| selected_text_file.set(None),
                     on_skip_detection: |_| {},
                     on_exact_match_select: move |idx| selected_match_index.set(Some(idx)),
                     on_confirm_exact_match: |_| {},

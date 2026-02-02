@@ -9,7 +9,6 @@ mod confirmation;
 mod file_list;
 mod folder_import;
 mod gallery_lightbox;
-mod image_lightbox;
 mod manual_search_panel;
 mod match_item;
 mod match_results_panel;
@@ -20,7 +19,6 @@ mod release_sidebar;
 mod search_source_selector;
 mod shared;
 mod smart_file_display;
-mod text_file_modal;
 mod torrent_display;
 mod torrent_import;
 
@@ -30,7 +28,6 @@ pub use cd_toc_display::{CdTocDisplayView, CdTocInfo};
 pub use confirmation::ConfirmationView;
 pub use file_list::FileListView;
 pub use folder_import::{FolderImportView, FolderImportViewProps};
-pub use image_lightbox::ImageLightboxView;
 pub use manual_search_panel::ManualSearchPanelView;
 pub use match_item::MatchItemView;
 pub use match_results_panel::MatchResultsPanel;
@@ -46,7 +43,6 @@ pub use shared::{
     SelectedSourceView,
 };
 pub use smart_file_display::SmartFileDisplayView;
-pub use text_file_modal::TextFileModalView;
 pub use torrent_display::{
     MetadataDetectionPromptView, TorrentFilesDisplayView, TorrentInfoDisplayView,
     TorrentTrackerDisplayView, TrackerConnectionStatus, TrackerStatus,
