@@ -35,3 +35,5 @@ runs:
       if: inputs.install-dioxus == 'true'
       shell: bash
       run: cargo binstall dioxus-cli@0.7.2 --no-confirm --locked
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
