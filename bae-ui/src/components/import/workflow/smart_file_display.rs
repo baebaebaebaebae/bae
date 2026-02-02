@@ -84,6 +84,7 @@ pub fn SmartFileDisplayView(
             label: file.name.clone(),
             content: GalleryItemContent::Image {
                 url: file.display_url.clone(),
+                thumbnail_url: file.display_url.clone(),
             },
         });
     }

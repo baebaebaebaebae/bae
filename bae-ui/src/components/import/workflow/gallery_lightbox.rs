@@ -10,7 +10,7 @@ use dioxus::prelude::*;
 /// Content variant for a gallery item
 #[derive(Clone, Debug, PartialEq)]
 pub enum GalleryItemContent {
-    Image { url: String },
+    Image { url: String, thumbnail_url: String },
     Text { content: Option<String> },
 }
 
@@ -73,9 +73,7 @@ pub fn GalleryLightbox(
 
     rsx! {
         Modal { is_open, on_close,
-            div {
-                onkeydown: on_keydown,
-                class: "flex flex-col items-center min-w-[50vw]",
+            div { onkeydown: on_keydown, class: "flex flex-col items-center",
 
                 // Close button
                 button {
@@ -122,7 +120,7 @@ pub fn GalleryLightbox(
                     // Selection mode (images only): overlay with label and select button
                     {
                         let url = match &current_item.content {
-                            GalleryItemContent::Image { url } => url,
+                            GalleryItemContent::Image { url, .. } => url,
                             _ => unreachable!(),
                         };
                         rsx! {
@@ -156,7 +154,7 @@ pub fn GalleryLightbox(
                 } else {
                     // View mode: render based on content type
                     match &current_item.content {
-                        GalleryItemContent::Image { url } => rsx! {
+                        GalleryItemContent::Image { url, .. } => rsx! {
                             div { class: "flex flex-col items-center",
                                 img {
                                     src: "{url}",
@@ -168,7 +166,7 @@ pub fn GalleryLightbox(
                         },
                         GalleryItemContent::Text { content: Some(text) } => rsx! {
                             div { class: "flex flex-col items-center",
-                                div { class: "bg-gray-800 rounded-lg max-w-2xl w-full max-h-[80vh] overflow-auto shadow-2xl",
+                                div { class: "bg-gray-800 rounded-lg w-[min(42rem,90vw)] max-h-[80vh] overflow-auto shadow-2xl",
                                     pre { class: "text-sm text-gray-300 font-mono whitespace-pre-wrap select-text p-4",
                                         {text.clone()}
                                     }
@@ -178,7 +176,7 @@ pub fn GalleryLightbox(
                         },
                         GalleryItemContent::Text { content: None } => rsx! {
                             div { class: "flex flex-col items-center",
-                                div { class: "bg-gray-800 rounded-lg max-w-2xl w-full p-8 flex items-center justify-center shadow-2xl",
+                                div { class: "bg-gray-800 rounded-lg w-[min(42rem,90vw)] p-8 flex items-center justify-center shadow-2xl",
                                     span { class: "text-gray-400 text-sm", "Loading..." }
                                 }
                                 div { class: "mt-4 text-gray-300 text-sm", {label.clone()} }
@@ -208,8 +206,12 @@ pub fn GalleryLightbox(
                                         onclick: move |_| navigate(i),
                                         div { class: "w-full h-full rounded-md overflow-clip",
                                             match &item.content {
-                                                GalleryItemContent::Image { url } => rsx! {
-                                                    img { src: "{url}", alt: "{item.label}", class: "w-full h-full object-cover" }
+                                                GalleryItemContent::Image { thumbnail_url, .. } => rsx! {
+                                                    img {
+                                                        src: "{thumbnail_url}",
+                                                        alt: "{item.label}",
+                                                        class: "w-full h-full object-cover",
+                                                    }
                                                 },
                                                 GalleryItemContent::Text { .. } => rsx! {
                                                     div { class: "w-full h-full bg-gray-800 flex items-center justify-center",

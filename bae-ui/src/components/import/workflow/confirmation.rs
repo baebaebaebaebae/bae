@@ -70,9 +70,19 @@ pub fn ConfirmationView(
             MatchSourceType::MusicBrainz => "MusicBrainz",
             MatchSourceType::Discogs => "Discogs",
         };
+        // Use full-size CAA image for the lightbox (the thumbnail URL is only 250px)
+        let lightbox_url = match (&candidate.source_type, &candidate.musicbrainz_release_id) {
+            (MatchSourceType::MusicBrainz, Some(mb_id)) => {
+                format!("https://coverartarchive.org/release/{mb_id}/front-1200")
+            }
+            _ => url.clone(),
+        };
         picker_items.push(GalleryItem {
             label: format!("{source_label} cover"),
-            content: GalleryItemContent::Image { url: url.clone() },
+            content: GalleryItemContent::Image {
+                url: lightbox_url,
+                thumbnail_url: url.clone(),
+            },
         });
         picker_covers.push(SelectedCover::Remote {
             url: url.clone(),
@@ -84,6 +94,7 @@ pub fn ConfirmationView(
             label: img.name.clone(),
             content: GalleryItemContent::Image {
                 url: img.display_url.clone(),
+                thumbnail_url: img.display_url.clone(),
             },
         });
         picker_covers.push(SelectedCover::Local {
@@ -95,6 +106,7 @@ pub fn ConfirmationView(
             label: img.name.clone(),
             content: GalleryItemContent::Image {
                 url: img.display_url.clone(),
+                thumbnail_url: img.display_url.clone(),
             },
         });
         picker_covers.push(SelectedCover::Local {
