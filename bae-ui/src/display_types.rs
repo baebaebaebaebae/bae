@@ -199,6 +199,8 @@ pub struct MatchCandidate {
     pub artist: String,
     pub year: Option<String>,
     pub cover_url: Option<String>,
+    /// True when cover art fetch failed (network error, not 404)
+    pub cover_fetch_failed: bool,
     pub format: Option<String>,
     pub country: Option<String>,
     pub label: Option<String>,

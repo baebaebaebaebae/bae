@@ -24,6 +24,7 @@ use bae_ui::stores::AppStateStoreExt;
 use bae_ui::ImportSource;
 use dioxus::prelude::*;
 use dioxus::router::Navigator;
+use reqwest::redirect;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use tokio::sync::broadcast;
@@ -132,6 +133,7 @@ pub fn to_display_candidate(candidate: &MatchCandidate) -> DisplayMatchCandidate
         },
         year: candidate.year(),
         cover_url: candidate.cover_art_url(),
+        cover_fetch_failed: false,
         format,
         country,
         label,
@@ -277,6 +279,80 @@ fn non_empty(s: String) -> Option<String> {
 }
 
 const MAX_SEARCH_RETRIES: u32 = 3;
+const COVER_CHECK_RETRIES: u32 = 2;
+
+/// Build a reqwest client for Cover Art Archive checks.
+/// Disables redirects so we can read the 307 Location header without following it.
+pub fn build_caa_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .redirect(redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(2))
+        .user_agent("bae/0.0.0-dev (https://github.com/nichochar/bae)")
+        .build()
+        .expect("failed to build CAA client")
+}
+
+/// Check whether cover art exists for a MusicBrainz release.
+///
+/// Returns `(Some(url), false)` if the CAA has art (307 with Location header),
+/// `(None, false)` if no art exists (404), or `(None, true)` on network/server error
+/// after retries.
+pub async fn check_cover_art(client: &reqwest::Client, release_id: &str) -> (Option<String>, bool) {
+    let url = format!(
+        "https://coverartarchive.org/release/{}/front-250",
+        release_id
+    );
+
+    for attempt in 0..=COVER_CHECK_RETRIES {
+        match client.get(&url).send().await {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                if status == 307 {
+                    // Art exists — extract the redirect URL
+                    let location = resp
+                        .headers()
+                        .get("location")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+                    return (location.or(Some(url)), false);
+                } else if status == 404 {
+                    // No art — not an error, just missing
+                    return (None, false);
+                }
+                // 5xx or unexpected status — retry
+            }
+            Err(_) => {
+                // Network error — retry
+            }
+        }
+
+        if attempt < COVER_CHECK_RETRIES {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+    }
+
+    // All retries exhausted
+    (None, true)
+}
+
+/// Check cover art for a batch of MB release IDs concurrently.
+/// Returns a vec of (cover_url, cover_fetch_failed) in the same order.
+async fn check_cover_art_batch(release_ids: &[Option<&str>]) -> Vec<(Option<String>, bool)> {
+    let client = build_caa_client();
+    let futures: Vec<_> = release_ids
+        .iter()
+        .map(|id| {
+            let client = &client;
+            async move {
+                match id {
+                    Some(rid) if !rid.is_empty() => check_cover_art(client, rid).await,
+                    _ => (None, false),
+                }
+            }
+        })
+        .collect();
+    futures::future::join_all(futures).await
+}
 
 /// Search MusicBrainz and rank results
 async fn search_mb_and_rank(
@@ -289,7 +365,7 @@ async fn search_mb_and_rank(
         match search_releases_with_params(&params).await {
             Ok(releases) => {
                 info!("✓ MusicBrainz search returned {} result(s)", releases.len());
-                let mut candidates = if let Some(ref meta) = metadata {
+                let candidates = if let Some(ref meta) = metadata {
                     use bae_core::import::rank_mb_matches;
                     rank_mb_matches(meta, releases)
                 } else {
@@ -304,22 +380,31 @@ async fn search_mb_and_rank(
                         .collect()
                 };
 
-                // Use deterministic CAA thumbnail URLs — the webview loads them
-                // lazily, avoiding 25 blocking HTTP requests per search.
-                for candidate in &mut candidates {
-                    if candidate.cover_art_url.is_none() {
-                        if let MatchSource::MusicBrainz(release) = &candidate.source {
-                            if !release.release_id.is_empty() {
-                                candidate.cover_art_url = Some(format!(
-                                    "https://coverartarchive.org/release/{}/front-250",
-                                    release.release_id
-                                ));
-                            }
+                // Check CAA for cover art existence concurrently.
+                // 307 → use redirect URL, 404 → no art, error → mark failed for retry.
+                let release_ids: Vec<Option<&str>> = candidates
+                    .iter()
+                    .map(|c| match &c.source {
+                        MatchSource::MusicBrainz(r) if c.cover_art_url.is_none() => {
+                            Some(r.release_id.as_str())
                         }
+                        _ => None,
+                    })
+                    .collect();
+
+                let cover_results = check_cover_art_batch(&release_ids).await;
+
+                let mut display: Vec<DisplayMatchCandidate> =
+                    candidates.iter().map(to_display_candidate).collect();
+
+                for (d, (url, failed)) in display.iter_mut().zip(cover_results) {
+                    if d.cover_url.is_none() {
+                        d.cover_url = url;
+                        d.cover_fetch_failed = failed;
                     }
                 }
 
-                return Ok(candidates.iter().map(to_display_candidate).collect());
+                return Ok(display);
             }
             Err(e) => {
                 last_err = format!("{}", e);
@@ -336,7 +421,10 @@ async fn search_mb_and_rank(
         }
     }
 
-    warn!("✗ MusicBrainz search failed after {} attempts: {}", MAX_SEARCH_RETRIES, last_err);
+    warn!(
+        "✗ MusicBrainz search failed after {} attempts: {}",
+        MAX_SEARCH_RETRIES, last_err
+    );
     Err(format!("MusicBrainz search failed: {}", last_err))
 }
 
@@ -384,7 +472,10 @@ async fn search_discogs_and_rank(
         }
     }
 
-    warn!("✗ Discogs search failed after {} attempts: {}", MAX_SEARCH_RETRIES, last_err);
+    warn!(
+        "✗ Discogs search failed after {} attempts: {}",
+        MAX_SEARCH_RETRIES, last_err
+    );
     Err(format!("Discogs search failed: {}", last_err))
 }
 

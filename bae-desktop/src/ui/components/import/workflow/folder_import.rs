@@ -2,8 +2,8 @@
 
 use crate::ui::app_service::use_app;
 use crate::ui::import_helpers::{
-    confirm_and_start_import, lookup_discid, search_by_barcode, search_by_catalog_number,
-    search_general, DiscIdLookupResult,
+    build_caa_client, check_cover_art, confirm_and_start_import, lookup_discid, search_by_barcode,
+    search_by_catalog_number, search_general, DiscIdLookupResult,
 };
 use crate::ui::Route;
 use bae_ui::components::import::FolderImportView;
@@ -429,6 +429,41 @@ pub fn FolderImport() -> Element {
         }
     };
 
+    // Retry cover art for a search result
+    let on_retry_cover = {
+        let app = app.clone();
+        move |index: usize| {
+            let app = app.clone();
+            spawn(async move {
+                let mut import_store = app.state.import();
+
+                // Get the MB release ID from the search result
+                let mb_release_id = {
+                    let state = import_store.read();
+                    state.get_search_state().and_then(|s| {
+                        s.current_tab_state()
+                            .search_results
+                            .get(index)
+                            .and_then(|r| r.musicbrainz_release_id.clone())
+                    })
+                };
+
+                if let Some(release_id) = mb_release_id {
+                    let client = build_caa_client();
+                    let (cover_url, failed) = check_cover_art(&client, &release_id).await;
+
+                    import_store
+                        .write()
+                        .dispatch(CandidateEvent::UpdateSearchResultCover {
+                            index,
+                            cover_url,
+                            cover_fetch_failed: failed,
+                        });
+                }
+            });
+        }
+    };
+
     // Cover selection handler
     let on_select_cover = {
         let app = app.clone();
@@ -505,6 +540,7 @@ pub fn FolderImport() -> Element {
             on_search: move |_| perform_search(),
             on_cancel_search: move |_| cancel_search(),
             on_manual_confirm,
+            on_retry_cover,
             on_retry_discid_lookup,
             on_select_cover,
             on_storage_profile_change,

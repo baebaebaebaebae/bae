@@ -69,6 +69,7 @@ pub struct TorrentImportViewProps {
     pub on_search: EventHandler<()>,
     pub on_cancel_search: EventHandler<()>,
     pub on_manual_confirm: EventHandler<MatchCandidate>,
+    pub on_retry_cover: EventHandler<usize>,
     pub on_retry_discid_lookup: EventHandler<()>,
     pub on_detect_metadata: EventHandler<()>,
     pub on_select_cover: EventHandler<SelectedCover>,
@@ -127,6 +128,7 @@ pub fn TorrentImportView(props: TorrentImportViewProps) -> Element {
                             on_search: props.on_search,
                             on_cancel_search: props.on_cancel_search,
                             on_manual_confirm: props.on_manual_confirm,
+                            on_retry_cover: props.on_retry_cover,
                             on_retry_discid_lookup: props.on_retry_discid_lookup,
                             on_detect_metadata: props.on_detect_metadata,
                         }
@@ -177,6 +179,7 @@ fn TorrentIdentifyContent(
     on_search: EventHandler<()>,
     on_cancel_search: EventHandler<()>,
     on_manual_confirm: EventHandler<MatchCandidate>,
+    on_retry_cover: EventHandler<usize>,
     on_retry_discid_lookup: EventHandler<()>,
     on_detect_metadata: EventHandler<()>,
 ) -> Element {
@@ -241,6 +244,7 @@ fn TorrentIdentifyContent(
                         on_search,
                         on_cancel_search,
                         on_confirm: on_manual_confirm,
+                        on_retry_cover,
                         on_switch_to_exact_matches,
                     }
                 },

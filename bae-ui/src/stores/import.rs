@@ -195,6 +195,12 @@ pub enum CandidateEvent {
     SelectSearchResult(usize),
     /// User confirms the selected search result
     ConfirmSearchResult,
+    /// Update cover art for a search result (after retry or initial check)
+    UpdateSearchResultCover {
+        index: usize,
+        cover_url: Option<String>,
+        cover_fetch_failed: bool,
+    },
 
     // --- Confirm step events ---
     /// User clicks "Edit" to go back to Identify
@@ -435,6 +441,19 @@ impl IdentifyingState {
                 }
                 CandidateState::Identifying(state)
             }
+            CandidateEvent::UpdateSearchResultCover {
+                index,
+                cover_url,
+                cover_fetch_failed,
+            } => {
+                let mut state = self;
+                let tab = state.search_state.current_tab_state_mut();
+                if let Some(result) = tab.search_results.get_mut(index) {
+                    result.cover_url = cover_url;
+                    result.cover_fetch_failed = cover_fetch_failed;
+                }
+                CandidateState::Identifying(state)
+            }
             CandidateEvent::ConfirmSearchResult => {
                 let state = self;
                 let tab = state.search_state.current_tab_state();
@@ -536,7 +555,10 @@ impl ConfirmingState {
             | CandidateEvent::CancelSearch
             | CandidateEvent::SearchComplete { .. }
             | CandidateEvent::SelectSearchResult(_)
-            | CandidateEvent::ConfirmSearchResult => CandidateState::Confirming(Box::new(self)),
+            | CandidateEvent::ConfirmSearchResult
+            | CandidateEvent::UpdateSearchResultCover { .. } => {
+                CandidateState::Confirming(Box::new(self))
+            }
         }
     }
 }

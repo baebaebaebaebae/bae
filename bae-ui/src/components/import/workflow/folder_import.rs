@@ -76,6 +76,7 @@ pub struct FolderImportViewProps {
     pub on_search: EventHandler<()>,
     pub on_cancel_search: EventHandler<()>,
     pub on_manual_confirm: EventHandler<MatchCandidate>,
+    pub on_retry_cover: EventHandler<usize>,
     pub on_retry_discid_lookup: EventHandler<()>,
     pub on_select_cover: EventHandler<SelectedCover>,
     pub on_storage_profile_change: EventHandler<Option<String>>,
@@ -147,6 +148,7 @@ pub fn FolderImportView(props: FolderImportViewProps) -> Element {
                             on_search: props.on_search,
                             on_cancel_search: props.on_cancel_search,
                             on_manual_confirm: props.on_manual_confirm,
+                            on_retry_cover: props.on_retry_cover,
                             on_retry_discid_lookup: props.on_retry_discid_lookup,
                             on_select_cover: props.on_select_cover,
                             on_storage_profile_change: props.on_storage_profile_change,
@@ -210,6 +212,7 @@ fn WorkflowContent(
     on_search: EventHandler<()>,
     on_cancel_search: EventHandler<()>,
     on_manual_confirm: EventHandler<MatchCandidate>,
+    on_retry_cover: EventHandler<usize>,
     on_retry_discid_lookup: EventHandler<()>,
     on_select_cover: EventHandler<SelectedCover>,
     on_storage_profile_change: EventHandler<Option<String>>,
@@ -239,6 +242,7 @@ fn WorkflowContent(
                         on_search,
                         on_cancel_search,
                         on_manual_confirm,
+                        on_retry_cover,
                         on_retry_discid_lookup,
                     }
                 },
@@ -282,6 +286,7 @@ fn IdentifyStep(
     on_search: EventHandler<()>,
     on_cancel_search: EventHandler<()>,
     on_manual_confirm: EventHandler<MatchCandidate>,
+    on_retry_cover: EventHandler<usize>,
     on_retry_discid_lookup: EventHandler<()>,
 ) -> Element {
     // Read to determine mode - this is routing
@@ -319,6 +324,7 @@ fn IdentifyStep(
                     on_search,
                     on_cancel_search,
                     on_confirm: on_manual_confirm,
+                    on_retry_cover,
                     on_switch_to_exact_matches,
                 }
             },

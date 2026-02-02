@@ -1,6 +1,6 @@
 //! Match item view component
 
-use crate::components::icons::ImageIcon;
+use crate::components::icons::{ImageIcon, RefreshIcon};
 use crate::components::{Button, ButtonSize, ButtonVariant};
 use crate::display_types::{MatchCandidate, MatchSourceType};
 use dioxus::prelude::*;
@@ -12,6 +12,7 @@ pub fn MatchItemView(
     is_selected: bool,
     on_select: EventHandler<()>,
     on_confirm: EventHandler<()>,
+    on_retry_cover: EventHandler<()>,
     confirm_button_text: &'static str,
 ) -> Element {
     let border_class = if is_selected {
@@ -55,13 +56,23 @@ pub fn MatchItemView(
                     }
                 }
 
-                // Cover art
+                // Cover art: image / placeholder / retry
                 div { class: "w-10 h-10 flex-shrink-0 bg-gray-700 rounded overflow-clip",
                     if let Some(ref cover_url) = candidate.cover_url {
                         img {
                             src: "{cover_url}",
                             alt: "",
                             class: "w-full h-full object-cover text-transparent",
+                        }
+                    } else if candidate.cover_fetch_failed {
+                        div {
+                            class: "w-full h-full flex items-center justify-center text-gray-500 hover:text-gray-300 cursor-pointer",
+                            title: "Cover art failed to load. Click to retry.",
+                            onclick: move |e| {
+                                e.stop_propagation();
+                                on_retry_cover.call(());
+                            },
+                            RefreshIcon { class: "w-4 h-4" }
                         }
                     } else {
                         div { class: "w-full h-full flex items-center justify-center text-gray-500",
