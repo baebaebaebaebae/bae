@@ -2,8 +2,8 @@
 
 use crate::ui::app_service::use_app;
 use crate::ui::import_helpers::{
-    confirm_and_start_import, lookup_discid, search_by_barcode, search_by_catalog_number,
-    search_general, DiscIdLookupResult,
+    build_caa_client, check_cover_art, confirm_and_start_import, lookup_discid, search_by_barcode,
+    search_by_catalog_number, search_general, DiscIdLookupResult,
 };
 use bae_core::cd::CdDrive;
 use bae_ui::components::import::CdImportView;
@@ -22,7 +22,7 @@ pub fn CdImport() -> Element {
     // CD drive scanning state (local to this component)
     let is_scanning = use_signal(|| true);
     let drives = use_signal(Vec::<CdDriveInfo>::new);
-    let mut selected_drive = use_signal(|| Option::<String>::None);
+    let selected_drive = use_signal(|| Option::<String>::None);
 
     // Scan for drives on mount
     use_effect({
@@ -55,9 +55,6 @@ pub fn CdImport() -> Element {
     let import_state = app.state.import();
     let storage_profiles = app.state.storage_profiles().profiles();
 
-    // Extract values needed by handlers
-    let current_candidate_key = import_state.read().current_candidate_key.clone();
-
     // Drive select handler
     let on_drive_select = {
         let app = app.clone();
@@ -70,17 +67,25 @@ pub fn CdImport() -> Element {
             spawn(async move {
                 // Set the CD path in state
                 let mut import_store = app.state.import();
-                import_store
-                    .write()
-                    .set_cd_candidate(device_path_clone.clone());
+                {
+                    let mut state = import_store.write();
+                    state.init_state_machine(
+                        &device_path_clone,
+                        Default::default(),
+                        Default::default(),
+                    );
+                    state.switch_candidate(Some(device_path_clone.clone()));
+                }
 
                 // Attempt DiscID lookup
                 import_store.write().is_looking_up = true;
-                if let Some(mb_discid) = import_store
+
+                let mb_discid = import_store
                     .read()
                     .get_metadata()
-                    .and_then(|m| m.mb_discid.clone())
-                {
+                    .and_then(|m| m.mb_discid.clone());
+
+                if let Some(mb_discid) = mb_discid {
                     match lookup_discid(&mb_discid).await {
                         Ok(result) => {
                             let matches = match result {
@@ -327,6 +332,39 @@ pub fn CdImport() -> Element {
         }
     };
 
+    let on_retry_cover = {
+        let app = app.clone();
+        move |index: usize| {
+            let app = app.clone();
+            spawn(async move {
+                let mut import_store = app.state.import();
+
+                let mb_release_id = {
+                    let state = import_store.read();
+                    state.get_search_state().and_then(|s| {
+                        s.current_tab_state()
+                            .search_results
+                            .get(index)
+                            .and_then(|r| r.musicbrainz_release_id.clone())
+                    })
+                };
+
+                if let Some(release_id) = mb_release_id {
+                    let client = build_caa_client();
+                    let (cover_url, failed) = check_cover_art(&client, &release_id).await;
+
+                    import_store
+                        .write()
+                        .dispatch(CandidateEvent::UpdateSearchResultCover {
+                            index,
+                            cover_url,
+                            cover_fetch_failed: failed,
+                        });
+                }
+            });
+        }
+    };
+
     let on_retry_discid_lookup = {
         let app = app.clone();
         move |_| {
@@ -505,6 +543,7 @@ pub fn CdImport() -> Element {
             on_search: move |_| perform_search(),
             on_cancel_search: move |_| cancel_search(),
             on_manual_confirm,
+            on_retry_cover,
             on_retry_discid_lookup,
             on_select_cover: |_| {},
             on_storage_profile_change: |_| {},

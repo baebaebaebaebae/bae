@@ -799,6 +799,7 @@ dependencies = [
  "futures",
  "keyring",
  "objc",
+ "reqwest",
  "rfd",
  "serde",
  "serde_json",

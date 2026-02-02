@@ -2,7 +2,8 @@
 
 use super::framework::{ControlRegistryBuilder, MockPage, MockPanel, Preset};
 use bae_ui::stores::import::{
-    CandidateState, ConfirmPhase, ConfirmingState, IdentifyingState, ImportState, ManualSearchState,
+    CandidateState, ConfirmPhase, ConfirmingState, IdentifyingState, ImportState,
+    ManualSearchState, TabSearchState,
 };
 use bae_ui::{
     AudioContentInfo, CategorizedFileInfo, CueFlacPairInfo, DetectedCandidate,
@@ -355,6 +356,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             country: Some("US".to_string()),
             label: Some("Synthwave Records".to_string()),
             catalog_number: Some("SWR-001".to_string()),
+            cover_fetch_failed: false,
             source_type: MatchSourceType::MusicBrainz,
             original_year: Some("2023".to_string()),
             musicbrainz_release_id: Some("mock-mb-release-001".to_string()),
@@ -371,6 +373,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             country: Some("XW".to_string()),
             label: Some("Synthwave Records".to_string()),
             catalog_number: Some("SWR-001D".to_string()),
+            cover_fetch_failed: false,
             source_type: MatchSourceType::MusicBrainz,
             original_year: Some("2023".to_string()),
             musicbrainz_release_id: Some("mock-mb-release-002".to_string()),
@@ -448,7 +451,14 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         None
     };
 
-    // Build search state
+    // Build search state with per-tab results
+    let current_tab = search_tab();
+    let active_tab_state = TabSearchState {
+        has_searched,
+        search_results: manual_match_candidates.clone(),
+        selected_result_index: selected_match_index(),
+        error_message: None,
+    };
     let mock_search_state = ManualSearchState {
         search_source: search_source(),
         search_artist: search_artist(),
@@ -457,12 +467,23 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         search_label: search_label(),
         search_catalog_number: search_catalog_number(),
         search_barcode: search_barcode(),
-        search_tab: search_tab(),
-        has_searched,
+        search_tab: current_tab,
         is_searching,
-        search_results: manual_match_candidates.clone(),
-        selected_result_index: selected_match_index(),
-        error_message: None,
+        general: if current_tab == SearchTab::General {
+            active_tab_state.clone()
+        } else {
+            TabSearchState::default()
+        },
+        catalog_number: if current_tab == SearchTab::CatalogNumber {
+            active_tab_state.clone()
+        } else {
+            TabSearchState::default()
+        },
+        barcode: if current_tab == SearchTab::Barcode {
+            active_tab_state
+        } else {
+            TabSearchState::default()
+        },
     };
 
     // Build candidate state based on step
@@ -509,6 +530,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                         catalog_number: None,
                         country: None,
                         cover_url: None,
+                        cover_fetch_failed: false,
                         source_type: MatchSourceType::MusicBrainz,
                         original_year: None,
                         musicbrainz_release_id: None,
@@ -621,6 +643,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                     on_search: move |_| registry_for_search.set_string("search_phase", "Searching".to_string()),
                     on_cancel_search: move |_| registry_for_cancel.set_string("search_phase", "Empty".to_string()),
                     on_manual_confirm: |_| {},
+                    on_retry_cover: |_| {},
                     on_retry_discid_lookup: |_| {},
                     on_select_cover: move |cover| selected_cover.set(Some(cover)),
                     on_storage_profile_change: move |id| selected_profile_id.set(id),

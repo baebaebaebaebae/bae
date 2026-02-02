@@ -11,6 +11,7 @@ pub fn MatchResultsPanel(
     selected_index: Option<usize>,
     on_select: EventHandler<usize>,
     on_confirm: EventHandler<MatchCandidate>,
+    on_retry_cover: EventHandler<usize>,
     confirm_button_text: &'static str,
 ) -> Element {
     if candidates.is_empty() {
@@ -30,6 +31,7 @@ pub fn MatchResultsPanel(
                             let candidate = candidate.clone();
                             move |_| on_confirm.call(candidate.clone())
                         },
+                        on_retry_cover: move |_| on_retry_cover.call(index),
                         confirm_button_text,
                     }
                 }

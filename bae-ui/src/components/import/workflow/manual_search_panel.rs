@@ -25,6 +25,7 @@ pub fn ManualSearchPanelView(
     on_search: EventHandler<()>,
     on_cancel_search: EventHandler<()>,
     on_confirm: EventHandler<MatchCandidate>,
+    on_retry_cover: EventHandler<usize>,
     on_switch_to_exact_matches: EventHandler<String>,
 ) -> Element {
     // Read state at this leaf component
@@ -62,16 +63,14 @@ pub fn ManualSearchPanelView(
         .as_ref()
         .map(|s| s.is_searching)
         .unwrap_or(false);
-    let error = search_state.as_ref().and_then(|s| s.error_message.clone());
-    let searched = search_state
+    let tab_state = search_state.as_ref().map(|s| s.current_tab_state().clone());
+    let error = tab_state.as_ref().and_then(|t| t.error_message.clone());
+    let searched = tab_state.as_ref().map(|t| t.has_searched).unwrap_or(false);
+    let candidates = tab_state
         .as_ref()
-        .map(|s| s.has_searched)
-        .unwrap_or(false);
-    let candidates = search_state
-        .as_ref()
-        .map(|s| s.search_results.clone())
+        .map(|t| t.search_results.clone())
         .unwrap_or_default();
-    let selected = search_state.as_ref().and_then(|s| s.selected_result_index);
+    let selected = tab_state.as_ref().and_then(|t| t.selected_result_index);
 
     drop(st);
 
@@ -141,6 +140,13 @@ pub fn ManualSearchPanelView(
                     SearchSourceSelectorView {
                         selected_source: source,
                         on_select: on_search_source_change,
+                    }
+                }
+
+                // Error message
+                if let Some(ref err) = error {
+                    div { class: "bg-red-500/15 rounded-lg p-3",
+                        p { class: "text-sm text-red-300 select-text", "Error: {err}" }
                     }
                 }
 
@@ -239,13 +245,6 @@ pub fn ManualSearchPanelView(
                 }
             }
 
-            // Error message
-            if let Some(ref err) = error {
-                div { class: "bg-red-500/15 rounded-lg p-3",
-                    p { class: "text-sm text-red-300 select-text", "Error: {err}" }
-                }
-            }
-
             // Results
             if searching {
                 div { class: "flex flex-col items-center gap-4 py-8",
@@ -257,7 +256,7 @@ pub fn ManualSearchPanelView(
                         "Cancel"
                     }
                 }
-            } else if candidates.is_empty() && searched {
+            } else if candidates.is_empty() && searched && error.is_none() {
                 div { class: "text-center py-8",
                     p { class: "text-gray-400", "No results found" }
                 }
@@ -267,6 +266,7 @@ pub fn ManualSearchPanelView(
                     selected_index: selected,
                     on_select: move |index| on_match_select.call(index),
                     on_confirm,
+                    on_retry_cover,
                     confirm_button_text: "Confirm",
                 }
             }
