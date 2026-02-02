@@ -1,28 +1,36 @@
 //! Gallery lightbox component
 //!
-//! A full-screen image viewer with gallery strip, used for both
-//! plain image viewing and cover art selection.
+//! A full-screen viewer with gallery strip for images and text files,
+//! used for both plain viewing and cover art selection.
 
-use crate::components::icons::{CheckIcon, ChevronLeftIcon, ChevronRightIcon, XIcon};
+use crate::components::icons::{CheckIcon, ChevronLeftIcon, ChevronRightIcon, FileTextIcon, XIcon};
 use crate::components::{Button, ButtonSize, ButtonVariant, ChromelessButton, Modal};
 use dioxus::prelude::*;
 
-/// An image in the gallery lightbox
+/// Content variant for a gallery item
 #[derive(Clone, Debug, PartialEq)]
-pub struct GalleryImage {
-    pub display_url: String,
+pub enum GalleryItemContent {
+    Image { url: String },
+    Text { content: Option<String> },
+}
+
+/// An item in the gallery lightbox (image or text file)
+#[derive(Clone, Debug, PartialEq)]
+pub struct GalleryItem {
     pub label: String,
+    pub content: GalleryItemContent,
 }
 
 /// Gallery lightbox with optional cover selection
 ///
 /// Always rendered by parent. Visibility controlled via `is_open` signal.
-/// When `selected_index` is None, this is a plain image viewer.
-/// When `selected_index` is Some, shows "Select as Cover" button and green selection badges.
+/// When `selected_index` is None, this is a plain viewer.
+/// When `selected_index` is Some, shows "Select as Cover" button and green selection badges
+/// (only for image items).
 #[component]
 pub fn GalleryLightbox(
     is_open: ReadSignal<bool>,
-    images: Vec<GalleryImage>,
+    items: Vec<GalleryItem>,
     initial_index: usize,
     on_close: EventHandler<()>,
     on_navigate: EventHandler<usize>,
@@ -32,23 +40,23 @@ pub fn GalleryLightbox(
     let mut current_index = use_signal(|| initial_index);
     let has_selection = selected_index.is_some();
 
-    let total = images.len();
+    let total = items.len();
 
     if total == 0 {
         return rsx! {
             Modal { is_open, on_close,
-                div { class: "text-white", "No images available" }
+                div { class: "text-white", "No files available" }
             }
         };
     }
 
     let idx = (*current_index.read()).min(total - 1);
-    let current_image = &images[idx];
-    let url = &current_image.display_url;
-    let label = &current_image.label;
+    let current_item = &items[idx];
+    let label = &current_item.label;
     let can_prev = idx > 0;
     let can_next = idx < total - 1;
 
+    let is_current_image = matches!(current_item.content, GalleryItemContent::Image { .. });
     let is_current_selected = selected_index == Some(idx);
 
     let mut navigate = move |new_idx: usize| {
@@ -109,50 +117,80 @@ pub fn GalleryLightbox(
                     }
                 }
 
-                // Main image
-                if has_selection {
-                    // Selection mode: overlay with label and select button
-                    div { class: "relative max-w-[90vw] max-h-[60vh]",
-                        img {
-                            src: "{url}",
-                            alt: "{label}",
-                            class: "max-w-[90vw] max-h-[60vh] object-contain rounded-lg shadow-2xl",
-                        }
-                        div { class: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/40 to-transparent rounded-b-lg px-4 py-3 flex items-end gap-3",
-                            span { class: "text-white text-xs", {label.clone()} }
-                            div { class: "ml-auto h-8 flex items-center whitespace-nowrap",
-                                if is_current_selected {
-                                    span { class: "text-green-400 text-sm flex items-center gap-1 px-3",
-                                        CheckIcon { class: "w-4 h-4" }
-                                        "Selected"
-                                    }
-                                } else {
-                                    Button {
-                                        variant: ButtonVariant::Primary,
-                                        size: ButtonSize::Small,
-                                        onclick: move |_| on_select.call(idx),
-                                        "Select as Cover"
+                // Main content area
+                if has_selection && is_current_image {
+                    // Selection mode (images only): overlay with label and select button
+                    {
+                        let url = match &current_item.content {
+                            GalleryItemContent::Image { url } => url,
+                            _ => unreachable!(),
+                        };
+                        rsx! {
+                            div { class: "relative max-w-[90vw] max-h-[60vh]",
+                                img {
+                                    src: "{url}",
+                                    alt: "{label}",
+                                    class: "max-w-[90vw] max-h-[60vh] object-contain rounded-lg shadow-2xl",
+                                }
+                                div { class: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/40 to-transparent rounded-b-lg px-4 py-3 flex items-end gap-3",
+                                    span { class: "text-white text-xs", {label.clone()} }
+                                    div { class: "ml-auto h-8 flex items-center whitespace-nowrap",
+                                        if is_current_selected {
+                                            span { class: "text-green-400 text-sm flex items-center gap-1 px-3",
+                                                CheckIcon { class: "w-4 h-4" }
+                                                "Selected"
+                                            }
+                                        } else {
+                                            Button {
+                                                variant: ButtonVariant::Primary,
+                                                size: ButtonSize::Small,
+                                                onclick: move |_| on_select.call(idx),
+                                                "Select as Cover"
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 } else {
-                    // View mode: image with filename below
-                    div { class: "flex flex-col items-center",
-                        img {
-                            src: "{url}",
-                            alt: "{label}",
-                            class: "max-w-[90vw] max-h-[80vh] object-contain rounded-lg shadow-2xl",
-                        }
-                        div { class: "mt-4 text-gray-300 text-sm", {label.clone()} }
+                    // View mode: render based on content type
+                    match &current_item.content {
+                        GalleryItemContent::Image { url } => rsx! {
+                            div { class: "flex flex-col items-center",
+                                img {
+                                    src: "{url}",
+                                    alt: "{label}",
+                                    class: "max-w-[90vw] max-h-[80vh] object-contain rounded-lg shadow-2xl",
+                                }
+                                div { class: "mt-4 text-gray-300 text-sm", {label.clone()} }
+                            }
+                        },
+                        GalleryItemContent::Text { content: Some(text) } => rsx! {
+                            div { class: "flex flex-col items-center",
+                                div { class: "bg-gray-800 rounded-lg max-w-2xl w-full max-h-[80vh] overflow-auto shadow-2xl",
+                                    pre { class: "text-sm text-gray-300 font-mono whitespace-pre-wrap select-text p-4",
+                                        {text.clone()}
+                                    }
+                                }
+                                div { class: "mt-4 text-gray-300 text-sm", {label.clone()} }
+                            }
+                        },
+                        GalleryItemContent::Text { content: None } => rsx! {
+                            div { class: "flex flex-col items-center",
+                                div { class: "bg-gray-800 rounded-lg max-w-2xl w-full p-8 flex items-center justify-center shadow-2xl",
+                                    span { class: "text-gray-400 text-sm", "Loading..." }
+                                }
+                                div { class: "mt-4 text-gray-300 text-sm", {label.clone()} }
+                            }
+                        },
                     }
                 }
 
                 // Gallery strip
                 if total > 1 {
                     div { class: "mt-6 flex gap-2 overflow-x-auto max-w-[90vw] p-1",
-                        for (i , img) in images.iter().enumerate() {
+                        for (i , item) in items.iter().enumerate() {
                             {
                                 let is_active = i == idx;
                                 let is_selected = selected_index == Some(i);
@@ -165,14 +203,19 @@ pub fn GalleryLightbox(
                                 };
                                 rsx! {
                                     ChromelessButton {
-                                        key: "{img.display_url}",
+                                        key: "{item.label}-{i}",
                                         class: Some(format!("relative flex-shrink-0 w-16 h-16 rounded-md {ring_class}")),
                                         onclick: move |_| navigate(i),
                                         div { class: "w-full h-full rounded-md overflow-clip",
-                                            img {
-                                                src: "{img.display_url}",
-                                                alt: "{img.label}",
-                                                class: "w-full h-full object-cover",
+                                            match &item.content {
+                                                GalleryItemContent::Image { url } => rsx! {
+                                                    img { src: "{url}", alt: "{item.label}", class: "w-full h-full object-cover" }
+                                                },
+                                                GalleryItemContent::Text { .. } => rsx! {
+                                                    div { class: "w-full h-full bg-gray-800 flex items-center justify-center",
+                                                        FileTextIcon { class: "w-6 h-6 text-gray-400" }
+                                                    }
+                                                },
                                             }
                                         }
                                         if is_selected {
