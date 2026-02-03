@@ -2459,6 +2459,7 @@ dependencies = [
  "dioxus",
  "getrandom 0.2.17",
  "js-sys-x",
+ "tracing",
  "wasm-bindgen-futures-x",
  "wasm-bindgen-x",
  "web-sys-x",
