@@ -730,42 +730,42 @@ mod tests {
     #[test]
     fn test_clean_album_name() {
         assert_eq!(
-            clean_album_name_for_search("Electric Ladyland (1968) [Polydor 823 359-2, 1984]",),
-            "Electric Ladyland",
+            clean_album_name_for_search("Some Album (2000) [Test Label 823 359-2, 2001]",),
+            "Some Album",
         );
         assert_eq!(
-            clean_album_name_for_search("Back In Black (Disc 2)"),
-            "Back In Black",
+            clean_album_name_for_search("Another Album (Disc 2)"),
+            "Another Album",
         );
         assert_eq!(
-            clean_album_name_for_search("Abbey Road (Remastered)"),
-            "Abbey Road"
+            clean_album_name_for_search("Third Album (Remastered)"),
+            "Third Album"
         );
         assert_eq!(
-            clean_album_name_for_search("The Wall (Deluxe Edition)"),
-            "The Wall"
+            clean_album_name_for_search("Fourth Album (Deluxe Edition)"),
+            "Fourth Album"
         );
     }
     #[test]
     fn test_release_search_params_build_query() {
         let params = ReleaseSearchParams {
-            artist: Some("Hendrix".to_string()),
-            album: Some("Electric Ladyland".to_string()),
-            year: Some("1968".to_string()),
+            artist: Some("Test Artist".to_string()),
+            album: Some("Test Album".to_string()),
+            year: Some("2000".to_string()),
             ..Default::default()
         };
         assert_eq!(
             params.build_query(),
-            "artist:\"Hendrix\" AND release:\"Electric Ladyland\" AND date:1968",
+            "artist:\"Test Artist\" AND release:\"Test Album\" AND date:2000",
         );
         let params2 = ReleaseSearchParams {
-            artist: Some("ACDC".to_string()),
-            catalog_number: Some("A2 16018".to_string()),
+            artist: Some("Another Artist".to_string()),
+            catalog_number: Some("TL-1234".to_string()),
             ..Default::default()
         };
         assert_eq!(
             params2.build_query(),
-            "artist:\"ACDC\" AND catno:\"A2 16018\""
+            "artist:\"Another Artist\" AND catno:\"TL-1234\""
         );
     }
 }

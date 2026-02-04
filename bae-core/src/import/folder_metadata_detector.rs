@@ -866,12 +866,12 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     #[test]
-    fn test_extract_leadout_from_log_acdc() {
-        let log_path = PathBuf::from("tests/fixtures/acdc_back_in_black.log");
+    fn test_extract_leadout_from_log() {
+        let log_path = PathBuf::from("tests/fixtures/test_album.log");
         let log_path = if log_path.exists() {
             log_path
         } else {
-            PathBuf::from("bae/tests/fixtures/acdc_back_in_black.log")
+            PathBuf::from("bae/tests/fixtures/test_album.log")
         };
         if !log_path.exists() {
             eprintln!("LOG file not found at: {:?}", log_path);
@@ -953,12 +953,12 @@ mod tests {
         }
     }
     #[test]
-    fn test_calculate_mb_discid_from_log_acdc() {
-        let log_path = PathBuf::from("tests/fixtures/acdc_back_in_black.log");
+    fn test_calculate_mb_discid_from_log() {
+        let log_path = PathBuf::from("tests/fixtures/test_album.log");
         let log_path = if log_path.exists() {
             log_path
         } else {
-            PathBuf::from("bae/tests/fixtures/acdc_back_in_black.log")
+            PathBuf::from("bae/tests/fixtures/test_album.log")
         };
         if !log_path.exists() {
             eprintln!("LOG file not found at: {:?}", log_path);
@@ -991,12 +991,12 @@ mod tests {
         }
     }
     #[test]
-    fn test_calculate_mb_discid_from_log_acdc_cue_log() {
-        let log_path = PathBuf::from("tests/fixtures/acdc_back_in_black.log");
+    fn test_calculate_mb_discid_from_log_cue_log() {
+        let log_path = PathBuf::from("tests/fixtures/test_album.log");
         let log_path = if log_path.exists() {
             log_path
         } else {
-            PathBuf::from("bae/tests/fixtures/acdc_back_in_black.log")
+            PathBuf::from("bae/tests/fixtures/test_album.log")
         };
         if !log_path.exists() {
             eprintln!("LOG file not found, skipping test");

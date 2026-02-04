@@ -777,18 +777,18 @@ FILE "test.flac" WAVE
     fn test_pregap_sets_correct_track_boundary() {
         // Track 2 has a 3-second pregap (INDEX 00 at 2:46, INDEX 01 at 2:49)
         // Track 1 should end at INDEX 00 (2:46), not INDEX 01 (2:49)
-        let cue_content = r#"PERFORMER "Led Zeppelin"
-TITLE "Led Zeppelin I"
-FILE "Led Zeppelin I.flac" WAVE
+        let cue_content = r#"PERFORMER "Test Artist"
+TITLE "Test Album"
+FILE "Test Artist - Test Album.flac" WAVE
   TRACK 01 AUDIO
-    TITLE "Good Times Bad Times"
+    TITLE "Track One"
     INDEX 01 00:00:00
   TRACK 02 AUDIO
-    TITLE "Babe I'm Gonna Leave You"
+    TITLE "Track Two"
     INDEX 00 02:46:00
     INDEX 01 02:49:00
   TRACK 03 AUDIO
-    TITLE "You Shook Me"
+    TITLE "Track Three"
     INDEX 01 09:31:00
 "#;
         let result = CueFlacProcessor::parse_cue_content(cue_content);
