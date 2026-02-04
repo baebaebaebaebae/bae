@@ -1,6 +1,7 @@
 //! Import source selector view
 
-use crate::components::{Button, ButtonSize, ButtonVariant};
+use crate::components::button::ButtonVariant;
+use crate::components::segmented_control::{Segment, SegmentedControl};
 use dioxus::prelude::*;
 
 /// Import source type
@@ -21,6 +22,14 @@ impl ImportSource {
         }
     }
 
+    pub fn value(&self) -> &'static str {
+        match self {
+            ImportSource::Folder => "folder",
+            ImportSource::Torrent => "torrent",
+            ImportSource::Cd => "cd",
+        }
+    }
+
     pub fn all() -> &'static [ImportSource] {
         &[
             ImportSource::Folder,
@@ -30,6 +39,14 @@ impl ImportSource {
             ImportSource::Cd,
         ]
     }
+
+    fn from_value(value: &str) -> ImportSource {
+        match value {
+            "torrent" => ImportSource::Torrent,
+            "cd" => ImportSource::Cd,
+            _ => ImportSource::Folder,
+        }
+    }
 }
 
 /// Import source selector tabs
@@ -38,40 +55,26 @@ pub fn ImportSourceSelectorView(
     selected_source: ImportSource,
     on_source_select: EventHandler<ImportSource>,
 ) -> Element {
+    let mut segments: Vec<Segment> = ImportSource::all()
+        .iter()
+        .map(|s| Segment::new(s.label(), s.value()))
+        .collect();
+
+    if !cfg!(feature = "torrent") {
+        segments.push(Segment::new("Torrent", "torrent").disabled());
+    }
+    if !cfg!(feature = "cd-rip") {
+        segments.push(Segment::new("CD", "cd").disabled());
+    }
+
     rsx! {
-        div { class: "flex items-center gap-2 rounded-lg bg-gray-800/40 p-1",
-            for source in ImportSource::all() {
-                Button {
-                    variant: if selected_source == *source { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
-                    size: ButtonSize::Small,
-                    class: Some("text-xs".to_string()),
-                    onclick: {
-                        let source = *source;
-                        move |_| on_source_select.call(source)
-                    },
-                    "{source.label()}"
-                }
-            }
-            if !cfg!(feature = "torrent") {
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Small,
-                    disabled: true,
-                    class: Some("text-xs text-gray-600 cursor-not-allowed".to_string()),
-                    onclick: move |_| {},
-                    "Torrent"
-                }
-            }
-            if !cfg!(feature = "cd-rip") {
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Small,
-                    disabled: true,
-                    class: Some("text-xs text-gray-600 cursor-not-allowed".to_string()),
-                    onclick: move |_| {},
-                    "CD"
-                }
-            }
+        SegmentedControl {
+            segments,
+            selected: selected_source.value().to_string(),
+            selected_variant: ButtonVariant::Secondary,
+            on_select: move |value: &str| {
+                on_source_select.call(ImportSource::from_value(value));
+            },
         }
     }
 }

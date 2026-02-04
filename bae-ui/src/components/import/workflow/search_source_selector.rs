@@ -1,40 +1,36 @@
 //! Search source selector view component
 
+use crate::components::button::ButtonVariant;
+use crate::components::segmented_control::{Segment, SegmentedControl};
 use crate::display_types::SearchSource;
 use dioxus::prelude::*;
 
-/// Radio buttons to select between MusicBrainz and Discogs
+/// Segmented button group to select between MusicBrainz and Discogs
 #[component]
 pub fn SearchSourceSelectorView(
     selected_source: SearchSource,
     on_select: EventHandler<SearchSource>,
 ) -> Element {
+    let segments = vec![
+        Segment::new("MusicBrainz", "musicbrainz"),
+        Segment::new("Discogs", "discogs"),
+    ];
+
     rsx! {
-        div { class: "flex gap-4",
-            label { class: "flex items-center gap-2 cursor-pointer group",
-                input {
-                    r#type: "radio",
-                    name: "search_source",
-                    class: "accent-gray-200",
-                    checked: selected_source == SearchSource::MusicBrainz,
-                    onchange: move |_| on_select.call(SearchSource::MusicBrainz),
-                }
-                span { class: "text-xs text-gray-300 group-hover:text-white transition-colors",
-                    "MusicBrainz"
-                }
-            }
-            label { class: "flex items-center gap-2 cursor-pointer group",
-                input {
-                    r#type: "radio",
-                    name: "search_source",
-                    class: "accent-gray-200",
-                    checked: selected_source == SearchSource::Discogs,
-                    onchange: move |_| on_select.call(SearchSource::Discogs),
-                }
-                span { class: "text-xs text-gray-300 group-hover:text-white transition-colors",
-                    "Discogs"
-                }
-            }
+        SegmentedControl {
+            segments,
+            selected: match selected_source {
+                SearchSource::MusicBrainz => "musicbrainz".to_string(),
+                SearchSource::Discogs => "discogs".to_string(),
+            },
+            selected_variant: ButtonVariant::Secondary,
+            on_select: move |value: &str| {
+                let source = match value {
+                    "discogs" => SearchSource::Discogs,
+                    _ => SearchSource::MusicBrainz,
+                };
+                on_select.call(source);
+            },
         }
     }
 }
