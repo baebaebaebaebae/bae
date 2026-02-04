@@ -115,7 +115,7 @@ pub fn to_display_candidate(candidate: &MatchCandidate) -> DisplayMatchCandidate
             MatchSourceType::Discogs,
             result.format.as_ref().map(|v| v.join(", ")),
             result.country.clone(),
-            result.label.as_ref().map(|v| v.join(", ")),
+            result.label.as_ref().and_then(|v| v.first().cloned()),
             result.catno.clone(),
             None,
             None,

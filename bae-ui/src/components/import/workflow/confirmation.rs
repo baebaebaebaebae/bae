@@ -48,14 +48,9 @@ pub fn ConfirmationView(
     let release_year = candidate.year.clone();
     let original_year = candidate.original_year.clone();
 
-    let (format_text, country_text, label_text) = match candidate.source_type {
-        MatchSourceType::MusicBrainz => (
-            candidate.format.clone(),
-            candidate.country.clone(),
-            candidate.label.clone(),
-        ),
-        MatchSourceType::Discogs => (None, None, None),
-    };
+    let format_text = candidate.format.clone();
+    let country_text = candidate.country.clone();
+    let label_text = candidate.label.clone();
 
     let has_cover_options =
         !artwork_files.is_empty() || !managed_artwork.is_empty() || remote_cover_url.is_some();
