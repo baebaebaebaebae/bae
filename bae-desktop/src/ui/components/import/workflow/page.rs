@@ -120,6 +120,13 @@ pub fn ImportPage() -> Element {
         }
     };
 
+    let on_clear_incomplete = {
+        let app = app.clone();
+        move |_| {
+            app.state.import().write().clear_incomplete_candidates();
+        }
+    };
+
     let on_open_folder = move |path: String| {
         let _ = std::process::Command::new("open").arg(&path).spawn();
     };
@@ -133,6 +140,7 @@ pub fn ImportPage() -> Element {
             on_add_folder,
             on_remove_candidate,
             on_clear_all,
+            on_clear_incomplete,
             on_open_folder,
 
             match selected_source {

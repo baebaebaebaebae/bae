@@ -27,6 +27,8 @@ pub fn ImportView(
     on_remove_candidate: EventHandler<usize>,
     /// Sidebar: called to clear all candidates
     on_clear_all: EventHandler<()>,
+    /// Sidebar: called to clear incomplete candidates
+    on_clear_incomplete: EventHandler<()>,
     /// Sidebar: called to open a folder in the native file manager
     on_open_folder: EventHandler<String>,
     children: Element,
@@ -67,6 +69,7 @@ pub fn ImportView(
                                 on_add_folder,
                                 on_remove: on_remove_candidate,
                                 on_clear_all,
+                                on_clear_incomplete,
                                 on_open_folder,
                             }
                         }

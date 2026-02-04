@@ -612,6 +612,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                 on_add_folder: |_| {},
                 on_remove_candidate: |_| {},
                 on_clear_all: |_| {},
+                on_clear_incomplete: |_| {},
                 on_open_folder: |_| {},
                 FolderImportView {
                     state: import_state,
