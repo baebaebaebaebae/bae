@@ -62,7 +62,7 @@ pub fn MultipleExactMatchesView(
                 on_select: move |index| on_select.call(index),
                 on_confirm: move |candidate| on_confirm.call(candidate),
                 on_retry_cover: move |_| {},
-                confirm_button_text: "Continue",
+                confirm_button_text: "Select",
             }
         }
     }

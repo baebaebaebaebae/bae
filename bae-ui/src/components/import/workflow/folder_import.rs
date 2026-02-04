@@ -432,7 +432,9 @@ fn DetailHeader(state: ReadStore<ImportState>) -> Element {
     rsx! {
         div { class: "flex-shrink-0 px-4 py-4 bg-gray-800/30",
             div { class: "cursor-default", title: "{tooltip}",
-                span { class: "text-base font-medium text-gray-300 truncate", "{name}" }
+                span { class: "text-[0.9375rem] font-medium text-gray-300 truncate select-text",
+                    "{name}"
+                }
             }
         }
     }
