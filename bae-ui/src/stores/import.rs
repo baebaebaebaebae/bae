@@ -68,25 +68,43 @@ pub struct ManualSearchState {
     pub search_barcode: String,
     pub search_tab: SearchTab,
     pub is_searching: bool,
-    pub general: TabSearchState,
-    pub catalog_number: TabSearchState,
-    pub barcode: TabSearchState,
+    pub general_mb: TabSearchState,
+    pub general_discogs: TabSearchState,
+    pub catalog_number_mb: TabSearchState,
+    pub catalog_number_discogs: TabSearchState,
+    pub barcode_mb: TabSearchState,
+    pub barcode_discogs: TabSearchState,
 }
 
 impl ManualSearchState {
+    pub fn any_tab_searched(&self) -> bool {
+        self.general_mb.has_searched
+            || self.general_discogs.has_searched
+            || self.catalog_number_mb.has_searched
+            || self.catalog_number_discogs.has_searched
+            || self.barcode_mb.has_searched
+            || self.barcode_discogs.has_searched
+    }
+
     pub fn current_tab_state(&self) -> &TabSearchState {
-        match self.search_tab {
-            SearchTab::General => &self.general,
-            SearchTab::CatalogNumber => &self.catalog_number,
-            SearchTab::Barcode => &self.barcode,
+        match (self.search_tab, self.search_source) {
+            (SearchTab::General, SearchSource::MusicBrainz) => &self.general_mb,
+            (SearchTab::General, SearchSource::Discogs) => &self.general_discogs,
+            (SearchTab::CatalogNumber, SearchSource::MusicBrainz) => &self.catalog_number_mb,
+            (SearchTab::CatalogNumber, SearchSource::Discogs) => &self.catalog_number_discogs,
+            (SearchTab::Barcode, SearchSource::MusicBrainz) => &self.barcode_mb,
+            (SearchTab::Barcode, SearchSource::Discogs) => &self.barcode_discogs,
         }
     }
 
     pub fn current_tab_state_mut(&mut self) -> &mut TabSearchState {
-        match self.search_tab {
-            SearchTab::General => &mut self.general,
-            SearchTab::CatalogNumber => &mut self.catalog_number,
-            SearchTab::Barcode => &mut self.barcode,
+        match (self.search_tab, self.search_source) {
+            (SearchTab::General, SearchSource::MusicBrainz) => &mut self.general_mb,
+            (SearchTab::General, SearchSource::Discogs) => &mut self.general_discogs,
+            (SearchTab::CatalogNumber, SearchSource::MusicBrainz) => &mut self.catalog_number_mb,
+            (SearchTab::CatalogNumber, SearchSource::Discogs) => &mut self.catalog_number_discogs,
+            (SearchTab::Barcode, SearchSource::MusicBrainz) => &mut self.barcode_mb,
+            (SearchTab::Barcode, SearchSource::Discogs) => &mut self.barcode_discogs,
         }
     }
 }
