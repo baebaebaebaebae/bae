@@ -75,7 +75,7 @@ pub fn ManualSearchPanelView(
     drop(st);
 
     rsx! {
-        div { class: "p-5 space-y-4",
+        div { class: "flex-1 flex flex-col p-5 space-y-4",
             // Info banner if disc ID lookup found no results
             if let Some(disc_id) = disc_id_not_found {
                 div { class: "bg-blue-500/15 rounded-lg p-3 flex items-center gap-2",
@@ -247,7 +247,7 @@ pub fn ManualSearchPanelView(
 
             // Results
             if searching {
-                div { class: "flex flex-col items-center gap-4 py-8",
+                div { class: "flex-1 flex flex-col items-center justify-center gap-4",
                     LoadingIndicator { message: format!("Searching {}...", source.display_name()) }
                     Button {
                         variant: ButtonVariant::Outline,
@@ -267,7 +267,7 @@ pub fn ManualSearchPanelView(
                     on_select: move |index| on_match_select.call(index),
                     on_confirm,
                     on_retry_cover,
-                    confirm_button_text: "Confirm",
+                    confirm_button_text: "Select",
                 }
             }
         }

@@ -197,7 +197,7 @@ pub fn ConfirmationView(
                         size: ButtonSize::Small,
                         disabled: is_importing,
                         onclick: move |_| on_edit.call(()),
-                        "Edit"
+                        "Change"
                     }
                 }
             }
