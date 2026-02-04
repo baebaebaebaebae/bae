@@ -444,6 +444,69 @@ unsafe fn setup_app_menu_inner(app: id) {
     playback_menu_item.setSubmenu_(playback_menu);
     main_menu.addItem_(playback_menu_item);
 
+    // Edit menu (enables Cmd+C/V/X/A in webview text fields)
+    let edit_menu = NSMenu::new(nil);
+    edit_menu.autorelease();
+    let edit_menu_title = NSString::alloc(nil).init_str("Edit");
+    let _: () = msg_send![edit_menu, setTitle: edit_menu_title];
+
+    let undo_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+        NSString::alloc(nil).init_str("Undo"),
+        selector("undo:"),
+        NSString::alloc(nil).init_str("z"),
+    );
+    undo_item.autorelease();
+    edit_menu.addItem_(undo_item);
+
+    let redo_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+        NSString::alloc(nil).init_str("Redo"),
+        selector("redo:"),
+        NSString::alloc(nil).init_str("Z"),
+    );
+    redo_item.autorelease();
+    let _: () = msg_send![redo_item, setKeyEquivalentModifierMask: command_shift];
+    edit_menu.addItem_(redo_item);
+
+    let edit_sep = NSMenuItem::separatorItem(nil);
+    edit_menu.addItem_(edit_sep);
+
+    let cut_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+        NSString::alloc(nil).init_str("Cut"),
+        selector("cut:"),
+        NSString::alloc(nil).init_str("x"),
+    );
+    cut_item.autorelease();
+    edit_menu.addItem_(cut_item);
+
+    let copy_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+        NSString::alloc(nil).init_str("Copy"),
+        selector("copy:"),
+        NSString::alloc(nil).init_str("c"),
+    );
+    copy_item.autorelease();
+    edit_menu.addItem_(copy_item);
+
+    let paste_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+        NSString::alloc(nil).init_str("Paste"),
+        selector("paste:"),
+        NSString::alloc(nil).init_str("v"),
+    );
+    paste_item.autorelease();
+    edit_menu.addItem_(paste_item);
+
+    let select_all_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+        NSString::alloc(nil).init_str("Select All"),
+        selector("selectAll:"),
+        NSString::alloc(nil).init_str("a"),
+    );
+    select_all_item.autorelease();
+    edit_menu.addItem_(select_all_item);
+
+    let edit_menu_item = NSMenuItem::new(nil);
+    edit_menu_item.autorelease();
+    edit_menu_item.setSubmenu_(edit_menu);
+    main_menu.addItem_(edit_menu_item);
+
     let go_menu_item = NSMenuItem::new(nil);
     go_menu_item.autorelease();
     go_menu_item.setSubmenu_(go_menu);
