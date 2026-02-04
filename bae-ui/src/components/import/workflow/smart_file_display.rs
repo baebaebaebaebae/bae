@@ -1,8 +1,10 @@
 //! Smart file display view component
 
 use super::gallery_lightbox::{GalleryItem, GalleryItemContent, GalleryLightbox};
+use crate::components::helpers::Tooltip;
 use crate::components::icons::{DiscIcon, FileTextIcon, RowsIcon};
 use crate::display_types::{AudioContentInfo, CategorizedFileInfo, CueFlacPairInfo, FileInfo};
+use crate::floating_ui::Placement;
 use dioxus::prelude::*;
 
 /// Base file row container - horizontal list item
@@ -239,16 +241,21 @@ fn GalleryThumbnailView(
     on_click: EventHandler<usize>,
 ) -> Element {
     rsx! {
-        button {
-            class: "relative w-[72px] h-[72px] flex-shrink-0 rounded-xl overflow-clip hover:ring-2 hover:ring-white/20 transition-all duration-150 group",
-            onclick: move |_| on_click.call(index),
-            img {
-                src: "{url}",
-                alt: "{filename}",
-                class: "w-full h-full object-cover",
-            }
-            div { class: "absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-1.5",
-                span { class: "text-[10px] text-white truncate w-full", {filename.clone()} }
+        Tooltip {
+            text: filename.clone(),
+            placement: Placement::Bottom,
+            nowrap: true,
+            button {
+                class: "relative w-[72px] h-[72px] flex-shrink-0 rounded-xl overflow-clip hover:ring-2 hover:ring-white/20 transition-all duration-150 group",
+                onclick: move |_| on_click.call(index),
+                img {
+                    src: "{url}",
+                    alt: "{filename}",
+                    class: "w-full h-full object-cover",
+                }
+                div { class: "absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-1.5",
+                    span { class: "text-[10px] text-white truncate w-full", {filename.clone()} }
+                }
             }
         }
     }
@@ -260,14 +267,20 @@ fn DocumentRowView(file: FileInfo, on_click: EventHandler<(String, String)>) -> 
     let filename = file.name.clone();
 
     rsx! {
-        FileRow {
-            bg: "bg-white/5",
-            on_click: {
-                let name = filename.clone();
-                move |_| on_click.call((name.clone(), name.clone()))
-            },
-            FileTextIcon { class: "w-4 h-4 text-gray-400 flex-shrink-0" }
-            span { class: "text-xs text-gray-200 truncate", {file.name.clone()} }
+        Tooltip {
+            text: file.name.clone(),
+            placement: Placement::TopStart,
+            nowrap: true,
+            cross_axis_offset: 2,
+            FileRow {
+                bg: "bg-white/5",
+                on_click: {
+                    let name = filename.clone();
+                    move |_| on_click.call((name.clone(), name.clone()))
+                },
+                FileTextIcon { class: "w-4 h-4 text-gray-400 flex-shrink-0" }
+                span { class: "text-xs text-gray-200 truncate", {file.name.clone()} }
+            }
         }
     }
 }
