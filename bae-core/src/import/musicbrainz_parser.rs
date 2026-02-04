@@ -1,6 +1,8 @@
 use crate::db::{DbAlbum, DbAlbumArtist, DbArtist, DbRelease, DbTrack};
+use crate::discogs::DiscogsClient;
 use crate::import::cover_art::fetch_cover_art_for_mb_release;
 use crate::musicbrainz::lookup_release_by_id;
+use tracing::{info, warn};
 use uuid::Uuid;
 /// Result of parsing a MusicBrainz release into database entities
 pub type ParsedMbAlbum = (
@@ -12,35 +14,42 @@ pub type ParsedMbAlbum = (
 );
 /// Fetch full MusicBrainz release with tracklist and parse into database models
 ///
-/// If the MB release has Discogs URLs in relationships, optionally fetches Discogs data
-/// to populate both discogs_release and musicbrainz_release fields in DbAlbum.
+/// If the MB release has Discogs URLs in relationships and a DiscogsClient is provided,
+/// fetches Discogs data to populate both discogs_release and musicbrainz_release fields
+/// in DbAlbum, enabling cross-source duplicate detection.
 ///
 /// cover_art_url: Optional cover art URL that was already fetched during detection phase
 pub async fn fetch_and_parse_mb_release(
     release_id: &str,
     master_year: u32,
     cover_art_url: Option<String>,
+    discogs_client: Option<&DiscogsClient>,
 ) -> Result<ParsedMbAlbum, String> {
     let (mb_release, external_urls, json) = lookup_release_by_id(release_id)
         .await
         .map_err(|e| format!("Failed to fetch MusicBrainz release: {}", e))?;
-    let discogs_release = if let Some(ref discogs_url) = external_urls.discogs_release_url {
-        if let Some(release_id_str) = discogs_url.split("/release/").nth(1) {
-            if let Some(id) = release_id_str.split('-').next() {
-                use tracing::info;
-                info!("Found Discogs release URL: {}, ID: {}", discogs_url, id);
-                None
+    let discogs_release = match (&discogs_client, &external_urls.discogs_release_url) {
+        (Some(client), Some(discogs_url)) => {
+            if let Some(id) = discogs_url.split('/').next_back() {
+                info!(
+                    "Found Discogs release URL: {}, fetching release {}",
+                    discogs_url, id
+                );
+                match client.get_release(id).await {
+                    Ok(release) => Some(release),
+                    Err(e) => {
+                        warn!("Failed to fetch Discogs release {}: {}", id, e);
+                        None
+                    }
+                }
             } else {
                 None
             }
-        } else {
-            None
         }
-    } else {
-        None
+        _ => None,
     };
     let cover_art = if cover_art_url.is_none() {
-        fetch_cover_art_for_mb_release(&mb_release, &external_urls, None).await
+        fetch_cover_art_for_mb_release(&mb_release, &external_urls, discogs_client).await
     } else {
         cover_art_url
     };
