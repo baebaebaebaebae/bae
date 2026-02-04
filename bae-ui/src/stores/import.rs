@@ -893,6 +893,46 @@ impl ImportState {
         })
     }
 
+    /// Remove all incomplete candidates (those with corrupt/bad files)
+    pub fn clear_incomplete_candidates(&mut self) {
+        let incomplete_paths: Vec<String> = self
+            .detected_candidates
+            .iter()
+            .filter(|c| {
+                self.candidate_states
+                    .get(&c.path)
+                    .map(|s| {
+                        let files = s.files();
+                        files.bad_audio_count > 0 || files.bad_image_count > 0
+                    })
+                    .unwrap_or(false)
+            })
+            .map(|c| c.path.clone())
+            .collect();
+
+        if incomplete_paths.is_empty() {
+            return;
+        }
+
+        for path in &incomplete_paths {
+            self.detected_candidates.retain(|c| &c.path != path);
+            self.candidate_states.remove(path);
+            self.loading_candidates.remove(path);
+            self.discid_lookup_attempted.remove(path);
+        }
+
+        if let Some(key) = &self.current_candidate_key {
+            if incomplete_paths.contains(key) {
+                if let Some(first) = self.detected_candidates.first() {
+                    let new_key = first.path.clone();
+                    self.switch_candidate(Some(new_key));
+                } else {
+                    self.switch_candidate(None);
+                }
+            }
+        }
+    }
+
     /// Remove a detected release by index
     pub fn remove_detected_release(&mut self, index: usize) {
         if index < self.detected_candidates.len() {

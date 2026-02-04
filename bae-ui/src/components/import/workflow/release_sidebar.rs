@@ -30,6 +30,8 @@ pub fn ReleaseSidebarView(
     on_remove: EventHandler<usize>,
     /// Called to clear all folders
     on_clear_all: EventHandler<()>,
+    /// Called to clear incomplete folders only
+    on_clear_incomplete: EventHandler<()>,
     /// Called to open a folder in the native file manager
     on_open_folder: EventHandler<String>,
 ) -> Element {
@@ -39,6 +41,10 @@ pub fn ReleaseSidebarView(
     let candidates = st.get_detected_candidates_display();
     let selected_index = st.get_selected_candidate_index();
     drop(st);
+
+    let has_incomplete = candidates
+        .iter()
+        .any(|c| matches!(c.status, DetectedCandidateStatus::Incomplete { .. }));
 
     let mut show_menu = use_signal(|| false);
     let is_open: ReadSignal<bool> = show_menu.into();
@@ -105,13 +111,23 @@ pub fn ReleaseSidebarView(
                             FolderIcon { class: "w-3.5 h-3.5 text-gray-400" }
                             span { "Add" }
                         }
+                        if has_incomplete {
+                            MenuItem {
+                                onclick: move |_| {
+                                    show_menu.set(false);
+                                    on_clear_incomplete.call(());
+                                },
+                                TrashIcon { class: "w-3.5 h-3.5 text-gray-400" }
+                                span { "Clear incomplete" }
+                            }
+                        }
                         MenuItem {
                             onclick: move |_| {
                                 show_menu.set(false);
                                 show_clear_confirm.set(true);
                             },
                             TrashIcon { class: "w-3.5 h-3.5 text-gray-400" }
-                            span { "Clear" }
+                            span { "Clear all" }
                         }
                     }
                 }
