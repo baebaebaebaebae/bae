@@ -469,21 +469,24 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         search_barcode: search_barcode(),
         search_tab: current_tab,
         is_searching,
-        general: if current_tab == SearchTab::General {
+        general_mb: if current_tab == SearchTab::General {
             active_tab_state.clone()
         } else {
             TabSearchState::default()
         },
-        catalog_number: if current_tab == SearchTab::CatalogNumber {
+        general_discogs: TabSearchState::default(),
+        catalog_number_mb: if current_tab == SearchTab::CatalogNumber {
             active_tab_state.clone()
         } else {
             TabSearchState::default()
         },
-        barcode: if current_tab == SearchTab::Barcode {
+        catalog_number_discogs: TabSearchState::default(),
+        barcode_mb: if current_tab == SearchTab::Barcode {
             active_tab_state
         } else {
             TabSearchState::default()
         },
+        barcode_discogs: TabSearchState::default(),
     };
 
     // Build candidate state based on step
