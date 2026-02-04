@@ -2,7 +2,7 @@ use crate::cue_flac::CueFlacProcessor;
 #[cfg(feature = "torrent")]
 use crate::db::DbTorrent;
 use crate::db::{Database, DbImport, ImageSource, ImportOperationStatus};
-use crate::discogs::DiscogsRelease;
+use crate::discogs::{DiscogsClient, DiscogsRelease};
 use crate::import::cover_art::download_cover_art_to_bae_folder;
 #[cfg(feature = "cd-rip")]
 use crate::import::discogs_parser::parse_discogs_release;
@@ -44,6 +44,16 @@ pub enum ScanEvent {
 
 pub struct ScanRequest {
     pub path: std::path::PathBuf,
+}
+
+/// Try to create a DiscogsClient from the keyring.
+/// Returns None if no API key is configured.
+fn get_discogs_client() -> Option<DiscogsClient> {
+    keyring::Entry::new("bae", "discogs_api_key")
+        .ok()
+        .and_then(|e| e.get_password().ok())
+        .filter(|k| !k.is_empty())
+        .map(DiscogsClient::new)
 }
 /// Torrent-specific metadata for import
 #[cfg(feature = "torrent")]
@@ -240,8 +250,14 @@ impl ImportServiceHandle {
                 parse_discogs_release(discogs_rel, master_year, cover_art_url.clone())?
             } else if let Some(ref mb_rel) = mb_release {
                 use crate::import::musicbrainz_parser::fetch_and_parse_mb_release;
-                fetch_and_parse_mb_release(&mb_rel.release_id, master_year, cover_art_url.clone())
-                    .await?
+                let discogs_client = get_discogs_client();
+                fetch_and_parse_mb_release(
+                    &mb_rel.release_id,
+                    master_year,
+                    cover_art_url.clone(),
+                    discogs_client.as_ref(),
+                )
+                .await?
             } else {
                 return Err("No release provided".to_string());
             };
@@ -370,8 +386,14 @@ impl ImportServiceHandle {
                 parse_discogs_release(discogs_rel, master_year, cover_art_url.clone())?
             } else if let Some(ref mb_rel) = mb_release {
                 use crate::import::musicbrainz_parser::fetch_and_parse_mb_release;
-                fetch_and_parse_mb_release(&mb_rel.release_id, master_year, cover_art_url.clone())
-                    .await?
+                let discogs_client = get_discogs_client();
+                fetch_and_parse_mb_release(
+                    &mb_rel.release_id,
+                    master_year,
+                    cover_art_url.clone(),
+                    discogs_client.as_ref(),
+                )
+                .await?
             } else {
                 return Err("No release provided".to_string());
             };
@@ -490,8 +512,14 @@ impl ImportServiceHandle {
             if let Some(ref discogs_rel) = discogs_release {
                 parse_discogs_release(discogs_rel, master_year, cover_art_url.clone())?
             } else if let Some(ref mb_rel) = mb_release {
-                fetch_and_parse_mb_release(&mb_rel.release_id, master_year, cover_art_url.clone())
-                    .await?
+                let discogs_client = get_discogs_client();
+                fetch_and_parse_mb_release(
+                    &mb_rel.release_id,
+                    master_year,
+                    cover_art_url.clone(),
+                    discogs_client.as_ref(),
+                )
+                .await?
             } else {
                 return Err("No release provided".to_string());
             };
