@@ -67,8 +67,9 @@ pub fn GalleryLightbox(
     let idx = (*current_index.read()).min(total - 1);
     let current_item = &items[idx];
     let label = &current_item.label;
-    let can_prev = idx > 0;
-    let can_next = idx < total - 1;
+    let prev_idx = if idx == 0 { total - 1 } else { idx - 1 };
+    let next_idx = if idx == total - 1 { 0 } else { idx + 1 };
+    let can_cycle = total > 1;
 
     let is_current_image = matches!(current_item.content, GalleryItemContent::Image { .. });
     let is_current_selected = selected_index == Some(idx);
@@ -79,8 +80,8 @@ pub fn GalleryLightbox(
     };
 
     let on_keydown = move |evt: KeyboardEvent| match evt.key() {
-        Key::ArrowLeft if can_prev => navigate(idx - 1),
-        Key::ArrowRight if can_next => navigate(idx + 1),
+        Key::ArrowLeft if can_cycle => navigate(prev_idx),
+        Key::ArrowRight if can_cycle => navigate(next_idx),
         Key::Enter if has_selection => on_select.call(*current_index.read()),
         _ => {}
     };
@@ -100,12 +101,12 @@ pub fn GalleryLightbox(
                 }
 
                 // Previous button
-                if can_prev {
+                if can_cycle {
                     button {
                         class: "fixed left-4 top-1/2 -translate-y-1/2 w-14 h-14 bg-gray-800/60 hover:bg-gray-700/80 rounded-full flex items-center justify-center transition-colors z-10",
                         onclick: move |e| {
                             e.stop_propagation();
-                            navigate(idx - 1);
+                            navigate(prev_idx);
                         },
                         ChevronLeftIcon {
                             class: "w-8 h-8 text-gray-300 -translate-x-0.5",
@@ -115,12 +116,12 @@ pub fn GalleryLightbox(
                 }
 
                 // Next button
-                if can_next {
+                if can_cycle {
                     button {
                         class: "fixed right-4 top-1/2 -translate-y-1/2 w-14 h-14 bg-gray-800/60 hover:bg-gray-700/80 rounded-full flex items-center justify-center transition-colors z-10",
                         onclick: move |e| {
                             e.stop_propagation();
-                            navigate(idx + 1);
+                            navigate(next_idx);
                         },
                         ChevronRightIcon {
                             class: "w-8 h-8 text-gray-300 translate-x-0.5",
