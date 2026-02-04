@@ -1,0 +1,60 @@
+REM GENRE "Rock"
+REM DATE 2000
+REM DISCID 7F09D50A
+REM COMMENT "ExactAudioCopy v1.6"
+PERFORMER "Test Artist"
+TITLE "Test Album"
+REM COMPOSER ""
+FILE "Test Artist - Test Album.flac" WAVE
+  TRACK 01 AUDIO
+    TITLE "Track One"
+    PERFORMER "Test Artist"
+    REM COMPOSER ""
+    INDEX 01 00:00:00
+  TRACK 02 AUDIO
+    TITLE "Track Two"
+    PERFORMER "Test Artist"
+    REM COMPOSER ""
+    INDEX 01 05:12:10
+  TRACK 03 AUDIO
+    TITLE "Track Three"
+    PERFORMER "Test Artist"
+    REM COMPOSER ""
+    INDEX 01 10:30:05
+  TRACK 04 AUDIO
+    TITLE "Track Four"
+    PERFORMER "Test Artist"
+    REM COMPOSER ""
+    INDEX 01 14:05:45
+  TRACK 05 AUDIO
+    TITLE "Track Five"
+    PERFORMER "Test Artist"
+    REM COMPOSER ""
+    INDEX 01 17:37:60
+  TRACK 06 AUDIO
+    TITLE "Track Six"
+    PERFORMER "Test Artist"
+    REM COMPOSER ""
+    INDEX 01 21:52:02
+  TRACK 07 AUDIO
+    TITLE "Track Seven"
+    PERFORMER "Test Artist"
+    REM COMPOSER ""
+    INDEX 00 26:06:72
+    INDEX 01 26:07:60
+  TRACK 08 AUDIO
+    TITLE "Track Eight"
+    PERFORMER "Test Artist"
+    REM COMPOSER ""
+    INDEX 01 29:38:02
+  TRACK 09 AUDIO
+    TITLE "Track Nine"
+    PERFORMER "Test Artist"
+    REM COMPOSER ""
+    INDEX 01 33:37:02
+  TRACK 10 AUDIO
+    TITLE "Track Ten"
+    PERFORMER "Test Artist"
+    REM COMPOSER ""
+    INDEX 00 37:42:52
+    INDEX 01 37:42:72
