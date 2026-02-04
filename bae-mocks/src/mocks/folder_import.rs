@@ -625,12 +625,18 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                             .and_then(|idx| {
                                 let files = files?;
                                 let doc = files.documents.get(idx.checked_sub(files.artwork.len())?)?;
-                                Some(
-                                    format!(
-                                        "Mock content for {}\n\nThis is placeholder text for the file viewer.\nLine 3\nLine 4\nLine 5",
-                                        doc.name,
-                                    ),
-                                )
+                                if doc.name.ends_with(".nfo") {
+                                    Some(Err("Permission denied (os error 13)".to_string()))
+                                } else {
+                                    Some(
+                                        Ok(
+                                            format!(
+                                                "Mock content for {}\n\nThis is placeholder text for the file viewer.\nLine 3\nLine 4\nLine 5",
+                                                doc.name,
+                                            ),
+                                        ),
+                                    )
+                                }
                             })
                     },
                     storage_profiles,

@@ -10,8 +10,13 @@ use dioxus::prelude::*;
 /// Content variant for a gallery item
 #[derive(Clone, Debug, PartialEq)]
 pub enum GalleryItemContent {
-    Image { url: String, thumbnail_url: String },
-    Text { content: Option<String> },
+    Image {
+        url: String,
+        thumbnail_url: String,
+    },
+    Text {
+        content: Option<Result<String, String>>,
+    },
 }
 
 /// An item in the gallery lightbox (image or text file)
@@ -173,12 +178,20 @@ pub fn GalleryLightbox(
                                 div { class: "mt-4 text-gray-300 text-sm", {label.clone()} }
                             }
                         },
-                        GalleryItemContent::Text { content: Some(text) } => rsx! {
+                        GalleryItemContent::Text { content: Some(Ok(text)) } => rsx! {
                             div { class: "flex flex-col items-center",
                                 div { class: "bg-gray-800 rounded-lg w-[min(42rem,90vw)] max-h-[80vh] overflow-auto shadow-2xl",
                                     pre { class: "text-sm text-gray-300 font-mono whitespace-pre-wrap select-text p-4",
                                         {text.clone()}
                                     }
+                                }
+                                div { class: "mt-4 text-gray-300 text-sm", {label.clone()} }
+                            }
+                        },
+                        GalleryItemContent::Text { content: Some(Err(err)) } => rsx! {
+                            div { class: "flex flex-col items-center",
+                                div { class: "bg-gray-800 rounded-lg w-[min(42rem,90vw)] p-8 flex items-center justify-center shadow-2xl",
+                                    span { class: "text-red-400 text-sm", "Could not read file: {err}" }
                                 }
                                 div { class: "mt-4 text-gray-300 text-sm", {label.clone()} }
                             }
