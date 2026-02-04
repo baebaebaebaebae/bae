@@ -3,8 +3,10 @@
 //! A full-screen viewer with gallery strip for images and text files,
 //! used for both plain viewing and cover art selection.
 
+use crate::components::helpers::Tooltip;
 use crate::components::icons::{CheckIcon, ChevronLeftIcon, ChevronRightIcon, FileTextIcon, XIcon};
 use crate::components::{Button, ButtonSize, ButtonVariant, ChromelessButton, Modal};
+use crate::floating_ui::Placement;
 use dioxus::prelude::*;
 
 /// Content variant for a gallery item
@@ -210,7 +212,7 @@ pub fn GalleryLightbox(
 
                 // Gallery strip
                 if total > 1 {
-                    div { class: "mt-6 flex gap-2 overflow-x-auto max-w-[90vw] p-1",
+                    div { class: "fixed bottom-5 mt-6 flex gap-2 overflow-x-auto max-w-[90vw] p-1",
                         for (i , item) in items.iter().enumerate() {
                             {
                                 let is_active = i == idx;
@@ -223,29 +225,31 @@ pub fn GalleryLightbox(
                                     "ring-1 ring-gray-600 hover:ring-gray-500"
                                 };
                                 rsx! {
-                                    ChromelessButton {
-                                        key: "{item.label}-{i}",
-                                        class: Some(format!("relative flex-shrink-0 w-16 h-16 rounded-md {ring_class}")),
-                                        onclick: move |_| navigate(i),
-                                        div { class: "w-full h-full rounded-md overflow-clip",
-                                            match &item.content {
-                                                GalleryItemContent::Image { thumbnail_url, .. } => rsx! {
-                                                    img {
-                                                        src: "{thumbnail_url}",
-                                                        alt: "{item.label}",
-                                                        class: "w-full h-full object-cover",
-                                                    }
-                                                },
-                                                GalleryItemContent::Text { .. } => rsx! {
-                                                    div { class: "w-full h-full bg-gray-800 flex items-center justify-center",
-                                                        FileTextIcon { class: "w-6 h-6 text-gray-400" }
-                                                    }
-                                                },
+                                    Tooltip { text: item.label.clone(), placement: Placement::Top, nowrap: true,
+                                        ChromelessButton {
+                                            key: "{item.label}-{i}",
+                                            class: Some(format!("relative flex-shrink-0 w-16 h-16 rounded-md {ring_class}")),
+                                            onclick: move |_| navigate(i),
+                                            div { class: "w-full h-full rounded-md overflow-clip",
+                                                match &item.content {
+                                                    GalleryItemContent::Image { thumbnail_url, .. } => rsx! {
+                                                        img {
+                                                            src: "{thumbnail_url}",
+                                                            alt: "{item.label}",
+                                                            class: "w-full h-full object-cover",
+                                                        }
+                                                    },
+                                                    GalleryItemContent::Text { .. } => rsx! {
+                                                        div { class: "w-full h-full bg-gray-800 flex items-center justify-center",
+                                                            FileTextIcon { class: "w-6 h-6 text-gray-400" }
+                                                        }
+                                                    },
+                                                }
                                             }
-                                        }
-                                        if is_selected {
-                                            div { class: "absolute top-0.5 right-0.5 bg-green-500 text-white w-3.5 h-3.5 rounded-full flex items-center justify-center",
-                                                CheckIcon { class: "w-2.5 h-2.5" }
+                                            if is_selected {
+                                                div { class: "absolute top-0.5 right-0.5 bg-green-500 text-white w-3.5 h-3.5 rounded-full flex items-center justify-center",
+                                                    CheckIcon { class: "w-2.5 h-2.5" }
+                                                }
                                             }
                                         }
                                     }
