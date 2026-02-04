@@ -2,14 +2,14 @@
 
 use crate::mocks::framework::{MockPage, MockSection};
 use crate::mocks::{
-    AlbumDetailMock, ButtonMock, FolderImportMock, LibraryMock, MenuMock, PillMock, TextInputMock,
-    TitleBarMock, TooltipMock,
+    AlbumDetailMock, ButtonMock, FolderImportMock, LibraryMock, MenuMock, PillMock,
+    SegmentedControlMock, TextInputMock, TitleBarMock, TooltipMock,
 };
 use crate::ui::LinkCard;
 use crate::Route;
 use bae_ui::{
-    Button, ButtonSize, ButtonVariant, MenuItem, Pill, PillVariant, TextInput, TextInputSize,
-    TooltipBubble,
+    Button, ButtonSize, ButtonVariant, MenuItem, Pill, PillVariant, Segment, SegmentedControl,
+    TextInput, TextInputSize, TooltipBubble,
 };
 use dioxus::prelude::*;
 
@@ -73,6 +73,32 @@ pub fn MockIndex() -> Element {
                         Pill { variant: PillVariant::Muted, "Muted" }
                         Pill { variant: PillVariant::Link, "Link" }
                         Pill { variant: PillVariant::Link, monospace: true, "mono" }
+                    }
+                }
+
+                // SegmentedControl specimens
+                SpecimenCard {
+                    title: "SegmentedControl",
+                    to: Route::MockSegmentedControl {
+                        state: None,
+                    },
+                    div { class: "flex flex-col gap-2",
+                        SegmentedControl {
+                            segments: vec![
+                                Segment::new("Title", "title"),
+                                Segment::new("Catalog #", "catalog"),
+                                Segment::new("Barcode", "barcode"),
+                            ],
+                            selected: "title".to_string(),
+                            selected_variant: ButtonVariant::Primary,
+                            on_select: |_| {},
+                        }
+                        SegmentedControl {
+                            segments: vec![Segment::new("Folder", "folder"), Segment::new("Torrent", "torrent")],
+                            selected: "folder".to_string(),
+                            selected_variant: ButtonVariant::Secondary,
+                            on_select: |_| {},
+                        }
                     }
                 }
 
@@ -199,6 +225,17 @@ pub fn MockMenu(state: Option<String>) -> Element {
 pub fn MockPill(state: Option<String>) -> Element {
     rsx! {
         PillMock { initial_state: state }
+    }
+}
+
+// ============================================================================
+// SegmentedControl page wrapper
+// ============================================================================
+
+#[component]
+pub fn MockSegmentedControl(state: Option<String>) -> Element {
+    rsx! {
+        SegmentedControlMock { initial_state: state }
     }
 }
 

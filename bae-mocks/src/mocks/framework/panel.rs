@@ -36,6 +36,7 @@ pub enum MockPage {
     Button,
     Menu,
     Pill,
+    SegmentedControl,
     TextInput,
     Tooltip,
     // Components
@@ -52,6 +53,7 @@ impl MockPage {
         MockPage::Button,
         MockPage::Menu,
         MockPage::Pill,
+        MockPage::SegmentedControl,
         MockPage::TextInput,
         MockPage::Tooltip,
         // Components
@@ -67,6 +69,7 @@ impl MockPage {
             MockPage::Button
             | MockPage::Menu
             | MockPage::Pill
+            | MockPage::SegmentedControl
             | MockPage::TextInput
             | MockPage::Tooltip => MockSection::DesignSystem,
             _ => MockSection::Components,
@@ -79,6 +82,7 @@ impl MockPage {
             MockPage::Button => "Button",
             MockPage::Menu => "Menu",
             MockPage::Pill => "Pill",
+            MockPage::SegmentedControl => "SegmentedControl",
             MockPage::TextInput => "TextInput",
             MockPage::Tooltip => "Tooltip",
             MockPage::Library => "LibraryView",
@@ -94,6 +98,7 @@ impl MockPage {
             MockPage::Button => "button",
             MockPage::Menu => "menu",
             MockPage::Pill => "pill",
+            MockPage::SegmentedControl => "segmented-control",
             MockPage::TextInput => "text-input",
             MockPage::Tooltip => "tooltip",
             MockPage::Library => "library",
@@ -109,6 +114,7 @@ impl MockPage {
             MockPage::Button => "Button component with variants, sizes, and states",
             MockPage::Menu => "Dropdown menu with items, dividers, and danger states",
             MockPage::Pill => "Pill component for tokens, tags, and inline labels",
+            MockPage::SegmentedControl => "Toggle button group for switching between options",
             MockPage::TextInput => "Text input component with sizes and states",
             MockPage::Tooltip => "Hover tooltip with placement and wrapping options",
             MockPage::Library => "Album grid with loading/error/empty states",
@@ -124,6 +130,7 @@ impl MockPage {
             MockPage::Button => Route::MockButton { state },
             MockPage::Menu => Route::MockMenu { state },
             MockPage::Pill => Route::MockPill { state },
+            MockPage::SegmentedControl => Route::MockSegmentedControl { state },
             MockPage::TextInput => Route::MockTextInput { state },
             MockPage::Tooltip => Route::MockTooltip { state },
             MockPage::Library => Route::MockLibrary { state },

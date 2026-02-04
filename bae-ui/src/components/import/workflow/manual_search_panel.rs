@@ -3,7 +3,9 @@
 use super::match_results_panel::MatchResultsPanel;
 use super::search_source_selector::SearchSourceSelectorView;
 use super::{DiscIdPill, DiscIdSource, LoadingIndicator};
-use crate::components::{Button, ButtonSize, ButtonVariant, TextInput, TextInputSize};
+use crate::components::button::ButtonVariant;
+use crate::components::segmented_control::{Segment, SegmentedControl};
+use crate::components::{Button, ButtonSize, TextInput, TextInputSize};
 use crate::display_types::{MatchCandidate, SearchSource, SearchTab};
 use crate::floating_ui::Placement;
 use crate::stores::import::ImportState;
@@ -116,25 +118,26 @@ pub fn ManualSearchPanelView(
             div { class: "bg-gray-800/20 rounded-lg p-4 space-y-4",
                 // Header row: tabs + source selector
                 div { class: "flex items-center justify-between gap-4",
-                    div { class: "flex gap-1 bg-gray-800/50 rounded-lg p-1",
-                        Button {
-                            variant: if tab == SearchTab::General { ButtonVariant::Primary } else { ButtonVariant::Ghost },
-                            size: ButtonSize::Small,
-                            onclick: move |_| on_tab_change.call(SearchTab::General),
-                            "Title"
-                        }
-                        Button {
-                            variant: if tab == SearchTab::CatalogNumber { ButtonVariant::Primary } else { ButtonVariant::Ghost },
-                            size: ButtonSize::Small,
-                            onclick: move |_| on_tab_change.call(SearchTab::CatalogNumber),
-                            "Catalog #"
-                        }
-                        Button {
-                            variant: if tab == SearchTab::Barcode { ButtonVariant::Primary } else { ButtonVariant::Ghost },
-                            size: ButtonSize::Small,
-                            onclick: move |_| on_tab_change.call(SearchTab::Barcode),
-                            "Barcode"
-                        }
+                    SegmentedControl {
+                        segments: vec![
+                            Segment::new("Title", "general"),
+                            Segment::new("Catalog #", "catalog"),
+                            Segment::new("Barcode", "barcode"),
+                        ],
+                        selected: match tab {
+                            SearchTab::General => "general".to_string(),
+                            SearchTab::CatalogNumber => "catalog".to_string(),
+                            SearchTab::Barcode => "barcode".to_string(),
+                        },
+                        selected_variant: ButtonVariant::Primary,
+                        on_select: move |value: &str| {
+                            let tab = match value {
+                                "catalog" => SearchTab::CatalogNumber,
+                                "barcode" => SearchTab::Barcode,
+                                _ => SearchTab::General,
+                            };
+                            on_tab_change.call(tab);
+                        },
                     }
 
                     SearchSourceSelectorView {

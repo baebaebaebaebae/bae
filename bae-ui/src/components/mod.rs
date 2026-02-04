@@ -16,6 +16,7 @@ pub mod modal;
 pub mod pill;
 pub mod playback;
 pub mod resizable_panel;
+pub mod segmented_control;
 pub mod select;
 pub mod settings;
 pub mod text_input;
@@ -62,6 +63,7 @@ pub use modal::Modal;
 pub use pill::{Pill, PillVariant};
 pub use playback::{NowPlayingBarView, QueueSidebarState, QueueSidebarView};
 pub use resizable_panel::{GrabBar, PanelPosition, ResizablePanel, ResizeDirection};
+pub use segmented_control::{Segment, SegmentedControl};
 pub use select::{Select, SelectOption};
 pub use settings::{
     AboutSectionView, ApiKeysSectionView, BitTorrentSectionView, BitTorrentSettings,
