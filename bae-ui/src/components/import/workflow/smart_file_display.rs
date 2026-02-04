@@ -49,21 +49,16 @@ fn FileSection(label: &'static str, children: Element) -> Element {
 ///
 /// Displays audio, artwork, documents, and other files with section headers.
 /// Opens a unified gallery lightbox for viewing both images and text files.
+///
+/// Parent owns the `viewing_index` signal (which gallery item is open)
+/// and derives text content loading from it.
 #[component]
 pub fn SmartFileDisplayView(
-    /// Categorized file info
     files: CategorizedFileInfo,
-    /// Currently viewed text file name
-    selected_text_file: Option<String>,
-    /// Loaded text file content (for selected file)
+    viewing_index: ReadSignal<Option<usize>>,
     text_file_content: Option<String>,
-    /// Callback when user selects a text file to view
-    on_text_file_select: EventHandler<String>,
-    /// Callback when user closes text file modal
-    on_text_file_close: EventHandler<()>,
+    on_view_change: EventHandler<Option<usize>>,
 ) -> Element {
-    let mut viewing_index = use_signal(|| None::<usize>);
-
     if files.is_empty() {
         return rsx! {
             div { class: "text-gray-400 text-center py-8", "No files found" }
@@ -95,49 +90,16 @@ pub fn SmartFileDisplayView(
         });
     }
 
-    // Inject text content into the currently selected text file's gallery item
-    if let Some(ref selected_name) = selected_text_file {
-        for item in gallery_items.iter_mut() {
-            if item.label == *selected_name {
+    // Inject loaded text content into the viewed gallery item
+    if let Some(idx) = viewing_index() {
+        if let Some(item) = gallery_items.get_mut(idx) {
+            if matches!(item.content, GalleryItemContent::Text { .. }) {
                 item.content = GalleryItemContent::Text {
                     content: text_file_content.clone(),
                 };
             }
         }
     }
-
-    let mut open_gallery = move |combined_idx: usize, gallery_items: &[GalleryItem]| {
-        // If navigating to a text item, request its content
-        if let Some(item) = gallery_items.get(combined_idx) {
-            if matches!(item.content, GalleryItemContent::Text { .. }) {
-                on_text_file_select.call(item.label.clone());
-            }
-        }
-        viewing_index.set(Some(combined_idx));
-    };
-
-    let on_gallery_navigate = {
-        let gallery_items_for_nav = gallery_items.clone();
-        move |new_idx: usize| {
-            // Close old text file first, then select new — ordering matters
-            // because both write to selected_text_file and the last write wins.
-            if let Some(old_idx) = *viewing_index.read() {
-                if let Some(old_item) = gallery_items_for_nav.get(old_idx) {
-                    if matches!(old_item.content, GalleryItemContent::Text { .. }) {
-                        on_text_file_close.call(());
-                    }
-                }
-            }
-
-            if let Some(item) = gallery_items_for_nav.get(new_idx) {
-                if matches!(item.content, GalleryItemContent::Text { .. }) {
-                    on_text_file_select.call(item.label.clone());
-                }
-            }
-
-            viewing_index.set(Some(new_idx));
-        }
-    };
 
     rsx! {
         div { class: "space-y-5",
@@ -151,7 +113,7 @@ pub fn SmartFileDisplayView(
                             move |(name, _path): (String, String)| {
                                 // Find this CUE file in the combined gallery
                                 if let Some(idx) = gallery_items.iter().position(|item| item.label == name) {
-                                    open_gallery(idx, &gallery_items);
+                                    on_view_change.call(Some(idx));
                                 }
                             }
                         },
@@ -169,7 +131,7 @@ pub fn SmartFileDisplayView(
                                 filename: file.name.clone(),
                                 url: file.display_url.clone(),
                                 index: idx,
-                                on_click: move |idx| viewing_index.set(Some(idx)),
+                                on_click: move |idx| on_view_change.call(Some(idx)),
                             }
                         }
                     }
@@ -185,10 +147,9 @@ pub fn SmartFileDisplayView(
                                 key: "{doc.path}",
                                 file: doc.clone(),
                                 on_click: {
-                                    let gallery_items = gallery_items.clone();
                                     let combined_idx = artwork_count + doc_idx;
                                     move |(_name, _path): (String, String)| {
-                                        open_gallery(combined_idx, &gallery_items);
+                                        on_view_change.call(Some(combined_idx));
                                     }
                                 },
                             }
@@ -207,18 +168,8 @@ pub fn SmartFileDisplayView(
                     is_open,
                     items: gallery_items.clone(),
                     initial_index: viewing_index().unwrap_or(0),
-                    on_close: move |_| {
-                        // If closing while viewing a text file, signal close
-                        if let Some(idx) = *viewing_index.read() {
-                            if let Some(item) = gallery_items.get(idx) {
-                                if matches!(item.content, GalleryItemContent::Text { .. }) {
-                                    on_text_file_close.call(());
-                                }
-                            }
-                        }
-                        viewing_index.set(None);
-                    },
-                    on_navigate: on_gallery_navigate,
+                    on_close: move |_| on_view_change.call(None),
+                    on_navigate: move |idx| on_view_change.call(Some(idx)),
                     selected_index: None::<usize>,
                     on_select: |_| {},
                 }
