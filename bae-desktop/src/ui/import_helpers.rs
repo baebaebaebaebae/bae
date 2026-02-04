@@ -115,7 +115,7 @@ pub fn to_display_candidate(candidate: &MatchCandidate) -> DisplayMatchCandidate
             MatchSourceType::Discogs,
             result.format.as_ref().map(|v| v.join(", ")),
             result.country.clone(),
-            result.label.as_ref().map(|v| v.join(", ")),
+            result.label.as_ref().and_then(|v| v.first().cloned()),
             result.catno.clone(),
             None,
             None,
@@ -153,9 +153,14 @@ pub fn to_display_candidate(candidate: &MatchCandidate) -> DisplayMatchCandidate
 
 /// Get or create the Discogs client.
 pub fn get_discogs_client() -> Result<DiscogsClient, String> {
-    let api_key = keyring::Entry::new("bae", "discogs_api_key")
+    let api_key = std::env::var("BAE_DISCOGS_API_KEY")
         .ok()
-        .and_then(|e| e.get_password().ok());
+        .filter(|k| !k.is_empty())
+        .or_else(|| {
+            keyring::Entry::new("bae", "discogs_api_key")
+                .ok()
+                .and_then(|e| e.get_password().ok())
+        });
 
     match api_key {
         Some(key) if !key.is_empty() => Ok(DiscogsClient::new(key)),

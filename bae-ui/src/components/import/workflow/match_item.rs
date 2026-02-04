@@ -2,7 +2,7 @@
 
 use crate::components::icons::{ImageIcon, RefreshIcon};
 use crate::components::{Button, ButtonSize, ButtonVariant};
-use crate::display_types::{MatchCandidate, MatchSourceType};
+use crate::display_types::MatchCandidate;
 use dioxus::prelude::*;
 
 /// Displays a single match candidate
@@ -27,21 +27,16 @@ pub fn MatchItemView(
         "border-gray-500"
     };
 
-    let (format_text, country_text, label_text, catalog_text) = match candidate.source_type {
-        MatchSourceType::MusicBrainz => (
-            candidate.format.as_ref().map(|f| format!("Format: {}", f)),
-            candidate
-                .country
-                .as_ref()
-                .map(|c| format!("Country: {}", c)),
-            candidate.label.as_ref().map(|l| format!("Label: {}", l)),
-            candidate
-                .catalog_number
-                .as_ref()
-                .map(|c| format!("Catalog: {}", c)),
-        ),
-        MatchSourceType::Discogs => (None, None, None, None),
-    };
+    let format_text = candidate.format.as_ref().map(|f| format!("Format: {}", f));
+    let country_text = candidate
+        .country
+        .as_ref()
+        .map(|c| format!("Country: {}", c));
+    let label_text = candidate.label.as_ref().map(|l| format!("Label: {}", l));
+    let catalog_text = candidate
+        .catalog_number
+        .as_ref()
+        .map(|c| format!("Catalog: {}", c));
 
     rsx! {
         div {
