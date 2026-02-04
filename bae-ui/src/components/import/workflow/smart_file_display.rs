@@ -119,19 +119,19 @@ pub fn SmartFileDisplayView(
     let on_gallery_navigate = {
         let gallery_items_for_nav = gallery_items.clone();
         move |new_idx: usize| {
-            // If navigating to a text item, request its content
-            if let Some(item) = gallery_items_for_nav.get(new_idx) {
-                if matches!(item.content, GalleryItemContent::Text { .. }) {
-                    on_text_file_select.call(item.label.clone());
-                }
-            }
-
-            // If navigating away from a text item, signal close
+            // Close old text file first, then select new — ordering matters
+            // because both write to selected_text_file and the last write wins.
             if let Some(old_idx) = *viewing_index.read() {
                 if let Some(old_item) = gallery_items_for_nav.get(old_idx) {
                     if matches!(old_item.content, GalleryItemContent::Text { .. }) {
                         on_text_file_close.call(());
                     }
+                }
+            }
+
+            if let Some(item) = gallery_items_for_nav.get(new_idx) {
+                if matches!(item.content, GalleryItemContent::Text { .. }) {
+                    on_text_file_select.call(item.label.clone());
                 }
             }
 

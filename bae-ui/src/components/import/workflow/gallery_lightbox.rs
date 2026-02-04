@@ -40,8 +40,9 @@ pub fn GalleryLightbox(
     let mut current_index = use_signal(|| initial_index);
     let mut last_initial = use_signal(|| initial_index);
 
-    // Sync with initial_index when parent reopens with a different file
-    if initial_index != *last_initial.read() {
+    // Sync when parent changes initial_index (e.g. reopened on a different file).
+    // peek() avoids subscribing so the set() doesn't re-trigger render.
+    if initial_index != *last_initial.peek() {
         last_initial.set(initial_index);
         current_index.set(initial_index);
     }
