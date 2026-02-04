@@ -1388,6 +1388,7 @@ fn create_test_discogs_release() -> DiscogsRelease {
         label: vec!["Test Label".to_string()],
         cover_image: None,
         thumb: None,
+        catno: None,
         artists: vec![],
         tracklist: vec![
             DiscogsTrack {
@@ -1406,6 +1407,6 @@ fn create_test_discogs_release() -> DiscogsRelease {
                 duration: Some("0:10".to_string()),
             },
         ],
-        master_id: "test-master".to_string(),
+        master_id: Some("test-master".to_string()),
     }
 }

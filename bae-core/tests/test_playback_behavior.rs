@@ -198,6 +198,7 @@ fn create_test_album() -> DiscogsRelease {
         label: vec!["Test Label".to_string()],
         cover_image: None,
         thumb: None,
+        catno: None,
         artists: vec![DiscogsArtist {
             name: "Test Artist".to_string(),
             id: "test-artist-1".to_string(),
@@ -214,7 +215,7 @@ fn create_test_album() -> DiscogsRelease {
                 duration: Some("0:10".to_string()),
             },
         ],
-        master_id: "test-master-123".to_string(),
+        master_id: Some("test-master-123".to_string()),
     }
 }
 /// Copy pre-generated FLAC fixtures to test directory
@@ -298,6 +299,7 @@ fn create_cue_flac_test_album() -> DiscogsRelease {
         label: vec!["Test Label".to_string()],
         cover_image: None,
         thumb: None,
+        catno: None,
         artists: vec![DiscogsArtist {
             name: "Test Artist".to_string(),
             id: "test-artist-1".to_string(),
@@ -319,7 +321,7 @@ fn create_cue_flac_test_album() -> DiscogsRelease {
                 duration: Some("0:10".to_string()),
             },
         ],
-        master_id: "test-master-cue-flac".to_string(),
+        master_id: Some("test-master-cue-flac".to_string()),
     }
 }
 
@@ -1983,6 +1985,7 @@ impl HighSampleRateTestFixture {
             label: vec!["Test Label".to_string()],
             cover_image: None,
             thumb: None,
+            catno: None,
             artists: vec![DiscogsArtist {
                 name: "Test Artist".to_string(),
                 id: "test-artist-1".to_string(),
@@ -1992,7 +1995,7 @@ impl HighSampleRateTestFixture {
                 title: "96kHz Track".to_string(),
                 duration: Some("0:03".to_string()),
             }],
-            master_id: "test-master-96khz".to_string(),
+            master_id: Some("test-master-96khz".to_string()),
         };
 
         let import_handle = bae_core::import::ImportService::start(

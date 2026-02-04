@@ -44,6 +44,8 @@ pub struct DiscogsSearchResult {
     pub format: Option<Vec<String>>,
     pub country: Option<String>,
     pub label: Option<Vec<String>>,
+    pub catno: Option<String>,
+    pub barcode: Option<Vec<String>>,
     pub cover_image: Option<String>,
     pub thumb: Option<String>,
     pub master_id: Option<u64>,
@@ -66,6 +68,7 @@ struct ReleaseResponse {
     styles: Option<Vec<String>>,
     formats: Option<Vec<Format>>,
     country: Option<String>,
+    labels: Option<Vec<LabelResponse>>,
     images: Option<Vec<Image>>,
     artists: Option<Vec<ArtistCredit>>,
     tracklist: Option<Vec<TrackResponse>>,
@@ -87,6 +90,11 @@ struct TrackResponse {
     position: String,
     title: String,
     duration: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+struct LabelResponse {
+    name: String,
+    catno: Option<String>,
 }
 #[derive(Clone)]
 pub struct DiscogsClient {
@@ -222,10 +230,10 @@ impl DiscogsClient {
             let cover_image = primary_image.map(|img| img.uri.clone());
             let thumb =
                 primary_image.and_then(|img| img.uri150.clone().or_else(|| Some(img.uri.clone())));
-            let master_id = release
-                .master_id
-                .map(|id| id.to_string())
-                .unwrap_or_default();
+            let master_id = release.master_id.map(|id| id.to_string());
+            let labels = release.labels.unwrap_or_default();
+            let label_names: Vec<String> = labels.iter().map(|l| l.name.clone()).collect();
+            let catno = labels.first().and_then(|l| l.catno.clone());
             Ok(DiscogsRelease {
                 id: release.id.to_string(),
                 title: release.title,
@@ -239,7 +247,8 @@ impl DiscogsClient {
                     .map(|f| f.name)
                     .collect(),
                 country: release.country,
-                label: Vec::new(),
+                label: label_names,
+                catno,
                 cover_image,
                 thumb,
                 artists,

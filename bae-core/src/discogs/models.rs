@@ -18,9 +18,10 @@ pub struct DiscogsRelease {
     pub label: Vec<String>,
     pub cover_image: Option<String>,
     pub thumb: Option<String>,
+    pub catno: Option<String>,
     pub artists: Vec<DiscogsArtist>,
     pub tracklist: Vec<DiscogsTrack>,
-    pub master_id: String,
+    pub master_id: Option<String>,
 }
 /// Represents a track from Discogs
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
