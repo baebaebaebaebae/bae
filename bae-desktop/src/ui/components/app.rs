@@ -1,12 +1,15 @@
 use crate::ui::app_context::AppServices;
 use crate::ui::app_service::AppService;
 use crate::ui::{Route, FAVICON, FLOATING_UI_CORE, FLOATING_UI_DOM, MAIN_CSS, TAILWIND_CSS};
+use bae_ui::wasm_utils::use_wry_ready;
 use dioxus::prelude::*;
 use tracing::debug;
 
 #[component]
 pub fn App() -> Element {
     debug!("Rendering app component");
+
+    let wry_ready = use_wry_ready();
 
     // Get backend services from launch context
     let services = use_context::<AppServices>();
@@ -26,6 +29,8 @@ pub fn App() -> Element {
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
         document::Script { src: FLOATING_UI_CORE }
         document::Script { src: FLOATING_UI_DOM }
-        Router::<Route> {}
+        if wry_ready() {
+            Router::<Route> {}
+        }
     }
 }
