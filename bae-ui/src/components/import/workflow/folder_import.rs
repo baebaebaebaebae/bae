@@ -50,7 +50,7 @@ pub struct FolderImportViewProps {
     pub viewing_index: ReadSignal<Option<usize>>,
     /// Loaded text file content (for viewed file, if it's a text file)
     #[props(default)]
-    pub text_file_content: Option<String>,
+    pub text_file_content: Option<Result<String, String>>,
 
     // === External data (not in ImportState) ===
     /// Storage profiles (from app context)
@@ -447,7 +447,7 @@ fn DetailHeader(state: ReadStore<ImportState>) -> Element {
 fn FilesColumn(
     state: ReadStore<ImportState>,
     viewing_index: ReadSignal<Option<usize>>,
-    text_file_content: Option<String>,
+    text_file_content: Option<Result<String, String>>,
     on_view_change: EventHandler<Option<usize>>,
 ) -> Element {
     // Read files at this level

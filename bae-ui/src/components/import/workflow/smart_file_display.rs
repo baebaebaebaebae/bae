@@ -56,7 +56,7 @@ fn FileSection(label: &'static str, children: Element) -> Element {
 pub fn SmartFileDisplayView(
     files: CategorizedFileInfo,
     viewing_index: ReadSignal<Option<usize>>,
-    text_file_content: Option<String>,
+    text_file_content: Option<Result<String, String>>,
     on_view_change: EventHandler<Option<usize>>,
 ) -> Element {
     if files.is_empty() {

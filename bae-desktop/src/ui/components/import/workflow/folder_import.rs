@@ -518,7 +518,7 @@ pub fn FolderImport() -> Element {
             let artwork_count = files.artwork.len();
             let doc = files.documents.get(idx.checked_sub(artwork_count)?)?;
             let path = std::path::Path::new(&folder).join(&doc.name);
-            bae_core::text_encoding::read_text_file(&path).ok()
+            Some(bae_core::text_encoding::read_text_file(&path).map_err(|e| e.to_string()))
         }
     });
 
