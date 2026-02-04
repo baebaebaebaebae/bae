@@ -158,7 +158,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         })
     });
     let mut selected_profile_id = use_signal(|| Some("profile-1".to_string()));
-    let mut selected_text_file = use_signal(|| None::<String>);
+    let mut viewing_index = use_signal(|| None::<usize>);
 
     // Parse state from registry
     let state_str = registry.get_string("state");
@@ -615,19 +615,27 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                 on_open_folder: |_| {},
                 FolderImportView {
                     state: import_state,
-                    selected_text_file: selected_text_file.read().clone(),
-                    text_file_content: selected_text_file
-                        .read()
-                        .as_ref()
-                        .map(|name| {
-                            format!(
-                                "Mock content for {name}\n\nThis is placeholder text for the file viewer.\nLine 3\nLine 4\nLine 5",
-                            )
-                        }),
+                    viewing_index: ReadSignal::from(viewing_index),
+                    text_file_content: {
+                        let files = import_state
+                            .read()
+                            .current_candidate_state()
+                            .map(|s| s.files().clone());
+                        viewing_index()
+                            .and_then(|idx| {
+                                let files = files?;
+                                let doc = files.documents.get(idx.checked_sub(files.artwork.len())?)?;
+                                Some(
+                                    format!(
+                                        "Mock content for {}\n\nThis is placeholder text for the file viewer.\nLine 3\nLine 4\nLine 5",
+                                        doc.name,
+                                    ),
+                                )
+                            })
+                    },
                     storage_profiles,
                     on_folder_select_click: |_| {},
-                    on_text_file_select: move |name| selected_text_file.set(Some(name)),
-                    on_text_file_close: move |_| selected_text_file.set(None),
+                    on_view_change: move |idx| viewing_index.set(idx),
                     on_skip_detection: |_| {},
                     on_exact_match_select: move |idx| selected_match_index.set(Some(idx)),
                     on_confirm_exact_match: |_| {},

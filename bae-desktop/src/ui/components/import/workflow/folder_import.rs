@@ -499,17 +499,25 @@ pub fn FolderImport() -> Element {
         });
     };
 
-    // Text file viewing
-    let mut selected_text_file = use_signal(|| None::<String>);
+    // Gallery lightbox viewing index (None = closed)
+    let mut viewing_index = use_signal(|| None::<usize>);
 
-    // Load text file contents when selected
+    // Load text file contents when the viewed gallery item is a document.
+    // Gallery ordering: artwork first, then documents.
     let folder_path = current_candidate_key.clone();
     let text_file_contents_resource = use_resource(move || {
+        let idx = *viewing_index.read();
         let folder = folder_path.clone().unwrap_or_default();
-        let selected = selected_text_file.read().clone();
+        let files = import_state
+            .read()
+            .current_candidate_state()
+            .map(|s| s.files().clone());
         async move {
-            let name = selected?;
-            let path = std::path::Path::new(&folder).join(&name);
+            let idx = idx?;
+            let files = files?;
+            let artwork_count = files.artwork.len();
+            let doc = files.documents.get(idx.checked_sub(artwork_count)?)?;
+            let path = std::path::Path::new(&folder).join(&doc.name);
             std::fs::read_to_string(&path).ok()
         }
     });
@@ -519,12 +527,11 @@ pub fn FolderImport() -> Element {
     rsx! {
         FolderImportView {
             state: import_state,
-            selected_text_file: selected_text_file.read().clone(),
+            viewing_index: ReadSignal::from(viewing_index),
             text_file_content,
             storage_profiles,
             on_folder_select_click: on_folder_select,
-            on_text_file_select: move |name| selected_text_file.set(Some(name)),
-            on_text_file_close: move |_| selected_text_file.set(None),
+            on_view_change: move |idx| viewing_index.set(idx),
             on_skip_detection,
             on_exact_match_select,
             on_confirm_exact_match,

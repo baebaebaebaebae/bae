@@ -46,10 +46,9 @@ pub struct FolderImportViewProps {
     pub state: ReadStore<ImportState>,
 
     // === UI-only state (not in ImportState) ===
-    /// Currently viewed text file name
-    #[props(default)]
-    pub selected_text_file: Option<String>,
-    /// Loaded text file content (for selected file)
+    /// Which gallery item is currently viewed in the lightbox (None = closed)
+    pub viewing_index: ReadSignal<Option<usize>>,
+    /// Loaded text file content (for viewed file, if it's a text file)
     #[props(default)]
     pub text_file_content: Option<String>,
 
@@ -59,8 +58,7 @@ pub struct FolderImportViewProps {
 
     // === Callbacks ===
     pub on_folder_select_click: EventHandler<()>,
-    pub on_text_file_select: EventHandler<String>,
-    pub on_text_file_close: EventHandler<()>,
+    pub on_view_change: EventHandler<Option<usize>>,
     pub on_skip_detection: EventHandler<()>,
     pub on_exact_match_select: EventHandler<usize>,
     pub on_confirm_exact_match: EventHandler<MatchCandidate>,
@@ -121,10 +119,9 @@ pub fn FolderImportView(props: FolderImportViewProps) -> Element {
                     // Left: Files column (narrow, scrollable)
                     FilesColumn {
                         state,
-                        selected_text_file: props.selected_text_file.clone(),
+                        viewing_index: props.viewing_index,
                         text_file_content: props.text_file_content.clone(),
-                        on_text_file_select: props.on_text_file_select,
-                        on_text_file_close: props.on_text_file_close,
+                        on_view_change: props.on_view_change,
                     }
 
                     // Right: Workflow (main, fills remaining space)
@@ -449,10 +446,9 @@ fn DetailHeader(state: ReadStore<ImportState>) -> Element {
 #[component]
 fn FilesColumn(
     state: ReadStore<ImportState>,
-    selected_text_file: Option<String>,
+    viewing_index: ReadSignal<Option<usize>>,
     text_file_content: Option<String>,
-    on_text_file_select: EventHandler<String>,
-    on_text_file_close: EventHandler<()>,
+    on_view_change: EventHandler<Option<usize>>,
 ) -> Element {
     // Read files at this level
     let files = state
@@ -483,10 +479,9 @@ fn FilesColumn(
             div { class: "h-full overflow-y-auto pt-1 px-4 pb-4 bg-gray-800/30",
                 SmartFileDisplayView {
                     files,
-                    selected_text_file,
+                    viewing_index,
                     text_file_content,
-                    on_text_file_select,
-                    on_text_file_close,
+                    on_view_change,
                 }
             }
         }

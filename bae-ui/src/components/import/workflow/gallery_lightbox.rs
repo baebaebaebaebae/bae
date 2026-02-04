@@ -38,6 +38,15 @@ pub fn GalleryLightbox(
     on_select: EventHandler<usize>,
 ) -> Element {
     let mut current_index = use_signal(|| initial_index);
+    let mut last_initial = use_signal(|| initial_index);
+
+    // Sync when parent changes initial_index (e.g. reopened on a different file).
+    // peek() avoids subscribing so the set() doesn't re-trigger render.
+    if initial_index != *last_initial.peek() {
+        last_initial.set(initial_index);
+        current_index.set(initial_index);
+    }
+
     let has_selection = selected_index.is_some();
 
     let total = items.len();
