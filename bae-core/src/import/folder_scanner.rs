@@ -12,7 +12,7 @@ use tracing::{debug, info, warn};
 const MAX_RECURSION_DEPTH: usize = 10;
 const AUDIO_EXTENSIONS: &[&str] = &["flac"];
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "bmp"];
-const DOCUMENT_EXTENSIONS: &[&str] = &["cue", "log", "txt", "nfo", "m3u", "m3u8"];
+const DOCUMENT_EXTENSIONS: &[&str] = &["cue", "log", "txt", "nfo"];
 /// A file discovered during folder scanning
 #[derive(Debug, Clone)]
 pub struct ScannedFile {
@@ -1045,6 +1045,30 @@ FILE "album.ape" WAVE
         assert_eq!(
             candidates[0].files.bad_image_count, 2,
             "Two bad images: corrupt + 0-byte"
+        );
+    }
+
+    #[test]
+    fn test_m3u_files_skipped() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+
+        std::fs::write(root.join("track.flac"), fake_flac()).unwrap();
+        std::fs::write(root.join("playlist.m3u"), b"#EXTM3U\ntrack.flac\n").unwrap();
+        std::fs::write(root.join("playlist.m3u8"), b"#EXTM3U\ntrack.flac\n").unwrap();
+        std::fs::write(root.join("notes.log"), b"log content").unwrap();
+
+        let files = collect_release_files(root).unwrap();
+
+        let doc_names: Vec<_> = files
+            .documents
+            .iter()
+            .map(|f| f.relative_path.as_str())
+            .collect();
+        assert_eq!(
+            doc_names,
+            vec!["notes.log"],
+            "m3u/m3u8 files should not be collected as documents"
         );
     }
 }
