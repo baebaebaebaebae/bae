@@ -82,13 +82,12 @@ pub struct DbTrackArtist {
     /// Role: "main", "featuring", "remixer", etc.
     pub role: Option<String>,
 }
-/// Discogs master release information for an album
+/// Discogs release information for an album.
 ///
-/// When an album is imported from Discogs, both the master_id and release_id
-/// are always known together (the release_id is the main_release for that master).
+/// Not all Discogs releases have a master — master_id is optional.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DiscogsMasterRelease {
-    pub master_id: String,
+    pub master_id: Option<String>,
     pub release_id: String,
 }
 /// MusicBrainz release information for an album
@@ -418,6 +417,11 @@ impl DbRelease {
     /// Create a release from a Discogs release
     pub fn from_discogs_release(album_id: &str, release: &crate::discogs::DiscogsRelease) -> Self {
         let now = Utc::now();
+        let format = if release.format.is_empty() {
+            None
+        } else {
+            Some(release.format.join(", "))
+        };
         DbRelease {
             id: Uuid::new_v4().to_string(),
             album_id: album_id.to_string(),
@@ -425,10 +429,10 @@ impl DbRelease {
             year: release.year.map(|y| y as i32),
             discogs_release_id: Some(release.id.clone()),
             bandcamp_release_id: None,
-            format: None,
-            label: None,
-            catalog_number: None,
-            country: None,
+            format,
+            label: release.label.first().cloned(),
+            catalog_number: release.catno.clone(),
+            country: release.country.clone(),
             barcode: None,
             import_status: ImportStatus::Queued,
             created_at: now,

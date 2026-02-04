@@ -116,7 +116,7 @@ pub fn to_display_candidate(candidate: &MatchCandidate) -> DisplayMatchCandidate
             result.format.as_ref().map(|v| v.join(", ")),
             result.country.clone(),
             result.label.as_ref().map(|v| v.join(", ")),
-            None,
+            result.catno.clone(),
             None,
             None,
             None,
@@ -446,11 +446,18 @@ async fn search_discogs_and_rank(
                 } else {
                     results
                         .into_iter()
-                        .map(|result| MatchCandidate {
-                            source: MatchSource::Discogs(result),
-                            confidence: 50.0,
-                            match_reasons: vec!["Manual search result".to_string()],
-                            cover_art_url: None,
+                        .map(|result| {
+                            let cover_art_url = result
+                                .cover_image
+                                .clone()
+                                .or_else(|| result.thumb.clone())
+                                .map(|url| bae_core::network::upgrade_to_https(&url));
+                            MatchCandidate {
+                                source: MatchSource::Discogs(result),
+                                confidence: 50.0,
+                                match_reasons: vec!["Manual search result".to_string()],
+                                cover_art_url,
+                            }
                         })
                         .collect()
                 };
@@ -609,13 +616,17 @@ pub async fn search_by_barcode(
 /// Fetch full Discogs release details for import
 async fn fetch_discogs_release(
     release_id: &str,
-    master_id: &str,
+    master_id: Option<&str>,
 ) -> Result<DiscogsRelease, String> {
     let client = get_discogs_client()?;
     match client.get_release(release_id).await {
-        Ok(release) => {
-            let mut release = release;
-            release.master_id = master_id.to_string();
+        Ok(mut release) => {
+            // Prefer the master_id from the search result (if any) over what
+            // the release endpoint returned, since the search result is what
+            // the user selected.
+            if master_id.is_some() {
+                release.master_id = master_id.map(|s| s.to_string());
+            }
             Ok(release)
         }
         Err(e) => Err(format!("Failed to fetch release details: {}", e)),
@@ -714,12 +725,10 @@ pub async fn confirm_and_start_import(
                     .discogs_release_id
                     .as_ref()
                     .ok_or_else(|| "Missing Discogs release ID".to_string())?;
-                let master_id = candidate
-                    .discogs_master_id
-                    .as_ref()
-                    .ok_or_else(|| "Discogs result has no master_id".to_string())?;
 
-                let discogs_release = fetch_discogs_release(release_id, master_id).await?;
+                let discogs_release =
+                    fetch_discogs_release(release_id, candidate.discogs_master_id.as_deref())
+                        .await?;
 
                 ImportRequest::Folder {
                     import_id: import_id.clone(),

@@ -447,13 +447,11 @@ impl Database {
         for row in rows {
             let discogs_master_id: Option<String> = row.get("discogs_master_id");
             let discogs_release_id: Option<String> = row.get("discogs_release_id");
-            let discogs_release = match (discogs_master_id, discogs_release_id) {
-                (Some(mid), Some(rid)) => Some(crate::db::models::DiscogsMasterRelease {
-                    master_id: mid,
+            let discogs_release =
+                discogs_release_id.map(|rid| crate::db::models::DiscogsMasterRelease {
+                    master_id: discogs_master_id,
                     release_id: rid,
-                }),
-                _ => None,
-            };
+                });
             let mb_release_group_id: Option<String> = row.get("musicbrainz_release_group_id");
             let mb_release_id: Option<String> = row.get("musicbrainz_release_id");
             let musicbrainz_release = match (mb_release_group_id, mb_release_id) {
@@ -504,13 +502,11 @@ impl Database {
         Ok(row.map(|row| {
             let discogs_master_id: Option<String> = row.get("discogs_master_id");
             let discogs_release_id: Option<String> = row.get("discogs_release_id");
-            let discogs_release = match (discogs_master_id, discogs_release_id) {
-                (Some(mid), Some(rid)) => Some(crate::db::models::DiscogsMasterRelease {
-                    master_id: mid,
+            let discogs_release =
+                discogs_release_id.map(|rid| crate::db::models::DiscogsMasterRelease {
+                    master_id: discogs_master_id,
                     release_id: rid,
-                }),
-                _ => None,
-            };
+                });
             let mb_release_group_id: Option<String> = row.get("musicbrainz_release_group_id");
             let mb_release_id: Option<String> = row.get("musicbrainz_release_id");
             let musicbrainz_release = match (mb_release_group_id, mb_release_id) {
@@ -887,13 +883,11 @@ impl Database {
         Ok(row.map(|row| {
             let discogs_master_id: Option<String> = row.get("discogs_master_id");
             let discogs_release_id: Option<String> = row.get("discogs_release_id");
-            let discogs_release = match (discogs_master_id, discogs_release_id) {
-                (Some(mid), Some(rid)) => Some(crate::db::models::DiscogsMasterRelease {
-                    master_id: mid,
+            let discogs_release =
+                discogs_release_id.map(|rid| crate::db::models::DiscogsMasterRelease {
+                    master_id: discogs_master_id,
                     release_id: rid,
-                }),
-                _ => None,
-            };
+                });
             let mb_release_group_id: Option<String> = row.get("musicbrainz_release_group_id");
             let mb_release_id: Option<String> = row.get("musicbrainz_release_id");
             let musicbrainz_release = match (mb_release_group_id, mb_release_id) {
@@ -998,13 +992,11 @@ impl Database {
         Ok(row.map(|row| {
             let discogs_master_id: Option<String> = row.get("discogs_master_id");
             let discogs_release_id: Option<String> = row.get("discogs_release_id");
-            let discogs_release = match (discogs_master_id, discogs_release_id) {
-                (Some(mid), Some(rid)) => Some(crate::db::models::DiscogsMasterRelease {
-                    master_id: mid,
+            let discogs_release =
+                discogs_release_id.map(|rid| crate::db::models::DiscogsMasterRelease {
+                    master_id: discogs_master_id,
                     release_id: rid,
-                }),
-                _ => None,
-            };
+                });
             let mb_release_group_id: Option<String> = row.get("musicbrainz_release_group_id");
             let mb_release_id: Option<String> = row.get("musicbrainz_release_id");
             let musicbrainz_release = match (mb_release_group_id, mb_release_id) {

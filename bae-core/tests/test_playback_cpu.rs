@@ -108,6 +108,7 @@ fn create_cue_flac_test_album() -> DiscogsRelease {
         label: vec!["Test Label".to_string()],
         cover_image: None,
         thumb: None,
+        catno: None,
         artists: vec![DiscogsArtist {
             name: "Test Artist".to_string(),
             id: "test-artist-1".to_string(),
@@ -129,7 +130,7 @@ fn create_cue_flac_test_album() -> DiscogsRelease {
                 duration: Some("1:40".to_string()), // 100 seconds
             },
         ],
-        master_id: "test-master".to_string(),
+        master_id: Some("test-master".to_string()),
     }
 }
 
