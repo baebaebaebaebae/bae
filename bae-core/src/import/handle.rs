@@ -46,13 +46,18 @@ pub struct ScanRequest {
     pub path: std::path::PathBuf,
 }
 
-/// Try to create a DiscogsClient from the keyring.
+/// Try to create a DiscogsClient from env var or keyring.
 /// Returns None if no API key is configured.
 fn get_discogs_client() -> Option<DiscogsClient> {
-    keyring::Entry::new("bae", "discogs_api_key")
+    std::env::var("BAE_DISCOGS_API_KEY")
         .ok()
-        .and_then(|e| e.get_password().ok())
         .filter(|k| !k.is_empty())
+        .or_else(|| {
+            keyring::Entry::new("bae", "discogs_api_key")
+                .ok()
+                .and_then(|e| e.get_password().ok())
+                .filter(|k| !k.is_empty())
+        })
         .map(DiscogsClient::new)
 }
 /// Torrent-specific metadata for import
