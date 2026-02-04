@@ -6,7 +6,6 @@
 
 use crate::components::album_card::AlbumCard;
 use crate::components::helpers::{ErrorDisplay, LoadingSpinner};
-use crate::components::icons::ImageIcon;
 use crate::components::{Button, ButtonSize, ButtonVariant};
 use crate::display_types::{Album, Artist};
 use crate::stores::library::{LibraryState, LibraryStateStoreExt};
@@ -48,7 +47,7 @@ pub fn LibraryView(
         div {
             class: "flex-grow overflow-y-auto flex flex-col py-10",
             onmounted: move |evt| scroll_target.set(Some(evt.data())),
-            div { class: "container mx-auto flex flex-col",
+            div { class: "container mx-auto flex flex-col flex-1",
                 h1 { class: "text-3xl font-bold text-white mb-6", "Music Library" }
                 if loading {
                     LoadingSpinner { message: "Loading your music library...".to_string() }
@@ -58,19 +57,13 @@ pub fn LibraryView(
                         "An error occurred while loading your music library."
                     }
                 } else if albums.is_empty() {
-                    div { class: "text-center py-12",
-                        div { class: "text-gray-400 mb-4",
-                            ImageIcon { class: "w-16 h-16 mx-auto" }
-                        }
-                        h2 { class: "text-2xl font-bold text-gray-300 mb-2",
-                            "No albums in your library yet"
-                        }
-                        p { class: "text-gray-500 mb-4", "Import your first album to get started!" }
+                    div { class: "flex-1 flex flex-col items-center justify-center",
+                        p { class: "text-gray-500 mb-4", "No albums in your library" }
                         Button {
                             variant: ButtonVariant::Primary,
                             size: ButtonSize::Medium,
                             onclick: move |_| on_empty_action.call(()),
-                            "Import Album"
+                            "Import"
                         }
                     }
                 } else {
