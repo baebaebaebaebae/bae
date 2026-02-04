@@ -752,6 +752,7 @@ dependencies = [
  "dirs 5.0.1",
  "discid",
  "dotenvy",
+ "encoding_rs",
  "ffmpeg-next",
  "ffmpeg-sys-next",
  "futures",

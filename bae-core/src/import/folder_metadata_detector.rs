@@ -1,5 +1,4 @@
 use crate::cue_flac::CueFlacProcessor;
-use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tracing::{debug, info, warn};
@@ -369,26 +368,8 @@ fn extract_track_offsets_from_log(
 pub fn calculate_mb_discid_from_log(log_path: &Path) -> Result<String, MetadataDetectionError> {
     info!("🎵 Calculating MusicBrainz DiscID from LOG: {:?}", log_path);
     info!("📄 Reading LOG file: {:?}", log_path);
-    let log_bytes = fs::read(log_path)?;
-    info!("📏 LOG file size: {} bytes", log_bytes.len());
-    let log_content = if log_bytes.len() >= 2 && log_bytes[0] == 0xFF && log_bytes[1] == 0xFE {
-        info!("📄 Detected UTF-16 LE encoding");
-        let utf16_chars: Vec<u16> = log_bytes[2..]
-            .chunks_exact(2)
-            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-            .collect();
-        String::from_utf16_lossy(&utf16_chars)
-    } else if log_bytes.len() >= 2 && log_bytes[0] == 0xFE && log_bytes[1] == 0xFF {
-        info!("📄 Detected UTF-16 BE encoding");
-        let utf16_chars: Vec<u16> = log_bytes[2..]
-            .chunks_exact(2)
-            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
-            .collect();
-        String::from_utf16_lossy(&utf16_chars)
-    } else {
-        info!("📄 Assuming UTF-8 encoding");
-        String::from_utf8_lossy(&log_bytes).to_string()
-    };
+    let log_content = crate::text_encoding::read_text_file(log_path)?;
+
     info!("📄 LOG file decoded, length: {} chars", log_content.len());
     let (track_offsets, raw_track_sectors) = extract_track_offsets_from_log(&log_content)?;
     info!("📊 Found {} track(s) in LOG file", track_offsets.len());
@@ -455,7 +436,7 @@ pub fn calculate_mb_discid_from_cue_flac(
         "🎵 Calculating MusicBrainz DiscID from CUE: {:?}, FLAC: {:?}",
         cue_path, flac_path
     );
-    let cue_content = fs::read_to_string(cue_path)?;
+    let cue_content = crate::text_encoding::read_text_file(cue_path)?;
     let (track_offsets, raw_track_sectors) = extract_track_offsets_from_cue(&cue_content)?;
     info!("📊 Found {} track(s) in CUE file", track_offsets.len());
     info!(
@@ -661,7 +642,7 @@ pub fn detect_metadata(folder_path: PathBuf) -> Result<FolderMetadata, MetadataD
     );
     for cue_path in &cue_files {
         debug!("Reading CUE file: {:?}", cue_path);
-        if let Ok(content) = fs::read_to_string(cue_path) {
+        if let Ok(content) = crate::text_encoding::read_text_file(cue_path) {
             let is_cue_flac_release = is_single_file_cue(&content);
             if !is_cue_flac_release {
                 debug!(

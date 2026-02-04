@@ -425,7 +425,7 @@ impl CueFlacProcessor {
         debug!("Attempting to parse CUE sheet: {:?}", cue_path);
         debug!("CUE path exists: {}", cue_path.exists());
         debug!("CUE path absolute: {:?}", cue_path.canonicalize().ok());
-        let content = fs::read_to_string(cue_path).map_err(|e| {
+        let content = crate::text_encoding::read_text_file(cue_path).map_err(|e| {
             error!(
                 "Failed to read CUE file {:?}: {} (os error {})",
                 cue_path,

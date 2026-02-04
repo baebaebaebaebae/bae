@@ -19,5 +19,6 @@ pub mod storage;
 pub mod subsonic;
 #[cfg(feature = "test-utils")]
 pub mod test_support;
+pub mod text_encoding;
 #[cfg(feature = "torrent")]
 pub mod torrent;
