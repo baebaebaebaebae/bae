@@ -22,6 +22,7 @@
 //! This is particularly useful with Dioxus signals—store the listener in a
 //! `Signal<Option<DocumentEventListener>>` and set it to `None` to remove the listener.
 
+use dioxus::prelude::*;
 use wasm_bindgen_x::prelude::*;
 
 /// A document event listener that automatically removes itself when dropped.
@@ -65,4 +66,49 @@ impl Drop for DocumentEventListener {
             self.callback.as_ref().unchecked_ref(),
         );
     }
+}
+
+/// Dioxus hook that gates rendering until the wry-bindgen JS bridge is ready.
+///
+/// wry-bindgen can panic with `U8BufferEmpty` when web_sys calls happen before
+/// the bridge is fully initialized at startup. This hook probes the bridge with
+/// a cheap `window().document()` call inside `catch_unwind` and retries until
+/// it succeeds, returning `true` once the bridge is confirmed working.
+///
+/// See bae-fm/bae#39, bae-fm/bae#42.
+pub fn use_wry_ready() -> ReadSignal<bool> {
+    let mut ready = use_signal(|| false);
+    let mut retry = use_signal(|| 0u8);
+
+    use_effect(move || {
+        let _attempt = retry();
+
+        let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _document = web_sys_x::window()
+                .expect("window")
+                .document()
+                .expect("document");
+        }));
+
+        match ok {
+            Ok(()) => ready.set(true),
+            Err(e) => {
+                tracing::warn!("wry bridge not ready, retrying: {e:?}");
+
+                spawn(async move {
+                    let Some(window) = web_sys_x::window() else {
+                        return;
+                    };
+                    let promise = js_sys_x::Promise::new(&mut |resolve, _| {
+                        let _ = window
+                            .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, 50);
+                    });
+                    let _ = wasm_bindgen_futures_x::JsFuture::from(promise).await;
+                    retry += 1;
+                });
+            }
+        }
+    });
+
+    ready.into()
 }
