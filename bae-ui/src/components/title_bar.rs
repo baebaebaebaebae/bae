@@ -4,7 +4,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::components::icons::{ImageIcon, SettingsIcon};
+use crate::components::icons::{ChevronDownIcon, ImageIcon, SettingsIcon};
 use crate::components::{ChromelessButton, Dropdown, Placement};
 use dioxus::prelude::*;
 
@@ -49,14 +49,23 @@ pub fn TitleBarView(
     // Platform hooks (no-ops on web)
     #[props(default)] on_bar_mousedown: Option<EventHandler<()>>,
     #[props(default)] on_bar_double_click: Option<EventHandler<()>>,
-    // Optional imports indicator slot
-    #[props(default)] imports_indicator: Option<Element>,
+    // Import split button
+    #[props(default)] import_count: usize,
+    #[props(default)] show_imports_dropdown: Option<ReadSignal<bool>>,
+    #[props(default)] on_imports_dropdown_toggle: Option<EventHandler<()>>,
+    #[props(default)] on_imports_dropdown_close: Option<EventHandler<()>>,
+    #[props(default)] imports_dropdown_content: Option<Element>,
     // Left padding for traffic lights on macOS
     #[props(default = 80)] left_padding: u32,
 ) -> Element {
     let search_input_id = use_hook(|| {
         let id = BUTTON_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
         format!("search-input-{}", id)
+    });
+
+    let chevron_button_id = use_hook(|| {
+        let id = BUTTON_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("imports-chevron-{}", id)
     });
 
     rsx! {
@@ -76,25 +85,38 @@ pub fn TitleBarView(
                 }
             },
 
-            // Left section: Navigation + imports indicator
+            // Left section: Navigation
             div {
                 class: "flex gap-2 flex-none items-center",
                 style: "-webkit-app-region: no-drag;",
                 for item in nav_items.iter() {
-                    NavButton {
-                        key: "{item.id}",
-                        is_active: item.is_active,
-                        on_click: {
-                            let id = item.id.clone();
-                            move |_| on_nav_click.call(id.clone())
-                        },
-                        "{item.label}"
+                    if item.id == "import" && import_count > 0 {
+                        ImportSplitButton {
+                            key: "{item.id}",
+                            is_active: item.is_active,
+                            label: item.label.clone(),
+                            chevron_button_id: chevron_button_id.clone(),
+                            on_label_click: {
+                                let id = item.id.clone();
+                                move |_| on_nav_click.call(id.clone())
+                            },
+                            on_chevron_click: move |_| {
+                                if let Some(handler) = &on_imports_dropdown_toggle {
+                                    handler.call(());
+                                }
+                            },
+                        }
+                    } else {
+                        NavButton {
+                            key: "{item.id}",
+                            is_active: item.is_active,
+                            on_click: {
+                                let id = item.id.clone();
+                                move |_| on_nav_click.call(id.clone())
+                            },
+                            "{item.label}"
+                        }
                     }
-                }
-
-                // Imports indicator
-                if let Some(indicator) = imports_indicator {
-                    div { class: "relative ml-2", {indicator} }
                 }
             }
 
@@ -146,6 +168,76 @@ pub fn TitleBarView(
                     on_click: move |_| on_settings_click.call(()),
                     SettingsIcon { class: "w-4 h-4" }
                 }
+            }
+        }
+
+        // Imports dropdown (anchored to chevron button via popover API)
+        if let Some(is_open) = show_imports_dropdown {
+            if let Some(content) = &imports_dropdown_content {
+                Dropdown {
+                    anchor_id: chevron_button_id.clone(),
+                    is_open,
+                    on_close: move |_| {
+                        if let Some(handler) = &on_imports_dropdown_close {
+                            handler.call(());
+                        }
+                    },
+                    placement: Placement::Bottom,
+                    class: "w-96 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-clip",
+                    {content.clone()}
+                }
+            }
+        }
+    }
+}
+
+/// Split button for the Import nav item: [Import | ▼]
+#[component]
+fn ImportSplitButton(
+    is_active: bool,
+    label: String,
+    chevron_button_id: String,
+    on_label_click: EventHandler<()>,
+    on_chevron_click: EventHandler<()>,
+) -> Element {
+    let active_class = if is_active {
+        "bg-gray-700 text-white"
+    } else {
+        "text-gray-400 hover:text-white"
+    };
+
+    let left_hover = if is_active { "" } else { "hover:bg-gray-700" };
+    let right_hover = if is_active { "" } else { "hover:bg-gray-700" };
+
+    rsx! {
+        span {
+            class: "inline-flex items-center",
+            onmousedown: move |evt| evt.stop_propagation(),
+
+            // Left part: label
+            ChromelessButton {
+                class: Some(
+                    format!(
+                        "text-[12px] cursor-pointer px-2 py-1.5 rounded-l {active_class} {left_hover} transition-colors",
+                    ),
+                ),
+                onclick: move |_| on_label_click.call(()),
+                "{label}"
+            }
+
+            // Divider
+            span { class: "w-px h-4 bg-gray-600" }
+
+            // Right part: chevron
+            ChromelessButton {
+                id: Some(chevron_button_id.clone()),
+                class: Some(
+                    format!(
+                        "text-[12px] cursor-pointer px-1 py-1.5 rounded-r {active_class} {right_hover} transition-colors",
+                    ),
+                ),
+                onclick: move |_| on_chevron_click.call(()),
+                ChevronDownIcon { class: "w-3 h-3" }
             }
         }
     }

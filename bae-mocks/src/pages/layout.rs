@@ -4,9 +4,8 @@ use crate::demo_data;
 use crate::Route;
 use bae_ui::stores::{PlaybackStatus, PlaybackUiState, SidebarState, SidebarStateStoreExt};
 use bae_ui::{
-    ActiveImport, AppLayoutView, ImportStatus, ImportsButtonView, ImportsDropdownView, NavItem,
-    NowPlayingBarView, QueueItem, QueueSidebarView, SearchResult, TitleBarView, Track,
-    TrackImportState,
+    ActiveImport, AppLayoutView, ImportStatus, ImportsDropdownView, NavItem, NowPlayingBarView,
+    QueueItem, QueueSidebarView, SearchResult, TitleBarView, Track, TrackImportState,
 };
 use dioxus::prelude::*;
 
@@ -96,7 +95,9 @@ pub fn DemoLayout() -> Element {
     let mut show_search_results = use_signal(|| false);
     let show_search_results_read: ReadSignal<bool> = show_search_results.into();
     let mut imports_open = use_signal(|| false);
+    let imports_open_read: ReadSignal<bool> = imports_open.into();
     let mock_imports = mock_active_imports();
+    let import_count = mock_imports.len();
 
     // Create mock track and queue data
     let mock_track = mock_playing_track();
@@ -216,16 +217,13 @@ pub fn DemoLayout() -> Element {
                         navigator().push(Route::Settings {});
                     },
                     settings_active: matches!(current_route, Route::Settings {}),
-                    imports_indicator: rsx! {
-                        ImportsButtonView {
-                            imports: mock_imports.clone(),
-                            is_open: imports_open(),
-                            on_toggle: move |_| imports_open.toggle(),
-                        }
+                    import_count,
+                    show_imports_dropdown: Some(imports_open_read),
+                    on_imports_dropdown_toggle: Some(EventHandler::new(move |_| imports_open.toggle())),
+                    on_imports_dropdown_close: Some(EventHandler::new(move |_| imports_open.set(false))),
+                    imports_dropdown_content: rsx! {
                         ImportsDropdownView {
                             imports: mock_imports.clone(),
-                            is_open: imports_open(),
-                            on_close: move |_| imports_open.set(false),
                             on_import_click: move |_id: String| imports_open.set(false),
                             on_import_dismiss: move |_id: String| {},
                             on_clear_all: move |_| {},
