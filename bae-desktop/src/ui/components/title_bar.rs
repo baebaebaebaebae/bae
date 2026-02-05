@@ -39,8 +39,6 @@ pub fn TitleBar() -> Element {
     let current_route = use_route::<Route>();
     let search_store = app.state.ui().search();
     let mut search_query_store = search_store.query();
-    let mut show_results = use_signal(|| false);
-    let show_results_read: ReadSignal<bool> = show_results.into();
     let mut search_results = use_signal(GroupedSearchResults::default);
     let mut imports_dropdown_open = use_signal(|| false);
     let imports_dropdown_open_read: ReadSignal<bool> = imports_dropdown_open.into();
@@ -58,7 +56,6 @@ pub fn TitleBar() -> Element {
             let query = search_query_store.read().clone();
             if query.is_empty() {
                 search_results.set(GroupedSearchResults::default());
-                show_results.set(false);
             } else {
                 let library_manager = library_manager.clone();
                 let query = query.clone();
@@ -100,7 +97,6 @@ pub fn TitleBar() -> Element {
                                     .collect(),
                             };
                             search_results.set(grouped);
-                            show_results.set(true);
                         }
                         Err(e) => {
                             tracing::warn!("Search failed: {}", e);
@@ -163,7 +159,6 @@ pub fn TitleBar() -> Element {
             on_search_change: move |value| search_query_store.set(value),
             search_results: search_results(),
             on_search_result_click: move |action: SearchAction| {
-                show_results.set(false);
                 search_query_store.set(String::new());
                 match action {
                     SearchAction::Artist(artist_id) => {
@@ -185,8 +180,6 @@ pub fn TitleBar() -> Element {
                     }
                 }
             },
-            show_search_results: show_results_read,
-            on_search_dismiss: move |_| show_results.set(false),
             on_search_focus: move |_| {
                 if search_query_store.read().is_empty() {
                     // Show top artists as suggestions
@@ -198,10 +191,7 @@ pub fn TitleBar() -> Element {
                                 albums: vec![],
                                 tracks: vec![],
                             });
-                        show_results.set(true);
                     }
-                } else {
-                    show_results.set(true);
                 }
             },
             on_search_blur: |_| {},

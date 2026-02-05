@@ -33,7 +33,6 @@ pub fn TitleBarMock(initial_state: Option<String>) -> Element {
 
     let active_nav = registry.get_string("active_nav");
     let show_search_results_bool = registry.get_bool("show_search_results");
-    let show_search_results: ReadSignal<bool> = use_memo(move || show_search_results_bool).into();
 
     let nav_items = vec![
         NavItem {
@@ -50,6 +49,7 @@ pub fn TitleBarMock(initial_state: Option<String>) -> Element {
 
     let settings_active = active_nav == "settings";
 
+    // When the mock toggle is on, always provide results (the panel shows on focus)
     let search_results = if show_search_results_bool {
         mock_search_results()
     } else {
@@ -68,8 +68,6 @@ pub fn TitleBarMock(initial_state: Option<String>) -> Element {
                 on_search_change: |_| {},
                 search_results,
                 on_search_result_click: |_: SearchAction| {},
-                show_search_results,
-                on_search_dismiss: |_| {},
                 on_search_focus: |_| {},
                 on_search_blur: |_| {},
                 on_settings_click: |_| {},

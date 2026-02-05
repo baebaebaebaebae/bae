@@ -162,31 +162,29 @@ pub fn ShortcutsHandler(children: Element) -> Element {
         });
     });
 
-    let onkeydown = move |evt: KeyboardEvent| {
-        // "/" shortcut to focus search (no modifiers, not when in a text field)
-        if let Key::Character(ref c) = evt.key() {
-            if c == "/"
-                && !evt.modifiers().meta()
-                && !evt.modifiers().ctrl()
-                && !evt.modifiers().alt()
-            {
-                // Use eval to check active element and focus search input.
-                // The JS checks that we're not already in a text field.
-                let js = format!(
-                    r#"
+    // "/" shortcut: register on document so it works regardless of focus.
+    // The div-level onkeydown only fires when a descendant has focus,
+    // which often isn't the case (focus defaults to body).
+    use_hook(|| {
+        let js = format!(
+            r#"
+            document.addEventListener('keydown', function(e) {{
+                if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey) {{
                     const tag = document.activeElement?.tagName;
                     if (tag !== 'INPUT' && tag !== 'TEXTAREA') {{
+                        e.preventDefault();
                         const el = document.getElementById('{}');
                         if (el) {{ el.focus(); }}
                     }}
-                    "#,
-                    bae_ui::SEARCH_INPUT_ID,
-                );
-                dioxus::document::eval(&js);
-                return;
-            }
-        }
+                }}
+            }});
+            "#,
+            bae_ui::SEARCH_INPUT_ID,
+        );
+        dioxus::document::eval(&js);
+    });
 
+    let onkeydown = move |evt: KeyboardEvent| {
         if let Some(action) = handle_shortcut(&evt) {
             evt.prevent_default();
             execute_nav_action(action);
