@@ -516,7 +516,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                 "Preparing" => ConfirmPhase::Preparing("Fetching release data...".to_string()),
                 "Importing" => ConfirmPhase::Importing,
                 "Failed" => ConfirmPhase::Failed(import_error.clone().unwrap_or_default()),
-                "Completed" => ConfirmPhase::Completed,
+                "Completed" => ConfirmPhase::Completed("mock-album-id".to_string()),
                 _ => ConfirmPhase::Ready,
             };
             CandidateState::Confirming(Box::new(ConfirmingState {

@@ -4,7 +4,6 @@
 //! These replace the methods from ImportContext.
 
 use crate::ui::app_service::AppService;
-use crate::ui::Route;
 use bae_core::discogs::client::DiscogsSearchParams;
 use bae_core::discogs::{DiscogsClient, DiscogsRelease};
 use bae_core::import::{
@@ -23,7 +22,6 @@ use bae_ui::stores::import::CandidateEvent;
 use bae_ui::stores::AppStateStoreExt;
 use bae_ui::ImportSource;
 use dioxus::prelude::*;
-use dioxus::router::Navigator;
 use reqwest::redirect;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -645,7 +643,6 @@ pub async fn confirm_and_start_import(
     app: &AppService,
     candidate: DisplayMatchCandidate,
     import_source: ImportSource,
-    navigator: Navigator,
 ) -> Result<(), String> {
     let mut import_store = app.state.import();
 
@@ -739,6 +736,7 @@ pub async fn confirm_and_start_import(
             // Spawn a task to listen for import completion
             let progress_handle = import_handle.progress_handle.clone();
             let mut import_store_clone = app.state.import();
+            let album_id_for_completion = album_id.clone();
             spawn(async move {
                 let mut progress_rx = progress_handle.subscribe_import(import_id.clone());
                 while let Some(event) = progress_rx.recv().await {
@@ -747,7 +745,7 @@ pub async fn confirm_and_start_import(
                             info!("Import completed for candidate: {}", candidate_key);
                             import_store_clone.write().dispatch_to_candidate(
                                 &candidate_key,
-                                CandidateEvent::ImportComplete,
+                                CandidateEvent::ImportCompleted(album_id_for_completion.clone()),
                             );
                             break;
                         }
@@ -764,42 +762,7 @@ pub async fn confirm_and_start_import(
                 }
             });
 
-            // Check for more releases
-            let has_more = import_store.read().has_more_releases();
-            if has_more {
-                info!("More releases to import, advancing to next release");
-                import_store.write().advance_to_next_release();
-                let (current_idx, selected_indices, detected_candidates) = {
-                    let state = import_store.read();
-                    (
-                        state.current_release_index,
-                        state.selected_release_indices.clone(),
-                        state.detected_candidates.clone(),
-                    )
-                };
-                if let Some(&release_idx) = selected_indices.get(current_idx) {
-                    if let Err(e) =
-                        load_selected_release(app, release_idx, &detected_candidates).await
-                    {
-                        error!("Failed to load next release: {}", e);
-                        import_store
-                            .write()
-                            .dispatch(CandidateEvent::ImportFailed(e));
-                    }
-                }
-                Ok(())
-            } else {
-                info!(
-                    "No more releases to import, navigating to album: {}",
-                    album_id
-                );
-                import_store.write().reset();
-                navigator.push(Route::AlbumDetail {
-                    album_id,
-                    release_id: String::new(),
-                });
-                Ok(())
-            }
+            Ok(())
         }
         Err(e) => {
             let error_msg = format!("Failed to start import: {}", e);

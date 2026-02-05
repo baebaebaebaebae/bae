@@ -435,12 +435,11 @@ pub fn CdImport() -> Element {
         let app = app.clone();
         move |_| {
             let app = app.clone();
-            let navigator = navigator;
             spawn(async move {
                 let confirmed = app.state.import().read().get_confirmed_candidate();
                 if let Some(candidate) = confirmed {
                     if let Err(e) =
-                        confirm_and_start_import(&app, candidate, ImportSource::Cd, navigator).await
+                        confirm_and_start_import(&app, candidate, ImportSource::Cd).await
                     {
                         warn!("Failed to confirm and start import: {}", e);
                     }
@@ -556,7 +555,13 @@ pub fn CdImport() -> Element {
             on_confirm,
             on_configure_storage: |_| {},
             on_clear,
-            on_view_in_library: |_| {},
+            on_view_in_library: move |album_id: String| {
+                navigator
+                    .push(crate::ui::Route::AlbumDetail {
+                        album_id,
+                        release_id: String::new(),
+                    });
+            },
         }
     }
 }
