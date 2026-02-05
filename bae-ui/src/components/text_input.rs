@@ -11,12 +11,29 @@ pub enum TextInputSize {
     Medium,
 }
 
+/// Text input type
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TextInputType {
+    Text,
+    Password,
+}
+
+impl TextInputType {
+    fn as_str(self) -> &'static str {
+        match self {
+            TextInputType::Text => "text",
+            TextInputType::Password => "password",
+        }
+    }
+}
+
 /// Reusable text input component with consistent styling
 #[component]
 pub fn TextInput(
     value: String,
     on_input: EventHandler<String>,
     size: TextInputSize,
+    input_type: TextInputType,
     #[props(default)] placeholder: Option<&'static str>,
     #[props(default)] disabled: bool,
     #[props(default)] monospace: bool,
@@ -39,15 +56,20 @@ pub fn TextInput(
     let font_class = if monospace { "font-mono" } else { "" };
 
     let class = format!("{base} {padding} {disabled_class} {font_class}");
+    let type_str = input_type.as_str();
 
     rsx! {
         input {
-            r#type: "text",
+            r#type: "{type_str}",
             class: "{class}",
             id: id.as_deref(),
             value: "{value}",
             placeholder,
             disabled,
+            autocomplete: "off",
+            autocapitalize: "off",
+            autocorrect: "off",
+            spellcheck: false,
             oninput: move |e| on_input.call(e.value()),
             onmounted: move |event| async move {
                 if autofocus {

@@ -7,7 +7,7 @@ use crate::components::icons::{
     CheckIcon, CopyIcon, InfoIcon, KeyIcon, PencilIcon, PlusIcon, TrashIcon,
 };
 use crate::components::{
-    Button, ButtonSize, ButtonVariant, ChromelessButton, TextInput, TextInputSize,
+    Button, ButtonSize, ButtonVariant, ChromelessButton, TextInput, TextInputSize, TextInputType,
 };
 use dioxus::prelude::*;
 
@@ -246,15 +246,16 @@ fn EncryptionSubSection(
                         label { class: "block text-sm font-medium text-gray-400 mb-2",
                             "Paste your encryption key"
                         }
-                        input {
-                            r#type: "text",
-                            class: "w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono",
-                            placeholder: "64-character hex string",
-                            value: "{import_value}",
-                            oninput: move |e| {
-                                import_value.set(e.value());
+                        TextInput {
+                            value: import_value(),
+                            on_input: move |v: String| {
+                                import_value.set(v);
                                 import_error.set(None);
                             },
+                            size: TextInputSize::Medium,
+                            input_type: TextInputType::Text,
+                            placeholder: "64-character hex string",
+                            monospace: true,
                         }
                     }
 
@@ -571,6 +572,7 @@ pub fn StorageProfileEditorView(
                         value: name(),
                         on_input: move |v| name.set(v),
                         size: TextInputSize::Medium,
+                        input_type: TextInputType::Text,
                         placeholder: "My Storage Profile",
                     }
                 }
@@ -610,6 +612,7 @@ pub fn StorageProfileEditorView(
                             value: location_path(),
                             on_input: move |v| location_path.set(v),
                             size: TextInputSize::Medium,
+                            input_type: TextInputType::Text,
                             placeholder: "/path/to/storage",
                         }
                     }
@@ -622,6 +625,7 @@ pub fn StorageProfileEditorView(
                             value: cloud_bucket(),
                             on_input: move |v| cloud_bucket.set(v),
                             size: TextInputSize::Medium,
+                            input_type: TextInputType::Text,
                             placeholder: "my-music-bucket",
                         }
                     }
@@ -633,6 +637,7 @@ pub fn StorageProfileEditorView(
                             value: cloud_region(),
                             on_input: move |v| cloud_region.set(v),
                             size: TextInputSize::Medium,
+                            input_type: TextInputType::Text,
                             placeholder: "us-east-1",
                         }
                     }
@@ -644,6 +649,7 @@ pub fn StorageProfileEditorView(
                             value: cloud_endpoint(),
                             on_input: move |v| cloud_endpoint.set(v),
                             size: TextInputSize::Medium,
+                            input_type: TextInputType::Text,
                             placeholder: "https://minio.example.com",
                         }
                         p { class: "text-xs text-gray-500 mt-1", "Leave empty for AWS S3" }
@@ -667,26 +673,26 @@ pub fn StorageProfileEditorView(
                         label { class: "block text-sm font-medium text-gray-400 mb-2",
                             "Access Key ID"
                         }
-                        input {
-                            r#type: if *show_secrets.read() { "text" } else { "password" },
-                            autocomplete: "off",
-                            class: "w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono",
+                        TextInput {
+                            value: cloud_access_key.to_string(),
+                            on_input: move |v| cloud_access_key.set(v),
+                            size: TextInputSize::Medium,
+                            input_type: if *show_secrets.read() { TextInputType::Text } else { TextInputType::Password },
                             placeholder: "AKIAIOSFODNN7EXAMPLE",
-                            value: "{cloud_access_key}",
-                            oninput: move |e| cloud_access_key.set(e.value()),
+                            monospace: true,
                         }
                     }
                     div {
                         label { class: "block text-sm font-medium text-gray-400 mb-2",
                             "Secret Access Key"
                         }
-                        input {
-                            r#type: if *show_secrets.read() { "text" } else { "password" },
-                            autocomplete: "off",
-                            class: "w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono",
+                        TextInput {
+                            value: cloud_secret_key.to_string(),
+                            on_input: move |v| cloud_secret_key.set(v),
+                            size: TextInputSize::Medium,
+                            input_type: if *show_secrets.read() { TextInputType::Text } else { TextInputType::Password },
                             placeholder: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-                            value: "{cloud_secret_key}",
-                            oninput: move |e| cloud_secret_key.set(e.value()),
+                            monospace: true,
                         }
                     }
                 }

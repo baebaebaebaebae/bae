@@ -1,7 +1,7 @@
 //! TextInput mock component
 
 use super::framework::{ControlRegistryBuilder, MockPage, MockPanel, Preset};
-use bae_ui::{TextInput, TextInputSize};
+use bae_ui::{TextInput, TextInputSize, TextInputType};
 use dioxus::prelude::*;
 
 #[component]
@@ -55,6 +55,7 @@ pub fn TextInputMock(initial_state: Option<String>) -> Element {
                             value: value(),
                             on_input: move |v| value.set(v),
                             size,
+                            input_type: TextInputType::Text,
                             placeholder,
                             disabled,
                         }
@@ -71,6 +72,7 @@ pub fn TextInputMock(initial_state: Option<String>) -> Element {
                                 value: "Small input".to_string(),
                                 on_input: move |_| {},
                                 size: TextInputSize::Small,
+                                input_type: TextInputType::Text,
                             }
                         }
                         div {
@@ -79,6 +81,7 @@ pub fn TextInputMock(initial_state: Option<String>) -> Element {
                                 value: "Medium input".to_string(),
                                 on_input: move |_| {},
                                 size: TextInputSize::Medium,
+                                input_type: TextInputType::Text,
                             }
                         }
                     }
@@ -94,6 +97,7 @@ pub fn TextInputMock(initial_state: Option<String>) -> Element {
                                 value: "".to_string(),
                                 on_input: move |_| {},
                                 size: TextInputSize::Medium,
+                                input_type: TextInputType::Text,
                                 placeholder: "Search artist or album...",
                             }
                         }
@@ -103,6 +107,7 @@ pub fn TextInputMock(initial_state: Option<String>) -> Element {
                                 value: "Cannot edit".to_string(),
                                 on_input: move |_| {},
                                 size: TextInputSize::Medium,
+                                input_type: TextInputType::Text,
                                 disabled: true,
                             }
                         }
@@ -120,6 +125,7 @@ pub fn TextInputMock(initial_state: Option<String>) -> Element {
                                     value: "The Midnight Signal".to_string(),
                                     on_input: move |_| {},
                                     size: TextInputSize::Medium,
+                                    input_type: TextInputType::Text,
                                 }
                             }
                             div { class: "flex-1",
@@ -128,6 +134,7 @@ pub fn TextInputMock(initial_state: Option<String>) -> Element {
                                     value: "Neon Frequencies".to_string(),
                                     on_input: move |_| {},
                                     size: TextInputSize::Medium,
+                                    input_type: TextInputType::Text,
                                 }
                             }
                         }

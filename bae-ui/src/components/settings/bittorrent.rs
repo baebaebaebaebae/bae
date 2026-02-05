@@ -1,6 +1,8 @@
 //! BitTorrent section view
 
-use crate::components::{Button, ButtonSize, ButtonVariant, TextInput, TextInputSize};
+use crate::components::{
+    Button, ButtonSize, ButtonVariant, TextInput, TextInputSize, TextInputType,
+};
 use dioxus::prelude::*;
 
 /// BitTorrent settings display data
@@ -217,6 +219,7 @@ pub fn BitTorrentSectionView(
                                 value: edit_bind_interface.to_string(),
                                 on_input: move |v| on_bind_interface_change.call(v),
                                 size: TextInputSize::Medium,
+                                input_type: TextInputType::Text,
                                 placeholder: "e.g., eth0, tun0, 192.168.1.100",
                             }
                             p { class: "text-xs text-gray-500",
