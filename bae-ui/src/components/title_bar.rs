@@ -86,8 +86,6 @@ pub fn TitleBarView(
     on_search_change: EventHandler<String>,
     search_results: GroupedSearchResults,
     on_search_result_click: EventHandler<SearchAction>,
-    show_search_results: ReadSignal<bool>,
-    on_search_dismiss: EventHandler<()>,
     on_search_focus: EventHandler<()>,
     on_search_blur: EventHandler<()>,
     // Settings
@@ -170,10 +168,13 @@ pub fn TitleBarView(
                 class: "flex-none flex items-center gap-2",
                 style: "-webkit-app-region: no-drag;",
 
-                // Search input with dropdown
+                // Search input with autocomplete results
                 div {
                     class: "relative transition-all duration-200",
                     class: if search_active { "w-56" } else { "w-40" },
+                    // Stop mousedown propagation so title bar drag doesn't
+                    // interfere with focus.
+                    onmousedown: move |evt| evt.stop_propagation(),
                     input {
                         id: SEARCH_INPUT_ID,
                         r#type: "text",
@@ -192,19 +193,24 @@ pub fn TitleBarView(
                         },
                         onkeydown: move |evt| {
                             if evt.key() == Key::Escape {
-                                on_search_dismiss.call(());
+                                // Defer blur to avoid re-entrant borrow in wry
+                                spawn(async move {
+                                    let js = format!(
+                                        "document.getElementById('{}')?.blur()",
+                                        SEARCH_INPUT_ID,
+                                    );
+                                    dioxus::document::eval(&js);
+                                });
                             }
                         },
                     }
 
-                    // Search results dropdown
-                    if !search_results.is_empty() {
-                        Dropdown {
-                            anchor_id: SEARCH_INPUT_ID.to_string(),
-                            is_open: show_search_results,
-                            on_close: on_search_dismiss,
-                            placement: Placement::Bottom,
-                            class: "bg-surface-overlay border border-border-strong rounded-lg shadow-lg w-72 max-h-96 overflow-y-auto",
+                    // Search results panel (visible when focused with results)
+                    if search_active && !search_results.is_empty() {
+                        div {
+                            class: "absolute top-full left-0 mt-1 bg-surface-overlay border border-border-strong rounded-lg shadow-lg w-72 max-h-96 overflow-y-auto z-50",
+                            // Prevent mousedown from blurring the search input
+                            onmousedown: move |evt| evt.prevent_default(),
                             SearchResultsContent {
                                 results: search_results,
                                 on_click: on_search_result_click,

@@ -93,8 +93,6 @@ fn mock_queue() -> Vec<QueueItem> {
 pub fn DemoLayout() -> Element {
     let current_route = use_route::<Route>();
     let mut search_query = use_signal(String::new);
-    let mut show_search_results = use_signal(|| false);
-    let show_search_results_read: ReadSignal<bool> = show_search_results.into();
     let mut imports_open = use_signal(|| false);
     let imports_open_read: ReadSignal<bool> = imports_open.into();
     let mock_imports = mock_active_imports();
@@ -228,12 +226,10 @@ pub fn DemoLayout() -> Element {
                     },
                     search_value: search_query(),
                     on_search_change: move |value: String| {
-                        search_query.set(value.clone());
-                        show_search_results.set(!value.is_empty());
+                        search_query.set(value);
                     },
                     search_results,
                     on_search_result_click: move |action: SearchAction| {
-                        show_search_results.set(false);
                         search_query.set(String::new());
                         match action {
                             SearchAction::Album(album_id) | SearchAction::Track { album_id } => {
@@ -242,13 +238,7 @@ pub fn DemoLayout() -> Element {
                             SearchAction::Artist(_) => {}
                         }
                     },
-                    show_search_results: show_search_results_read,
-                    on_search_dismiss: move |_| show_search_results.set(false),
-                    on_search_focus: move |_| {
-                        if !search_query().is_empty() {
-                            show_search_results.set(true);
-                        }
-                    },
+                    on_search_focus: |_| {},
                     on_search_blur: |_| {},
                     on_settings_click: move |_| {
                         navigator().push(Route::Settings {});
