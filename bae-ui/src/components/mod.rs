@@ -56,7 +56,7 @@ pub use import::{
     TorrentInputMode, TorrentInputView, TorrentTrackerDisplayView, TrackerConnectionStatus,
     TrackerStatus,
 };
-pub use imports::{ImportsButtonView, ImportsDropdownView};
+pub use imports::ImportsDropdownView;
 pub use library::LibraryView;
 pub use menu::{MenuDivider, MenuDropdown, MenuItem};
 pub use modal::Modal;

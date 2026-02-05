@@ -4,12 +4,12 @@
 //! window dragging (macOS), zoom (macOS), and database-backed search.
 
 use crate::ui::app_service::use_app;
-use crate::ui::components::imports_button::ImportsButton;
 use crate::ui::components::imports_dropdown::ImportsDropdown;
 use crate::ui::Route;
 use bae_ui::display_types::Album;
 use bae_ui::stores::{
-    AppStateStoreExt, LibraryStateStoreExt, SearchStateStoreExt, UiStateStoreExt,
+    ActiveImportsUiStateStoreExt, AppStateStoreExt, LibraryStateStoreExt, SearchStateStoreExt,
+    UiStateStoreExt,
 };
 use bae_ui::{NavItem, SearchResult, TitleBarView};
 #[cfg(target_os = "macos")]
@@ -39,11 +39,15 @@ pub fn TitleBar() -> Element {
     let mut show_results = use_signal(|| false);
     let show_results_read: ReadSignal<bool> = show_results.into();
     let mut filtered_albums = use_signal(Vec::<Album>::new);
-    let imports_dropdown_open = use_signal(|| false);
+    let mut imports_dropdown_open = use_signal(|| false);
+    let imports_dropdown_open_read: ReadSignal<bool> = imports_dropdown_open.into();
 
     // Read albums from global store (populated by App component)
     let albums_store = app.state.library().albums();
     let artists_store = app.state.library().artists_by_album();
+
+    // Read import count for split button
+    let import_count = app.state.active_imports().imports().read().len();
 
     // Filter albums based on search query
     use_effect({
@@ -178,9 +182,12 @@ pub fn TitleBar() -> Element {
             settings_active: matches!(current_route, Route::Settings {}),
             on_bar_mousedown,
             on_bar_double_click,
-            imports_indicator: rsx! {
-                ImportsButton { is_open: imports_dropdown_open }
-                ImportsDropdown { is_open: imports_dropdown_open }
+            import_count,
+            show_imports_dropdown: Some(imports_dropdown_open_read),
+            on_imports_dropdown_toggle: Some(EventHandler::new(move |_| imports_dropdown_open.toggle())),
+            on_imports_dropdown_close: Some(EventHandler::new(move |_| imports_dropdown_open.set(false))),
+            imports_dropdown_content: rsx! {
+                ImportsDropdown {}
             },
             left_padding,
         }

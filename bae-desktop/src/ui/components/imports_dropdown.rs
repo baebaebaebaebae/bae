@@ -9,9 +9,9 @@ use bae_ui::stores::{ActiveImportsUiStateStoreExt, AppStateStoreExt, ImportOpera
 use bae_ui::ImportsDropdownView;
 use dioxus::prelude::*;
 
-/// Dropdown showing list of active imports with progress
+/// Dropdown content showing list of active imports with progress
 #[component]
-pub fn ImportsDropdown(mut is_open: Signal<bool>) -> Element {
+pub fn ImportsDropdown() -> Element {
     let app = use_app();
     let active_imports_store = app.state.active_imports();
     let imports_store = active_imports_store.imports();
@@ -56,12 +56,9 @@ pub fn ImportsDropdown(mut is_open: Signal<bool>) -> Element {
     rsx! {
         ImportsDropdownView {
             imports: display_imports,
-            is_open: *is_open.read(),
-            on_close: move |_| is_open.set(false),
             on_import_click: {
                 let release_ids = release_ids.clone();
                 move |import_id: String| {
-                    is_open.set(false);
                     if let Some(Some(rid)) = release_ids.get(&import_id) {
                         navigator
                             .push(Route::AlbumDetail {
@@ -74,10 +71,8 @@ pub fn ImportsDropdown(mut is_open: Signal<bool>) -> Element {
             on_import_dismiss: {
                 let app = app.clone();
                 move |import_id: String| {
-                    // Remove from UI state
+                    // Remove from UI state, also delete from DB so it doesn't reappear after restart
                     app.state
-
-                        // Also delete from DB so it doesn't reappear after restart
                         .active_imports()
                         .imports()
                         .with_mut(|list| {
