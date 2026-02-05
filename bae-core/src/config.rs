@@ -21,7 +21,7 @@ fn default_true() -> bool {
     true
 }
 
-/// YAML config file structure for non-secret settings
+/// YAML config file structure for non-secret settings (per-library)
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ConfigYaml {
     pub library_id: Option<String>,
@@ -53,6 +53,7 @@ pub struct ConfigYaml {
 #[derive(Clone, Debug)]
 pub struct Config {
     pub library_id: String,
+    pub library_path: Option<PathBuf>,
     /// Discogs API key - loaded lazily from keyring when needed
     pub discogs_api_key: Option<String>,
     /// Encryption key - loaded lazily from keyring when needed (when creating encrypted storage profile)
@@ -90,12 +91,14 @@ impl Config {
         // Load from env if present, otherwise will be loaded lazily from keyring
         let discogs_api_key = std::env::var("BAE_DISCOGS_API_KEY").ok();
         let encryption_key = std::env::var("BAE_ENCRYPTION_KEY").ok();
+        let library_path = std::env::var("BAE_LIBRARY_PATH").ok().map(PathBuf::from);
         let torrent_bind_interface = std::env::var("BAE_TORRENT_BIND_INTERFACE")
             .ok()
             .filter(|s| !s.is_empty());
 
         Self {
             library_id,
+            library_path,
             discogs_api_key,
             encryption_key,
             torrent_bind_interface,
@@ -112,9 +115,28 @@ impl Config {
     }
 
     fn from_config_file() -> Self {
-        // Don't load from keyring on startup - credentials loaded lazily when needed
         let home_dir = dirs::home_dir().expect("Failed to get home directory");
-        let config_path = home_dir.join(".bae").join("config.yaml");
+
+        // Read library path from global pointer file
+        let library_path_file = home_dir.join(".bae").join("library");
+        let library_path = if library_path_file.exists() {
+            let content = std::fs::read_to_string(&library_path_file)
+                .expect("Failed to read library path file");
+            let trimmed = content.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(trimmed))
+            }
+        } else {
+            None
+        };
+
+        // Read library-specific config from the library directory
+        let library_dir = library_path
+            .clone()
+            .unwrap_or_else(|| home_dir.join(".bae"));
+        let config_path = library_dir.join("config.yaml");
         let yaml_config: ConfigYaml = if config_path.exists() {
             serde_yaml::from_str(&std::fs::read_to_string(&config_path).unwrap())
                 .unwrap_or_default()
@@ -128,6 +150,7 @@ impl Config {
 
         Self {
             library_id,
+            library_path,
             discogs_api_key: None,
             encryption_key: None,
             torrent_bind_interface: yaml_config.torrent_bind_interface,
@@ -144,9 +167,15 @@ impl Config {
     }
 
     pub fn get_library_path(&self) -> PathBuf {
-        std::env::var("BAE_LIBRARY_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| dirs::home_dir().unwrap().join(".bae"))
+        if let Some(path) = &self.library_path {
+            return path.clone();
+        }
+
+        dirs::home_dir().unwrap().join(".bae")
+    }
+
+    pub fn set_library_path(&mut self, path: PathBuf) {
+        self.library_path = Some(path);
     }
 
     pub fn is_dev_mode() -> bool {
@@ -213,6 +242,21 @@ impl Config {
         if let Some(key) = &self.encryption_key {
             keyring::Entry::new("bae", "encryption_master_key")?.set_password(key)?;
         }
+        Ok(())
+    }
+
+    /// Save the library path to the global pointer file (~/.bae/library).
+    pub fn save_library_path(&self) -> Result<(), ConfigError> {
+        let bae_dir = dirs::home_dir()
+            .expect("Failed to get home directory")
+            .join(".bae");
+        std::fs::create_dir_all(&bae_dir)?;
+        let path_str = self
+            .library_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        std::fs::write(bae_dir.join("library"), path_str)?;
         Ok(())
     }
 
