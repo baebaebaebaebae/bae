@@ -1,15 +1,14 @@
 //! Settings page
 
 use bae_ui::{
-    AboutSectionView, ApiKeysSectionView, BitTorrentSectionView, BitTorrentSettings,
-    EncryptionSectionView, SettingsTab, SettingsView, StorageLocation, StorageProfile,
-    StorageProfilesSectionView, SubsonicSectionView,
+    AboutSectionView, BitTorrentSectionView, BitTorrentSettings, DiscogsSectionView, SettingsTab,
+    SettingsView, StorageLocation, StorageProfile, StorageProfilesSectionView, SubsonicSectionView,
 };
 use dioxus::prelude::*;
 
 #[component]
 pub fn Settings() -> Element {
-    let mut active_tab = use_signal(|| SettingsTab::StorageProfiles);
+    let mut active_tab = use_signal(|| SettingsTab::Storage);
 
     rsx! {
         SettingsView {
@@ -17,12 +16,17 @@ pub fn Settings() -> Element {
             on_tab_change: move |tab| active_tab.set(tab),
 
             match *active_tab.read() {
-                SettingsTab::StorageProfiles => rsx! {
+                SettingsTab::Storage => rsx! {
                     StorageProfilesSectionView {
                         profiles: mock_storage_profiles(),
                         is_loading: false,
                         editing_profile: None,
                         is_creating: false,
+                        encryption_configured: true,
+                        encryption_key_preview: "a1b2c3d4...x7y8z9".to_string(),
+                        encryption_key_length: 32,
+                        on_copy_key: |_| {},
+                        on_import_key: |_| {},
                         on_create: |_| {},
                         on_edit: |_| {},
                         on_delete: |_| {},
@@ -31,8 +35,8 @@ pub fn Settings() -> Element {
                         on_cancel_edit: |_| {},
                     }
                 },
-                SettingsTab::ApiKeys => rsx! {
-                    ApiKeysSectionView {
+                SettingsTab::Discogs => rsx! {
+                    DiscogsSectionView {
                         discogs_configured: true,
                         discogs_key_value: String::new(),
                         is_editing: false,
@@ -43,13 +47,6 @@ pub fn Settings() -> Element {
                         on_key_change: |_| {},
                         on_save: |_| {},
                         on_cancel: |_| {},
-                    }
-                },
-                SettingsTab::Encryption => rsx! {
-                    EncryptionSectionView {
-                        is_configured: true,
-                        key_preview: "a1b2c3d4...x7y8z9".to_string(),
-                        key_length: 32,
                     }
                 },
                 SettingsTab::BitTorrent => rsx! {

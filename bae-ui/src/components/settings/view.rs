@@ -7,9 +7,8 @@ use dioxus::prelude::*;
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum SettingsTab {
     #[default]
-    StorageProfiles,
-    ApiKeys,
-    Encryption,
+    Storage,
+    Discogs,
     BitTorrent,
     Subsonic,
     About,
@@ -18,9 +17,8 @@ pub enum SettingsTab {
 impl SettingsTab {
     pub fn label(&self) -> &'static str {
         match self {
-            SettingsTab::StorageProfiles => "Storage Profiles",
-            SettingsTab::ApiKeys => "API Keys",
-            SettingsTab::Encryption => "Encryption",
+            SettingsTab::Storage => "Storage",
+            SettingsTab::Discogs => "Discogs",
             SettingsTab::BitTorrent => "BitTorrent",
             SettingsTab::Subsonic => "Subsonic",
             SettingsTab::About => "About",
@@ -29,9 +27,8 @@ impl SettingsTab {
 
     pub fn all() -> &'static [SettingsTab] {
         &[
-            SettingsTab::StorageProfiles,
-            SettingsTab::ApiKeys,
-            SettingsTab::Encryption,
+            SettingsTab::Storage,
+            SettingsTab::Discogs,
             #[cfg(feature = "torrent")]
             SettingsTab::BitTorrent,
             SettingsTab::Subsonic,
@@ -48,11 +45,11 @@ pub fn SettingsView(
     children: Element,
 ) -> Element {
     rsx! {
-        div { class: "flex flex-col h-full bg-gray-900",
+        div { class: "flex flex-col h-full min-h-0 bg-gray-900",
             div { class: "p-6 border-b border-gray-700",
                 h1 { class: "text-2xl font-bold text-white", "Settings" }
             }
-            div { class: "flex flex-1 overflow-clip",
+            div { class: "flex flex-1 min-h-0 overflow-clip",
                 nav { class: "w-56 bg-gray-800 border-r border-gray-700 p-4 flex-shrink-0",
                     ul { class: "space-y-1",
                         for tab in SettingsTab::all() {

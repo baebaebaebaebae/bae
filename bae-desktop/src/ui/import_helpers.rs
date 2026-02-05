@@ -157,7 +157,7 @@ pub fn get_discogs_client() -> Result<DiscogsClient, String> {
         .ok()
         .filter(|k| !k.is_empty())
         .or_else(|| {
-            keyring::Entry::new("bae", "discogs_api_key")
+            keyring_core::Entry::new("bae", "discogs_api_key")
                 .ok()
                 .and_then(|e| e.get_password().ok())
         });
@@ -165,8 +165,7 @@ pub fn get_discogs_client() -> Result<DiscogsClient, String> {
     match api_key {
         Some(key) if !key.is_empty() => Ok(DiscogsClient::new(key)),
         _ => Err(
-            "Discogs API key not configured. Go to Settings → API Keys to add your key."
-                .to_string(),
+            "Discogs API key not configured. Go to Settings → Discogs to add your key.".to_string(),
         ),
     }
 }
