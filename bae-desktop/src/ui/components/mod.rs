@@ -1,5 +1,4 @@
 // Desktop-only modules
-pub mod imports_button;
 pub mod imports_dropdown;
 pub mod title_bar;
 

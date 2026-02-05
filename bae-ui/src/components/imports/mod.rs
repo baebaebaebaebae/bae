@@ -1,9 +1,7 @@
-//! Imports indicator components
+//! Imports dropdown component
 //!
-//! Pure, props-based components for the imports button and dropdown in the title bar.
+//! Pure, props-based component for the imports dropdown content in the title bar.
 
-mod button;
 mod dropdown;
 
-pub use button::ImportsButtonView;
 pub use dropdown::ImportsDropdownView;

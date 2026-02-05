@@ -4,11 +4,38 @@ use std::path::PathBuf;
 use thiserror::Error;
 use tracing::{info, warn};
 
+/// Initialize the keyring credential store.
+///
+/// On macOS, uses the protected data store with iCloud cloud-sync enabled,
+/// so the encryption key is backed up via iCloud Keychain (if the user has it on).
+///
+/// Must be called once at startup before any keyring operations.
+pub fn init_keyring() {
+    #[cfg(target_os = "macos")]
+    {
+        use std::collections::HashMap;
+        let config = HashMap::from([("cloud-sync", "true")]);
+        match apple_native_keyring_store::protected::Store::new_with_configuration(&config) {
+            Ok(store) => {
+                keyring_core::set_default_store(store);
+                info!("Keyring initialized (protected store, iCloud sync enabled)");
+            }
+            Err(e) => {
+                warn!("Failed to create protected keyring store: {e}, falling back to local");
+                if let Ok(store) = apple_native_keyring_store::protected::Store::new() {
+                    keyring_core::set_default_store(store);
+                    info!("Keyring initialized (protected store, local only)");
+                }
+            }
+        }
+    }
+}
+
 /// Configuration errors (production mode only)
 #[derive(Error, Debug)]
 pub enum ConfigError {
     #[error("Keyring error: {0}")]
-    Keyring(#[from] keyring::Error),
+    Keyring(#[from] keyring_core::Error),
     #[error("Serialization error: {0}")]
     Serialization(String),
     #[error("Configuration error: {0}")]
@@ -21,7 +48,7 @@ fn default_true() -> bool {
     true
 }
 
-/// YAML config file structure for non-secret settings
+/// YAML config file structure for non-secret settings (per-library)
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ConfigYaml {
     pub library_id: Option<String>,
@@ -53,6 +80,7 @@ pub struct ConfigYaml {
 #[derive(Clone, Debug)]
 pub struct Config {
     pub library_id: String,
+    pub library_path: Option<PathBuf>,
     /// Discogs API key - loaded lazily from keyring when needed
     pub discogs_api_key: Option<String>,
     /// Encryption key - loaded lazily from keyring when needed (when creating encrypted storage profile)
@@ -90,12 +118,14 @@ impl Config {
         // Load from env if present, otherwise will be loaded lazily from keyring
         let discogs_api_key = std::env::var("BAE_DISCOGS_API_KEY").ok();
         let encryption_key = std::env::var("BAE_ENCRYPTION_KEY").ok();
+        let library_path = std::env::var("BAE_LIBRARY_PATH").ok().map(PathBuf::from);
         let torrent_bind_interface = std::env::var("BAE_TORRENT_BIND_INTERFACE")
             .ok()
             .filter(|s| !s.is_empty());
 
         Self {
             library_id,
+            library_path,
             discogs_api_key,
             encryption_key,
             torrent_bind_interface,
@@ -112,9 +142,28 @@ impl Config {
     }
 
     fn from_config_file() -> Self {
-        // Don't load from keyring on startup - credentials loaded lazily when needed
         let home_dir = dirs::home_dir().expect("Failed to get home directory");
-        let config_path = home_dir.join(".bae").join("config.yaml");
+
+        // Read library path from global pointer file
+        let library_path_file = home_dir.join(".bae").join("library");
+        let library_path = if library_path_file.exists() {
+            let content = std::fs::read_to_string(&library_path_file)
+                .expect("Failed to read library path file");
+            let trimmed = content.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(trimmed))
+            }
+        } else {
+            None
+        };
+
+        // Read library-specific config from the library directory
+        let library_dir = library_path
+            .clone()
+            .unwrap_or_else(|| home_dir.join(".bae"));
+        let config_path = library_dir.join("config.yaml");
         let yaml_config: ConfigYaml = if config_path.exists() {
             serde_yaml::from_str(&std::fs::read_to_string(&config_path).unwrap())
                 .unwrap_or_default()
@@ -128,6 +177,7 @@ impl Config {
 
         Self {
             library_id,
+            library_path,
             discogs_api_key: None,
             encryption_key: None,
             torrent_bind_interface: yaml_config.torrent_bind_interface,
@@ -144,9 +194,15 @@ impl Config {
     }
 
     pub fn get_library_path(&self) -> PathBuf {
-        std::env::var("BAE_LIBRARY_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| dirs::home_dir().unwrap().join(".bae"))
+        if let Some(path) = &self.library_path {
+            return path.clone();
+        }
+
+        dirs::home_dir().unwrap().join(".bae")
+    }
+
+    pub fn set_library_path(&mut self, path: PathBuf) {
+        self.library_path = Some(path);
     }
 
     pub fn is_dev_mode() -> bool {
@@ -208,11 +264,26 @@ impl Config {
 
     pub fn save_to_keyring(&self) -> Result<(), ConfigError> {
         if let Some(key) = &self.discogs_api_key {
-            keyring::Entry::new("bae", "discogs_api_key")?.set_password(key)?;
+            keyring_core::Entry::new("bae", "discogs_api_key")?.set_password(key)?;
         }
         if let Some(key) = &self.encryption_key {
-            keyring::Entry::new("bae", "encryption_master_key")?.set_password(key)?;
+            keyring_core::Entry::new("bae", "encryption_master_key")?.set_password(key)?;
         }
+        Ok(())
+    }
+
+    /// Save the library path to the global pointer file (~/.bae/library).
+    pub fn save_library_path(&self) -> Result<(), ConfigError> {
+        let bae_dir = dirs::home_dir()
+            .expect("Failed to get home directory")
+            .join(".bae");
+        std::fs::create_dir_all(&bae_dir)?;
+        let path_str = self
+            .library_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        std::fs::write(bae_dir.join("library"), path_str)?;
         Ok(())
     }
 
@@ -242,7 +313,7 @@ impl Config {
     /// Load discogs API key from keyring (call when Discogs API is needed)
     pub fn load_discogs_key(&mut self) {
         if self.discogs_api_key.is_none() {
-            self.discogs_api_key = keyring::Entry::new("bae", "discogs_api_key")
+            self.discogs_api_key = keyring_core::Entry::new("bae", "discogs_api_key")
                 .ok()
                 .and_then(|e| e.get_password().ok());
         }
@@ -252,14 +323,14 @@ impl Config {
     pub fn load_or_create_encryption_key(&mut self) {
         if self.encryption_key.is_none() {
             // Try to load existing key from keyring
-            let existing = keyring::Entry::new("bae", "encryption_master_key")
+            let existing = keyring_core::Entry::new("bae", "encryption_master_key")
                 .ok()
                 .and_then(|e| e.get_password().ok());
 
             self.encryption_key = Some(existing.unwrap_or_else(|| {
                 // Generate new key and save to keyring
                 let key_hex = hex::encode(crate::encryption::generate_random_key());
-                if let Ok(entry) = keyring::Entry::new("bae", "encryption_master_key") {
+                if let Ok(entry) = keyring_core::Entry::new("bae", "encryption_master_key") {
                     let _ = entry.set_password(&key_hex);
                 }
                 key_hex

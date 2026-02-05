@@ -813,3 +813,29 @@ pub fn SettingsIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Elemen
         }
     }
 }
+
+/// Lucide "copy" icon — two overlapping rectangles
+#[component]
+pub fn CopyIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
+    rsx! {
+        svg {
+            class: "{class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            rect {
+                x: "9",
+                y: "9",
+                width: "13",
+                height: "13",
+                rx: "2",
+                ry: "2",
+            }
+            path { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }
+        }
+    }
+}

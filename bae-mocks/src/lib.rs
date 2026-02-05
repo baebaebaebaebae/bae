@@ -13,7 +13,7 @@ use dioxus::prelude::*;
 use pages::{
     AlbumDetail, ArtistDetail, DemoLayout, Import, Library, MockAlbumDetail, MockButton,
     MockDropdownTest, MockFolderImport, MockIndex, MockLibrary, MockMenu, MockPill,
-    MockSegmentedControl, MockTextInput, MockTitleBar, MockTooltip, Settings,
+    MockSegmentedControl, MockSettings, MockTextInput, MockTitleBar, MockTooltip, Settings,
 };
 
 pub const FAVICON: Asset = asset!("/assets/favicon.ico");
@@ -60,6 +60,8 @@ pub enum Route {
     MockAlbumDetail { state: Option<String> },
     #[route("/library?:state")]
     MockLibrary { state: Option<String> },
+    #[route("/settings-mock?:state")]
+    MockSettings { state: Option<String> },
     #[route("/title-bar?:state")]
     MockTitleBar { state: Option<String> },
     #[route("/dropdown-test")]

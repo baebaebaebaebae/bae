@@ -23,6 +23,7 @@ pub enum NavAction {
 pub enum NavTarget {
     Library,
     Import,
+    Settings,
 }
 
 impl NavTarget {
@@ -30,6 +31,7 @@ impl NavTarget {
         match self {
             NavTarget::Library => Route::Library {},
             NavTarget::Import => Route::ImportWorkflowManager {},
+            NavTarget::Settings => Route::Settings {},
         }
     }
 }
@@ -129,6 +131,7 @@ pub fn handle_shortcut(evt: &KeyboardEvent) -> Option<NavAction> {
     match evt.key() {
         Key::Character(c) if c == "1" => return Some(NavAction::GoTo(NavTarget::Library)),
         Key::Character(c) if c == "2" => return Some(NavAction::GoTo(NavTarget::Import)),
+        Key::Character(c) if c == "3" => return Some(NavAction::GoTo(NavTarget::Settings)),
         Key::Character(c) if c == "[" => return Some(NavAction::Back),
         Key::Character(c) if c == "]" => return Some(NavAction::Forward),
         _ => {}

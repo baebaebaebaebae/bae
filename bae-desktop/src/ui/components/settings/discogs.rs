@@ -1,13 +1,13 @@
-//! API Keys section wrapper - handles config state, delegates UI to ApiKeysSectionView
+//! Discogs section wrapper - handles config state, delegates UI to DiscogsSectionView
 
 use crate::ui::app_service::use_app;
 use bae_ui::stores::{AppStateStoreExt, ConfigStateStoreExt};
-use bae_ui::ApiKeysSectionView;
+use bae_ui::DiscogsSectionView;
 use dioxus::prelude::*;
 
-/// API Keys section - Discogs key management
+/// Discogs section - API key management
 #[component]
-pub fn ApiKeysSection() -> Element {
+pub fn DiscogsSection() -> Element {
     let app = use_app();
 
     // Read config from Store
@@ -50,7 +50,7 @@ pub fn ApiKeysSection() -> Element {
     };
 
     rsx! {
-        ApiKeysSectionView {
+        DiscogsSectionView {
             discogs_configured,
             discogs_key_value: discogs_key.read().clone().unwrap_or_default(),
             is_editing: *is_editing.read(),

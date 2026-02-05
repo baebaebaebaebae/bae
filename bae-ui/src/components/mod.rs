@@ -59,7 +59,7 @@ pub use import::{
     TorrentInputMode, TorrentInputView, TorrentTrackerDisplayView, TrackerConnectionStatus,
     TrackerStatus,
 };
-pub use imports::{ImportsButtonView, ImportsDropdownView};
+pub use imports::ImportsDropdownView;
 pub use library::LibraryView;
 pub use menu::{MenuDivider, MenuDropdown, MenuItem};
 pub use modal::Modal;
@@ -69,9 +69,9 @@ pub use resizable_panel::{GrabBar, PanelPosition, ResizablePanel, ResizeDirectio
 pub use segmented_control::{Segment, SegmentedControl};
 pub use select::{Select, SelectOption};
 pub use settings::{
-    AboutSectionView, ApiKeysSectionView, BitTorrentSectionView, BitTorrentSettings,
-    EncryptionSectionView, SettingsTab, SettingsView, StorageLocation, StorageProfile,
-    StorageProfileEditorView, StorageProfilesSectionView, SubsonicSectionView,
+    AboutSectionView, BitTorrentSectionView, BitTorrentSettings, DiscogsSectionView, SettingsTab,
+    SettingsView, StorageLocation, StorageProfile, StorageProfileEditorView,
+    StorageProfilesSectionView, SubsonicSectionView,
 };
 pub use text_input::{TextInput, TextInputSize};
 pub use title_bar::{

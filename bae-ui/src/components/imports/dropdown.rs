@@ -1,72 +1,57 @@
 //! Imports dropdown view component
 //!
-//! Pure, props-based dropdown showing list of active imports with progress.
+//! Pure, props-based content for the imports dropdown.
+//! Positioning and visibility are handled by the Dropdown component in the title bar.
 
 use crate::components::icons::{CheckIcon, DownloadIcon, FileTextIcon, ImageIcon, XIcon};
 use crate::display_types::{ActiveImport, ImportStatus};
 use dioxus::prelude::*;
 
-/// Dropdown showing list of active imports with progress
+/// Content for the imports dropdown: header + items list
 #[component]
 pub fn ImportsDropdownView(
     imports: Vec<ActiveImport>,
-    is_open: bool,
-    on_close: EventHandler<()>,
     on_import_click: EventHandler<String>,
     on_import_dismiss: EventHandler<String>,
     on_clear_all: EventHandler<()>,
 ) -> Element {
-    if !is_open {
-        return rsx! {};
-    }
-
     let import_count = imports.len();
 
     rsx! {
-        // Click-outside overlay
-        div {
-            class: "fixed inset-0 z-[1600]",
-            onclick: move |_| on_close.call(()),
-        }
-
-        // Dropdown panel
-        div { class: "absolute top-full right-0 mt-2 w-96 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-[1700] overflow-clip",
-
-            // Header
-            div { class: "px-4 py-3 bg-gray-800/50 border-b border-gray-700 flex items-center justify-between",
-                div { class: "flex items-center gap-2",
-                    DownloadIcon { class: "h-4 w-4 text-indigo-400" }
-                    h3 { class: "text-sm font-semibold text-white", "Imports" }
-                    span { class: "text-xs text-gray-500", "({import_count})" }
-                }
-
-                if import_count > 0 {
-                    button {
-                        class: "text-xs text-gray-400 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-gray-700/50",
-                        onclick: move |e: Event<MouseData>| {
-                            e.stop_propagation();
-                            on_clear_all.call(());
-                        },
-                        "Clear all"
-                    }
-                }
+        // Header
+        div { class: "px-4 py-3 bg-gray-800/50 border-b border-gray-700 flex items-center justify-between",
+            div { class: "flex items-center gap-2",
+                DownloadIcon { class: "h-4 w-4 text-indigo-400" }
+                h3 { class: "text-sm font-semibold text-white", "Imports" }
+                span { class: "text-xs text-gray-500", "({import_count})" }
             }
 
-            // Content
-            if imports.is_empty() {
-                div { class: "px-4 py-8 text-center",
-                    FileTextIcon { class: "h-10 w-10 text-gray-600 mx-auto mb-3" }
-                    p { class: "text-gray-500 text-sm", "No active imports" }
+            if import_count > 0 {
+                button {
+                    class: "text-xs text-gray-400 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-gray-700/50",
+                    onclick: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        on_clear_all.call(());
+                    },
+                    "Clear all"
                 }
-            } else {
-                div { class: "max-h-96 overflow-y-auto divide-y divide-gray-800",
-                    for import in imports.iter() {
-                        ImportItemView {
-                            key: "{import.import_id}",
-                            import: import.clone(),
-                            on_click: on_import_click,
-                            on_dismiss: on_import_dismiss,
-                        }
+            }
+        }
+
+        // Content
+        if imports.is_empty() {
+            div { class: "px-4 py-8 text-center",
+                FileTextIcon { class: "h-10 w-10 text-gray-600 mx-auto mb-3" }
+                p { class: "text-gray-500 text-sm", "No active imports" }
+            }
+        } else {
+            div { class: "max-h-96 overflow-y-auto divide-y divide-gray-800",
+                for import in imports.iter() {
+                    ImportItemView {
+                        key: "{import.import_id}",
+                        import: import.clone(),
+                        on_click: on_import_click,
+                        on_dismiss: on_import_dismiss,
                     }
                 }
             }

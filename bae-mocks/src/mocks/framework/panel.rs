@@ -43,6 +43,7 @@ pub enum MockPage {
     Library,
     AlbumDetail,
     FolderImport,
+    Settings,
     TitleBar,
 }
 
@@ -60,6 +61,7 @@ impl MockPage {
         MockPage::Library,
         MockPage::AlbumDetail,
         MockPage::FolderImport,
+        MockPage::Settings,
         MockPage::TitleBar,
     ];
 
@@ -88,6 +90,7 @@ impl MockPage {
             MockPage::Library => "LibraryView",
             MockPage::AlbumDetail => "AlbumDetailView",
             MockPage::FolderImport => "FolderImportView",
+            MockPage::Settings => "SettingsView",
             MockPage::TitleBar => "TitleBarView",
         }
     }
@@ -104,6 +107,7 @@ impl MockPage {
             MockPage::Library => "library",
             MockPage::AlbumDetail => "album-detail",
             MockPage::FolderImport => "folder-import",
+            MockPage::Settings => "settings",
             MockPage::TitleBar => "title-bar",
         }
     }
@@ -120,6 +124,7 @@ impl MockPage {
             MockPage::Library => "Album grid with loading/error/empty states",
             MockPage::AlbumDetail => "Album detail page with tracks and controls",
             MockPage::FolderImport => "Folder import workflow with all phases",
+            MockPage::Settings => "Settings page with storage profiles and encryption",
             MockPage::TitleBar => "Title bar with nav, search, and update indicator",
         }
     }
@@ -136,6 +141,7 @@ impl MockPage {
             MockPage::Library => Route::MockLibrary { state },
             MockPage::AlbumDetail => Route::MockAlbumDetail { state },
             MockPage::FolderImport => Route::MockFolderImport { state },
+            MockPage::Settings => Route::MockSettings { state },
             MockPage::TitleBar => Route::MockTitleBar { state },
         }
     }
