@@ -12,6 +12,7 @@ pub fn MatchResultsPanel(
     on_select: EventHandler<usize>,
     on_confirm: EventHandler<MatchCandidate>,
     on_retry_cover: EventHandler<usize>,
+    on_view_in_library: EventHandler<String>,
     confirm_button_text: &'static str,
 ) -> Element {
     if candidates.is_empty() {
@@ -32,6 +33,7 @@ pub fn MatchResultsPanel(
                             move |_| on_confirm.call(candidate.clone())
                         },
                         on_retry_cover: move |_| on_retry_cover.call(index),
+                        on_view_in_library,
                         confirm_button_text,
                     }
                 }

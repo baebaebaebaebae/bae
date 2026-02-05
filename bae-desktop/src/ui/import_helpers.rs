@@ -121,6 +121,7 @@ pub fn to_display_candidate(candidate: &MatchCandidate) -> DisplayMatchCandidate
         musicbrainz_release_group_id,
         discogs_release_id,
         discogs_master_id,
+        existing_album_id: None,
     }
 }
 
@@ -244,6 +245,31 @@ async fn handle_discid_lookup_result(
         DiscIdLookupResult::SingleMatch(Box::new(display_candidates.into_iter().next().unwrap()))
     } else {
         DiscIdLookupResult::MultipleMatches(display_candidates)
+    }
+}
+
+// ============================================================================
+// Duplicate detection helper
+// ============================================================================
+
+/// Check candidates against the library by exact release ID.
+pub async fn check_candidates_for_duplicates(
+    app: &AppService,
+    candidates: &mut [DisplayMatchCandidate],
+) {
+    let lm = app.library_manager.get();
+    for candidate in candidates.iter_mut() {
+        if let Some(id) = &candidate.musicbrainz_release_id {
+            if let Ok(Some(dup)) = lm.find_duplicate_by_musicbrainz(Some(id), None).await {
+                candidate.existing_album_id = Some(dup.id);
+                continue;
+            }
+        }
+        if let Some(id) = &candidate.discogs_release_id {
+            if let Ok(Some(dup)) = lm.find_duplicate_by_discogs(None, Some(id)).await {
+                candidate.existing_album_id = Some(dup.id);
+            }
+        }
     }
 }
 
@@ -637,48 +663,6 @@ pub async fn confirm_and_start_import(
 
     let import_id = uuid::Uuid::new_v4().to_string();
 
-    // Check for duplicates based on source type
-    match candidate.source_type {
-        MatchSourceType::Discogs => {
-            if let Ok(Some(duplicate)) = app
-                .library_manager
-                .get()
-                .find_duplicate_by_discogs(
-                    candidate.discogs_master_id.as_deref(),
-                    candidate.discogs_release_id.as_deref(),
-                )
-                .await
-            {
-                import_store
-                    .write()
-                    .dispatch(CandidateEvent::ImportFailed(format!(
-                        "This release already exists in your library: {}",
-                        duplicate.title,
-                    )));
-                return Err("Duplicate album found".to_string());
-            }
-        }
-        MatchSourceType::MusicBrainz => {
-            if let Ok(Some(duplicate)) = app
-                .library_manager
-                .get()
-                .find_duplicate_by_musicbrainz(
-                    candidate.musicbrainz_release_id.as_deref(),
-                    candidate.musicbrainz_release_group_id.as_deref(),
-                )
-                .await
-            {
-                import_store
-                    .write()
-                    .dispatch(CandidateEvent::ImportFailed(format!(
-                        "This release already exists in your library: {}",
-                        duplicate.title,
-                    )));
-                return Err("Duplicate album found".to_string());
-            }
-        }
-    }
-
     // Get state from store
     let (storage_profile_id, metadata, selected_cover) = {
         let state = import_store.read();
@@ -887,14 +871,17 @@ pub async fn load_selected_release(
                     });
             }
             Ok(DiscIdLookupResult::SingleMatch(candidate)) => {
+                let mut matches = vec![*candidate];
+                check_candidates_for_duplicates(app, &mut matches).await;
                 import_store
                     .write()
                     .dispatch(CandidateEvent::DiscIdLookupComplete {
-                        matches: vec![*candidate],
+                        matches,
                         error: None,
                     });
             }
-            Ok(DiscIdLookupResult::MultipleMatches(candidates)) => {
+            Ok(DiscIdLookupResult::MultipleMatches(mut candidates)) => {
+                check_candidates_for_duplicates(app, &mut candidates).await;
                 import_store
                     .write()
                     .dispatch(CandidateEvent::DiscIdLookupComplete {

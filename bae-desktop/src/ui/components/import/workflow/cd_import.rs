@@ -2,8 +2,8 @@
 
 use crate::ui::app_service::use_app;
 use crate::ui::import_helpers::{
-    build_caa_client, check_cover_art, confirm_and_start_import, lookup_discid, search_by_barcode,
-    search_by_catalog_number, search_general, DiscIdLookupResult,
+    build_caa_client, check_candidates_for_duplicates, check_cover_art, confirm_and_start_import,
+    lookup_discid, search_by_barcode, search_by_catalog_number, search_general, DiscIdLookupResult,
 };
 use bae_core::cd::CdDrive;
 use bae_ui::components::import::CdImportView;
@@ -88,11 +88,12 @@ pub fn CdImport() -> Element {
                 if let Some(mb_discid) = mb_discid {
                     match lookup_discid(&mb_discid).await {
                         Ok(result) => {
-                            let matches = match result {
+                            let mut matches = match result {
                                 DiscIdLookupResult::NoMatches => vec![],
                                 DiscIdLookupResult::SingleMatch(c) => vec![*c],
                                 DiscIdLookupResult::MultipleMatches(cs) => cs,
                             };
+                            check_candidates_for_duplicates(&app, &mut matches).await;
                             import_store.write().is_looking_up = false;
                             import_store
                                 .write()
@@ -210,7 +211,8 @@ pub fn CdImport() -> Element {
                         let result =
                             search_general(metadata, source, artist, album, year, label).await;
                         match result {
-                            Ok(candidates) => {
+                            Ok(mut candidates) => {
+                                check_candidates_for_duplicates(&app, &mut candidates).await;
                                 import_store
                                     .write()
                                     .dispatch(CandidateEvent::SearchComplete {
@@ -244,7 +246,8 @@ pub fn CdImport() -> Element {
 
                         let result = search_by_catalog_number(metadata, source, catno).await;
                         match result {
-                            Ok(candidates) => {
+                            Ok(mut candidates) => {
+                                check_candidates_for_duplicates(&app, &mut candidates).await;
                                 import_store
                                     .write()
                                     .dispatch(CandidateEvent::SearchComplete {
@@ -278,7 +281,8 @@ pub fn CdImport() -> Element {
 
                         let result = search_by_barcode(metadata, source, barcode).await;
                         match result {
-                            Ok(candidates) => {
+                            Ok(mut candidates) => {
+                                check_candidates_for_duplicates(&app, &mut candidates).await;
                                 import_store
                                     .write()
                                     .dispatch(CandidateEvent::SearchComplete {
@@ -386,11 +390,12 @@ pub fn CdImport() -> Element {
                     info!("Retrying DiscID lookup...");
                     match lookup_discid(&mb_discid).await {
                         Ok(result) => {
-                            let matches = match result {
+                            let mut matches = match result {
                                 DiscIdLookupResult::NoMatches => vec![],
                                 DiscIdLookupResult::SingleMatch(c) => vec![*c],
                                 DiscIdLookupResult::MultipleMatches(cs) => cs,
                             };
+                            check_candidates_for_duplicates(&app, &mut matches).await;
                             import_store.write().is_looking_up = false;
                             import_store
                                 .write()
@@ -551,7 +556,7 @@ pub fn CdImport() -> Element {
             on_confirm,
             on_configure_storage: |_| {},
             on_clear,
-            on_view_duplicate: |_| {},
+            on_view_in_library: |_| {},
         }
     }
 }

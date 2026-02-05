@@ -39,7 +39,10 @@ pub fn ConfirmationView(
     on_confirm: EventHandler<()>,
     /// Called to navigate to settings
     on_configure_storage: EventHandler<()>,
+    /// Called when user clicks "View in library" for a duplicate
+    on_view_in_library: EventHandler<String>,
 ) -> Element {
+    let is_duplicate = candidate.existing_album_id.is_some();
     let mut show_cover_picker = use_signal(|| false);
     let mut picker_open_count = use_signal(|| 0u32);
 
@@ -182,54 +185,73 @@ pub fn ConfirmationView(
                 }
             }
 
-            // Storage profile selection + Import button
-            div { class: "flex items-center gap-3 px-5",
-                label { class: "text-sm text-gray-400 ml-auto", "Storage:" }
-                Select {
-                    value: selected_profile_id.clone().unwrap_or_else(|| "__none__".to_string()),
-                    disabled: is_importing,
-                    onchange: move |val: String| {
-                        if val == "__none__" {
-                            on_storage_profile_change.call(None);
-                        } else {
-                            on_storage_profile_change.call(Some(val));
+            // Bottom action area
+            if is_duplicate {
+                // Already in library notice
+                div { class: "flex items-center gap-3 px-5",
+                    div { class: "ml-auto flex items-center gap-3",
+                        span { class: "text-sm font-medium text-amber-400/80", "Already in library" }
+                        Button {
+                            variant: ButtonVariant::Outline,
+                            size: ButtonSize::Small,
+                            onclick: {
+                                let album_id = candidate.existing_album_id.clone().unwrap_or_default();
+                                move |_| on_view_in_library.call(album_id.clone())
+                            },
+                            "View in library"
                         }
-                    },
-                    SelectOption {
-                        value: "__none__",
-                        label: "No Storage (files stay in place)",
                     }
-                    for profile in storage_profiles.read().iter() {
+                }
+            } else {
+                // Storage profile selection + Import button
+                div { class: "flex items-center gap-3 px-5",
+                    label { class: "text-sm text-gray-400 ml-auto", "Storage:" }
+                    Select {
+                        value: selected_profile_id.clone().unwrap_or_else(|| "__none__".to_string()),
+                        disabled: is_importing,
+                        onchange: move |val: String| {
+                            if val == "__none__" {
+                                on_storage_profile_change.call(None);
+                            } else {
+                                on_storage_profile_change.call(Some(val));
+                            }
+                        },
                         SelectOption {
-                            key: "{profile.id}",
-                            value: "{profile.id}",
-                            label: profile.name.clone(),
+                            value: "__none__",
+                            label: "No Storage (files stay in place)",
+                        }
+                        for profile in storage_profiles.read().iter() {
+                            SelectOption {
+                                key: "{profile.id}",
+                                value: "{profile.id}",
+                                label: profile.name.clone(),
+                            }
                         }
                     }
-                }
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Small,
-                    onclick: move |_| on_configure_storage.call(()),
-                    "Configure"
-                }
+                    Button {
+                        variant: ButtonVariant::Ghost,
+                        size: ButtonSize::Small,
+                        onclick: move |_| on_configure_storage.call(()),
+                        "Configure"
+                    }
 
-                // Import status and button
-                if is_importing {
-                    if let Some(ref step) = preparing_step_text {
-                        span { class: "text-sm text-gray-400", "{step}" }
-                    }
-                }
-                Button {
-                    variant: ButtonVariant::Primary,
-                    size: ButtonSize::Small,
-                    disabled: is_importing,
-                    loading: is_importing,
-                    onclick: move |_| on_confirm.call(()),
+                    // Import status and button
                     if is_importing {
-                        div { class: "animate-spin rounded-full h-4 w-4 border-b-2 border-white" }
+                        if let Some(ref step) = preparing_step_text {
+                            span { class: "text-sm text-gray-400", "{step}" }
+                        }
                     }
-                    "Import"
+                    Button {
+                        variant: ButtonVariant::Primary,
+                        size: ButtonSize::Small,
+                        disabled: is_importing,
+                        loading: is_importing,
+                        onclick: move |_| on_confirm.call(()),
+                        if is_importing {
+                            div { class: "animate-spin rounded-full h-4 w-4 border-b-2 border-white" }
+                        }
+                        "Import"
+                    }
                 }
             }
         }

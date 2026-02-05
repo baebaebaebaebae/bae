@@ -81,7 +81,7 @@ pub struct FolderImportViewProps {
     pub on_edit: EventHandler<()>,
     pub on_confirm: EventHandler<()>,
     pub on_configure_storage: EventHandler<()>,
-    pub on_view_duplicate: EventHandler<String>,
+    pub on_view_in_library: EventHandler<String>,
 }
 
 /// Folder import workflow view - main content area only
@@ -152,7 +152,7 @@ pub fn FolderImportView(props: FolderImportViewProps) -> Element {
                             on_edit: props.on_edit,
                             on_confirm: props.on_confirm,
                             on_configure_storage: props.on_configure_storage,
-                            on_view_duplicate: props.on_view_duplicate,
+                            on_view_in_library: props.on_view_in_library,
                         }
                     }
                 }
@@ -216,7 +216,7 @@ fn WorkflowContent(
     on_edit: EventHandler<()>,
     on_confirm: EventHandler<()>,
     on_configure_storage: EventHandler<()>,
-    on_view_duplicate: EventHandler<String>,
+    on_view_in_library: EventHandler<String>,
 ) -> Element {
     rsx! {
         div { class: "flex-1 min-h-0 overflow-auto bg-gray-900/40 rounded-tl-xl flex flex-col",
@@ -241,6 +241,7 @@ fn WorkflowContent(
                         on_manual_confirm,
                         on_retry_cover,
                         on_retry_discid_lookup,
+                        on_view_in_library,
                     }
                 },
                 ImportStep::Confirm => rsx! {
@@ -252,7 +253,7 @@ fn WorkflowContent(
                         on_edit,
                         on_confirm,
                         on_configure_storage,
-                        on_view_duplicate,
+                        on_view_in_library,
                     }
                 },
             }
@@ -285,6 +286,7 @@ fn IdentifyStep(
     on_manual_confirm: EventHandler<MatchCandidate>,
     on_retry_cover: EventHandler<usize>,
     on_retry_discid_lookup: EventHandler<()>,
+    on_view_in_library: EventHandler<String>,
 ) -> Element {
     // Read to determine mode - this is routing
     let mode = state.read().get_identify_mode();
@@ -306,6 +308,7 @@ fn IdentifyStep(
                     on_select: on_exact_match_select,
                     on_confirm: on_confirm_exact_match,
                     on_switch_to_manual_search,
+                    on_view_in_library,
                 }
             },
             IdentifyMode::ManualSearch => rsx! {
@@ -322,6 +325,7 @@ fn IdentifyStep(
                     on_cancel_search,
                     on_confirm: on_manual_confirm,
                     on_retry_cover,
+                    on_view_in_library,
                     on_switch_to_exact_matches,
                 }
             },
@@ -343,7 +347,7 @@ fn ConfirmStep(
     on_edit: EventHandler<()>,
     on_confirm: EventHandler<()>,
     on_configure_storage: EventHandler<()>,
-    on_view_duplicate: EventHandler<String>,
+    on_view_in_library: EventHandler<String>,
 ) -> Element {
     // Read state at this level to get confirm-specific data
     let st = state.read();
@@ -371,9 +375,6 @@ fn ConfirmStep(
         })
         .unwrap_or((false, None, None));
 
-    let import_error = import_error.or_else(|| st.import_error_message.clone());
-    let duplicate_album_id = st.duplicate_album_id.clone();
-
     let Some(candidate) = confirmed_candidate else {
         return rsx! {};
     };
@@ -395,13 +396,10 @@ fn ConfirmStep(
                 on_edit,
                 on_confirm,
                 on_configure_storage,
+                on_view_in_library,
             }
 
-            ImportErrorDisplayView {
-                error_message: import_error,
-                duplicate_album_id,
-                on_view_duplicate,
-            }
+            ImportErrorDisplayView { error_message: import_error }
         }
     }
 }

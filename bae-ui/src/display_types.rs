@@ -234,6 +234,8 @@ pub struct MatchCandidate {
     pub discogs_release_id: Option<String>,
     /// Discogs master ID
     pub discogs_master_id: Option<String>,
+    /// ID of existing album in library (duplicate detection)
+    pub existing_album_id: Option<String>,
 }
 
 /// Detected folder metadata for UI display

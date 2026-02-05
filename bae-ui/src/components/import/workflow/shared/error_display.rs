@@ -92,13 +92,9 @@ pub fn DiscIdLookupErrorView(
     }
 }
 
-/// Display import error with optional link to duplicate album
+/// Display import error
 #[component]
-pub fn ImportErrorDisplayView(
-    error_message: Option<String>,
-    duplicate_album_id: Option<String>,
-    on_view_duplicate: EventHandler<String>,
-) -> Element {
+pub fn ImportErrorDisplayView(error_message: Option<String>) -> Element {
     let Some(ref error) = error_message else {
         return rsx! {};
     };
@@ -106,19 +102,6 @@ pub fn ImportErrorDisplayView(
     rsx! {
         div { class: "bg-red-50 border border-red-200 rounded-lg p-4",
             p { class: "text-sm text-red-700 select-text break-words font-mono", "Error: {error}" }
-            if let Some(ref dup_id) = duplicate_album_id {
-                div { class: "mt-2",
-                    Button {
-                        variant: ButtonVariant::Ghost,
-                        size: ButtonSize::Small,
-                        onclick: {
-                            let dup_id = dup_id.clone();
-                            move |_| on_view_duplicate.call(dup_id.clone())
-                        },
-                        "View existing album"
-                    }
-                }
-            }
         }
     }
 }

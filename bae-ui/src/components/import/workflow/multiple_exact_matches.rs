@@ -17,6 +17,7 @@ pub fn MultipleExactMatchesView(
     on_select: EventHandler<usize>,
     on_confirm: EventHandler<MatchCandidate>,
     on_switch_to_manual_search: EventHandler<()>,
+    on_view_in_library: EventHandler<String>,
 ) -> Element {
     // Read state at leaf - these are computed values
     let st = state.read();
@@ -62,6 +63,7 @@ pub fn MultipleExactMatchesView(
                 on_select: move |index| on_select.call(index),
                 on_confirm: move |candidate| on_confirm.call(candidate),
                 on_retry_cover: move |_| {},
+                on_view_in_library,
                 confirm_button_text: "Select",
             }
         }

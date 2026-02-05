@@ -13,18 +13,31 @@ pub fn MatchItemView(
     on_select: EventHandler<()>,
     on_confirm: EventHandler<()>,
     on_retry_cover: EventHandler<()>,
+    on_view_in_library: EventHandler<String>,
     confirm_button_text: &'static str,
 ) -> Element {
-    let border_class = if is_selected {
+    let is_duplicate = candidate.existing_album_id.is_some();
+
+    let border_class = if is_duplicate {
+        "border-transparent bg-amber-900/15 opacity-75"
+    } else if is_selected {
         "border-transparent bg-blue-900/30 ring-1 ring-blue-500"
     } else {
         "border-transparent bg-gray-800/50 hover:bg-gray-800/70"
     };
 
-    let radio_border = if is_selected {
+    let radio_border = if is_duplicate {
+        "border-gray-600"
+    } else if is_selected {
         "border-blue-500"
     } else {
         "border-gray-500"
+    };
+
+    let cursor_class = if is_duplicate {
+        "cursor-default"
+    } else {
+        "cursor-pointer"
     };
 
     let format_text = candidate.format.as_ref().map(|f| format!("Format: {}", f));
@@ -40,14 +53,20 @@ pub fn MatchItemView(
 
     rsx! {
         div {
-            class: "border rounded-lg px-3 py-2 cursor-pointer transition-colors {border_class}",
-            onclick: move |_| on_select.call(()),
+            class: "border rounded-lg px-3 py-2 transition-colors {border_class} {cursor_class}",
+            onclick: move |_| {
+                if !is_duplicate {
+                    on_select.call(());
+                }
+            },
 
             div { class: "flex items-center gap-3",
-                // Radio indicator
-                div { class: "w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center {radio_border}",
-                    if is_selected {
-                        div { class: "w-2 h-2 rounded-full bg-blue-500" }
+                // Radio indicator (dimmed for duplicates)
+                if !is_duplicate {
+                    div { class: "w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center {radio_border}",
+                        if is_selected {
+                            div { class: "w-2 h-2 rounded-full bg-blue-500" }
+                        }
                     }
                 }
 
@@ -102,8 +121,25 @@ pub fn MatchItemView(
                     }
                 }
 
-                // Confirm button (only when selected)
-                if is_selected {
+                // Actions: "In library" badge + view link, or confirm button
+                if is_duplicate {
+                    div {
+                        class: "flex-shrink-0 flex items-center gap-2",
+                        onclick: move |e| e.stop_propagation(),
+                        span { class: "text-[0.6875rem] font-medium text-amber-400/80 bg-amber-500/15 px-1.5 py-0.5 rounded",
+                            "In library"
+                        }
+                        Button {
+                            variant: ButtonVariant::Ghost,
+                            size: ButtonSize::Small,
+                            onclick: {
+                                let album_id = candidate.existing_album_id.clone().unwrap_or_default();
+                                move |_| on_view_in_library.call(album_id.clone())
+                            },
+                            "View"
+                        }
+                    }
+                } else if is_selected {
                     div {
                         class: "flex-shrink-0",
                         onclick: move |e| e.stop_propagation(),
