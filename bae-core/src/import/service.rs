@@ -888,19 +888,11 @@ impl ImportService {
 
         let mut cover_image_id: Option<String> = None;
         for (idx, (_file, relative_path)) in image_files.iter().enumerate() {
-            let source = if relative_path.starts_with(".bae/") {
-                let filename_lower = relative_path.to_lowercase();
-                if filename_lower.contains("-mb") || filename_lower.contains("musicbrainz") {
-                    ImageSource::MusicBrainz
-                } else if filename_lower.contains("-discogs") || filename_lower.contains("discogs")
-                {
-                    ImageSource::Discogs
-                } else {
-                    ImageSource::Local
-                }
-            } else {
-                ImageSource::Local
-            };
+            let source = std::path::Path::new(relative_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .and_then(super::cover_art::classify_managed_artwork)
+                .unwrap_or(ImageSource::Local);
 
             let is_cover = idx == cover_index;
             let db_image = DbImage::new(release_id, relative_path, is_cover, source);

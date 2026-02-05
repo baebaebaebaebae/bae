@@ -4,6 +4,22 @@ use crate::musicbrainz::{ExternalUrls, MbRelease};
 use crate::network::upgrade_to_https;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
+
+/// Classify a managed artwork filename (from `.bae/`) into its source.
+///
+/// Returns `Some(ImageSource)` for recognized filenames like `cover-mb.jpg`
+/// or `cover-discogs.jpeg`, and `None` for unrecognized files.
+pub fn classify_managed_artwork(filename: &str) -> Option<ImageSource> {
+    let lower = filename.to_lowercase();
+    if lower.starts_with("cover-mb.") {
+        Some(ImageSource::MusicBrainz)
+    } else if lower.starts_with("cover-discogs.") {
+        Some(ImageSource::Discogs)
+    } else {
+        None
+    }
+}
+
 /// Fetch cover art URL from Cover Art Archive for a MusicBrainz release
 pub async fn fetch_cover_art_from_archive(release_id: &str) -> Option<String> {
     let json_url = format!("https://coverartarchive.org/release/{}", release_id);
