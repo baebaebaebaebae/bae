@@ -8,7 +8,7 @@ use crate::components::segmented_control::{Segment, SegmentedControl};
 use crate::components::{Button, ButtonSize, TextInput, TextInputSize};
 use crate::display_types::{MatchCandidate, SearchSource, SearchTab};
 use crate::floating_ui::Placement;
-use crate::stores::import::ImportState;
+use crate::stores::import::{CandidateState, ImportState, ImportStateStoreExt};
 use dioxus::prelude::*;
 
 /// Manual search panel with tabs for General/Catalog#/Barcode search
@@ -31,12 +31,27 @@ pub fn ManualSearchPanelView(
     on_view_in_library: EventHandler<String>,
     on_switch_to_exact_matches: EventHandler<String>,
 ) -> Element {
-    // Read state at this leaf component
-    let st = state.read();
-    let search_state = st.get_search_state();
-    let disc_id_not_found = st.get_disc_id_not_found();
-    let exact_matches = st.get_exact_match_candidates();
-    let source_disc_id = st.get_source_disc_id();
+    // Read via lenses — only subscribes to current_candidate_key + candidate_states
+    let current_key = state.current_candidate_key().read().clone();
+    let candidate_states = state.candidate_states().read().clone();
+    let candidate_state = current_key.as_ref().and_then(|k| candidate_states.get(k));
+
+    // Extract fields from the candidate state machine
+    let (search_state, disc_id_not_found, exact_matches, source_disc_id) = match candidate_state {
+        Some(CandidateState::Identifying(is)) => (
+            Some(is.search_state.clone()),
+            is.disc_id_not_found.clone(),
+            is.auto_matches.clone(),
+            is.source_disc_id.clone(),
+        ),
+        Some(CandidateState::Confirming(cs)) => (
+            Some(cs.search_state.clone()),
+            None,
+            cs.auto_matches.clone(),
+            cs.source_disc_id.clone(),
+        ),
+        None => (None, None, vec![], None),
+    };
 
     let source = search_state
         .as_ref()
@@ -74,8 +89,6 @@ pub fn ManualSearchPanelView(
         .map(|t| t.search_results.clone())
         .unwrap_or_default();
     let selected = tab_state.as_ref().and_then(|t| t.selected_result_index);
-
-    drop(st);
 
     rsx! {
         div { class: "flex-1 flex flex-col p-5 space-y-4",

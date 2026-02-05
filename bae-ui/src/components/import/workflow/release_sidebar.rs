@@ -5,7 +5,7 @@ use crate::components::icons::{
     CheckIcon, EllipsisIcon, FolderIcon, LoaderIcon, PlusIcon, TrashIcon, XIcon,
 };
 use crate::components::{MenuDropdown, MenuItem};
-use crate::display_types::DetectedCandidateStatus;
+use crate::display_types::{AudioContentInfo, DetectedCandidateStatus};
 use crate::floating_ui::Placement;
 use crate::platform;
 use crate::stores::import::{ImportState, ImportStateStoreExt};
@@ -35,12 +35,51 @@ pub fn ReleaseSidebarView(
     /// Called to open a folder in the native file manager
     on_open_folder: EventHandler<String>,
 ) -> Element {
-    // Use lens for is_scanning, computed values need full read
     let is_scanning = *state.is_scanning_candidates().read();
-    let st = state.read();
-    let candidates = st.get_detected_candidates_display();
-    let selected_index = st.get_selected_candidate_index();
-    drop(st);
+    let detected = state.detected_candidates().read().clone();
+    let candidate_states = state.candidate_states().read().clone();
+    let current_key = state.current_candidate_key().read().clone();
+
+    // Inline get_detected_candidates_display: compute status from candidate_states
+    let candidates: Vec<crate::display_types::DetectedCandidate> = detected
+        .iter()
+        .map(|c| {
+            let status = candidate_states
+                .get(&c.path)
+                .map(|s| {
+                    let files = s.files();
+                    if files.bad_audio_count > 0 || files.bad_image_count > 0 {
+                        let good_audio_count = match &files.audio {
+                            AudioContentInfo::CueFlacPairs(p) => p.len(),
+                            AudioContentInfo::TrackFiles(t) => t.len(),
+                        };
+                        return DetectedCandidateStatus::Incomplete {
+                            bad_audio_count: files.bad_audio_count,
+                            total_audio_count: good_audio_count + files.bad_audio_count,
+                            bad_image_count: files.bad_image_count,
+                        };
+                    }
+                    if s.is_imported() {
+                        DetectedCandidateStatus::Imported
+                    } else if s.is_importing() {
+                        DetectedCandidateStatus::Importing
+                    } else {
+                        DetectedCandidateStatus::Pending
+                    }
+                })
+                .unwrap_or(DetectedCandidateStatus::Pending);
+            crate::display_types::DetectedCandidate {
+                name: c.name.clone(),
+                path: c.path.clone(),
+                status,
+            }
+        })
+        .collect();
+
+    // Inline get_selected_candidate_index
+    let selected_index = current_key
+        .as_ref()
+        .and_then(|key| detected.iter().position(|c| &c.path == key));
 
     let has_incomplete = candidates
         .iter()

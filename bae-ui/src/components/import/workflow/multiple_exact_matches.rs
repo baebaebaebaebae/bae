@@ -5,7 +5,7 @@ use super::{DiscIdPill, DiscIdSource};
 use crate::components::{Button, ButtonSize, ButtonVariant};
 use crate::display_types::{IdentifyMode, MatchCandidate};
 use crate::floating_ui::Placement;
-use crate::stores::import::ImportState;
+use crate::stores::import::{CandidateState, ImportState, ImportStateStoreExt};
 use dioxus::prelude::*;
 
 /// Displays multiple DiscID matches for user to pick from
@@ -19,16 +19,21 @@ pub fn MultipleExactMatchesView(
     on_switch_to_manual_search: EventHandler<()>,
     on_view_in_library: EventHandler<String>,
 ) -> Element {
-    // Read state at leaf - these are computed values
-    let st = state.read();
-    let candidates = st.get_exact_match_candidates();
-    let selected_index = st.get_selected_match_index();
-    // Extract disc_id from the mode - it's carried in MultipleExactMatches(disc_id)
-    let disc_id = match st.get_identify_mode() {
-        IdentifyMode::MultipleExactMatches(id) => Some(id),
-        _ => None,
+    // Read via lenses — only subscribes to current_candidate_key + candidate_states
+    let current_key = state.current_candidate_key().read().clone();
+    let candidate_states = state.candidate_states().read().clone();
+    let candidate_state = current_key.as_ref().and_then(|k| candidate_states.get(k));
+
+    let (candidates, selected_index, disc_id) = match candidate_state {
+        Some(CandidateState::Identifying(is)) => {
+            let disc_id = match &is.mode {
+                IdentifyMode::MultipleExactMatches(id) => Some(id.clone()),
+                _ => None,
+            };
+            (is.auto_matches.clone(), is.selected_match_index, disc_id)
+        }
+        _ => (vec![], None, None),
     };
-    drop(st);
 
     if candidates.is_empty() {
         return rsx! {};
