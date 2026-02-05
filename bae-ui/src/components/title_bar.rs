@@ -136,7 +136,7 @@ pub fn TitleBarView(
         // Title bar
         div {
             id: "title-bar",
-            class: "shrink-0 h-10 bg-surface-raised flex items-center justify-between px-2 cursor-default border-b border-border-subtle",
+            class: "shrink-0 grow h-10 bg-surface-raised flex items-center justify-between px-2 cursor-default border-b border-border-subtle",
             style: "padding-left: {left_padding}px;",
             onmousedown: move |_| {
                 if let Some(handler) = &on_bar_mousedown {
