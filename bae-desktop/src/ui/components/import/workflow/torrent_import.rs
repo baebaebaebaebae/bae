@@ -399,7 +399,6 @@ pub fn TorrentImport() -> Element {
                     import_store
                         .write()
                         .dispatch(CandidateEvent::StartDiscIdLookup(mb_discid.clone()));
-                    import_store.write().is_looking_up = true;
 
                     info!("Retrying DiscID lookup...");
                     match lookup_discid(&mb_discid).await {
@@ -410,7 +409,6 @@ pub fn TorrentImport() -> Element {
                                 DiscIdLookupResult::MultipleMatches(cs) => cs,
                             };
                             check_candidates_for_duplicates(&app, &mut matches).await;
-                            import_store.write().is_looking_up = false;
                             import_store
                                 .write()
                                 .dispatch(CandidateEvent::DiscIdLookupComplete {
@@ -419,7 +417,6 @@ pub fn TorrentImport() -> Element {
                                 });
                         }
                         Err(e) => {
-                            import_store.write().is_looking_up = false;
                             import_store
                                 .write()
                                 .dispatch(CandidateEvent::DiscIdLookupComplete {
@@ -428,8 +425,6 @@ pub fn TorrentImport() -> Element {
                                 });
                         }
                     }
-                } else {
-                    import_store.write().is_looking_up = false;
                 }
             });
         }

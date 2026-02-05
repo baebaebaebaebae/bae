@@ -592,8 +592,6 @@ pub struct ImportState {
     pub candidate_states: std::collections::HashMap<String, CandidateState>,
     /// Loading state for candidates that haven't completed detection yet
     pub loading_candidates: std::collections::HashMap<String, bool>,
-    /// Whether DiscID lookup is in progress
-    pub is_looking_up: bool,
     /// Files in current folder (for UI reactivity)
     pub folder_files: CategorizedFileInfo,
     /// True while scanning a folder for release candidates
@@ -617,7 +615,6 @@ impl ImportState {
         self.current_candidate_key = None;
         self.candidate_states.clear();
         self.loading_candidates.clear();
-        self.is_looking_up = false;
         self.folder_files = CategorizedFileInfo::default();
         self.is_scanning_candidates = false;
         self.discid_lookup_attempted.clear();

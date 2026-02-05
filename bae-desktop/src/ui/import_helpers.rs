@@ -815,59 +815,48 @@ pub async fn load_selected_release(
         .and_then(|m| m.mb_discid.clone());
 
     if let Some(mb_discid) = mb_discid {
-        import_store
-            .write()
-            .dispatch(CandidateEvent::StartDiscIdLookup(mb_discid.clone()));
-        import_store.write().is_looking_up = true;
-
+        import_store.write().dispatch_to_candidate(
+            &release_path,
+            CandidateEvent::StartDiscIdLookup(mb_discid.clone()),
+        );
         let result = lookup_discid(&mb_discid).await;
 
-        import_store.write().is_looking_up = false;
-
-        match result {
-            Ok(DiscIdLookupResult::NoMatches) => {
-                import_store
-                    .write()
-                    .dispatch(CandidateEvent::DiscIdLookupComplete {
-                        matches: vec![],
-                        error: None,
-                    });
-            }
+        let event = match result {
+            Ok(DiscIdLookupResult::NoMatches) => CandidateEvent::DiscIdLookupComplete {
+                matches: vec![],
+                error: None,
+            },
             Ok(DiscIdLookupResult::SingleMatch(candidate)) => {
                 let mut matches = vec![*candidate];
                 check_candidates_for_duplicates(app, &mut matches).await;
-                import_store
-                    .write()
-                    .dispatch(CandidateEvent::DiscIdLookupComplete {
-                        matches,
-                        error: None,
-                    });
+                CandidateEvent::DiscIdLookupComplete {
+                    matches,
+                    error: None,
+                }
             }
             Ok(DiscIdLookupResult::MultipleMatches(mut candidates)) => {
                 check_candidates_for_duplicates(app, &mut candidates).await;
-                import_store
-                    .write()
-                    .dispatch(CandidateEvent::DiscIdLookupComplete {
-                        matches: candidates,
-                        error: None,
-                    });
+                CandidateEvent::DiscIdLookupComplete {
+                    matches: candidates,
+                    error: None,
+                }
             }
-            Err(error) => {
-                import_store
-                    .write()
-                    .dispatch(CandidateEvent::DiscIdLookupComplete {
-                        matches: vec![],
-                        error: Some(error),
-                    });
-            }
-        }
-    } else {
+            Err(error) => CandidateEvent::DiscIdLookupComplete {
+                matches: vec![],
+                error: Some(error),
+            },
+        };
         import_store
             .write()
-            .dispatch(CandidateEvent::DiscIdLookupComplete {
+            .dispatch_to_candidate(&release_path, event);
+    } else {
+        import_store.write().dispatch_to_candidate(
+            &release_path,
+            CandidateEvent::DiscIdLookupComplete {
                 matches: vec![],
                 error: None,
-            });
+            },
+        );
     }
 
     Ok(())

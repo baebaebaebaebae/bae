@@ -577,8 +577,6 @@ fn DiscIdLookupProgressView(
                 _ => None,
             })
     });
-    let is_retrying = *state.is_looking_up().read();
-
     rsx! {
         div { class: "flex-1 flex justify-center items-center",
             div { class: "text-center space-y-2 max-w-md",
@@ -619,14 +617,8 @@ fn DiscIdLookupProgressView(
                         Button {
                             variant: ButtonVariant::Primary,
                             size: ButtonSize::Small,
-                            disabled: is_retrying,
-                            loading: is_retrying,
                             onclick: move |_| on_retry.call(()),
-                            if is_retrying {
-                                "Retrying..."
-                            } else {
-                                "Retry"
-                            }
+                            "Retry"
                         }
                     }
                 }
