@@ -3,7 +3,9 @@
 //! ## Reactive State Pattern
 //! Accepts `ReadSignal` props and reads at leaf level for granular reactivity.
 
-use crate::components::icons::{CheckIcon, PencilIcon, PlusIcon, TrashIcon};
+use crate::components::icons::{
+    CheckIcon, CopyIcon, InfoIcon, KeyIcon, PencilIcon, PlusIcon, TrashIcon,
+};
 use crate::components::{
     Button, ButtonSize, ButtonVariant, ChromelessButton, TextInput, TextInputSize,
 };
@@ -51,6 +53,14 @@ pub fn StorageProfilesSectionView(
     is_loading: ReadSignal<bool>,
     editing_profile: Option<StorageProfile>,
     is_creating: bool,
+    /// Whether an encryption key is configured
+    encryption_configured: bool,
+    /// Preview of the encryption key (e.g., "abc123...xyz789")
+    encryption_key_preview: String,
+    /// Encryption key length in bytes
+    encryption_key_length: usize,
+    on_copy_key: EventHandler<()>,
+    on_import_key: EventHandler<String>,
     on_create: EventHandler<()>,
     on_edit: EventHandler<StorageProfile>,
     on_delete: EventHandler<String>,
@@ -64,8 +74,9 @@ pub fn StorageProfilesSectionView(
 
     rsx! {
         div { class: "max-w-2xl",
+            // Profiles sub-section
             div { class: "flex items-center justify-between mb-6",
-                h2 { class: "text-xl font-semibold text-white", "Storage Profiles" }
+                h2 { class: "text-xl font-semibold text-white", "Profiles" }
                 if !is_creating && editing_profile.is_none() {
                     Button {
                         variant: ButtonVariant::Primary,
@@ -119,6 +130,171 @@ pub fn StorageProfilesSectionView(
                     "Storage profiles determine how release files are stored. You can have multiple profiles "
                     "for different use cases (e.g., local development, cloud backup). The default profile "
                     "is used for new imports."
+                }
+            }
+
+            // Encryption sub-section
+            h2 { class: "text-xl font-semibold text-white mt-10 mb-6", "Encryption" }
+            EncryptionSubSection {
+                encryption_configured,
+                encryption_key_preview,
+                encryption_key_length,
+                on_copy_key,
+                on_import_key,
+            }
+        }
+    }
+}
+
+#[component]
+fn EncryptionSubSection(
+    encryption_configured: bool,
+    encryption_key_preview: String,
+    encryption_key_length: usize,
+    on_copy_key: EventHandler<()>,
+    on_import_key: EventHandler<String>,
+) -> Element {
+    let mut importing = use_signal(|| false);
+    let mut import_value = use_signal(String::new);
+    let mut import_error = use_signal(|| Option::<String>::None);
+
+    let handle_import = move |_| {
+        let key = import_value.read().trim().to_string();
+
+        if key.is_empty() {
+            import_error.set(Some("Please enter an encryption key.".to_string()));
+            return;
+        }
+        if key.len() != 64 || !key.chars().all(|c| c.is_ascii_hexdigit()) {
+            import_error.set(Some(
+                "Invalid key. Expected a 64-character hex string.".to_string(),
+            ));
+            return;
+        }
+
+        on_import_key.call(key);
+        importing.set(false);
+        import_value.set(String::new());
+        import_error.set(None);
+    };
+
+    let cancel_import = move |_| {
+        importing.set(false);
+        import_value.set(String::new());
+        import_error.set(None);
+    };
+
+    rsx! {
+        div { class: "bg-gray-800 rounded-lg p-6",
+            div { class: "space-y-4",
+                div { class: "flex items-center justify-between py-3 border-b border-gray-700",
+                    div {
+                        div { class: "text-sm font-medium text-gray-400", "Encryption Key" }
+                        div { class: "text-white font-mono mt-1", "{encryption_key_preview}" }
+                    }
+                    div { class: "flex items-center gap-2",
+                        if encryption_configured {
+                            ChromelessButton {
+                                class: Some(
+                                    "p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+                                        .to_string(),
+                                ),
+                                title: Some("Copy key to clipboard".to_string()),
+                                aria_label: Some("Copy key to clipboard".to_string()),
+                                onclick: move |_| on_copy_key.call(()),
+                                CopyIcon { class: "w-5 h-5" }
+                            }
+                            span { class: "px-3 py-1 bg-green-900 text-green-300 rounded-full text-sm",
+                                "Active"
+                            }
+                        }
+                        if !encryption_configured {
+                            span { class: "px-3 py-1 bg-gray-700 text-gray-400 rounded-full text-sm",
+                                "Not Set"
+                            }
+                        }
+                    }
+                }
+
+                if encryption_configured {
+                    div { class: "flex items-center justify-between py-3 border-b border-gray-700",
+                        span { class: "text-sm text-gray-400", "Key Length" }
+                        span { class: "text-white", "{encryption_key_length} bytes (256-bit AES)" }
+                    }
+                    div { class: "flex items-center justify-between py-3",
+                        span { class: "text-sm text-gray-400", "Algorithm" }
+                        span { class: "text-white", "AES-256-GCM" }
+                    }
+                }
+            }
+
+            if !encryption_configured && !*importing.read() {
+                div { class: "mt-6",
+                    Button {
+                        variant: ButtonVariant::Secondary,
+                        size: ButtonSize::Medium,
+                        onclick: move |_| importing.set(true),
+                        KeyIcon { class: "w-5 h-5" }
+                        "Import Key"
+                    }
+                }
+            }
+
+            if *importing.read() {
+                div { class: "mt-6 space-y-4",
+                    div {
+                        label { class: "block text-sm font-medium text-gray-400 mb-2",
+                            "Paste your encryption key"
+                        }
+                        input {
+                            r#type: "text",
+                            class: "w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono",
+                            placeholder: "64-character hex string",
+                            value: "{import_value}",
+                            oninput: move |e| {
+                                import_value.set(e.value());
+                                import_error.set(None);
+                            },
+                        }
+                    }
+
+                    if let Some(error) = import_error.read().as_ref() {
+                        div { class: "p-3 bg-red-900/30 border border-red-700 rounded-lg text-sm text-red-300",
+                            "{error}"
+                        }
+                    }
+
+                    div { class: "flex gap-3",
+                        Button {
+                            variant: ButtonVariant::Primary,
+                            size: ButtonSize::Medium,
+                            onclick: handle_import,
+                            "Save"
+                        }
+                        Button {
+                            variant: ButtonVariant::Secondary,
+                            size: ButtonSize::Medium,
+                            onclick: cancel_import,
+                            "Cancel"
+                        }
+                    }
+                }
+            }
+
+            div { class: "mt-6 p-4 bg-gray-700/50 rounded-lg",
+                div { class: "flex items-start gap-3",
+                    InfoIcon { class: "w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" }
+                    p { class: "text-sm text-gray-400",
+                        if encryption_configured {
+                            "This key is used for all storage profiles with encryption enabled. "
+                            "It is stored in the system keychain and backed up via iCloud Keychain if enabled. "
+                            "You can also copy the key above and save it in a password manager."
+                        } else {
+                            "A single encryption key is used for all storage profiles with encryption enabled. "
+                            "It will be generated automatically when you create an encrypted profile. "
+                            "If you have a key from a previous installation, you can import it above."
+                        }
+                    }
                 }
             }
         }
