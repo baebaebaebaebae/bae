@@ -35,7 +35,7 @@ pub fn ImportView(
 ) -> Element {
     // Determine if sidebar should be shown based on state
     let is_scanning = *state.is_scanning_candidates().read();
-    let has_candidates = !state.read().detected_candidates.is_empty();
+    let has_candidates = !state.detected_candidates().read().is_empty();
     let show_sidebar = has_candidates || is_scanning;
 
     // Only show source selector if multiple sources are available

@@ -5,6 +5,7 @@ use super::folder_import::FolderImport;
 use super::torrent_import::TorrentImport;
 use crate::ui::app_service::use_app;
 use crate::ui::import_helpers::{has_unclean_state, load_selected_release};
+use bae_ui::stores::import::ImportStateStoreExt;
 use bae_ui::stores::AppStateStoreExt;
 use bae_ui::{ConfirmDialogView, ImportSource, ImportView};
 use dioxus::prelude::*;
@@ -14,7 +15,7 @@ use tracing::warn;
 pub fn ImportPage() -> Element {
     let app = use_app();
     let import_store = app.state.import();
-    let selected_source = import_store.read().selected_import_source;
+    let selected_source = *import_store.selected_import_source().read();
 
     // Local state for switch confirmation dialog
     let mut pending_switch: Signal<Option<ImportSource>> = use_signal(|| None);

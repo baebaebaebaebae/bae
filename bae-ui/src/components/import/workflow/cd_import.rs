@@ -230,19 +230,25 @@ fn CdIdentifyContent(
     on_retry_discid_lookup: EventHandler<()>,
     on_view_in_library: EventHandler<String>,
 ) -> Element {
-    let st = state.read();
-    let identify_mode = st.get_identify_mode();
-    let toc_info = st
-        .cd_toc_info
+    let is_looking_up = *state.is_looking_up().read();
+    let toc_info = state
+        .cd_toc_info()
+        .read()
         .as_ref()
         .map(|(disc_id, first, last)| super::CdTocInfo {
             disc_id: disc_id.clone(),
             first_track: *first,
             last_track: *last,
         });
-    let is_looking_up = st.is_looking_up;
-    let discid_lookup_error = st.get_discid_lookup_error();
-    drop(st);
+
+    let current_key = state.current_candidate_key().read().clone();
+    let candidate_states = state.candidate_states().read().clone();
+    let cs = current_key.as_ref().and_then(|k| candidate_states.get(k));
+
+    let (identify_mode, discid_lookup_error) = match cs {
+        Some(CandidateState::Identifying(is)) => (is.mode.clone(), is.discid_lookup_error.clone()),
+        _ => (IdentifyMode::Created, None),
+    };
 
     rsx! {
         div { class: "space-y-6",
@@ -307,42 +313,81 @@ fn CdConfirmContent(
     on_configure_storage: EventHandler<()>,
     on_view_in_library: EventHandler<String>,
 ) -> Element {
-    // Read state at leaf level
-    let st = state.read();
-    let cd_path = st.current_candidate_key.clone().unwrap_or_default();
-    let toc_info = st
-        .cd_toc_info
+    let cd_path = state
+        .current_candidate_key()
+        .read()
+        .clone()
+        .unwrap_or_default();
+    let toc_info = state
+        .cd_toc_info()
+        .read()
         .as_ref()
         .map(|(disc_id, first, last)| super::CdTocInfo {
             disc_id: disc_id.clone(),
             first_track: *first,
             last_track: *last,
         });
-    let confirmed_candidate = st.get_confirmed_candidate();
-    let selected_cover = st.get_selected_cover();
-    let display_cover_url = st.get_display_cover_url();
-    let artwork_files = st
-        .current_candidate_state()
-        .map(|s| s.files().artwork.clone())
-        .unwrap_or_default();
-    let selected_profile_id = st.get_storage_profile_id();
 
-    let (is_importing, is_completed, completed_album_id, preparing_step_text, import_error) = st
-        .current_candidate_state()
-        .and_then(|s| match s {
-            CandidateState::Confirming(cs) => Some(&cs.phase),
-            _ => None,
-        })
-        .map(|phase| match phase {
-            ConfirmPhase::Ready => (false, false, None, None, None),
-            ConfirmPhase::Preparing(msg) => (false, false, None, Some(msg.clone()), None),
-            ConfirmPhase::Importing => (true, false, None, None, None),
-            ConfirmPhase::Failed(err) => (false, false, None, None, Some(err.clone())),
-            ConfirmPhase::Completed(album_id) => (false, true, Some(album_id.clone()), None, None),
-        })
-        .unwrap_or((false, false, None, None, None));
+    let current_key = state.current_candidate_key().read().clone();
+    let candidate_states = state.candidate_states().read().clone();
+    let cs = current_key.as_ref().and_then(|k| candidate_states.get(k));
 
-    drop(st);
+    let (
+        confirmed_candidate,
+        selected_cover,
+        display_cover_url,
+        artwork_files,
+        selected_profile_id,
+        is_importing,
+        is_completed,
+        completed_album_id,
+        preparing_step_text,
+        import_error,
+    ) = match cs {
+        Some(CandidateState::Confirming(cs)) => {
+            let cover_url = cs.selected_cover.as_ref().and_then(|sel| match sel {
+                SelectedCover::Remote { url, .. } => Some(url.clone()),
+                SelectedCover::Local { filename } => cs
+                    .files
+                    .artwork
+                    .iter()
+                    .find(|f| &f.name == filename)
+                    .map(|f| f.display_url.clone())
+                    .filter(|url| !url.is_empty()),
+            });
+            let (importing, completed, album_id, preparing, error) = match &cs.phase {
+                ConfirmPhase::Ready => (false, false, None, None, None),
+                ConfirmPhase::Preparing(msg) => (false, false, None, Some(msg.clone()), None),
+                ConfirmPhase::Importing => (true, false, None, None, None),
+                ConfirmPhase::Failed(err) => (false, false, None, None, Some(err.clone())),
+                ConfirmPhase::Completed(id) => (false, true, Some(id.clone()), None, None),
+            };
+            (
+                Some(cs.confirmed_candidate.clone()),
+                cs.selected_cover.clone(),
+                cover_url,
+                cs.files.artwork.clone(),
+                cs.selected_profile_id.clone(),
+                importing,
+                completed,
+                album_id,
+                preparing,
+                error,
+            )
+        }
+        _ => (
+            None,
+            None,
+            None,
+            vec![],
+            None,
+            false,
+            false,
+            None,
+            None,
+            None,
+        ),
+    };
 
     let Some(candidate) = confirmed_candidate else {
         return rsx! {};
