@@ -105,6 +105,25 @@ pub fn TitleBarView(
 ) -> Element {
     let mut is_search_active = use_signal(|| false);
     let search_active = is_search_active();
+    let mut selected_index = use_signal(|| None::<usize>);
+
+    // Flat list of actions for keyboard navigation (arrow keys + Enter)
+    let nav_actions: Vec<SearchAction> = {
+        let mut list = Vec::new();
+        for a in &search_results.artists {
+            list.push(SearchAction::Artist(a.id.clone()));
+        }
+        for a in &search_results.albums {
+            list.push(SearchAction::Album(a.id.clone()));
+        }
+        for t in &search_results.tracks {
+            list.push(SearchAction::Track {
+                album_id: t.album_id.clone(),
+            });
+        }
+        list
+    };
+    let total_results = nav_actions.len();
 
     let chevron_button_id = use_hook(|| {
         let id = BUTTON_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -182,7 +201,10 @@ pub fn TitleBarView(
                         autocomplete: "off",
                         class: "w-full h-7 px-2 bg-surface-input border border-border-default rounded text-white text-xs placeholder-gray-400 focus:outline-none focus:border-border-strong",
                         value: "{search_value}",
-                        oninput: move |evt| on_search_change.call(evt.value()),
+                        oninput: move |evt| {
+                            selected_index.set(None);
+                            on_search_change.call(evt.value());
+                        },
                         onfocus: move |_| {
                             is_search_active.set(true);
                             on_search_focus.call(());
@@ -203,15 +225,40 @@ pub fn TitleBarView(
                             on_search_blur.call(());
                         },
                         onkeydown: move |evt| {
-                            if evt.key() == Key::Escape {
-                                // Defer blur to avoid re-entrant borrow in wry
-                                spawn(async move {
-                                    let js = format!(
-                                        "document.getElementById('{}')?.blur()",
-                                        SEARCH_INPUT_ID,
-                                    );
-                                    dioxus::document::eval(&js);
-                                });
+                            match evt.key() {
+                                Key::Escape => {
+                                    spawn(async move {
+                                        let js = format!(
+                                            "document.getElementById('{}')?.blur()",
+                                            SEARCH_INPUT_ID,
+                                        );
+                                        dioxus::document::eval(&js);
+                                    });
+                                }
+                                Key::ArrowDown if total_results > 0 => {
+                                    evt.prevent_default();
+                                    let next = match selected_index() {
+                                        None => 0,
+                                        Some(i) => (i + 1) % total_results,
+                                    };
+                                    selected_index.set(Some(next));
+                                }
+                                Key::ArrowUp if total_results > 0 => {
+                                    evt.prevent_default();
+                                    let next = match selected_index() {
+                                        None | Some(0) => total_results - 1,
+                                        Some(i) => i - 1,
+                                    };
+                                    selected_index.set(Some(next));
+                                }
+                                Key::Enter => {
+                                    if let Some(i) = selected_index() {
+                                        if let Some(action) = nav_actions.get(i) {
+                                            on_search_result_click.call(action.clone());
+                                        }
+                                    }
+                                }
+                                _ => {}
                             }
                         },
                     }
@@ -225,6 +272,7 @@ pub fn TitleBarView(
                             SearchResultsContent {
                                 results: search_results,
                                 on_click: on_search_result_click,
+                                selected_index: selected_index(),
                             }
                         }
                     }
@@ -316,15 +364,20 @@ fn ImportSplitButton(
 fn SearchResultsContent(
     results: GroupedSearchResults,
     on_click: EventHandler<SearchAction>,
+    selected_index: Option<usize>,
 ) -> Element {
+    let album_offset = results.artists.len();
+    let track_offset = album_offset + results.albums.len();
+
     rsx! {
         // Artists section
         if !results.artists.is_empty() {
             SearchSectionHeader { label: "Artists" }
-            for artist in results.artists.iter() {
+            for (i , artist) in results.artists.iter().enumerate() {
                 ArtistResultItem {
                     key: "{artist.id}",
                     artist: artist.clone(),
+                    is_selected: selected_index == Some(i),
                     on_click,
                 }
             }
@@ -333,16 +386,26 @@ fn SearchResultsContent(
         // Albums section
         if !results.albums.is_empty() {
             SearchSectionHeader { label: "Albums" }
-            for album in results.albums.iter() {
-                AlbumResultItem { key: "{album.id}", album: album.clone(), on_click }
+            for (i , album) in results.albums.iter().enumerate() {
+                AlbumResultItem {
+                    key: "{album.id}",
+                    album: album.clone(),
+                    is_selected: selected_index == Some(album_offset + i),
+                    on_click,
+                }
             }
         }
 
         // Tracks section
         if !results.tracks.is_empty() {
             SearchSectionHeader { label: "Tracks" }
-            for track in results.tracks.iter() {
-                TrackResultItem { key: "{track.id}", track: track.clone(), on_click }
+            for (i , track) in results.tracks.iter().enumerate() {
+                TrackResultItem {
+                    key: "{track.id}",
+                    track: track.clone(),
+                    is_selected: selected_index == Some(track_offset + i),
+                    on_click,
+                }
             }
         }
     }
@@ -360,17 +423,22 @@ fn SearchSectionHeader(label: &'static str) -> Element {
 
 /// Artist result item
 #[component]
-fn ArtistResultItem(artist: ArtistResult, on_click: EventHandler<SearchAction>) -> Element {
+fn ArtistResultItem(
+    artist: ArtistResult,
+    is_selected: bool,
+    on_click: EventHandler<SearchAction>,
+) -> Element {
     let id = artist.id.clone();
     let album_label = if artist.album_count == 1 {
         "1 album".to_string()
     } else {
         format!("{} albums", artist.album_count)
     };
+    let selected_class = if is_selected { "bg-hover" } else { "" };
 
     rsx! {
         div {
-            class: "flex items-center gap-3 px-3 py-2 hover:bg-hover cursor-pointer",
+            class: "flex items-center gap-3 px-3 py-2 hover:bg-hover cursor-pointer {selected_class}",
             onclick: move |evt| {
                 evt.stop_propagation();
                 on_click.call(SearchAction::Artist(id.clone()));
@@ -388,17 +456,22 @@ fn ArtistResultItem(artist: ArtistResult, on_click: EventHandler<SearchAction>) 
 
 /// Album result item
 #[component]
-fn AlbumResultItem(album: AlbumResult, on_click: EventHandler<SearchAction>) -> Element {
+fn AlbumResultItem(
+    album: AlbumResult,
+    is_selected: bool,
+    on_click: EventHandler<SearchAction>,
+) -> Element {
     let id = album.id.clone();
     let subtitle = if let Some(year) = album.year {
         format!("{} \u{2022} {}", album.artist_name, year)
     } else {
         album.artist_name.clone()
     };
+    let selected_class = if is_selected { "bg-hover" } else { "" };
 
     rsx! {
         div {
-            class: "flex items-center gap-3 px-3 py-2 hover:bg-hover cursor-pointer",
+            class: "flex items-center gap-3 px-3 py-2 hover:bg-hover cursor-pointer {selected_class}",
             onclick: move |evt| {
                 evt.stop_propagation();
                 on_click.call(SearchAction::Album(id.clone()));
@@ -424,14 +497,19 @@ fn AlbumResultItem(album: AlbumResult, on_click: EventHandler<SearchAction>) -> 
 
 /// Track result item
 #[component]
-fn TrackResultItem(track: TrackResult, on_click: EventHandler<SearchAction>) -> Element {
+fn TrackResultItem(
+    track: TrackResult,
+    is_selected: bool,
+    on_click: EventHandler<SearchAction>,
+) -> Element {
     let album_id = track.album_id.clone();
     let subtitle = format!("{} \u{2022} {}", track.album_title, track.artist_name);
     let duration = track.duration_ms.map(format_duration).unwrap_or_default();
+    let selected_class = if is_selected { "bg-hover" } else { "" };
 
     rsx! {
         div {
-            class: "flex items-center gap-3 px-3 py-2 hover:bg-hover cursor-pointer",
+            class: "flex items-center gap-3 px-3 py-2 hover:bg-hover cursor-pointer {selected_class}",
             onclick: move |evt| {
                 evt.stop_propagation();
                 on_click
