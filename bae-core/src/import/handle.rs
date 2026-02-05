@@ -19,7 +19,7 @@ use crate::import::types::{
 };
 use crate::library::{LibraryManager, SharedLibraryManager};
 use crate::musicbrainz::MbRelease;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
@@ -267,6 +267,8 @@ impl ImportServiceHandle {
                 return Err("No release provided".to_string());
             };
 
+        let mut downloaded_cover_path: Option<PathBuf> = None;
+
         if let Some(ref url) = cover_art_url {
             emit_preparing(PrepareStep::DownloadingCoverArt);
             let source = if mb_release.is_some() {
@@ -277,6 +279,7 @@ impl ImportServiceHandle {
             match download_cover_art_to_bae_folder(url, &folder, source).await {
                 Ok(downloaded) => {
                     info!("Downloaded cover art to {:?}", downloaded.path);
+                    downloaded_cover_path = Some(downloaded.path);
                 }
                 Err(e) => {
                     warn!("Failed to download cover art: {}", e);
@@ -285,14 +288,28 @@ impl ImportServiceHandle {
         }
 
         emit_preparing(PrepareStep::DiscoveringFiles);
-        let discovered_files = discover_folder_files(&folder)?;
+        let mut discovered_files = discover_folder_files(&folder)?;
+
+        // Add downloaded cover to discovered files (scanner skips .bae/)
+        if let Some(ref path) = downloaded_cover_path {
+            if let Ok(metadata) = std::fs::metadata(path.as_path()) {
+                discovered_files.push(DiscoveredFile {
+                    path: path.clone(),
+                    size: metadata.len(),
+                });
+            }
+        }
+
         emit_preparing(PrepareStep::ValidatingTracks);
         let mapping_result = map_tracks_to_files(&db_tracks, &discovered_files).await?;
         let tracks_to_files = mapping_result.track_files.clone();
         let cue_flac_metadata = mapping_result.cue_flac_metadata.clone();
 
-        // Resolve CoverSelection to an absolute path from discovered files
-        let cover_image_path = resolve_cover_path(&selected_cover, &discovered_files);
+        // Use the downloaded path directly for remote covers, resolve from files for local
+        let cover_image_path = match &selected_cover {
+            Some(CoverSelection::Remote(_)) => downloaded_cover_path,
+            _ => resolve_cover_path(&selected_cover, &discovered_files),
+        };
 
         emit_preparing(PrepareStep::SavingToDatabase);
         let mut artist_id_map = std::collections::HashMap::new();
