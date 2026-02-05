@@ -57,9 +57,8 @@ async fn test_cue_flac_records_track_positions() {
             mb_release: None,
             folder: album_dir,
             master_year: 2024,
-            cover_art_url: None,
             storage_profile_id: None,
-            selected_cover_filename: None,
+            selected_cover: None,
         })
         .await
         .expect("send request");
@@ -206,9 +205,8 @@ async fn test_cue_flac_playback_uses_track_positions() {
             mb_release: None,
             folder: album_dir,
             master_year: 2024,
-            cover_art_url: None,
             storage_profile_id: None,
-            selected_cover_filename: None,
+            selected_cover: None,
         })
         .await
         .expect("send request");
@@ -359,9 +357,8 @@ async fn test_cue_flac_decoded_duration_matches_cue_timing() {
             mb_release: None,
             folder: album_dir,
             master_year: 2024,
-            cover_art_url: None,
             storage_profile_id: None,
-            selected_cover_filename: None,
+            selected_cover: None,
         })
         .await
         .expect("send request");
@@ -497,9 +494,8 @@ async fn test_cue_flac_byte_ranges_have_no_gaps() {
             mb_release: None,
             folder: album_dir,
             master_year: 2024,
-            cover_art_url: None,
             storage_profile_id: None,
-            selected_cover_filename: None,
+            selected_cover: None,
         })
         .await
         .expect("send request");
@@ -650,9 +646,8 @@ async fn test_cue_flac_builds_dense_seektable() {
             mb_release: None,
             folder: album_dir.clone(),
             master_year: 2024,
-            cover_art_url: None,
             storage_profile_id: None,
-            selected_cover_filename: None,
+            selected_cover: None,
         })
         .await
         .expect("send request");

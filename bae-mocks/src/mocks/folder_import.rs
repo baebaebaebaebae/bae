@@ -291,7 +291,6 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                 ]),
                 artwork: vec![mock_artwork("AlbumArt.jpg", 450_000, "JPEG", 5)],
                 documents: vec![],
-                managed_artwork: vec![],
                 bad_audio_count: 2,
                 bad_image_count: 1,
             },

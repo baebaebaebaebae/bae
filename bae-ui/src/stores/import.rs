@@ -132,17 +132,12 @@ pub struct ConfirmingState {
     pub source_disc_id: Option<String>,
 }
 
-/// Pick a default cover: remote (MB/Discogs) > managed artwork > release artwork > none
+/// Pick a default cover: remote (MB/Discogs) > release artwork > none
 fn default_cover(candidate: &MatchCandidate, files: &CategorizedFileInfo) -> Option<SelectedCover> {
     if let Some(url) = &candidate.cover_url {
         return Some(SelectedCover::Remote {
             url: url.clone(),
             source: String::new(),
-        });
-    }
-    if let Some(img) = files.managed_artwork.first() {
-        return Some(SelectedCover::Local {
-            filename: img.name.clone(),
         });
     }
     if let Some(img) = files.artwork.first() {
@@ -827,20 +822,16 @@ impl ImportState {
         let selected = self.get_selected_cover()?;
         match selected {
             SelectedCover::Remote { url, .. } => Some(url),
-            SelectedCover::Local { filename } => {
-                // Find the artwork file with matching name (check both release and managed artwork)
-                self.current_candidate_state()
-                    .and_then(|s| {
-                        let files = s.files();
-                        files
-                            .artwork
-                            .iter()
-                            .chain(files.managed_artwork.iter())
-                            .find(|f| f.name == filename)
-                            .map(|f| f.display_url.clone())
-                    })
-                    .filter(|url| !url.is_empty())
-            }
+            SelectedCover::Local { filename } => self
+                .current_candidate_state()
+                .and_then(|s| {
+                    s.files()
+                        .artwork
+                        .iter()
+                        .find(|f| f.name == filename)
+                        .map(|f| f.display_url.clone())
+                })
+                .filter(|url| !url.is_empty()),
         }
     }
 

@@ -13,6 +13,8 @@ use crate::import::folder_scanner::scan_for_candidates_with_callback;
 use crate::import::handle::TorrentImportMetadata;
 use crate::import::handle::{ImportServiceHandle, ScanEvent, ScanRequest};
 #[cfg(feature = "torrent")]
+use crate::import::types::CoverSelection;
+#[cfg(feature = "torrent")]
 use crate::import::types::TorrentSource;
 use crate::import::types::{
     CueFlacMetadata, DiscoveredFile, ImportCommand, ImportPhase, ImportProgress, TrackFile,
@@ -22,7 +24,7 @@ use crate::storage::{ReleaseStorage, ReleaseStorageImpl};
 #[cfg(feature = "torrent")]
 use crate::torrent::LazyTorrentManager;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 #[cfg(any(feature = "torrent", feature = "cd-rip"))]
@@ -47,6 +49,39 @@ fn calculate_track_percent(bytes_written: usize, start_byte: i64, end_byte: i64)
         } else {
             ((written_for_track * 100) / track_size) as u8
         }
+    }
+}
+
+/// Resolve a CoverSelection to an absolute path among discovered files after torrent download.
+///
+/// For Remote covers, the file was downloaded to a .bae/ subfolder — match by that prefix.
+/// For Local covers, match by the relative filename.
+#[cfg(feature = "torrent")]
+fn resolve_torrent_cover_path(
+    selected_cover: &Option<CoverSelection>,
+    discovered_files: &[DiscoveredFile],
+) -> Option<PathBuf> {
+    let selected_cover = selected_cover.as_ref()?;
+    match selected_cover {
+        CoverSelection::Remote(_) => {
+            // Downloaded covers go into .bae/ subfolder
+            discovered_files.iter().find_map(|f| {
+                let path_str = f.path.to_string_lossy();
+                if path_str.contains(".bae/") {
+                    Some(f.path.clone())
+                } else {
+                    None
+                }
+            })
+        }
+        CoverSelection::Local(filename) => discovered_files.iter().find_map(|f| {
+            let path_str = f.path.to_string_lossy();
+            if path_str.ends_with(filename) {
+                Some(f.path.clone())
+            } else {
+                None
+            }
+        }),
     }
 }
 
@@ -370,7 +405,7 @@ impl ImportService {
                 discovered_files,
                 cue_flac_metadata,
                 storage_profile_id,
-                selected_cover_filename,
+                cover_image_path,
                 import_id,
             } => {
                 info!("Starting folder import for '{}'", db_album.title);
@@ -384,7 +419,7 @@ impl ImportService {
                                     &tracks_to_files,
                                     cue_flac_metadata,
                                     profile,
-                                    selected_cover_filename,
+                                    cover_image_path.as_deref(),
                                     &import_id,
                                 )
                                 .await
@@ -399,7 +434,7 @@ impl ImportService {
                             &discovered_files,
                             &tracks_to_files,
                             cue_flac_metadata,
-                            selected_cover_filename,
+                            cover_image_path.as_deref(),
                             &import_id,
                         )
                         .await
@@ -414,9 +449,8 @@ impl ImportService {
                 torrent_source,
                 torrent_metadata,
                 seed_after_download,
-                cover_art_url,
                 storage_profile_id,
-                selected_cover_filename,
+                selected_cover,
             } => {
                 info!("Starting torrent import for '{}'", db_album.title);
                 match storage_profile_id {
@@ -430,9 +464,8 @@ impl ImportService {
                                     torrent_source,
                                     torrent_metadata,
                                     seed_after_download,
-                                    cover_art_url,
+                                    selected_cover,
                                     profile,
-                                    selected_cover_filename,
                                 )
                                 .await
                             }
@@ -447,8 +480,7 @@ impl ImportService {
                             tracks_to_files,
                             torrent_source,
                             torrent_metadata,
-                            cover_art_url,
-                            selected_cover_filename,
+                            selected_cover,
                         )
                         .await
                     }
@@ -462,7 +494,7 @@ impl ImportService {
                 drive_path,
                 toc,
                 storage_profile_id,
-                selected_cover_filename,
+                cover_image_path,
             } => {
                 info!("Starting CD import for '{}'", db_album.title);
                 match storage_profile_id {
@@ -476,7 +508,7 @@ impl ImportService {
                                     drive_path,
                                     toc,
                                     profile,
-                                    selected_cover_filename,
+                                    cover_image_path.as_deref(),
                                 )
                                 .await
                             }
@@ -491,7 +523,7 @@ impl ImportService {
                             db_tracks,
                             drive_path,
                             toc,
-                            selected_cover_filename,
+                            cover_image_path.as_deref(),
                         )
                         .await
                     }
@@ -636,7 +668,7 @@ impl ImportService {
         tracks_to_files: &[TrackFile],
         cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
         storage_profile: DbStorageProfile,
-        selected_cover_filename: Option<String>,
+        cover_image_path: Option<&Path>,
         import_id: &str,
     ) -> Result<(), String> {
         let library_manager = self.library_manager.get();
@@ -760,7 +792,7 @@ impl ImportService {
                 &db_release.album_id,
                 discovered_files,
                 library_manager,
-                selected_cover_filename,
+                cover_image_path,
             )
             .await?;
 
@@ -799,13 +831,16 @@ impl ImportService {
     }
 
     /// Create DbImage records for image files in the discovered files.
+    ///
+    /// `cover_image_path`: Absolute path to the user-selected cover image.
+    /// If provided, that file is marked as cover. Otherwise, priority logic picks the best one.
     async fn create_image_records(
         &self,
         release_id: &str,
         album_id: &str,
         discovered_files: &[DiscoveredFile],
         library_manager: &LibraryManager,
-        selected_cover_filename: Option<String>,
+        cover_image_path: Option<&Path>,
     ) -> Result<Option<String>, String> {
         use crate::db::{DbImage, ImageSource};
         let image_extensions = ["jpg", "jpeg", "png", "gif", "webp"];
@@ -826,46 +861,40 @@ impl ImportService {
             return Ok(None);
         }
 
-        let cover_filename = if let Some(ref selected) = selected_cover_filename {
-            if image_files.iter().any(|(_, path)| path == selected) {
-                Some(selected.clone())
-            } else {
+        // Determine which file is the cover: match by absolute path if provided
+        let cover_index = if let Some(selected_path) = cover_image_path {
+            let found = image_files
+                .iter()
+                .position(|(f, _)| f.path.as_path() == selected_path);
+            if found.is_none() {
                 info!(
-                    "Selected cover '{}' not found among images, using priority",
-                    selected
+                    "Selected cover {:?} not found among images, using priority",
+                    selected_path
                 );
-                None
             }
+            found
         } else {
             None
         };
 
-        let cover_filename = cover_filename.unwrap_or_else(|| {
+        let cover_index = cover_index.unwrap_or_else(|| {
             image_files.sort_by(|(_, a), (_, b)| {
                 let a_priority = Self::image_cover_priority(a);
                 let b_priority = Self::image_cover_priority(b);
                 a_priority.cmp(&b_priority)
             });
-            image_files.first().map(|(_, path)| path.clone()).unwrap()
+            0
         });
 
         let mut cover_image_id: Option<String> = None;
-        for (_file, relative_path) in &image_files {
-            let source = if relative_path.starts_with(".bae/") {
-                let filename_lower = relative_path.to_lowercase();
-                if filename_lower.contains("-mb") || filename_lower.contains("musicbrainz") {
-                    ImageSource::MusicBrainz
-                } else if filename_lower.contains("-discogs") || filename_lower.contains("discogs")
-                {
-                    ImageSource::Discogs
-                } else {
-                    ImageSource::Local
-                }
-            } else {
-                ImageSource::Local
-            };
+        for (idx, (_file, relative_path)) in image_files.iter().enumerate() {
+            let source = std::path::Path::new(relative_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .and_then(super::cover_art::classify_managed_artwork)
+                .unwrap_or(ImageSource::Local);
 
-            let is_cover = relative_path == &cover_filename;
+            let is_cover = idx == cover_index;
             let db_image = DbImage::new(release_id, relative_path, is_cover, source);
             let image_id = db_image.id.clone();
 
@@ -1145,7 +1174,7 @@ impl ImportService {
         discovered_files: &[DiscoveredFile],
         tracks_to_files: &[TrackFile],
         cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
-        selected_cover_filename: Option<String>,
+        cover_image_path: Option<&Path>,
         import_id: &str,
     ) -> Result<(), String> {
         let library_manager = self.library_manager.get();
@@ -1254,7 +1283,7 @@ impl ImportService {
                 &db_release.album_id,
                 discovered_files,
                 library_manager,
-                selected_cover_filename,
+                cover_image_path,
             )
             .await?;
 
@@ -1289,8 +1318,7 @@ impl ImportService {
         tracks_to_files: Vec<TrackFile>,
         torrent_source: TorrentSource,
         torrent_metadata: TorrentImportMetadata,
-        cover_art_url: Option<String>,
-        selected_cover_filename: Option<String>,
+        selected_cover: Option<CoverSelection>,
     ) -> Result<(), String> {
         let library_manager = self.library_manager.get();
         library_manager
@@ -1358,7 +1386,7 @@ impl ImportService {
             })
             .collect();
 
-        if let Some(ref url) = cover_art_url {
+        if let Some(CoverSelection::Remote(ref url)) = selected_cover {
             use crate::db::ImageSource;
             use crate::import::cover_art::download_cover_art_to_bae_folder;
             let source = if url.contains("coverartarchive.org") || url.contains("musicbrainz") {
@@ -1381,6 +1409,9 @@ impl ImportService {
                 }
             }
         }
+
+        // Resolve cover selection to absolute path now that files exist
+        let cover_image_path = resolve_torrent_cover_path(&selected_cover, &discovered_files);
 
         let _ = self
             .torrent_manager
@@ -1454,7 +1485,7 @@ impl ImportService {
                 &db_release.album_id,
                 &discovered_files,
                 library_manager,
-                selected_cover_filename,
+                cover_image_path.as_deref(),
             )
             .await?;
 
@@ -1488,9 +1519,8 @@ impl ImportService {
         torrent_source: TorrentSource,
         torrent_metadata: TorrentImportMetadata,
         seed_after_download: bool,
-        cover_art_url: Option<String>,
+        selected_cover: Option<CoverSelection>,
         storage_profile: DbStorageProfile,
-        selected_cover_filename: Option<String>,
     ) -> Result<(), String> {
         let library_manager = self.library_manager.get();
         library_manager
@@ -1555,7 +1585,7 @@ impl ImportService {
             })
             .collect();
 
-        if let Some(ref url) = cover_art_url {
+        if let Some(CoverSelection::Remote(ref url)) = selected_cover {
             use crate::db::ImageSource;
             use crate::import::cover_art::download_cover_art_to_bae_folder;
             let source = if url.contains("coverartarchive.org") || url.contains("musicbrainz") {
@@ -1578,6 +1608,9 @@ impl ImportService {
                 }
             }
         }
+
+        // Resolve cover selection to absolute path now that files exist
+        let cover_image_path = resolve_torrent_cover_path(&selected_cover, &discovered_files);
 
         // Detect CUE/FLAC
         let file_paths: Vec<PathBuf> = discovered_files.iter().map(|f| f.path.clone()).collect();
@@ -1614,7 +1647,7 @@ impl ImportService {
             &tracks_to_files,
             cue_flac_opt,
             storage_profile,
-            selected_cover_filename,
+            cover_image_path.as_deref(),
             &import_id,
         )
         .await?;
@@ -1665,7 +1698,7 @@ impl ImportService {
         drive_path: PathBuf,
         toc: CdToc,
         storage_profile: DbStorageProfile,
-        selected_cover_filename: Option<String>,
+        cover_image_path: Option<&Path>,
     ) -> Result<(), String> {
         use crate::cd::{CdDrive, CdRipper, CueGenerator, LogGenerator};
         use crate::import::track_to_file_mapper::map_tracks_to_files;
@@ -1788,7 +1821,7 @@ impl ImportService {
             &tracks_to_files,
             cue_flac_metadata,
             storage_profile,
-            selected_cover_filename,
+            cover_image_path,
             &import_id,
         )
         .await?;
@@ -1813,7 +1846,7 @@ impl ImportService {
         db_tracks: Vec<DbTrack>,
         drive_path: PathBuf,
         toc: CdToc,
-        _selected_cover_filename: Option<String>,
+        _cover_image_path: Option<&Path>,
     ) -> Result<(), String> {
         use crate::cd::{CdDrive, CdRipper};
 

@@ -14,11 +14,12 @@ use crate::import::track_to_file_mapper::map_tracks_to_files;
 #[cfg(feature = "torrent")]
 use crate::import::types::TorrentSource;
 use crate::import::types::{
-    DiscoveredFile, ImportCommand, ImportProgress, ImportRequest, PrepareStep, TrackFile,
+    CoverSelection, DiscoveredFile, ImportCommand, ImportProgress, ImportRequest, PrepareStep,
+    TrackFile,
 };
 use crate::library::{LibraryManager, SharedLibraryManager};
 use crate::musicbrainz::MbRelease;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
@@ -130,9 +131,8 @@ impl ImportServiceHandle {
                 mb_release,
                 folder,
                 master_year,
-                cover_art_url,
                 storage_profile_id,
-                selected_cover_filename,
+                selected_cover,
             } => {
                 self.send_folder_request(
                     import_id,
@@ -140,9 +140,8 @@ impl ImportServiceHandle {
                     mb_release,
                     folder,
                     master_year,
-                    cover_art_url,
                     storage_profile_id,
-                    selected_cover_filename,
+                    selected_cover,
                 )
                 .await
             }
@@ -154,9 +153,8 @@ impl ImportServiceHandle {
                 master_year,
                 seed_after_download,
                 torrent_metadata,
-                cover_art_url,
                 storage_profile_id,
-                selected_cover_filename,
+                selected_cover,
             } => {
                 self.send_torrent_request(
                     torrent_source,
@@ -165,9 +163,8 @@ impl ImportServiceHandle {
                     master_year,
                     seed_after_download,
                     torrent_metadata,
-                    cover_art_url,
                     storage_profile_id,
-                    selected_cover_filename,
+                    selected_cover,
                 )
                 .await
             }
@@ -177,18 +174,16 @@ impl ImportServiceHandle {
                 mb_release,
                 drive_path,
                 master_year,
-                cover_art_url,
                 storage_profile_id,
-                selected_cover_filename,
+                selected_cover,
             } => {
                 self.send_cd_request(
                     discogs_release,
                     mb_release,
                     drive_path,
                     master_year,
-                    cover_art_url,
                     storage_profile_id,
-                    selected_cover_filename,
+                    selected_cover,
                 )
                 .await
             }
@@ -201,9 +196,8 @@ impl ImportServiceHandle {
         mb_release: Option<MbRelease>,
         folder: std::path::PathBuf,
         master_year: u32,
-        cover_art_url: Option<String>,
         storage_profile_id: Option<String>,
-        selected_cover_filename: Option<String>,
+        selected_cover: Option<CoverSelection>,
     ) -> Result<(String, String), String> {
         if discogs_release.is_none() && mb_release.is_none() {
             return Err("Either discogs_release or mb_release must be provided".to_string());
@@ -222,6 +216,12 @@ impl ImportServiceHandle {
         } else {
             return Err("No release provided".to_string());
         };
+
+        let cover_art_url = match &selected_cover {
+            Some(CoverSelection::Remote(url)) => Some(url.clone()),
+            _ => None,
+        };
+
         let db_import = DbImport::new(
             &import_id,
             &album_title,
@@ -266,6 +266,9 @@ impl ImportServiceHandle {
             } else {
                 return Err("No release provided".to_string());
             };
+
+        let mut downloaded_cover_path: Option<PathBuf> = None;
+
         if let Some(ref url) = cover_art_url {
             emit_preparing(PrepareStep::DownloadingCoverArt);
             let source = if mb_release.is_some() {
@@ -276,18 +279,38 @@ impl ImportServiceHandle {
             match download_cover_art_to_bae_folder(url, &folder, source).await {
                 Ok(downloaded) => {
                     info!("Downloaded cover art to {:?}", downloaded.path);
+                    downloaded_cover_path = Some(downloaded.path);
                 }
                 Err(e) => {
                     warn!("Failed to download cover art: {}", e);
                 }
             }
         }
+
         emit_preparing(PrepareStep::DiscoveringFiles);
-        let discovered_files = discover_folder_files(&folder)?;
+        let mut discovered_files = discover_folder_files(&folder)?;
+
+        // Add downloaded cover to discovered files (scanner skips .bae/)
+        if let Some(ref path) = downloaded_cover_path {
+            if let Ok(metadata) = std::fs::metadata(path.as_path()) {
+                discovered_files.push(DiscoveredFile {
+                    path: path.clone(),
+                    size: metadata.len(),
+                });
+            }
+        }
+
         emit_preparing(PrepareStep::ValidatingTracks);
         let mapping_result = map_tracks_to_files(&db_tracks, &discovered_files).await?;
         let tracks_to_files = mapping_result.track_files.clone();
         let cue_flac_metadata = mapping_result.cue_flac_metadata.clone();
+
+        // Use the downloaded path directly for remote covers, resolve from files for local
+        let cover_image_path = match &selected_cover {
+            Some(CoverSelection::Remote(_)) => downloaded_cover_path,
+            _ => resolve_cover_path(&selected_cover, &discovered_files),
+        };
+
         emit_preparing(PrepareStep::SavingToDatabase);
         let mut artist_id_map = std::collections::HashMap::new();
         for artist in &artists {
@@ -335,6 +358,7 @@ impl ImportServiceHandle {
         }
         emit_preparing(PrepareStep::ExtractingDurations);
         extract_and_store_durations(library_manager, &tracks_to_files).await?;
+
         tracing::info!(
             "Validated and queued album '{}' (release: {}) with {} tracks",
             db_album.title,
@@ -355,7 +379,7 @@ impl ImportServiceHandle {
                 discovered_files,
                 cue_flac_metadata,
                 storage_profile_id,
-                selected_cover_filename,
+                cover_image_path,
                 import_id,
             })
             .map_err(|_| "Failed to queue validated album for import".to_string())?;
@@ -370,15 +394,20 @@ impl ImportServiceHandle {
         master_year: u32,
         seed_after_download: bool,
         torrent_metadata: TorrentImportMetadata,
-        cover_art_url: Option<String>,
         storage_profile_id: Option<String>,
-        selected_cover_filename: Option<String>,
+        selected_cover: Option<CoverSelection>,
     ) -> Result<(String, String), String> {
         if discogs_release.is_none() && mb_release.is_none() {
             return Err("Either discogs_release or mb_release must be provided".to_string());
         }
         let library_manager = self.library_manager.get();
         let torrent_source_for_request = torrent_source.clone();
+
+        let cover_art_url = match &selected_cover {
+            Some(CoverSelection::Remote(url)) => Some(url.clone()),
+            _ => None,
+        };
+
         info!(
             "Torrent import: {} ({} pieces, {} bytes)",
             torrent_metadata.torrent_name,
@@ -467,6 +496,7 @@ impl ImportServiceHandle {
             .insert_torrent(&db_torrent)
             .await
             .map_err(|e| format!("Failed to save torrent metadata: {}", e))?;
+
         tracing::info!(
             "Validated and queued torrent import '{}' (release: {}) with {} tracks",
             db_album.title,
@@ -483,9 +513,8 @@ impl ImportServiceHandle {
                 torrent_source: torrent_source_for_request,
                 torrent_metadata,
                 seed_after_download,
-                cover_art_url,
                 storage_profile_id,
-                selected_cover_filename,
+                selected_cover,
             })
             .map_err(|_| "Failed to queue validated torrent for import".to_string())?;
         Ok((album_id, release_id))
@@ -497,14 +526,19 @@ impl ImportServiceHandle {
         mb_release: Option<MbRelease>,
         drive_path: std::path::PathBuf,
         master_year: u32,
-        cover_art_url: Option<String>,
         storage_profile_id: Option<String>,
-        selected_cover_filename: Option<String>,
+        selected_cover: Option<CoverSelection>,
     ) -> Result<(String, String), String> {
         if discogs_release.is_none() && mb_release.is_none() {
             return Err("Either discogs_release or mb_release must be provided".to_string());
         }
         let library_manager = self.library_manager.get();
+
+        let cover_art_url = match &selected_cover {
+            Some(CoverSelection::Remote(url)) => Some(url.clone()),
+            _ => None,
+        };
+
         use crate::cd::CdDrive;
         let drive = CdDrive {
             device_path: drive_path.clone(),
@@ -570,6 +604,10 @@ impl ImportServiceHandle {
         }
         let album_id = db_album.id.clone();
         let release_id = db_release.id.clone();
+
+        // CD import: cover_image_path is None since no files exist yet (ripping happens in service)
+        let cover_image_path = None;
+
         self.requests_tx
             .send(ImportCommand::CD {
                 db_album,
@@ -578,7 +616,7 @@ impl ImportServiceHandle {
                 drive_path: drive.device_path,
                 toc,
                 storage_profile_id,
-                selected_cover_filename,
+                cover_image_path,
             })
             .map_err(|_| "Failed to queue validated CD import".to_string())?;
         Ok((album_id, release_id))
@@ -707,6 +745,53 @@ fn extract_flac_duration(file_path: &Path) -> Option<i64> {
         }
     }
 }
+/// Resolve a CoverSelection to an absolute path by matching against discovered files.
+///
+/// For Remote: The downloaded file will be in the .bae/ subfolder. Find it by matching
+/// the relative path (e.g. ".bae/cover-mb.jpg") against discovered file paths.
+/// For Local: Match the relative filename/path against discovered file paths.
+fn resolve_cover_path(
+    selected_cover: &Option<CoverSelection>,
+    discovered_files: &[DiscoveredFile],
+) -> Option<std::path::PathBuf> {
+    let relative = match selected_cover {
+        Some(CoverSelection::Remote(url)) => {
+            // Compute expected filename the same way import_helpers does
+            let extension = url
+                .rsplit('/')
+                .next()
+                .and_then(|filename| {
+                    let ext = filename.rsplit('.').next()?;
+                    let ext_lower = ext.to_lowercase();
+                    if ["jpg", "jpeg", "png", "gif", "webp"].contains(&ext_lower.as_str()) {
+                        Some(ext_lower)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| "jpg".to_string());
+
+            let base_name = if url.contains("coverartarchive.org") || url.contains("musicbrainz") {
+                "cover-mb"
+            } else {
+                "cover-discogs"
+            };
+            format!(".bae/{}.{}", base_name, extension)
+        }
+        Some(CoverSelection::Local(filename)) => filename.clone(),
+        None => return None,
+    };
+
+    discovered_files.iter().find_map(|f| {
+        let path_str = f.path.to_string_lossy();
+        if path_str.ends_with(&relative) {
+            Some(f.path.clone())
+        } else {
+            None
+        }
+    })
+}
+
 /// Discover all files in folder with metadata.
 ///
 /// Recursively scans the folder using the folder_scanner module to support:

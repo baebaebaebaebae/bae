@@ -19,8 +19,6 @@ pub fn ConfirmationView(
     display_cover_url: Option<String>,
     /// Artwork files available in the folder (with resolved display URLs)
     artwork_files: Vec<FileInfo>,
-    /// Managed artwork files from .bae/ (downloaded covers)
-    managed_artwork: Vec<FileInfo>,
     /// Remote cover URL from the match candidate
     remote_cover_url: Option<String>,
     /// Available storage profiles
@@ -52,8 +50,7 @@ pub fn ConfirmationView(
     let country_text = candidate.country.clone();
     let label_text = candidate.label.clone();
 
-    let has_cover_options =
-        !artwork_files.is_empty() || !managed_artwork.is_empty() || remote_cover_url.is_some();
+    let has_cover_options = !artwork_files.is_empty() || remote_cover_url.is_some();
 
     // Build combined image list for picker: remote + managed + release artwork
     // Each entry pairs a GalleryItem with the SelectedCover it represents
@@ -82,18 +79,6 @@ pub fn ConfirmationView(
         picker_covers.push(SelectedCover::Remote {
             url: url.clone(),
             source: String::new(),
-        });
-    }
-    for img in managed_artwork.iter() {
-        picker_items.push(GalleryItem {
-            label: img.name.clone(),
-            content: GalleryItemContent::Image {
-                url: img.display_url.clone(),
-                thumbnail_url: img.display_url.clone(),
-            },
-        });
-        picker_covers.push(SelectedCover::Local {
-            filename: img.name.clone(),
         });
     }
     for img in artwork_files.iter() {

@@ -189,9 +189,8 @@ impl CueFlacTestFixture {
                 mb_release: None,
                 folder: album_dir.clone(),
                 master_year,
-                cover_art_url: None,
                 storage_profile_id: None,
-                selected_cover_filename: None,
+                selected_cover: None,
             })
             .await?;
 
