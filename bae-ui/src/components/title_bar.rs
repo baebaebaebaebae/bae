@@ -188,7 +188,18 @@ pub fn TitleBarView(
                             on_search_focus.call(());
                         },
                         onblur: move |_| {
-                            is_search_active.set(false);
+                            // Only narrow the search bar if the document still has focus
+                            // (user clicked elsewhere in the app). Skip when the window
+                            // is deactivating so we don't replay the width animation on
+                            // reactivation.
+                            let doc_has_focus = web_sys_x::window()
+                                .and_then(|w| w.document())
+                                .and_then(|d| d.has_focus().ok())
+                                .unwrap_or(true);
+
+                            if doc_has_focus {
+                                is_search_active.set(false);
+                            }
                             on_search_blur.call(());
                         },
                         onkeydown: move |evt| {
@@ -208,7 +219,7 @@ pub fn TitleBarView(
                     // Search results panel (visible when focused with results)
                     if search_active && !search_results.is_empty() {
                         div {
-                            class: "absolute top-full left-0 mt-1 bg-surface-overlay border border-border-strong rounded-lg shadow-lg w-72 max-h-96 overflow-y-auto z-50",
+                            class: "absolute top-full right-0 mt-1 bg-surface-overlay border border-border-strong rounded-lg shadow-lg w-72 max-h-96 overflow-y-auto z-50",
                             // Prevent mousedown from blurring the search input
                             onmousedown: move |evt| evt.prevent_default(),
                             SearchResultsContent {
