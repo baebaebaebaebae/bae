@@ -309,18 +309,18 @@ unsafe fn setup_app_menu_inner(app: id) {
     app_menu_item.setSubmenu_(app_menu);
     main_menu.addItem_(app_menu_item);
 
-    // Go menu
-    let go_menu = NSMenu::new(nil);
-    go_menu.autorelease();
-    let go_menu_title = NSString::alloc(nil).init_str("Go");
-    let _: () = msg_send![go_menu, setTitle: go_menu_title];
-
     let menu_handler = get_menu_handler();
 
     let command_only = NSEventModifierFlags::NSCommandKeyMask;
     let command_shift =
         NSEventModifierFlags::NSCommandKeyMask | NSEventModifierFlags::NSShiftKeyMask;
     let no_modifiers = NSEventModifierFlags::empty();
+
+    // Go menu
+    let go_menu = NSMenu::new(nil);
+    go_menu.autorelease();
+    let go_menu_title = NSString::alloc(nil).init_str("Go");
+    let _: () = msg_send![go_menu, setTitle: go_menu_title];
 
     // Back
     let back_title = NSString::alloc(nil).init_str("Back");
@@ -442,8 +442,6 @@ unsafe fn setup_app_menu_inner(app: id) {
     let playback_menu_item = NSMenuItem::new(nil);
     playback_menu_item.autorelease();
     playback_menu_item.setSubmenu_(playback_menu);
-    main_menu.addItem_(playback_menu_item);
-
     // Edit menu (enables Cmd+C/V/X/A in webview text fields)
     let edit_menu = NSMenu::new(nil);
     edit_menu.autorelease();
@@ -507,10 +505,13 @@ unsafe fn setup_app_menu_inner(app: id) {
     edit_menu_item.setSubmenu_(edit_menu);
     main_menu.addItem_(edit_menu_item);
 
+    // Add remaining menus
     let go_menu_item = NSMenuItem::new(nil);
     go_menu_item.autorelease();
     go_menu_item.setSubmenu_(go_menu);
     main_menu.addItem_(go_menu_item);
+
+    main_menu.addItem_(playback_menu_item);
 
     app.setMainMenu_(main_menu);
 }
