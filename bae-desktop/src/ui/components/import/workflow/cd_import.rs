@@ -78,8 +78,6 @@ pub fn CdImport() -> Element {
                 }
 
                 // Attempt DiscID lookup
-                import_store.write().is_looking_up = true;
-
                 let mb_discid = import_store
                     .read()
                     .get_metadata()
@@ -94,7 +92,6 @@ pub fn CdImport() -> Element {
                                 DiscIdLookupResult::MultipleMatches(cs) => cs,
                             };
                             check_candidates_for_duplicates(&app, &mut matches).await;
-                            import_store.write().is_looking_up = false;
                             import_store
                                 .write()
                                 .dispatch(CandidateEvent::DiscIdLookupComplete {
@@ -103,7 +100,6 @@ pub fn CdImport() -> Element {
                                 });
                         }
                         Err(e) => {
-                            import_store.write().is_looking_up = false;
                             import_store
                                 .write()
                                 .dispatch(CandidateEvent::DiscIdLookupComplete {
@@ -112,8 +108,6 @@ pub fn CdImport() -> Element {
                                 });
                         }
                     }
-                } else {
-                    import_store.write().is_looking_up = false;
                 }
             });
         }
@@ -385,8 +379,6 @@ pub fn CdImport() -> Element {
                     import_store
                         .write()
                         .dispatch(CandidateEvent::StartDiscIdLookup(mb_discid.clone()));
-                    import_store.write().is_looking_up = true;
-
                     info!("Retrying DiscID lookup...");
                     match lookup_discid(&mb_discid).await {
                         Ok(result) => {
@@ -396,7 +388,6 @@ pub fn CdImport() -> Element {
                                 DiscIdLookupResult::MultipleMatches(cs) => cs,
                             };
                             check_candidates_for_duplicates(&app, &mut matches).await;
-                            import_store.write().is_looking_up = false;
                             import_store
                                 .write()
                                 .dispatch(CandidateEvent::DiscIdLookupComplete {
@@ -405,7 +396,6 @@ pub fn CdImport() -> Element {
                                 });
                         }
                         Err(e) => {
-                            import_store.write().is_looking_up = false;
                             import_store
                                 .write()
                                 .dispatch(CandidateEvent::DiscIdLookupComplete {
@@ -414,8 +404,6 @@ pub fn CdImport() -> Element {
                                 });
                         }
                     }
-                } else {
-                    import_store.write().is_looking_up = false;
                 }
             });
         }

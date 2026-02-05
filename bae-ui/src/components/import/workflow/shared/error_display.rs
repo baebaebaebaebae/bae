@@ -12,7 +12,6 @@ use dioxus::prelude::*;
 #[component]
 pub fn DiscIdLookupErrorView(
     error_message: Option<String>,
-    is_retrying: bool,
     on_retry: EventHandler<()>,
     #[props(default)] disc_id: Option<String>,
     #[props(default)] on_skip: Option<EventHandler<()>>,
@@ -45,14 +44,8 @@ pub fn DiscIdLookupErrorView(
                     Button {
                         variant: ButtonVariant::Primary,
                         size: ButtonSize::Small,
-                        disabled: is_retrying,
-                        loading: is_retrying,
                         onclick: move |_| on_retry.call(()),
-                        if is_retrying {
-                            "Retrying..."
-                        } else {
-                            "Retry Lookup"
-                        }
+                        "Retry Lookup"
                     }
                     Button {
                         variant: ButtonVariant::Outline,
@@ -75,14 +68,8 @@ pub fn DiscIdLookupErrorView(
                             Button {
                                 variant: ButtonVariant::Primary,
                                 size: ButtonSize::Small,
-                                disabled: is_retrying,
-                                loading: is_retrying,
                                 onclick: move |_| on_retry.call(()),
-                                if is_retrying {
-                                    "Retrying..."
-                                } else {
-                                    "Retry Lookup"
-                                }
+                                "Retry Lookup"
                             }
                         }
                     }

@@ -107,9 +107,13 @@ pub fn FolderImport() -> Element {
             let app = app.clone();
             spawn(async move {
                 let mut import_store = app.state.import();
+                let candidate_key = import_store.read().current_candidate_key.clone();
                 let search_state = import_store.read().get_search_state();
                 let metadata = import_store.read().get_metadata();
 
+                let Some(candidate_key) = candidate_key else {
+                    return;
+                };
                 let Some(search_state) = search_state else {
                     return;
                 };
@@ -129,108 +133,108 @@ pub fn FolderImport() -> Element {
                             && year.trim().is_empty()
                             && label.trim().is_empty()
                         {
-                            import_store
-                                .write()
-                                .dispatch(CandidateEvent::SearchComplete {
+                            import_store.write().dispatch_to_candidate(
+                                &candidate_key,
+                                CandidateEvent::SearchComplete {
                                     results: vec![],
                                     error: Some("Please fill in at least one field".to_string()),
-                                });
+                                },
+                            );
                             return;
                         }
 
-                        import_store.write().dispatch(CandidateEvent::StartSearch);
+                        import_store
+                            .write()
+                            .dispatch_to_candidate(&candidate_key, CandidateEvent::StartSearch);
 
                         let result =
                             search_general(metadata, source, artist, album, year, label).await;
-                        match result {
+                        let event = match result {
                             Ok(mut candidates) => {
                                 check_candidates_for_duplicates(&app, &mut candidates).await;
-                                import_store
-                                    .write()
-                                    .dispatch(CandidateEvent::SearchComplete {
-                                        results: candidates,
-                                        error: None,
-                                    });
+                                CandidateEvent::SearchComplete {
+                                    results: candidates,
+                                    error: None,
+                                }
                             }
-                            Err(e) => {
-                                import_store
-                                    .write()
-                                    .dispatch(CandidateEvent::SearchComplete {
-                                        results: vec![],
-                                        error: Some(format!("Search failed: {}", e)),
-                                    });
-                            }
-                        }
+                            Err(e) => CandidateEvent::SearchComplete {
+                                results: vec![],
+                                error: Some(format!("Search failed: {}", e)),
+                            },
+                        };
+                        import_store
+                            .write()
+                            .dispatch_to_candidate(&candidate_key, event);
                     }
                     bae_ui::display_types::SearchTab::CatalogNumber => {
                         let catno = search_state.search_catalog_number.clone();
                         if catno.trim().is_empty() {
-                            import_store
-                                .write()
-                                .dispatch(CandidateEvent::SearchComplete {
+                            import_store.write().dispatch_to_candidate(
+                                &candidate_key,
+                                CandidateEvent::SearchComplete {
                                     results: vec![],
                                     error: Some("Please enter a catalog number".to_string()),
-                                });
+                                },
+                            );
                             return;
                         }
 
-                        import_store.write().dispatch(CandidateEvent::StartSearch);
+                        import_store
+                            .write()
+                            .dispatch_to_candidate(&candidate_key, CandidateEvent::StartSearch);
 
                         let result = search_by_catalog_number(metadata, source, catno).await;
-                        match result {
+                        let event = match result {
                             Ok(mut candidates) => {
                                 check_candidates_for_duplicates(&app, &mut candidates).await;
-                                import_store
-                                    .write()
-                                    .dispatch(CandidateEvent::SearchComplete {
-                                        results: candidates,
-                                        error: None,
-                                    });
+                                CandidateEvent::SearchComplete {
+                                    results: candidates,
+                                    error: None,
+                                }
                             }
-                            Err(e) => {
-                                import_store
-                                    .write()
-                                    .dispatch(CandidateEvent::SearchComplete {
-                                        results: vec![],
-                                        error: Some(format!("Search failed: {}", e)),
-                                    });
-                            }
-                        }
+                            Err(e) => CandidateEvent::SearchComplete {
+                                results: vec![],
+                                error: Some(format!("Search failed: {}", e)),
+                            },
+                        };
+                        import_store
+                            .write()
+                            .dispatch_to_candidate(&candidate_key, event);
                     }
                     bae_ui::display_types::SearchTab::Barcode => {
                         let barcode = search_state.search_barcode.clone();
                         if barcode.trim().is_empty() {
-                            import_store
-                                .write()
-                                .dispatch(CandidateEvent::SearchComplete {
+                            import_store.write().dispatch_to_candidate(
+                                &candidate_key,
+                                CandidateEvent::SearchComplete {
                                     results: vec![],
                                     error: Some("Please enter a barcode".to_string()),
-                                });
+                                },
+                            );
                             return;
                         }
 
-                        import_store.write().dispatch(CandidateEvent::StartSearch);
+                        import_store
+                            .write()
+                            .dispatch_to_candidate(&candidate_key, CandidateEvent::StartSearch);
 
                         let result = search_by_barcode(metadata, source, barcode).await;
-                        match result {
+                        let event = match result {
                             Ok(mut candidates) => {
                                 check_candidates_for_duplicates(&app, &mut candidates).await;
-                                import_store
-                                    .write()
-                                    .dispatch(CandidateEvent::SearchComplete {
-                                        results: candidates,
-                                        error: None,
-                                    });
+                                CandidateEvent::SearchComplete {
+                                    results: candidates,
+                                    error: None,
+                                }
                             }
-                            Err(e) => {
-                                import_store
-                                    .write()
-                                    .dispatch(CandidateEvent::SearchComplete {
-                                        results: vec![],
-                                        error: Some(format!("Search failed: {}", e)),
-                                    });
-                            }
-                        }
+                            Err(e) => CandidateEvent::SearchComplete {
+                                results: vec![],
+                                error: Some(format!("Search failed: {}", e)),
+                            },
+                        };
+                        import_store
+                            .write()
+                            .dispatch_to_candidate(&candidate_key, event);
                     }
                 }
             });
@@ -274,6 +278,11 @@ pub fn FolderImport() -> Element {
             let app = app.clone();
             spawn(async move {
                 let mut import_store = app.state.import();
+                let candidate_key = import_store.read().current_candidate_key.clone();
+
+                let Some(candidate_key) = candidate_key else {
+                    return;
+                };
 
                 let mb_discid = import_store
                     .read()
@@ -281,13 +290,13 @@ pub fn FolderImport() -> Element {
                     .and_then(|m| m.mb_discid.clone());
 
                 if let Some(mb_discid) = mb_discid {
-                    import_store
-                        .write()
-                        .dispatch(CandidateEvent::StartDiscIdLookup(mb_discid.clone()));
-                    import_store.write().is_looking_up = true;
+                    import_store.write().dispatch_to_candidate(
+                        &candidate_key,
+                        CandidateEvent::StartDiscIdLookup(mb_discid.clone()),
+                    );
 
                     info!("Retrying DiscID lookup...");
-                    match lookup_discid(&mb_discid).await {
+                    let event = match lookup_discid(&mb_discid).await {
                         Ok(result) => {
                             let mut matches = match result {
                                 DiscIdLookupResult::NoMatches => vec![],
@@ -295,26 +304,20 @@ pub fn FolderImport() -> Element {
                                 DiscIdLookupResult::MultipleMatches(cs) => cs,
                             };
                             check_candidates_for_duplicates(&app, &mut matches).await;
-                            import_store.write().is_looking_up = false;
-                            import_store
-                                .write()
-                                .dispatch(CandidateEvent::DiscIdLookupComplete {
-                                    matches,
-                                    error: None,
-                                });
+                            CandidateEvent::DiscIdLookupComplete {
+                                matches,
+                                error: None,
+                            }
                         }
-                        Err(e) => {
-                            import_store.write().is_looking_up = false;
-                            import_store
-                                .write()
-                                .dispatch(CandidateEvent::DiscIdLookupComplete {
-                                    matches: vec![],
-                                    error: Some(e),
-                                });
-                        }
-                    }
-                } else {
-                    import_store.write().is_looking_up = false;
+                        Err(e) => CandidateEvent::DiscIdLookupComplete {
+                            matches: vec![],
+                            error: Some(e),
+                        },
+                    };
+
+                    import_store
+                        .write()
+                        .dispatch_to_candidate(&candidate_key, event);
                 }
             });
         }

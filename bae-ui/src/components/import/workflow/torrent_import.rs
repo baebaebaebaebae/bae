@@ -263,7 +263,6 @@ fn TorrentIdentifyContent(
     on_detect_metadata: EventHandler<()>,
     on_view_in_library: EventHandler<String>,
 ) -> Element {
-    let is_looking_up = *state.is_looking_up().read();
     let current_key = state.current_candidate_key().read().clone();
     let candidate_states = state.candidate_states().read().clone();
     let cs = current_key.as_ref().and_then(|k| candidate_states.get(k));
@@ -313,11 +312,7 @@ fn TorrentIdentifyContent(
                 },
                 IdentifyMode::ManualSearch => rsx! {
                     if discid_lookup_error.is_some() {
-                        DiscIdLookupErrorView {
-                            error_message: discid_lookup_error,
-                            is_retrying: is_looking_up,
-                            on_retry: on_retry_discid_lookup,
-                        }
+                        DiscIdLookupErrorView { error_message: discid_lookup_error, on_retry: on_retry_discid_lookup }
                     }
                     if show_metadata_detection_prompt {
                         MetadataDetectionPromptView { on_detect: on_detect_metadata }

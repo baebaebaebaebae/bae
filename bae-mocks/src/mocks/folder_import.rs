@@ -589,7 +589,6 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         current_candidate_key: current_key,
         candidate_states,
         loading_candidates: HashMap::new(),
-        is_looking_up: false,
         folder_files: folder_files.clone(),
         is_scanning_candidates: false,
         discid_lookup_attempted: std::collections::HashSet::new(),

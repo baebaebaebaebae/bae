@@ -230,7 +230,6 @@ fn CdIdentifyContent(
     on_retry_discid_lookup: EventHandler<()>,
     on_view_in_library: EventHandler<String>,
 ) -> Element {
-    let is_looking_up = *state.is_looking_up().read();
     let toc_info = state
         .cd_toc_info()
         .read()
@@ -257,7 +256,7 @@ fn CdIdentifyContent(
                 path: cd_path,
                 on_clear,
                 on_reveal: |_| {},
-                CdTocDisplayView { toc: toc_info, is_reading: is_looking_up }
+                CdTocDisplayView { toc: toc_info }
             }
             match identify_mode {
                 IdentifyMode::Created | IdentifyMode::DiscIdLookup(_) => rsx! {},
@@ -272,11 +271,7 @@ fn CdIdentifyContent(
                 },
                 IdentifyMode::ManualSearch => rsx! {
                     if discid_lookup_error.is_some() {
-                        DiscIdLookupErrorView {
-                            error_message: discid_lookup_error,
-                            is_retrying: is_looking_up,
-                            on_retry: on_retry_discid_lookup,
-                        }
+                        DiscIdLookupErrorView { error_message: discid_lookup_error, on_retry: on_retry_discid_lookup }
                     }
                     ManualSearchPanelView {
                         state,
@@ -400,7 +395,7 @@ fn CdConfirmContent(
                 path: cd_path,
                 on_clear,
                 on_reveal: |_| {},
-                CdTocDisplayView { toc: toc_info, is_reading: false }
+                CdTocDisplayView { toc: toc_info }
             }
             ConfirmationView {
                 candidate: candidate.clone(),
