@@ -9,7 +9,7 @@ use crate::ui::LinkCard;
 use crate::Route;
 use bae_ui::{
     Button, ButtonSize, ButtonVariant, MenuItem, Pill, PillVariant, Segment, SegmentedControl,
-    TextInput, TextInputSize, TooltipBubble,
+    TextInput, TextInputSize, TextInputType, TooltipBubble,
 };
 use dioxus::prelude::*;
 
@@ -113,11 +113,13 @@ pub fn MockIndex() -> Element {
                             value: "Sample text".to_string(),
                             on_input: |_| {},
                             size: TextInputSize::Medium,
+                            input_type: TextInputType::Text,
                         }
                         TextInput {
                             value: "".to_string(),
                             on_input: |_| {},
                             size: TextInputSize::Small,
+                            input_type: TextInputType::Text,
                             placeholder: "Placeholder...",
                         }
                     }

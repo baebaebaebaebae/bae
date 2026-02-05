@@ -73,7 +73,7 @@ pub use settings::{
     SettingsView, StorageLocation, StorageProfile, StorageProfileEditorView,
     StorageProfilesSectionView, SubsonicSectionView,
 };
-pub use text_input::{TextInput, TextInputSize};
+pub use text_input::{TextInput, TextInputSize, TextInputType};
 pub use title_bar::{
     AlbumResult, ArtistResult, GroupedSearchResults, NavItem, SearchAction, TitleBarView,
     TrackResult, SEARCH_INPUT_ID,

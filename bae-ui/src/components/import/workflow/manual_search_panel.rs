@@ -5,7 +5,7 @@ use super::search_source_selector::SearchSourceSelectorView;
 use super::{DiscIdPill, DiscIdSource, LoadingIndicator};
 use crate::components::button::ButtonVariant;
 use crate::components::segmented_control::{Segment, SegmentedControl};
-use crate::components::{Button, ButtonSize, TextInput, TextInputSize};
+use crate::components::{Button, ButtonSize, TextInput, TextInputSize, TextInputType};
 use crate::display_types::{MatchCandidate, SearchSource, SearchTab};
 use crate::floating_ui::Placement;
 use crate::stores::import::{CandidateState, ImportState, ImportStateStoreExt};
@@ -183,6 +183,7 @@ pub fn ManualSearchPanelView(
                                         value: artist,
                                         on_input: move |v| on_artist_change.call(v),
                                         size: TextInputSize::Medium,
+                                        input_type: TextInputType::Text,
                                         autofocus: true,
                                         disabled: searching,
                                     }
@@ -193,6 +194,7 @@ pub fn ManualSearchPanelView(
                                         value: album,
                                         on_input: move |v| on_album_change.call(v),
                                         size: TextInputSize::Medium,
+                                        input_type: TextInputType::Text,
                                         disabled: searching,
                                     }
                                 }
@@ -216,6 +218,7 @@ pub fn ManualSearchPanelView(
                                         value: catalog,
                                         on_input: move |v| on_catalog_number_change.call(v),
                                         size: TextInputSize::Medium,
+                                        input_type: TextInputType::Text,
                                         placeholder: "e.g. WPCR-80001",
                                         autofocus: true,
                                         disabled: searching,
@@ -241,6 +244,7 @@ pub fn ManualSearchPanelView(
                                         value: barcode,
                                         on_input: move |v| on_barcode_change.call(v),
                                         size: TextInputSize::Medium,
+                                        input_type: TextInputType::Text,
                                         placeholder: "e.g. 4943674251780",
                                         autofocus: true,
                                         disabled: searching,

@@ -199,6 +199,9 @@ pub fn TitleBarView(
                         r#type: "text",
                         placeholder: "Search...",
                         autocomplete: "off",
+                        autocapitalize: "off",
+                        autocorrect: "off",
+                        spellcheck: false,
                         class: "w-full h-7 px-2 bg-surface-input border border-border-default rounded text-white text-xs placeholder-gray-400 focus:outline-none focus:border-border-strong",
                         value: "{search_value}",
                         oninput: move |evt| {

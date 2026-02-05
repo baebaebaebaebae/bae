@@ -1,6 +1,8 @@
 //! Discogs section view
 
-use crate::components::{Button, ButtonSize, ButtonVariant};
+use crate::components::{
+    Button, ButtonSize, ButtonVariant, TextInput, TextInputSize, TextInputType,
+};
 use dioxus::prelude::*;
 
 /// Discogs API key configuration
@@ -51,12 +53,12 @@ pub fn DiscogsSectionView(
                                 label { class: "block text-sm font-medium text-gray-400 mb-2",
                                     "API Key"
                                 }
-                                input {
-                                    r#type: "password",
-                                    class: "w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent",
+                                TextInput {
+                                    value: discogs_key_value.to_string(),
+                                    on_input: move |v| on_key_change.call(v),
+                                    size: TextInputSize::Medium,
+                                    input_type: TextInputType::Password,
                                     placeholder: "Enter your Discogs API key",
-                                    value: "{discogs_key_value}",
-                                    oninput: move |e| on_key_change.call(e.value()),
                                 }
                             }
 

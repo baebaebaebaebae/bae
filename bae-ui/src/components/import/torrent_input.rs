@@ -1,7 +1,9 @@
 //! Torrent input view component
 
 use crate::components::icons::UploadIcon;
-use crate::components::{Button, ButtonSize, ButtonVariant, TextInput, TextInputSize};
+use crate::components::{
+    Button, ButtonSize, ButtonVariant, TextInput, TextInputSize, TextInputType,
+};
 use dioxus::prelude::*;
 
 /// Torrent input mode
@@ -81,6 +83,7 @@ pub fn TorrentInputView(
                                 value: magnet_input(),
                                 on_input: move |v| magnet_input.set(v),
                                 size: TextInputSize::Medium,
+                                input_type: TextInputType::Text,
                                 placeholder: "magnet:?xt=urn:btih:...",
                                 monospace: true,
                             }
