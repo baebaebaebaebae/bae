@@ -331,6 +331,20 @@ impl LibraryManager {
     ) -> Result<Vec<DbArtist>, LibraryError> {
         Ok(self.database.get_artists_for_track(track_id).await?)
     }
+    /// Get artist by ID
+    pub async fn get_artist_by_id(
+        &self,
+        artist_id: &str,
+    ) -> Result<Option<DbArtist>, LibraryError> {
+        Ok(self.database.get_artist_by_id(artist_id).await?)
+    }
+    /// Get albums for an artist
+    pub async fn get_albums_for_artist(
+        &self,
+        artist_id: &str,
+    ) -> Result<Vec<DbAlbum>, LibraryError> {
+        Ok(self.database.get_albums_for_artist(artist_id).await?)
+    }
     /// Add an image to a release
     pub async fn add_image(&self, image: &DbImage) -> Result<(), LibraryError> {
         self.database.insert_image(image).await?;

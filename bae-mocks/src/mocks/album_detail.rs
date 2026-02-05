@@ -53,6 +53,7 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
         year: Some(2023),
         cover_url: Some("/covers/the-midnight-signal_neon-frequencies.png".to_string()),
         is_compilation: false,
+        date_added: chrono::Utc::now(),
     };
 
     let artists = vec![Artist {
@@ -186,6 +187,7 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
                 on_track_add_next: |_| {},
                 on_track_add_to_queue: |_| {},
                 on_track_export: |_| {},
+                on_artist_click: |_| {},
                 on_play_album: |_| {},
                 on_add_album_to_queue: |_| {},
             }

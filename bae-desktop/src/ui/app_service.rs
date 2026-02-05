@@ -26,8 +26,9 @@ use bae_core::torrent;
 use bae_ui::display_types::{QueueItem, TrackImportState};
 use bae_ui::stores::{
     ActiveImport, ActiveImportsUiStateStoreExt, AlbumDetailStateStoreExt, AppState,
-    AppStateStoreExt, ConfigStateStoreExt, ImportOperationStatus, LibraryStateStoreExt,
-    PlaybackStatus, PlaybackUiStateStoreExt, PrepareStep, RepeatMode, StorageProfilesStateStoreExt,
+    AppStateStoreExt, ArtistDetailStateStoreExt, ConfigStateStoreExt, ImportOperationStatus,
+    LibraryStateStoreExt, PlaybackStatus, PlaybackUiStateStoreExt, PrepareStep, RepeatMode,
+    StorageProfilesStateStoreExt,
 };
 use bae_ui::StorageProfile;
 use dioxus::prelude::*;
@@ -507,6 +508,21 @@ impl AppService {
     }
 
     // =========================================================================
+    // Artist Detail Methods
+    // =========================================================================
+
+    /// Load artist detail data into Store (called when navigating to artist page)
+    pub fn load_artist_detail(&self, artist_id: &str) {
+        let state = self.state;
+        let library_manager = self.library_manager.clone();
+        let artist_id = artist_id.to_string();
+
+        spawn(async move {
+            load_artist_detail(&state, &library_manager, &artist_id).await;
+        });
+    }
+
+    // =========================================================================
     // Config Methods
     // =========================================================================
 
@@ -912,6 +928,68 @@ async fn load_album_detail(
     }
 
     state.album_detail().loading().set(false);
+}
+
+/// Load artist detail data into the Store
+async fn load_artist_detail(
+    state: &Store<AppState>,
+    library_manager: &SharedLibraryManager,
+    artist_id: &str,
+) {
+    state.artist_detail().loading().set(true);
+    state.artist_detail().error().set(None);
+
+    // Load artist
+    match library_manager.get().get_artist_by_id(artist_id).await {
+        Ok(Some(db_artist)) => {
+            state
+                .artist_detail()
+                .artist()
+                .set(Some(artist_from_db_ref(&db_artist)));
+        }
+        Ok(None) => {
+            state
+                .artist_detail()
+                .error()
+                .set(Some("Artist not found".to_string()));
+            state.artist_detail().loading().set(false);
+            return;
+        }
+        Err(e) => {
+            state
+                .artist_detail()
+                .error()
+                .set(Some(format!("Failed to load artist: {}", e)));
+            state.artist_detail().loading().set(false);
+            return;
+        }
+    };
+
+    // Load albums for this artist
+    match library_manager.get().get_albums_for_artist(artist_id).await {
+        Ok(db_albums) => {
+            let mut artists_map = HashMap::new();
+            for album in &db_albums {
+                if let Ok(db_artists) = library_manager.get().get_artists_for_album(&album.id).await
+                {
+                    let artists = db_artists.iter().map(artist_from_db_ref).collect();
+                    artists_map.insert(album.id.clone(), artists);
+                }
+            }
+            let display_albums = db_albums.iter().map(album_from_db_ref).collect();
+
+            state.artist_detail().albums().set(display_albums);
+            state.artist_detail().artists_by_album().set(artists_map);
+        }
+        Err(e) => {
+            state
+                .artist_detail()
+                .error()
+                .set(Some(format!("Failed to load albums: {}", e)));
+        }
+    }
+
+    state.artist_detail().loading().set(false);
 }
 
 /// Convert bae_core ImportOperationStatus to bae_ui ImportOperationStatus

@@ -1,6 +1,7 @@
 //! Demo and mock pages
 
 mod album_detail;
+mod artist_detail;
 mod import;
 mod layout;
 mod library;
@@ -9,6 +10,7 @@ mod mock_index;
 mod settings;
 
 pub use album_detail::AlbumDetail;
+pub use artist_detail::ArtistDetail;
 pub use import::Import;
 pub use layout::DemoLayout;
 pub use library::Library;

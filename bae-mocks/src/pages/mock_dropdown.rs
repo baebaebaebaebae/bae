@@ -13,6 +13,7 @@ fn generate_test_albums() -> Vec<(Album, Vec<Artist>)> {
                 year: Some(2020 + (i % 5)),
                 cover_url: None,
                 is_compilation: false,
+                date_added: chrono::Utc::now(),
             };
             let artist = Artist {
                 id: format!("artist-{}", i),
@@ -48,6 +49,7 @@ pub fn MockDropdownTest() -> Element {
                         album: album.clone(),
                         artists,
                         on_click: |_| {},
+                        on_artist_click: |_| {},
                         on_play: |_| {},
                         on_add_to_queue: |_| {},
                     }

@@ -174,6 +174,87 @@ impl Database {
         }
         Ok(artists)
     }
+    /// Get artist by ID
+    pub async fn get_artist_by_id(&self, artist_id: &str) -> Result<Option<DbArtist>, sqlx::Error> {
+        let row = sqlx::query("SELECT * FROM artists WHERE id = ?")
+            .bind(artist_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| DbArtist {
+            id: row.get("id"),
+            name: row.get("name"),
+            sort_name: row.get("sort_name"),
+            discogs_artist_id: row.get("discogs_artist_id"),
+            bandcamp_artist_id: row.get("bandcamp_artist_id"),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                .unwrap()
+                .with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+                .unwrap()
+                .with_timezone(&Utc),
+        }))
+    }
+    /// Get albums for an artist (via album_artists join table)
+    pub async fn get_albums_for_artist(
+        &self,
+        artist_id: &str,
+    ) -> Result<Vec<DbAlbum>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_image_id, a.cover_art_url,
+                a.is_compilation, a.created_at, a.updated_at,
+                ad.discogs_master_id, ad.discogs_release_id,
+                amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
+            FROM albums a
+            JOIN album_artists aa ON a.id = aa.album_id
+            LEFT JOIN album_discogs ad ON a.id = ad.album_id
+            LEFT JOIN album_musicbrainz amb ON a.id = amb.album_id
+            WHERE aa.artist_id = ?
+            ORDER BY a.year DESC, a.title
+            "#,
+        )
+        .bind(artist_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut albums = Vec::new();
+        for row in rows {
+            let discogs_master_id: Option<String> = row.get("discogs_master_id");
+            let discogs_release_id: Option<String> = row.get("discogs_release_id");
+            let discogs_release =
+                discogs_release_id.map(|rid| crate::db::models::DiscogsMasterRelease {
+                    master_id: discogs_master_id,
+                    release_id: rid,
+                });
+            let mb_release_group_id: Option<String> = row.get("musicbrainz_release_group_id");
+            let mb_release_id: Option<String> = row.get("musicbrainz_release_id");
+            let musicbrainz_release = match (mb_release_group_id, mb_release_id) {
+                (Some(rgid), Some(rid)) => Some(crate::db::models::MusicBrainzRelease {
+                    release_group_id: rgid,
+                    release_id: rid,
+                }),
+                _ => None,
+            };
+            albums.push(DbAlbum {
+                id: row.get("id"),
+                title: row.get("title"),
+                year: row.get("year"),
+                discogs_release,
+                musicbrainz_release,
+                bandcamp_album_id: row.get("bandcamp_album_id"),
+                cover_image_id: row.get("cover_image_id"),
+                cover_art_url: row.get("cover_art_url"),
+                is_compilation: row.get("is_compilation"),
+                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                    .unwrap()
+                    .with_timezone(&Utc),
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+                    .unwrap()
+                    .with_timezone(&Utc),
+            });
+        }
+        Ok(albums)
+    }
     /// Insert a new album
     pub async fn insert_album(&self, album: &DbAlbum) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;

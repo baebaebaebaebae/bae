@@ -86,6 +86,7 @@ fn get_demo_data() -> &'static DemoData {
                 year: Some(album_data.year),
                 cover_url: Some(cover_url(&album_data.artist, &album_data.title)),
                 is_compilation: false,
+                date_added: chrono::Utc::now(),
             });
 
             // Link artist to album

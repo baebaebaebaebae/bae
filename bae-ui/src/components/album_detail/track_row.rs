@@ -30,6 +30,7 @@ pub fn TrackRow(
     on_add_next: EventHandler<String>,
     on_add_to_queue: EventHandler<String>,
     on_export: EventHandler<String>,
+    on_artist_click: EventHandler<String>,
 ) -> Element {
     // Read track data at this leaf level
     let track = track.read();
@@ -134,11 +135,20 @@ pub fn TrackRow(
                     p {
                         class: "text-sm",
                         class: if is_importing { "text-gray-600" } else { "text-gray-400" },
-                        {
-                            if artists.len() == 1 {
-                                artists[0].name.clone()
-                            } else {
-                                artists.iter().map(|a| a.name.as_str()).collect::<Vec<_>>().join(", ")
+                        for (i , artist) in artists.iter().enumerate() {
+                            if i > 0 {
+                                ", "
+                            }
+                            span {
+                                class: if is_importing { "" } else { "hover:text-white hover:underline transition-colors cursor-pointer" },
+                                onclick: {
+                                    let artist_id = artist.id.clone();
+                                    move |evt: Event<MouseData>| {
+                                        evt.stop_propagation();
+                                        on_artist_click.call(artist_id.clone());
+                                    }
+                                },
+                                "{artist.name}"
                             }
                         }
                     }

@@ -15,6 +15,8 @@ pub fn AlbumCard(
     artists: Vec<Artist>,
     // Navigation callback - called with album_id when card is clicked
     on_click: EventHandler<String>,
+    // Navigation callback - called with artist_id when artist name is clicked
+    on_artist_click: EventHandler<String>,
     // Action callbacks
     on_play: EventHandler<String>,
     on_add_to_queue: EventHandler<String>,
@@ -28,18 +30,6 @@ pub fn AlbumCard(
     let is_open: ReadSignal<bool> = show_dropdown.into();
     // Use album_id for anchor to ensure uniqueness even if component is recycled
     let anchor_id = format!("album-card-btn-{}", album_id);
-
-    let artist_name = if artists.is_empty() {
-        "Unknown Artist".to_string()
-    } else if artists.len() == 1 {
-        artists[0].name.clone()
-    } else {
-        artists
-            .iter()
-            .map(|a| a.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
 
     // Note: use overflow-clip (not overflow-hidden) to clip rounded corners without blocking scroll propagation
     let card_class = "bg-gray-800 rounded-lg overflow-clip shadow-lg hover:shadow-xl transition-shadow duration-300 cursor-pointer group relative";
@@ -89,10 +79,27 @@ pub fn AlbumCard(
                     title: "{album_title}",
                     "{album_title}"
                 }
-                p {
-                    class: "text-gray-400 text-sm truncate",
-                    title: "{artist_name}",
-                    "{artist_name}"
+                p { class: "text-gray-400 text-sm truncate",
+                    if artists.is_empty() {
+                        "Unknown Artist"
+                    } else {
+                        for (i , artist) in artists.iter().enumerate() {
+                            if i > 0 {
+                                ", "
+                            }
+                            span {
+                                class: "hover:text-white hover:underline transition-colors cursor-pointer",
+                                onclick: {
+                                    let artist_id = artist.id.clone();
+                                    move |evt: Event<MouseData>| {
+                                        evt.stop_propagation();
+                                        on_artist_click.call(artist_id.clone());
+                                    }
+                                },
+                                "{artist.name}"
+                            }
+                        }
+                    }
                 }
                 if let Some(year) = album_year {
                     p { class: "text-gray-500 text-xs mt-1", "{year}" }

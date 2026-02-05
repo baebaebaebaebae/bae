@@ -22,6 +22,8 @@ pub enum Route {
     Library {},
     #[route("/album/:album_id?:release_id")]
     AlbumDetail { album_id: String, release_id: String },
+    #[route("/artist/:artist_id")]
+    ArtistDetail { artist_id: String },
     #[route("/import")]
     ImportWorkflowManager {},
     #[route("/settings")]

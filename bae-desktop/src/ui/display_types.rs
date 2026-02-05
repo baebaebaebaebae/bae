@@ -19,6 +19,7 @@ pub fn album_from_db_ref(db: &DbAlbum) -> Album {
         year: db.year,
         cover_url,
         is_compilation: db.is_compilation,
+        date_added: db.created_at,
     }
 }
 

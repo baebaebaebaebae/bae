@@ -719,6 +719,44 @@ pub fn LayersIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element 
     }
 }
 
+/// Arrow up icon (sort ascending)
+#[component]
+pub fn ArrowUpIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
+    rsx! {
+        svg {
+            class: "{class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "m5 12 7-7 7 7" }
+            path { d: "M12 19V5" }
+        }
+    }
+}
+
+/// Arrow down icon (sort descending)
+#[component]
+pub fn ArrowDownIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
+    rsx! {
+        svg {
+            class: "{class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M12 5v14" }
+            path { d: "m19 12-7 7-7-7" }
+        }
+    }
+}
+
 /// Settings gear icon
 #[component]
 pub fn SettingsIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
