@@ -321,7 +321,7 @@ pub fn TitleBarView(
                             handler.call(());
                         }
                     },
-                    placement: Placement::Bottom,
+                    placement: Placement::BottomStart,
                     class: "w-96 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-clip",
                     {content.clone()}
                 }

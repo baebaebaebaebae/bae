@@ -49,6 +49,16 @@ pub fn TitleBar() -> Element {
     // Read import count for split button
     let import_count = app.state.active_imports().imports().read().len();
 
+    // Auto-close dropdown when all imports are dismissed
+    {
+        let imports_store = app.state.active_imports().imports();
+        use_effect(move || {
+            if imports_store.read().is_empty() {
+                imports_dropdown_open.set(false);
+            }
+        });
+    }
+
     // Search effect: when query changes, search the DB or show suggestions
     use_effect({
         let library_manager = app.library_manager.clone();
