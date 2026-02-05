@@ -136,7 +136,7 @@ pub fn TitleBarView(
         // Title bar
         div {
             id: "title-bar",
-            class: "shrink-0 h-10 bg-surface-raised flex items-center justify-between px-2 cursor-default border-b border-border-subtle",
+            class: "shrink-0 grow h-10 bg-surface-raised flex items-center justify-between px-2 cursor-default border-b border-border-subtle",
             style: "padding-left: {left_padding}px;",
             onmousedown: move |_| {
                 if let Some(handler) = &on_bar_mousedown {
@@ -321,7 +321,7 @@ pub fn TitleBarView(
                             handler.call(());
                         }
                     },
-                    placement: Placement::Bottom,
+                    placement: Placement::BottomStart,
                     class: "w-96 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-clip",
                     {content.clone()}
                 }
@@ -350,7 +350,7 @@ fn ImportSplitButton(
 
     rsx! {
         span {
-            class: "inline-flex items-center",
+            class: "inline-flex items-stretch",
             onmousedown: move |evt| evt.stop_propagation(),
 
             // Left part: label
@@ -365,14 +365,14 @@ fn ImportSplitButton(
             }
 
             // Divider
-            span { class: "w-px h-4 bg-gray-600" }
+            span { class: "w-px bg-gray-600 self-stretch my-1" }
 
             // Right part: chevron
             ChromelessButton {
                 id: Some(chevron_button_id.clone()),
                 class: Some(
                     format!(
-                        "text-[12px] cursor-pointer px-1 py-1.5 rounded-r {active_class} {right_hover} transition-colors",
+                        "flex items-center justify-center text-[12px] cursor-pointer px-1 py-1.5 rounded-r {active_class} {right_hover} transition-colors",
                     ),
                 ),
                 onclick: move |_| on_chevron_click.call(()),

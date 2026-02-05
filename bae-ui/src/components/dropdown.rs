@@ -94,7 +94,7 @@ pub fn Dropdown(
             // Reset position to invisible first (prevents flash at old position)
             let _ = floating.set_attribute(
                 "style",
-                "position: absolute; top: 0; left: 0; width: max-content; margin: 0; opacity: 0;",
+                "position: absolute; top: 0; left: 0; min-width: max-content; margin: 0; opacity: 0;",
             );
 
             // Mark as programmatic so ontoggle knows to ignore
@@ -122,7 +122,7 @@ pub fn Dropdown(
                         floating_ui::compute_position(&anchor, &floating, options).await
                     {
                         let style = format!(
-                            "position: absolute; top: 0; left: 0; width: max-content; margin: 0; transform: translate({}px, {}px); opacity: 1;",
+                            "position: absolute; top: 0; left: 0; min-width: max-content; margin: 0; transform: translate({}px, {}px); opacity: 1;",
                             result.x, result.y
                         );
                         let _ = floating.set_attribute("style", &style);
@@ -153,7 +153,7 @@ pub fn Dropdown(
             id: "{popover_id}",
             popover: "auto",
             class: "{dropdown_class}",
-            style: "position: absolute; top: 0; left: 0; width: max-content; margin: 0; opacity: 0;",
+            style: "position: absolute; top: 0; left: 0; min-width: max-content; margin: 0; opacity: 0;",
             ontoggle: move |_| {
                 // If we triggered this toggle programmatically, ignore it
                 if programmatic_toggle() {
