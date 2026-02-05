@@ -28,6 +28,7 @@ pub fn ManualSearchPanelView(
     on_cancel_search: EventHandler<()>,
     on_confirm: EventHandler<MatchCandidate>,
     on_retry_cover: EventHandler<usize>,
+    on_view_in_library: EventHandler<String>,
     on_switch_to_exact_matches: EventHandler<String>,
 ) -> Element {
     // Read state at this leaf component
@@ -270,6 +271,7 @@ pub fn ManualSearchPanelView(
                     on_select: move |index| on_match_select.call(index),
                     on_confirm,
                     on_retry_cover,
+                    on_view_in_library,
                     confirm_button_text: "Select",
                 }
             }

@@ -66,7 +66,7 @@ pub struct CdImportViewProps {
     pub on_confirm: EventHandler<()>,
     pub on_configure_storage: EventHandler<()>,
     pub on_clear: EventHandler<()>,
-    pub on_view_duplicate: EventHandler<String>,
+    pub on_view_in_library: EventHandler<String>,
 }
 
 /// CD import workflow view
@@ -116,6 +116,7 @@ pub fn CdImportView(props: CdImportViewProps) -> Element {
                             on_manual_confirm: props.on_manual_confirm,
                             on_retry_cover: props.on_retry_cover,
                             on_retry_discid_lookup: props.on_retry_discid_lookup,
+                            on_view_in_library: props.on_view_in_library,
                         }
                     }
                 },
@@ -129,7 +130,7 @@ pub fn CdImportView(props: CdImportViewProps) -> Element {
                         on_edit: props.on_edit,
                         on_confirm: props.on_confirm,
                         on_configure_storage: props.on_configure_storage,
-                        on_view_duplicate: props.on_view_duplicate,
+                        on_view_in_library: props.on_view_in_library,
                     }
                 },
             }
@@ -160,6 +161,7 @@ fn CdIdentifyContent(
     on_manual_confirm: EventHandler<MatchCandidate>,
     on_retry_cover: EventHandler<usize>,
     on_retry_discid_lookup: EventHandler<()>,
+    on_view_in_library: EventHandler<String>,
 ) -> Element {
     // Read TOC info at leaf level
     let st = state.read();
@@ -192,6 +194,7 @@ fn CdIdentifyContent(
                         on_select: on_exact_match_select,
                         on_confirm: on_confirm_exact_match,
                         on_switch_to_manual_search,
+                        on_view_in_library,
                     }
                 },
                 IdentifyMode::ManualSearch => rsx! {
@@ -215,6 +218,7 @@ fn CdIdentifyContent(
                         on_cancel_search,
                         on_confirm: on_manual_confirm,
                         on_retry_cover,
+                        on_view_in_library,
                         on_switch_to_exact_matches,
                     }
                 },
@@ -234,7 +238,7 @@ fn CdConfirmContent(
     on_edit: EventHandler<()>,
     on_confirm: EventHandler<()>,
     on_configure_storage: EventHandler<()>,
-    on_view_duplicate: EventHandler<String>,
+    on_view_in_library: EventHandler<String>,
 ) -> Element {
     // Read state at leaf level
     let st = state.read();
@@ -271,8 +275,6 @@ fn CdConfirmContent(
         })
         .unwrap_or((false, None, None));
 
-    let import_error = import_error.or_else(|| st.import_error_message.clone());
-    let duplicate_album_id = st.duplicate_album_id.clone();
     drop(st);
 
     let Some(candidate) = confirmed_candidate else {
@@ -304,12 +306,9 @@ fn CdConfirmContent(
                 on_edit,
                 on_confirm,
                 on_configure_storage,
+                on_view_in_library,
             }
-            ImportErrorDisplayView {
-                error_message: import_error,
-                duplicate_album_id,
-                on_view_duplicate,
-            }
+            ImportErrorDisplayView { error_message: import_error }
         }
     }
 }

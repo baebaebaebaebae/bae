@@ -363,6 +363,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             musicbrainz_release_group_id: Some("mock-mb-rg-001".to_string()),
             discogs_release_id: None,
             discogs_master_id: None,
+            existing_album_id: None,
         },
         MatchCandidate {
             title: "Neon Frequencies (Deluxe)".to_string(),
@@ -380,6 +381,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             musicbrainz_release_group_id: Some("mock-mb-rg-001".to_string()),
             discogs_release_id: None,
             discogs_master_id: None,
+            existing_album_id: None,
         },
     ];
 
@@ -540,6 +542,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                         musicbrainz_release_group_id: None,
                         discogs_release_id: None,
                         discogs_master_id: None,
+                        existing_album_id: None,
                     }),
                 selected_cover: selected_cover(),
                 selected_profile_id: selected_profile_id(),
@@ -588,8 +591,6 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         candidate_states,
         loading_candidates: HashMap::new(),
         is_looking_up: false,
-        duplicate_album_id: None,
-        import_error_message: import_error,
         folder_files: folder_files.clone(),
         is_scanning_candidates: false,
         discid_lookup_attempted: std::collections::HashSet::new(),
@@ -668,7 +669,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                     on_edit: |_| {},
                     on_confirm: |_| {},
                     on_configure_storage: |_| {},
-                    on_view_duplicate: |_| {},
+                    on_view_in_library: |_| {},
                 }
             }
         }

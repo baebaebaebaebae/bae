@@ -381,8 +381,9 @@ impl IdentifyingState {
                     state.disc_id_not_found = disc_id;
                     state.mode = IdentifyMode::ManualSearch;
                 } else if matches.len() == 1 {
-                    // Single match - auto-confirm
-                    let candidate = matches.into_iter().next().unwrap();
+                    // Single match — auto-confirm, but keep in auto_matches
+                    // so "view exact matches" works if user goes back
+                    let candidate = matches[0].clone();
                     let selected_cover = default_cover(&candidate, &state.files);
                     return CandidateState::Confirming(Box::new(ConfirmingState {
                         files: state.files,
@@ -391,7 +392,7 @@ impl IdentifyingState {
                         selected_cover,
                         selected_profile_id: None,
                         phase: ConfirmPhase::Ready,
-                        auto_matches: vec![],
+                        auto_matches: matches,
                         search_state: state.search_state,
                         source_disc_id: disc_id,
                     }));
@@ -598,10 +599,6 @@ pub struct ImportState {
     pub loading_candidates: std::collections::HashMap<String, bool>,
     /// Whether DiscID lookup is in progress
     pub is_looking_up: bool,
-    /// ID of duplicate album if found during import
-    pub duplicate_album_id: Option<String>,
-    /// Error message from import process
-    pub import_error_message: Option<String>,
     /// Files in current folder (for UI reactivity)
     pub folder_files: CategorizedFileInfo,
     /// True while scanning a folder for release candidates
@@ -626,8 +623,6 @@ impl ImportState {
         self.candidate_states.clear();
         self.loading_candidates.clear();
         self.is_looking_up = false;
-        self.duplicate_album_id = None;
-        self.import_error_message = None;
         self.folder_files = CategorizedFileInfo::default();
         self.is_scanning_candidates = false;
         self.discid_lookup_attempted.clear();
