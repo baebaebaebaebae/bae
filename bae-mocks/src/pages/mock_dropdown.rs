@@ -27,6 +27,7 @@ fn generate_test_albums() -> Vec<(Album, Vec<Artist>)> {
 #[component]
 pub fn MockDropdownTest() -> Element {
     let albums = generate_test_albums();
+    let open_dropdown: Signal<Option<String>> = use_signal(|| None);
 
     rsx! {
         style {
@@ -52,6 +53,7 @@ pub fn MockDropdownTest() -> Element {
                         on_artist_click: |_| {},
                         on_play: |_| {},
                         on_add_to_queue: |_| {},
+                        open_dropdown,
                     }
                 }
             }

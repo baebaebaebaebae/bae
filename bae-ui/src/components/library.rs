@@ -268,6 +268,10 @@ fn AlbumGrid(
         gap: 24.0,
     };
 
+    // Track which album's dropdown menu is open. Hoisted here so the signal
+    // outlives virtual scroll item scopes (prevents use-after-drop on recycled items).
+    let open_dropdown: Signal<Option<String>> = use_signal(|| None);
+
     // Create render function that captures the event handlers
     let render_item = RenderFn(Rc::new(move |item: AlbumGridItem, _idx: usize| {
         rsx! {
@@ -279,6 +283,7 @@ fn AlbumGrid(
                 on_artist_click,
                 on_play: on_play_album,
                 on_add_to_queue: on_add_album_to_queue,
+                open_dropdown,
             }
         }
     }));
