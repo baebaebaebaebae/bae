@@ -98,7 +98,10 @@ pub fn use_tooltip_handle() -> TooltipHandle {
     // Store the closure so we can remove the listener on unmount.
     let mut blur_cleanup: Signal<Option<BlurCleanup>> = use_signal(|| None);
 
-    use_hook(move || {
+    // WORKAROUND: use_effect instead of use_hook so the web_sys_x::window() IPC
+    // call runs after the render cycle. Calling it during render (use_hook) causes
+    // wry-bindgen U8BufferEmpty panics. https://github.com/bae-fm/bae/issues/82
+    use_effect(move || {
         let Some(window) = web_sys_x::window() else {
             return;
         };
@@ -127,11 +130,18 @@ pub fn use_tooltip_handle() -> TooltipHandle {
         if let Some(task) = hover_task.peek().as_ref() {
             task.cancel();
         }
-        if let Some(cleanup) = blur_cleanup.peek().as_ref() {
-            let _ = cleanup.window.remove_event_listener_with_callback(
-                "blur",
-                cleanup.callback.as_ref().unchecked_ref(),
-            );
+        // WORKAROUND: Take the JS refs out of the signal and spawn their cleanup.
+        // If they drop during scope teardown, the implicit Drop triggers synchronous
+        // wry-bindgen IPC inside the diff cycle → U8BufferEmpty panic.
+        // https://github.com/bae-fm/bae/issues/83
+        if let Some(cleanup) = blur_cleanup.write().take() {
+            spawn(async move {
+                let _ = cleanup.window.remove_event_listener_with_callback(
+                    "blur",
+                    cleanup.callback.as_ref().unchecked_ref(),
+                );
+                drop(cleanup);
+            });
         }
     });
 
