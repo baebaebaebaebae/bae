@@ -11,7 +11,7 @@ use bae_core::cloud_storage::CloudStorage;
 use bae_core::db::{Database, DbStorageProfile, ImportStatus, StorageLocation};
 use bae_core::discogs::models::{DiscogsRelease, DiscogsTrack};
 use bae_core::encryption::EncryptionService;
-use bae_core::import::{ImportPhase, ImportProgress, ImportRequest, ImportService};
+use bae_core::import::{CoverSelection, ImportPhase, ImportProgress, ImportRequest, ImportService};
 use bae_core::library::LibraryManager;
 use bae_core::storage::create_storage_reader;
 use bae_core::test_support::MockCloudStorage;
@@ -101,9 +101,8 @@ async fn test_storageless_import() {
             mb_release: None,
             folder: album_dir.clone(),
             master_year: 2024,
-            cover_art_url: None,
             storage_profile_id: None, // Storageless
-            selected_cover_filename: None,
+            selected_cover: None,
         })
         .await
         .expect("send request");
@@ -251,9 +250,8 @@ async fn test_storageless_delete_preserves_files() {
             mb_release: None,
             folder: album_dir.clone(),
             master_year: 2024,
-            cover_art_url: None,
             storage_profile_id: None, // Storageless
-            selected_cover_filename: None,
+            selected_cover: None,
         })
         .await
         .expect("send request");
@@ -419,9 +417,8 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
             mb_release: None,
             folder: album_dir.clone(),
             master_year,
-            cover_art_url: None,
             storage_profile_id: Some(storage_profile_id.clone()),
-            selected_cover_filename: Some(selected_cover.clone()),
+            selected_cover: Some(CoverSelection::Local(selected_cover.clone())),
             import_id: uuid::Uuid::new_v4().to_string(),
         })
         .await
@@ -932,9 +929,8 @@ async fn run_real_album_test(album_dir: PathBuf, location: StorageLocation, encr
             mb_release: None,
             folder: album_dir.clone(),
             master_year: 1981,
-            cover_art_url: None,
             storage_profile_id: Some(storage_profile_id.clone()),
-            selected_cover_filename: None,
+            selected_cover: None,
             import_id: uuid::Uuid::new_v4().to_string(),
         })
         .await

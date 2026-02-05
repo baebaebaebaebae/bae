@@ -20,4 +20,4 @@ pub use progress::ImportProgressHandle;
 pub use service::ImportService;
 #[cfg(feature = "torrent")]
 pub use types::TorrentSource;
-pub use types::{ImportPhase, ImportProgress, ImportRequest, PrepareStep};
+pub use types::{CoverSelection, ImportPhase, ImportProgress, ImportRequest, PrepareStep};

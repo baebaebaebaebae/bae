@@ -70,9 +70,8 @@ impl PlaybackTestFixture {
                 mb_release: None,
                 folder: album_dir.clone(),
                 master_year,
-                cover_art_url: None,
                 storage_profile_id: Some(storage_profile_id),
-                selected_cover_filename: None,
+                selected_cover: None,
             })
             .await?;
         let mut progress_rx = import_handle.subscribe_release(release_id.clone());
@@ -380,9 +379,8 @@ impl CueFlacTestFixture {
                 mb_release: None,
                 folder: album_dir.clone(),
                 master_year,
-                cover_art_url: None,
                 storage_profile_id: None, // No storage - direct local playback
-                selected_cover_filename: None,
+                selected_cover: None,
             })
             .await?;
 
@@ -2013,9 +2011,8 @@ impl HighSampleRateTestFixture {
                 mb_release: None,
                 folder: album_dir.clone(),
                 master_year: 2024,
-                cover_art_url: None,
                 storage_profile_id: None, // Local playback
-                selected_cover_filename: None,
+                selected_cover: None,
             })
             .await?;
 

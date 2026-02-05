@@ -34,6 +34,15 @@ use crate::{
 };
 use std::{collections::HashMap, path::PathBuf};
 
+/// User's cover art selection for an import.
+#[derive(Clone, Debug)]
+pub enum CoverSelection {
+    /// Remote cover to download (URL)
+    Remote(String),
+    /// Local file in the album folder (relative path from album root)
+    Local(String),
+}
+
 /// Request to import an album
 #[derive(Debug)]
 pub enum ImportRequest {
@@ -44,12 +53,10 @@ pub enum ImportRequest {
         mb_release: Option<MbRelease>,
         folder: PathBuf,
         master_year: u32,
-        cover_art_url: Option<String>,
         /// Storage profile ID. None means no bae storage (files stay in place).
         storage_profile_id: Option<String>,
-        /// User-selected cover image filename (relative path from album folder).
-        /// If set, this image will be marked as the album cover instead of using priority logic.
-        selected_cover_filename: Option<String>,
+        /// User-selected cover image.
+        selected_cover: Option<CoverSelection>,
     },
     #[cfg(feature = "torrent")]
     Torrent {
@@ -59,11 +66,10 @@ pub enum ImportRequest {
         master_year: u32,
         seed_after_download: bool,
         torrent_metadata: TorrentImportMetadata,
-        cover_art_url: Option<String>,
         /// Storage profile ID. None means no bae storage (files stay in temp folder).
         storage_profile_id: Option<String>,
-        /// User-selected cover image filename (relative path from album folder).
-        selected_cover_filename: Option<String>,
+        /// User-selected cover image.
+        selected_cover: Option<CoverSelection>,
     },
     #[cfg(feature = "cd-rip")]
     CD {
@@ -71,11 +77,10 @@ pub enum ImportRequest {
         mb_release: Option<MbRelease>,
         drive_path: PathBuf,
         master_year: u32,
-        cover_art_url: Option<String>,
         /// Storage profile ID. None means no bae storage (files stay in temp folder).
         storage_profile_id: Option<String>,
-        /// User-selected cover image filename (relative path from album folder).
-        selected_cover_filename: Option<String>,
+        /// User-selected cover image.
+        selected_cover: Option<CoverSelection>,
     },
 }
 
@@ -241,8 +246,8 @@ pub enum ImportCommand {
         cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
         /// Storage profile ID. None means no bae storage (files stay in place).
         storage_profile_id: Option<String>,
-        /// User-selected cover image filename
-        selected_cover_filename: Option<String>,
+        /// Resolved absolute path to the cover image file
+        cover_image_path: Option<PathBuf>,
         /// Import operation ID for progress tracking
         import_id: String,
     },
@@ -262,12 +267,10 @@ pub enum ImportCommand {
         torrent_metadata: TorrentImportMetadata,
         /// Whether to start seeding after download completes
         seed_after_download: bool,
-        /// Cover art URL to download after torrent completes
-        cover_art_url: Option<String>,
         /// Storage profile ID. None means no bae storage (files stay in temp folder).
         storage_profile_id: Option<String>,
-        /// User-selected cover image filename
-        selected_cover_filename: Option<String>,
+        /// User-selected cover (resolved after torrent download)
+        selected_cover: Option<CoverSelection>,
     },
     /// CD-based import: service will rip CD first (acquire phase), then process like folder import
     #[cfg(feature = "cd-rip")]
@@ -284,7 +287,7 @@ pub enum ImportCommand {
         toc: CdToc,
         /// Storage profile ID. None means no bae storage (files stay in temp folder).
         storage_profile_id: Option<String>,
-        /// User-selected cover image filename
-        selected_cover_filename: Option<String>,
+        /// Resolved absolute path to the cover image file
+        cover_image_path: Option<PathBuf>,
     },
 }

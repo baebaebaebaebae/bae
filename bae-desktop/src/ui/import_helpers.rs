@@ -8,8 +8,8 @@ use crate::ui::Route;
 use bae_core::discogs::client::DiscogsSearchParams;
 use bae_core::discogs::{DiscogsClient, DiscogsRelease};
 use bae_core::import::{
-    cover_art, detect_folder_contents, DetectedCandidate as CoreDetectedCandidate, ImportProgress,
-    ImportRequest, MatchCandidate, MatchSource, ScanEvent,
+    cover_art, detect_folder_contents, CoverSelection, DetectedCandidate as CoreDetectedCandidate,
+    ImportProgress, ImportRequest, MatchCandidate, MatchSource, ScanEvent,
 };
 use bae_core::musicbrainz::{
     lookup_by_discid, lookup_release_by_id, search_releases_with_params, ExternalUrls, MbRelease,
@@ -33,29 +33,6 @@ use tracing::{error, info, warn};
 // ============================================================================
 // Conversion helpers (from old import_context/state.rs)
 // ============================================================================
-
-/// Compute the expected filename for a remote cover download.
-pub fn compute_expected_cover_filename(url: &str, source: &str) -> String {
-    let extension = url
-        .rsplit('/')
-        .next()
-        .and_then(|filename| {
-            let ext = filename.rsplit('.').next()?;
-            let ext_lower = ext.to_lowercase();
-            if ["jpg", "jpeg", "png", "gif", "webp"].contains(&ext_lower.as_str()) {
-                Some(ext_lower)
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| "jpg".to_string());
-    let base_name = match source.to_lowercase().as_str() {
-        "musicbrainz" | "mb" => "cover-mb",
-        "discogs" => "cover-discogs",
-        _ => "cover",
-    };
-    format!(".bae/{}.{}", base_name, extension)
-}
 
 /// Convert bae-core FolderMetadata to display type
 pub fn to_display_metadata(m: &bae_core::import::FolderMetadata) -> DisplayFolderMetadata {
@@ -714,14 +691,10 @@ pub async fn confirm_and_start_import(
     };
     let master_year = metadata.as_ref().and_then(|m| m.year).unwrap_or(1970);
 
-    let (cover_art_url, selected_cover_filename) = match selected_cover {
-        Some(SelectedCover::Remote { url, source }) => {
-            let filename = compute_expected_cover_filename(&url, &source);
-            (Some(url), Some(filename))
-        }
-        Some(SelectedCover::Local { filename }) => (None, Some(filename)),
-        None => (None, None),
-    };
+    let selected_cover = selected_cover.map(|c| match c {
+        SelectedCover::Remote { url, .. } => CoverSelection::Remote(url),
+        SelectedCover::Local { filename } => CoverSelection::Local(filename),
+    });
 
     let request = match import_source {
         ImportSource::Folder => match candidate.source_type {
@@ -741,9 +714,8 @@ pub async fn confirm_and_start_import(
                     mb_release: None,
                     folder: PathBuf::from(&candidate_key),
                     master_year,
-                    cover_art_url: cover_art_url.clone(),
                     storage_profile_id: storage_profile_id.clone(),
-                    selected_cover_filename: selected_cover_filename.clone(),
+                    selected_cover: selected_cover.clone(),
                 }
             }
             MatchSourceType::MusicBrainz => {
@@ -767,9 +739,8 @@ pub async fn confirm_and_start_import(
                     mb_release: Some(mb_release),
                     folder: PathBuf::from(&candidate_key),
                     master_year,
-                    cover_art_url: cover_art_url.clone(),
                     storage_profile_id: storage_profile_id.clone(),
-                    selected_cover_filename: selected_cover_filename.clone(),
+                    selected_cover: selected_cover.clone(),
                 }
             }
         },
