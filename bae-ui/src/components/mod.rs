@@ -47,8 +47,8 @@ pub use icons::{
     ChevronLeftIcon, ChevronRightIcon, CloudOffIcon, DiscIcon, DownloadIcon, EllipsisIcon,
     ExternalLinkIcon, FileIcon, FileTextIcon, FolderIcon, ImageIcon, InfoIcon, KeyIcon, LayersIcon,
     LoaderIcon, LockIcon, MenuIcon, MonitorIcon, PauseIcon, PencilIcon, PlayIcon, PlusIcon,
-    RefreshIcon, RowsIcon, SettingsIcon, SkipBackIcon, SkipForwardIcon, StarIcon, TrashIcon,
-    UploadIcon, XIcon,
+    RefreshIcon, RowsIcon, SearchIcon, SettingsIcon, SkipBackIcon, SkipForwardIcon, StarIcon,
+    TrashIcon, UploadIcon, UserIcon, XIcon,
 };
 pub use import::{
     CdDriveStatus, CdSelectorView, ConfirmationView, DiscIdLookupErrorView, FileListView,
@@ -74,5 +74,8 @@ pub use settings::{
     StorageProfileEditorView, StorageProfilesSectionView, SubsonicSectionView,
 };
 pub use text_input::{TextInput, TextInputSize};
-pub use title_bar::{NavItem, SearchResult, TitleBarView};
+pub use title_bar::{
+    AlbumResult, ArtistResult, GroupedSearchResults, NavItem, SearchAction, TitleBarView,
+    TrackResult, SEARCH_INPUT_ID,
+};
 pub use utils::{format_duration, format_file_size};

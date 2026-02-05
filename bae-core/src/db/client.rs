@@ -255,6 +255,110 @@ impl Database {
         }
         Ok(albums)
     }
+    /// Search across artists, albums, and tracks by name/title
+    pub async fn search_library(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<LibrarySearchResults, sqlx::Error> {
+        let pattern = format!("%{}%", query);
+        let limit_i64 = limit as i64;
+
+        // Search artists by name, with album count
+        let artist_rows = sqlx::query(
+            r#"
+            SELECT art.id, art.name, COUNT(DISTINCT aa.album_id) as album_count
+            FROM artists art
+            JOIN album_artists aa ON art.id = aa.artist_id
+            WHERE art.name LIKE ?
+            GROUP BY art.id
+            ORDER BY album_count DESC, art.name
+            LIMIT ?
+            "#,
+        )
+        .bind(&pattern)
+        .bind(limit_i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let artists = artist_rows
+            .into_iter()
+            .map(|row| ArtistSearchResult {
+                id: row.get("id"),
+                name: row.get("name"),
+                album_count: row.get("album_count"),
+            })
+            .collect();
+
+        // Search albums by title, with primary artist name
+        let album_rows = sqlx::query(
+            r#"
+            SELECT a.id, a.title, a.year, a.cover_art_url,
+                   COALESCE(art.name, 'Unknown Artist') as artist_name
+            FROM albums a
+            LEFT JOIN album_artists aa ON a.id = aa.album_id AND aa.position = 0
+            LEFT JOIN artists art ON aa.artist_id = art.id
+            WHERE a.title LIKE ?
+            ORDER BY a.title
+            LIMIT ?
+            "#,
+        )
+        .bind(&pattern)
+        .bind(limit_i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let albums = album_rows
+            .into_iter()
+            .map(|row| AlbumSearchResult {
+                id: row.get("id"),
+                title: row.get("title"),
+                year: row.get("year"),
+                cover_art_url: row.get("cover_art_url"),
+                artist_name: row.get("artist_name"),
+            })
+            .collect();
+
+        // Search tracks by title, with album and artist info
+        let track_rows = sqlx::query(
+            r#"
+            SELECT t.id, t.title, t.duration_ms, r.album_id,
+                   a.title as album_title,
+                   COALESCE(art.name, 'Unknown Artist') as artist_name
+            FROM tracks t
+            JOIN releases r ON t.release_id = r.id
+            JOIN albums a ON r.album_id = a.id
+            LEFT JOIN album_artists aa ON a.id = aa.album_id AND aa.position = 0
+            LEFT JOIN artists art ON aa.artist_id = art.id
+            WHERE t.title LIKE ?
+            ORDER BY t.title
+            LIMIT ?
+            "#,
+        )
+        .bind(&pattern)
+        .bind(limit_i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let tracks = track_rows
+            .into_iter()
+            .map(|row| TrackSearchResult {
+                id: row.get("id"),
+                title: row.get("title"),
+                duration_ms: row.get("duration_ms"),
+                album_id: row.get("album_id"),
+                album_title: row.get("album_title"),
+                artist_name: row.get("artist_name"),
+            })
+            .collect();
+
+        Ok(LibrarySearchResults {
+            artists,
+            albums,
+            tracks,
+        })
+    }
+
     /// Insert a new album
     pub async fn insert_album(&self, album: &DbAlbum) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;

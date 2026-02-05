@@ -3,7 +3,7 @@ use crate::cloud_storage::CloudStorageError;
 use crate::db::{
     Database, DbAlbum, DbAlbumArtist, DbArtist, DbAudioFormat, DbFile, DbImage, DbImport,
     DbRelease, DbStorageProfile, DbTorrent, DbTrack, DbTrackArtist, ImportOperationStatus,
-    ImportStatus,
+    ImportStatus, LibrarySearchResults,
 };
 use crate::encryption::EncryptionService;
 use crate::library::export::ExportService;
@@ -338,6 +338,15 @@ impl LibraryManager {
     ) -> Result<Option<DbArtist>, LibraryError> {
         Ok(self.database.get_artist_by_id(artist_id).await?)
     }
+    /// Search across artists, albums, and tracks
+    pub async fn search_library(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<LibrarySearchResults, LibraryError> {
+        Ok(self.database.search_library(query, limit).await?)
+    }
+
     /// Get albums for an artist
     pub async fn get_albums_for_artist(
         &self,

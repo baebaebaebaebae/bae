@@ -4,9 +4,9 @@ use crate::demo_data;
 use crate::Route;
 use bae_ui::stores::{PlaybackStatus, PlaybackUiState, SidebarState, SidebarStateStoreExt};
 use bae_ui::{
-    ActiveImport, AppLayoutView, ImportStatus, ImportsButtonView, ImportsDropdownView, NavItem,
-    NowPlayingBarView, QueueItem, QueueSidebarView, SearchResult, TitleBarView, Track,
-    TrackImportState,
+    ActiveImport, AlbumResult, AppLayoutView, ArtistResult, GroupedSearchResults, ImportStatus,
+    ImportsButtonView, ImportsDropdownView, NavItem, NowPlayingBarView, QueueItem,
+    QueueSidebarView, SearchAction, TitleBarView, Track, TrackImportState,
 };
 use dioxus::prelude::*;
 
@@ -126,15 +126,38 @@ pub fn DemoLayout() -> Element {
     // Create sidebar store
     let sidebar_store = use_store(|| SidebarState { is_open: false });
 
-    // Mock search - filter albums by query
-    let search_results: Vec<SearchResult> = {
+    // Mock search - filter albums and artists by query
+    let search_results = {
         let query = search_query().to_lowercase();
         if query.is_empty() {
-            vec![]
+            GroupedSearchResults::default()
         } else {
             let albums = demo_data::get_albums();
             let artists_by_album = demo_data::get_artists_by_album();
-            albums
+
+            // Collect matching artists
+            let mut seen_artists = std::collections::HashSet::new();
+            let mut matched_artists = Vec::new();
+            for artists in artists_by_album.values() {
+                for artist in artists {
+                    if artist.name.to_lowercase().contains(&query)
+                        && seen_artists.insert(artist.id.clone())
+                    {
+                        let album_count = artists_by_album
+                            .values()
+                            .filter(|a| a.iter().any(|ar| ar.id == artist.id))
+                            .count();
+                        matched_artists.push(ArtistResult {
+                            id: artist.id.clone(),
+                            name: artist.name.clone(),
+                            album_count,
+                        });
+                    }
+                }
+            }
+
+            // Collect matching albums
+            let matched_albums: Vec<AlbumResult> = albums
                 .into_iter()
                 .filter(|album| {
                     album.title.to_lowercase().contains(&query)
@@ -154,14 +177,21 @@ pub fn DemoLayout() -> Element {
                         .first()
                         .map(|a| a.name.clone())
                         .unwrap_or_else(|| "Unknown Artist".to_string());
-                    SearchResult {
+                    AlbumResult {
                         id: album.id,
                         title: album.title,
-                        subtitle: artist_name,
+                        artist_name,
+                        year: album.year,
                         cover_url: album.cover_url,
                     }
                 })
-                .collect()
+                .collect();
+
+            GroupedSearchResults {
+                artists: matched_artists,
+                albums: matched_albums,
+                tracks: vec![],
+            }
         }
     };
 
@@ -200,10 +230,15 @@ pub fn DemoLayout() -> Element {
                         show_search_results.set(!value.is_empty());
                     },
                     search_results,
-                    on_search_result_click: move |album_id: String| {
+                    on_search_result_click: move |action: SearchAction| {
                         show_search_results.set(false);
                         search_query.set(String::new());
-                        navigator().push(Route::AlbumDetail { album_id });
+                        match action {
+                            SearchAction::Album(album_id) | SearchAction::Track { album_id } => {
+                                navigator().push(Route::AlbumDetail { album_id });
+                            }
+                            SearchAction::Artist(_) => {}
+                        }
                     },
                     show_search_results: show_search_results_read,
                     on_search_dismiss: move |_| show_search_results.set(false),
@@ -212,6 +247,7 @@ pub fn DemoLayout() -> Element {
                             show_search_results.set(true);
                         }
                     },
+                    on_search_blur: |_| {},
                     on_settings_click: move |_| {
                         navigator().push(Route::Settings {});
                     },

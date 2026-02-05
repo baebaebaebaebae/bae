@@ -971,3 +971,44 @@ impl DbReleaseStorage {
         }
     }
 }
+
+// ============================================================================
+// Library Search Result Types
+// ============================================================================
+
+/// Combined search results across artists, albums, and tracks
+#[derive(Debug, Clone)]
+pub struct LibrarySearchResults {
+    pub artists: Vec<ArtistSearchResult>,
+    pub albums: Vec<AlbumSearchResult>,
+    pub tracks: Vec<TrackSearchResult>,
+}
+
+/// Artist search result with album count
+#[derive(Debug, Clone)]
+pub struct ArtistSearchResult {
+    pub id: String,
+    pub name: String,
+    pub album_count: i64,
+}
+
+/// Album search result with primary artist name
+#[derive(Debug, Clone)]
+pub struct AlbumSearchResult {
+    pub id: String,
+    pub title: String,
+    pub year: Option<i32>,
+    pub cover_art_url: Option<String>,
+    pub artist_name: String,
+}
+
+/// Track search result with album and artist info
+#[derive(Debug, Clone)]
+pub struct TrackSearchResult {
+    pub id: String,
+    pub title: String,
+    pub duration_ms: Option<i64>,
+    pub album_id: String,
+    pub album_title: String,
+    pub artist_name: String,
+}
