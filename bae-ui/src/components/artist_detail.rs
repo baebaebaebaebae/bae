@@ -102,6 +102,8 @@ fn ArtistAlbumGrid(
         gap: 24.0,
     };
 
+    let open_dropdown: Signal<Option<String>> = use_signal(|| None);
+
     let render_item = RenderFn(Rc::new(move |item: AlbumGridItem, _idx: usize| {
         rsx! {
             AlbumCard {
@@ -112,6 +114,7 @@ fn ArtistAlbumGrid(
                 on_artist_click,
                 on_play: on_play_album,
                 on_add_to_queue: on_add_album_to_queue,
+                open_dropdown,
             }
         }
     }));
