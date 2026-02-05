@@ -221,6 +221,7 @@ pub fn TitleBarView(
 
                             if doc_has_focus {
                                 is_search_active.set(false);
+                                selected_index.set(None);
                             }
                             on_search_blur.call(());
                         },
@@ -255,6 +256,7 @@ pub fn TitleBarView(
                                     if let Some(i) = selected_index() {
                                         if let Some(action) = nav_actions.get(i) {
                                             on_search_result_click.call(action.clone());
+                                            blur_search_input();
                                         }
                                     }
                                 }
@@ -271,7 +273,10 @@ pub fn TitleBarView(
                             onmousedown: move |evt| evt.prevent_default(),
                             SearchResultsContent {
                                 results: search_results,
-                                on_click: on_search_result_click,
+                                on_click: move |action: SearchAction| {
+                                    on_search_result_click.call(action);
+                                    blur_search_input();
+                                },
                                 selected_index: selected_index(),
                             }
                         }
@@ -529,6 +534,17 @@ fn TrackResultItem(
             }
         }
     }
+}
+
+/// Blur the search input by spawning a deferred eval.
+///
+/// We spawn instead of calling eval inline to avoid re-entrant borrow panics
+/// in wry's webview bridge (the blur triggers `onblur` synchronously).
+fn blur_search_input() {
+    spawn(async move {
+        let js = format!("document.getElementById('{}')?.blur()", SEARCH_INPUT_ID,);
+        dioxus::document::eval(&js);
+    });
 }
 
 /// Navigation button with generic children
