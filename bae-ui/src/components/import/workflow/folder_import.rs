@@ -92,14 +92,13 @@ pub struct FolderImportViewProps {
 pub fn FolderImportView(props: FolderImportViewProps) -> Element {
     let state = props.state;
 
-    // Use lenses for routing decisions
-    let is_empty = !state.detected_candidates().read().is_empty();
+    // Lens reads only — no .read() on full state
+    let candidate_key = state.current_candidate_key().read().clone();
+    let is_empty = state.detected_candidates().read().is_empty();
     let is_scanning = *state.is_scanning_candidates().read();
-    // get_import_step() is a computed value, so we read just for that
-    let step = state.read().get_import_step();
 
     rsx! {
-        if !is_empty {
+        if is_empty {
             // Empty state - centered
             div { class: "flex-1 flex flex-col",
                 EmptyView {
@@ -107,10 +106,11 @@ pub fn FolderImportView(props: FolderImportViewProps) -> Element {
                     on_folder_select: props.on_folder_select_click,
                 }
             }
-        } else {
-            // Detail pane: unified area for selected folder
-            // Uses subtle background and rounded corners to visually group Files + Workflow as one unit
-            div { class: "flex-1 flex flex-col min-h-0 m-2 ml-0 bg-gray-900/40 rounded-xl overflow-clip",
+        } else if let Some(key) = candidate_key {
+            // Detail pane: keyed on candidate so it remounts when switching releases
+            div {
+                key: "{key}",
+                class: "flex-1 flex flex-col min-h-0 m-2 ml-0 bg-gray-900/40 rounded-xl overflow-clip",
                 // Context header showing folder name and step
                 DetailHeader { state }
 
@@ -128,7 +128,6 @@ pub fn FolderImportView(props: FolderImportViewProps) -> Element {
                     div { class: "flex-1 min-h-0 flex flex-col bg-gray-800/30",
                         WorkflowContent {
                             state,
-                            step,
                             storage_profiles: props.storage_profiles,
                             on_skip_detection: props.on_skip_detection,
                             on_exact_match_select: props.on_exact_match_select,
@@ -192,7 +191,6 @@ fn EmptyView(is_scanning: bool, on_folder_select: EventHandler<()>) -> Element {
 #[component]
 fn WorkflowContent(
     state: ReadStore<ImportState>,
-    step: ImportStep,
     storage_profiles: ReadSignal<Vec<StorageProfile>>,
     on_skip_detection: EventHandler<()>,
     on_exact_match_select: EventHandler<usize>,
@@ -218,6 +216,18 @@ fn WorkflowContent(
     on_configure_storage: EventHandler<()>,
     on_view_in_library: EventHandler<String>,
 ) -> Element {
+    let step = state
+        .current_candidate_key()
+        .read()
+        .as_ref()
+        .and_then(|k| {
+            state.candidate_states().read().get(k).map(|s| match s {
+                CandidateState::Identifying(_) => ImportStep::Identify,
+                CandidateState::Confirming(_) => ImportStep::Confirm,
+            })
+        })
+        .unwrap_or(ImportStep::Identify);
+
     rsx! {
         div { class: "flex-1 min-h-0 overflow-auto bg-gray-900/40 rounded-tl-xl flex flex-col",
             match step {
@@ -288,8 +298,21 @@ fn IdentifyStep(
     on_retry_discid_lookup: EventHandler<()>,
     on_view_in_library: EventHandler<String>,
 ) -> Element {
-    // Read to determine mode - this is routing
-    let mode = state.read().get_identify_mode();
+    let mode = state
+        .current_candidate_key()
+        .read()
+        .as_ref()
+        .and_then(|k| {
+            state
+                .candidate_states()
+                .read()
+                .get(k)
+                .and_then(|s| match s {
+                    CandidateState::Identifying(is) => Some(is.mode.clone()),
+                    _ => None,
+                })
+        })
+        .unwrap_or(IdentifyMode::Created);
 
     rsx! {
         match mode {
@@ -411,10 +434,15 @@ fn ConfirmStep(
 /// Header showing the selected folder name
 #[component]
 fn DetailHeader(state: ReadStore<ImportState>) -> Element {
-    let st = state.read();
-    let folder_path = st.current_candidate_key.clone();
-    let folder_name = st.get_current_candidate_name();
-    drop(st);
+    let folder_path = state.current_candidate_key().read().clone();
+    let folder_name = folder_path.as_ref().and_then(|key| {
+        state
+            .detected_candidates()
+            .read()
+            .iter()
+            .find(|c| &c.path == key)
+            .map(|c| c.name.clone())
+    });
 
     let Some(name) = folder_name else {
         return rsx! {};
@@ -445,11 +473,17 @@ fn FilesColumn(
     text_file_content: Option<Result<String, String>>,
     on_view_change: EventHandler<Option<usize>>,
 ) -> Element {
-    // Read files at this level
     let files = state
+        .current_candidate_key()
         .read()
-        .current_candidate_state()
-        .map(|s| s.files().clone())
+        .as_ref()
+        .and_then(|k| {
+            state
+                .candidate_states()
+                .read()
+                .get(k)
+                .map(|s| s.files().clone())
+        })
         .unwrap_or_default();
 
     // Snap to image grid widths when images present
@@ -496,7 +530,16 @@ fn DiscIdLookupProgressView(
     on_skip: EventHandler<()>,
     on_retry: EventHandler<()>,
 ) -> Element {
-    let error = state.read().get_discid_lookup_error();
+    let error = state.current_candidate_key().read().as_ref().and_then(|k| {
+        state
+            .candidate_states()
+            .read()
+            .get(k)
+            .and_then(|s| match s {
+                CandidateState::Identifying(is) => is.discid_lookup_error.clone(),
+                _ => None,
+            })
+    });
     let is_retrying = *state.is_looking_up().read();
 
     rsx! {

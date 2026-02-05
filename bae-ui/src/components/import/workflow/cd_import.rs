@@ -20,7 +20,7 @@ use crate::components::StorageProfile;
 use crate::display_types::{
     CdDriveInfo, IdentifyMode, ImportStep, MatchCandidate, SearchSource, SearchTab, SelectedCover,
 };
-use crate::stores::import::{CandidateState, ConfirmPhase, ImportState};
+use crate::stores::import::{CandidateState, ConfirmPhase, ImportState, ImportStateStoreExt};
 use dioxus::prelude::*;
 
 /// Props for CD import workflow view
@@ -71,70 +71,138 @@ pub struct CdImportViewProps {
 
 /// CD import workflow view
 ///
-/// Passes state signal down to children - reads only at leaf level.
+/// Only reads `current_candidate_key` via lens. Step routing is pushed
+/// into `CdWorkflowContent` so this parent stays narrowly subscribed.
 #[component]
 pub fn CdImportView(props: CdImportViewProps) -> Element {
     let state = props.state;
-
-    // Read only what's needed for routing decisions
-    let st = state.read();
-    let step = st.get_import_step();
-    let cd_path = st.current_candidate_key.clone().unwrap_or_default();
-    let identify_mode = st.get_identify_mode();
-    drop(st);
+    let candidate_key = state.current_candidate_key().read().clone();
 
     rsx! {
         div { class: "space-y-6",
-            match step {
-                ImportStep::Identify => rsx! {
-                    if cd_path.is_empty() {
-                        CdRipperView {
-                            is_scanning: props.is_scanning,
-                            drives: props.drives.clone(),
-                            selected_drive: props.selected_drive.clone(),
-                            on_drive_select: props.on_drive_select,
-                        }
-                    } else {
-                        CdIdentifyContent {
-                            state,
-                            cd_path,
-                            identify_mode,
-                            on_clear: props.on_clear,
-                            on_exact_match_select: props.on_exact_match_select,
-                            on_confirm_exact_match: props.on_confirm_exact_match,
-                            on_switch_to_manual_search: props.on_switch_to_manual_search,
-                            on_switch_to_exact_matches: props.on_switch_to_exact_matches,
-                            on_search_source_change: props.on_search_source_change,
-                            on_search_tab_change: props.on_search_tab_change,
-                            on_artist_change: props.on_artist_change,
-                            on_album_change: props.on_album_change,
-                            on_catalog_number_change: props.on_catalog_number_change,
-                            on_barcode_change: props.on_barcode_change,
-                            on_manual_match_select: props.on_manual_match_select,
-                            on_search: props.on_search,
-                            on_cancel_search: props.on_cancel_search,
-                            on_manual_confirm: props.on_manual_confirm,
-                            on_retry_cover: props.on_retry_cover,
-                            on_retry_discid_lookup: props.on_retry_discid_lookup,
-                            on_view_in_library: props.on_view_in_library,
-                        }
-                    }
-                },
-                ImportStep::Confirm => rsx! {
-                    CdConfirmContent {
-                        state,
-                        storage_profiles: props.storage_profiles,
-                        on_clear: props.on_clear,
-                        on_select_cover: props.on_select_cover,
-                        on_storage_profile_change: props.on_storage_profile_change,
-                        on_edit: props.on_edit,
-                        on_confirm: props.on_confirm,
-                        on_configure_storage: props.on_configure_storage,
-                        on_view_in_library: props.on_view_in_library,
-                    }
-                },
+            if candidate_key.is_none() {
+                CdRipperView {
+                    is_scanning: props.is_scanning,
+                    drives: props.drives.clone(),
+                    selected_drive: props.selected_drive.clone(),
+                    on_drive_select: props.on_drive_select,
+                }
+            } else if let Some(ref key) = candidate_key {
+                CdWorkflowContent {
+                    key: "{key}",
+                    state,
+                    storage_profiles: props.storage_profiles,
+                    on_clear: props.on_clear,
+                    on_exact_match_select: props.on_exact_match_select,
+                    on_confirm_exact_match: props.on_confirm_exact_match,
+                    on_switch_to_manual_search: props.on_switch_to_manual_search,
+                    on_switch_to_exact_matches: props.on_switch_to_exact_matches,
+                    on_search_source_change: props.on_search_source_change,
+                    on_search_tab_change: props.on_search_tab_change,
+                    on_artist_change: props.on_artist_change,
+                    on_album_change: props.on_album_change,
+                    on_catalog_number_change: props.on_catalog_number_change,
+                    on_barcode_change: props.on_barcode_change,
+                    on_manual_match_select: props.on_manual_match_select,
+                    on_search: props.on_search,
+                    on_cancel_search: props.on_cancel_search,
+                    on_manual_confirm: props.on_manual_confirm,
+                    on_retry_cover: props.on_retry_cover,
+                    on_retry_discid_lookup: props.on_retry_discid_lookup,
+                    on_select_cover: props.on_select_cover,
+                    on_storage_profile_change: props.on_storage_profile_change,
+                    on_edit: props.on_edit,
+                    on_confirm: props.on_confirm,
+                    on_configure_storage: props.on_configure_storage,
+                    on_view_in_library: props.on_view_in_library,
+                }
             }
         }
+    }
+}
+
+/// Step routing for CD workflow — reads candidate_states to determine step
+#[component]
+fn CdWorkflowContent(
+    state: ReadStore<ImportState>,
+    storage_profiles: ReadSignal<Vec<StorageProfile>>,
+    on_clear: EventHandler<()>,
+    on_exact_match_select: EventHandler<usize>,
+    on_confirm_exact_match: EventHandler<MatchCandidate>,
+    on_switch_to_manual_search: EventHandler<()>,
+    on_switch_to_exact_matches: EventHandler<String>,
+    on_search_source_change: EventHandler<SearchSource>,
+    on_search_tab_change: EventHandler<SearchTab>,
+    on_artist_change: EventHandler<String>,
+    on_album_change: EventHandler<String>,
+    on_catalog_number_change: EventHandler<String>,
+    on_barcode_change: EventHandler<String>,
+    on_manual_match_select: EventHandler<usize>,
+    on_search: EventHandler<()>,
+    on_cancel_search: EventHandler<()>,
+    on_manual_confirm: EventHandler<MatchCandidate>,
+    on_retry_cover: EventHandler<usize>,
+    on_retry_discid_lookup: EventHandler<()>,
+    on_select_cover: EventHandler<SelectedCover>,
+    on_storage_profile_change: EventHandler<Option<String>>,
+    on_edit: EventHandler<()>,
+    on_confirm: EventHandler<()>,
+    on_configure_storage: EventHandler<()>,
+    on_view_in_library: EventHandler<String>,
+) -> Element {
+    let cd_path = state
+        .current_candidate_key()
+        .read()
+        .clone()
+        .unwrap_or_default();
+    let step = state
+        .candidate_states()
+        .read()
+        .get(&cd_path)
+        .map(|s| match s {
+            CandidateState::Identifying(_) => ImportStep::Identify,
+            CandidateState::Confirming(_) => ImportStep::Confirm,
+        })
+        .unwrap_or(ImportStep::Identify);
+
+    match step {
+        ImportStep::Identify => rsx! {
+            CdIdentifyContent {
+                state,
+                cd_path,
+                on_clear,
+                on_exact_match_select,
+                on_confirm_exact_match,
+                on_switch_to_manual_search,
+                on_switch_to_exact_matches,
+                on_search_source_change,
+                on_search_tab_change,
+                on_artist_change,
+                on_album_change,
+                on_catalog_number_change,
+                on_barcode_change,
+                on_manual_match_select,
+                on_search,
+                on_cancel_search,
+                on_manual_confirm,
+                on_retry_cover,
+                on_retry_discid_lookup,
+                on_view_in_library,
+            }
+        },
+        ImportStep::Confirm => rsx! {
+            CdConfirmContent {
+                state,
+                storage_profiles,
+                on_clear,
+                on_select_cover,
+                on_storage_profile_change,
+                on_edit,
+                on_confirm,
+                on_configure_storage,
+                on_view_in_library,
+            }
+        },
     }
 }
 
@@ -143,7 +211,6 @@ pub fn CdImportView(props: CdImportViewProps) -> Element {
 fn CdIdentifyContent(
     state: ReadStore<ImportState>,
     cd_path: String,
-    identify_mode: IdentifyMode,
     on_clear: EventHandler<()>,
     on_exact_match_select: EventHandler<usize>,
     on_confirm_exact_match: EventHandler<MatchCandidate>,
@@ -163,8 +230,8 @@ fn CdIdentifyContent(
     on_retry_discid_lookup: EventHandler<()>,
     on_view_in_library: EventHandler<String>,
 ) -> Element {
-    // Read TOC info at leaf level
     let st = state.read();
+    let identify_mode = st.get_identify_mode();
     let toc_info = st
         .cd_toc_info
         .as_ref()

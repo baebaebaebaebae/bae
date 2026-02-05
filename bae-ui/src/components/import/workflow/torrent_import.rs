@@ -22,7 +22,7 @@ use crate::display_types::{
     IdentifyMode, ImportStep, MatchCandidate, SearchSource, SearchTab, SelectedCover,
     TorrentFileInfo, TorrentInfo,
 };
-use crate::stores::import::{CandidateState, ConfirmPhase, ImportState};
+use crate::stores::import::{CandidateState, ConfirmPhase, ImportState, ImportStateStoreExt};
 use crate::{TorrentInputMode, TorrentInputView};
 use dioxus::prelude::*;
 
@@ -83,77 +83,155 @@ pub struct TorrentImportViewProps {
 
 /// Torrent import workflow view
 ///
-/// Passes state signal down to children - reads only at leaf level.
+/// Only reads `current_candidate_key` via lens. Step routing is pushed
+/// into `TorrentWorkflowContent` so this parent stays narrowly subscribed.
 #[component]
 pub fn TorrentImportView(props: TorrentImportViewProps) -> Element {
     let state = props.state;
-
-    // Read only what's needed for routing decisions
-    let st = state.read();
-    let step = st.get_import_step();
-    let torrent_path = st.current_candidate_key.clone().unwrap_or_default();
-    drop(st);
+    let candidate_key = state.current_candidate_key().read().clone();
 
     rsx! {
         div {
-            match step {
-                ImportStep::Identify => rsx! {
-                    if torrent_path.is_empty() {
-                        TorrentInputView {
-                            input_mode: props.input_mode,
-                            is_dragging: props.is_dragging,
-                            on_mode_change: props.on_mode_change,
-                            on_select_click: props.on_file_select,
-                            on_magnet_submit: props.on_magnet_submit,
-                        }
-                    } else {
-                        TorrentIdentifyContent {
-                            state,
-                            torrent_path,
-                            torrent_info: props.torrent_info.clone(),
-                            tracker_statuses: props.tracker_statuses.clone(),
-                            torrent_files: props.torrent_files.clone(),
-                            on_clear: props.on_clear,
-                            on_exact_match_select: props.on_exact_match_select,
-                            on_confirm_exact_match: props.on_confirm_exact_match,
-                            on_switch_to_manual_search: props.on_switch_to_manual_search,
-                            on_switch_to_exact_matches: props.on_switch_to_exact_matches,
-                            on_search_source_change: props.on_search_source_change,
-                            on_search_tab_change: props.on_search_tab_change,
-                            on_artist_change: props.on_artist_change,
-                            on_album_change: props.on_album_change,
-                            on_catalog_number_change: props.on_catalog_number_change,
-                            on_barcode_change: props.on_barcode_change,
-                            on_manual_match_select: props.on_manual_match_select,
-                            on_search: props.on_search,
-                            on_cancel_search: props.on_cancel_search,
-                            on_manual_confirm: props.on_manual_confirm,
-                            on_retry_cover: props.on_retry_cover,
-                            on_retry_discid_lookup: props.on_retry_discid_lookup,
-                            on_detect_metadata: props.on_detect_metadata,
-                            on_view_in_library: props.on_view_in_library,
-                        }
-                    }
-                },
-                ImportStep::Confirm => rsx! {
-                    TorrentConfirmContent {
-                        state,
-                        torrent_path,
-                        torrent_info: props.torrent_info.clone(),
-                        tracker_statuses: props.tracker_statuses.clone(),
-                        torrent_files: props.torrent_files.clone(),
-                        storage_profiles: props.storage_profiles,
-                        on_clear: props.on_clear,
-                        on_select_cover: props.on_select_cover,
-                        on_storage_profile_change: props.on_storage_profile_change,
-                        on_edit: props.on_edit,
-                        on_confirm: props.on_confirm,
-                        on_configure_storage: props.on_configure_storage,
-                        on_view_in_library: props.on_view_in_library,
-                    }
-                },
+            if candidate_key.is_none() {
+                TorrentInputView {
+                    input_mode: props.input_mode,
+                    is_dragging: props.is_dragging,
+                    on_mode_change: props.on_mode_change,
+                    on_select_click: props.on_file_select,
+                    on_magnet_submit: props.on_magnet_submit,
+                }
+            } else if let Some(ref key) = candidate_key {
+                TorrentWorkflowContent {
+                    key: "{key}",
+                    state,
+                    torrent_info: props.torrent_info.clone(),
+                    tracker_statuses: props.tracker_statuses.clone(),
+                    torrent_files: props.torrent_files.clone(),
+                    storage_profiles: props.storage_profiles,
+                    on_clear: props.on_clear,
+                    on_exact_match_select: props.on_exact_match_select,
+                    on_confirm_exact_match: props.on_confirm_exact_match,
+                    on_switch_to_manual_search: props.on_switch_to_manual_search,
+                    on_switch_to_exact_matches: props.on_switch_to_exact_matches,
+                    on_search_source_change: props.on_search_source_change,
+                    on_search_tab_change: props.on_search_tab_change,
+                    on_artist_change: props.on_artist_change,
+                    on_album_change: props.on_album_change,
+                    on_catalog_number_change: props.on_catalog_number_change,
+                    on_barcode_change: props.on_barcode_change,
+                    on_manual_match_select: props.on_manual_match_select,
+                    on_search: props.on_search,
+                    on_cancel_search: props.on_cancel_search,
+                    on_manual_confirm: props.on_manual_confirm,
+                    on_retry_cover: props.on_retry_cover,
+                    on_retry_discid_lookup: props.on_retry_discid_lookup,
+                    on_detect_metadata: props.on_detect_metadata,
+                    on_select_cover: props.on_select_cover,
+                    on_storage_profile_change: props.on_storage_profile_change,
+                    on_edit: props.on_edit,
+                    on_confirm: props.on_confirm,
+                    on_configure_storage: props.on_configure_storage,
+                    on_view_in_library: props.on_view_in_library,
+                }
             }
         }
+    }
+}
+
+/// Step routing for torrent workflow — reads candidate_states to determine step
+#[component]
+fn TorrentWorkflowContent(
+    state: ReadStore<ImportState>,
+    torrent_info: Option<TorrentInfo>,
+    tracker_statuses: Vec<TrackerStatus>,
+    torrent_files: Vec<TorrentFileInfo>,
+    storage_profiles: ReadSignal<Vec<StorageProfile>>,
+    on_clear: EventHandler<()>,
+    on_exact_match_select: EventHandler<usize>,
+    on_confirm_exact_match: EventHandler<MatchCandidate>,
+    on_switch_to_manual_search: EventHandler<()>,
+    on_switch_to_exact_matches: EventHandler<String>,
+    on_search_source_change: EventHandler<SearchSource>,
+    on_search_tab_change: EventHandler<SearchTab>,
+    on_artist_change: EventHandler<String>,
+    on_album_change: EventHandler<String>,
+    on_catalog_number_change: EventHandler<String>,
+    on_barcode_change: EventHandler<String>,
+    on_manual_match_select: EventHandler<usize>,
+    on_search: EventHandler<()>,
+    on_cancel_search: EventHandler<()>,
+    on_manual_confirm: EventHandler<MatchCandidate>,
+    on_retry_cover: EventHandler<usize>,
+    on_retry_discid_lookup: EventHandler<()>,
+    on_detect_metadata: EventHandler<()>,
+    on_select_cover: EventHandler<SelectedCover>,
+    on_storage_profile_change: EventHandler<Option<String>>,
+    on_edit: EventHandler<()>,
+    on_confirm: EventHandler<()>,
+    on_configure_storage: EventHandler<()>,
+    on_view_in_library: EventHandler<String>,
+) -> Element {
+    let torrent_path = state
+        .current_candidate_key()
+        .read()
+        .clone()
+        .unwrap_or_default();
+    let step = state
+        .candidate_states()
+        .read()
+        .get(&torrent_path)
+        .map(|s| match s {
+            CandidateState::Identifying(_) => ImportStep::Identify,
+            CandidateState::Confirming(_) => ImportStep::Confirm,
+        })
+        .unwrap_or(ImportStep::Identify);
+
+    match step {
+        ImportStep::Identify => rsx! {
+            TorrentIdentifyContent {
+                state,
+                torrent_path,
+                torrent_info,
+                tracker_statuses,
+                torrent_files,
+                on_clear,
+                on_exact_match_select,
+                on_confirm_exact_match,
+                on_switch_to_manual_search,
+                on_switch_to_exact_matches,
+                on_search_source_change,
+                on_search_tab_change,
+                on_artist_change,
+                on_album_change,
+                on_catalog_number_change,
+                on_barcode_change,
+                on_manual_match_select,
+                on_search,
+                on_cancel_search,
+                on_manual_confirm,
+                on_retry_cover,
+                on_retry_discid_lookup,
+                on_detect_metadata,
+                on_view_in_library,
+            }
+        },
+        ImportStep::Confirm => rsx! {
+            TorrentConfirmContent {
+                state,
+                torrent_path,
+                torrent_info,
+                tracker_statuses,
+                torrent_files,
+                storage_profiles,
+                on_clear,
+                on_select_cover,
+                on_storage_profile_change,
+                on_edit,
+                on_confirm,
+                on_configure_storage,
+                on_view_in_library,
+            }
+        },
     }
 }
 
