@@ -6,10 +6,10 @@
 
 use crate::components::album_card::AlbumCard;
 use crate::components::helpers::{ErrorDisplay, LoadingSpinner};
-use crate::components::icons::{ArrowDownIcon, ArrowUpIcon, ChevronDownIcon};
+use crate::components::icons::{ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, PlusIcon, XIcon};
 use crate::components::{Button, ButtonSize, ButtonVariant, ChromelessButton};
 use crate::components::{MenuDropdown, MenuItem, Placement};
-use crate::display_types::{Album, Artist, LibrarySortField, SortDirection};
+use crate::display_types::{Album, Artist, LibrarySortField, SortCriterion, SortDirection};
 use crate::stores::library::{LibraryState, LibraryStateStoreExt};
 use dioxus::prelude::*;
 use dioxus_virtual_scroll::{KeyFn, RenderFn, ScrollTarget, VirtualGrid, VirtualGridConfig};
@@ -23,37 +23,42 @@ struct AlbumGridItem {
     artists: Vec<Artist>,
 }
 
-/// Sort albums based on field and direction
+/// Sort albums based on an ordered list of criteria
 fn sort_albums(
     albums: &[Album],
     artists_by_album: &HashMap<String, Vec<Artist>>,
-    sort_field: LibrarySortField,
-    sort_direction: SortDirection,
+    criteria: &[SortCriterion],
 ) -> Vec<Album> {
     let mut sorted = albums.to_vec();
     sorted.sort_by(|a, b| {
-        let cmp = match sort_field {
-            LibrarySortField::Title => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
-            LibrarySortField::Artist => {
-                let artist_a = artists_by_album
-                    .get(&a.id)
-                    .and_then(|v| v.first())
-                    .map(|a| a.name.to_lowercase())
-                    .unwrap_or_default();
-                let artist_b = artists_by_album
-                    .get(&b.id)
-                    .and_then(|v| v.first())
-                    .map(|a| a.name.to_lowercase())
-                    .unwrap_or_default();
-                artist_a.cmp(&artist_b)
+        for criterion in criteria {
+            let cmp = match criterion.field {
+                LibrarySortField::Title => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
+                LibrarySortField::Artist => {
+                    let artist_a = artists_by_album
+                        .get(&a.id)
+                        .and_then(|v| v.first())
+                        .map(|a| a.name.to_lowercase())
+                        .unwrap_or_default();
+                    let artist_b = artists_by_album
+                        .get(&b.id)
+                        .and_then(|v| v.first())
+                        .map(|a| a.name.to_lowercase())
+                        .unwrap_or_default();
+                    artist_a.cmp(&artist_b)
+                }
+                LibrarySortField::Year => a.year.cmp(&b.year),
+                LibrarySortField::DateAdded => a.date_added.cmp(&b.date_added),
+            };
+            let cmp = match criterion.direction {
+                SortDirection::Ascending => cmp,
+                SortDirection::Descending => cmp.reverse(),
+            };
+            if cmp != std::cmp::Ordering::Equal {
+                return cmp;
             }
-            LibrarySortField::Year => a.year.cmp(&b.year),
-            LibrarySortField::DateAdded => a.date_added.cmp(&b.date_added),
-        };
-        match sort_direction {
-            SortDirection::Ascending => cmp,
-            SortDirection::Descending => cmp.reverse(),
         }
+        std::cmp::Ordering::Equal
     });
     sorted
 }
@@ -90,17 +95,14 @@ pub fn LibraryView(
     let artists_by_album = state.artists_by_album().read().clone();
 
     // Sort state is local to the view (UI concern, not persisted)
-    let sort_field = use_signal(|| LibrarySortField::DateAdded);
-    let sort_direction = use_signal(|| SortDirection::Descending);
+    let sort_criteria = use_signal(|| {
+        vec![SortCriterion {
+            field: LibrarySortField::DateAdded,
+            direction: SortDirection::Descending,
+        }]
+    });
 
-    let current_sort_field = sort_field();
-    let current_sort_direction = sort_direction();
-    let sorted_albums = sort_albums(
-        &albums,
-        &artists_by_album,
-        current_sort_field,
-        current_sort_direction,
-    );
+    let sorted_albums = sort_albums(&albums, &artists_by_album, &sort_criteria.read());
     let album_count = sorted_albums.len();
 
     let mut scroll_target: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
@@ -129,7 +131,7 @@ pub fn LibraryView(
                         }
                     }
                 } else {
-                    SortToolbar { album_count, sort_field, sort_direction }
+                    SortToolbar { album_count, sort_criteria }
 
                     AlbumGrid {
                         albums: sorted_albums,
@@ -148,17 +150,10 @@ pub fn LibraryView(
 
 /// Sort controls toolbar
 #[component]
-fn SortToolbar(
-    album_count: usize,
-    sort_field: Signal<LibrarySortField>,
-    sort_direction: Signal<SortDirection>,
-) -> Element {
-    let mut show_sort_menu = use_signal(|| false);
-    let is_open: ReadSignal<bool> = show_sort_menu.into();
-    let anchor_id = "sort-field-btn";
-
-    let current_field = sort_field();
-    let current_direction = sort_direction();
+fn SortToolbar(album_count: usize, sort_criteria: Signal<Vec<SortCriterion>>) -> Element {
+    let criteria = sort_criteria.read().clone();
+    let used_fields: Vec<LibrarySortField> = criteria.iter().map(|c| c.field).collect();
+    let all_used = used_fields.len() >= LibrarySortField::ALL.len();
 
     let album_label = if album_count == 1 {
         "1 album".to_string()
@@ -170,71 +165,140 @@ fn SortToolbar(
         div { class: "flex items-center justify-between mb-4",
             span { class: "text-sm text-gray-400", "{album_label}" }
 
-            div { class: "flex items-center gap-2",
-                // Sort field dropdown trigger
-                ChromelessButton {
-                    id: Some(anchor_id.to_string()),
-                    class: Some(
-                        "flex items-center gap-1 px-2 py-1 rounded-md text-sm text-gray-400 hover:text-white hover:bg-hover transition-all"
-                            .to_string(),
-                    ),
-                    aria_label: Some("Sort by".to_string()),
-                    onclick: move |_| show_sort_menu.set(!show_sort_menu()),
-                    "{sort_field_label(current_field)}"
-                    ChevronDownIcon { class: "w-3 h-3" }
+            div { class: "flex items-center gap-1",
+                for (idx , criterion) in criteria.iter().enumerate() {
+                    SortCriterionItem {
+                        key: "{idx}",
+                        index: idx,
+                        criterion: *criterion,
+                        sort_criteria,
+                        removable: criteria.len() > 1,
+                    }
                 }
 
-                MenuDropdown {
-                    anchor_id: anchor_id.to_string(),
-                    is_open,
-                    on_close: move |_| show_sort_menu.set(false),
-                    placement: Placement::BottomEnd,
-
-                    for field in [
-                        LibrarySortField::Title,
-                        LibrarySortField::Artist,
-                        LibrarySortField::Year,
-                        LibrarySortField::DateAdded,
-                    ]
-                    {
-                        MenuItem {
-                            onclick: move |_| {
-                                show_sort_menu.set(false);
-                                sort_field.set(field);
-                            },
-                            span { class: if current_field == field { "text-accent-soft" } else { "" },
-                                "{sort_field_label(field)}"
+                if !all_used {
+                    ChromelessButton {
+                        class: Some(
+                            "p-1 rounded-md text-gray-400 hover:text-white hover:bg-hover transition-all"
+                                .to_string(),
+                        ),
+                        aria_label: Some("Add sort criterion".to_string()),
+                        onclick: move |_| {
+                            let mut criteria = sort_criteria.write();
+                            let used: Vec<_> = criteria.iter().map(|c| c.field).collect();
+                            if let Some(next_field) = LibrarySortField::ALL
+                                .iter()
+                                .find(|f| !used.contains(f))
+                            {
+                                criteria
+                                    .push(SortCriterion {
+                                        field: *next_field,
+                                        direction: SortDirection::Ascending,
+                                    });
                             }
+                        },
+                        PlusIcon { class: "w-4 h-4" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Single sort criterion: field dropdown + direction toggle + remove button
+#[component]
+fn SortCriterionItem(
+    index: usize,
+    criterion: SortCriterion,
+    sort_criteria: Signal<Vec<SortCriterion>>,
+    removable: bool,
+) -> Element {
+    let mut show_menu = use_signal(|| false);
+    let is_open: ReadSignal<bool> = show_menu.into();
+    let anchor_id = format!("sort-field-btn-{index}");
+
+    // Available fields: current field + any unused fields
+    let used_fields: Vec<LibrarySortField> = sort_criteria.read().iter().map(|c| c.field).collect();
+    let available_fields: Vec<LibrarySortField> = LibrarySortField::ALL
+        .iter()
+        .filter(|f| **f == criterion.field || !used_fields.contains(f))
+        .copied()
+        .collect();
+
+    rsx! {
+        div { class: "flex items-center gap-0.5",
+            // Field dropdown trigger
+            ChromelessButton {
+                id: Some(anchor_id.clone()),
+                class: Some(
+                    "flex items-center gap-1 px-2 py-1 rounded-md text-sm text-gray-400 hover:text-white hover:bg-hover transition-all"
+                        .to_string(),
+                ),
+                aria_label: Some("Sort by".to_string()),
+                onclick: move |_| show_menu.set(!show_menu()),
+                "{sort_field_label(criterion.field)}"
+                ChevronDownIcon { class: "w-3 h-3" }
+            }
+
+            MenuDropdown {
+                anchor_id: anchor_id.clone(),
+                is_open,
+                on_close: move |_| show_menu.set(false),
+                placement: Placement::BottomEnd,
+
+                for field in available_fields {
+                    MenuItem {
+                        onclick: move |_| {
+                            show_menu.set(false);
+                            sort_criteria.write()[index].field = field;
+                        },
+                        span { class: if criterion.field == field { "text-accent-soft" } else { "" },
+                            "{sort_field_label(field)}"
                         }
                     }
                 }
+            }
 
-                // Sort direction toggle
+            // Direction toggle
+            ChromelessButton {
+                class: Some(
+                    "p-1 rounded-md text-gray-400 hover:text-white hover:bg-hover transition-all"
+                        .to_string(),
+                ),
+                aria_label: Some(
+                    if criterion.direction == SortDirection::Ascending {
+                        "Sort descending"
+                    } else {
+                        "Sort ascending"
+                    }
+                        .to_string(),
+                ),
+                onclick: move |_| {
+                    let new_dir = match criterion.direction {
+                        SortDirection::Ascending => SortDirection::Descending,
+                        SortDirection::Descending => SortDirection::Ascending,
+                    };
+                    sort_criteria.write()[index].direction = new_dir;
+                },
+                if criterion.direction == SortDirection::Ascending {
+                    ArrowUpIcon { class: "w-3.5 h-3.5" }
+                } else {
+                    ArrowDownIcon { class: "w-3.5 h-3.5" }
+                }
+            }
+
+            // Remove button
+            if removable {
                 ChromelessButton {
                     class: Some(
-                        "px-2 py-1 rounded-md text-gray-400 hover:text-white hover:bg-hover transition-all"
+                        "p-1 rounded-md text-gray-400 hover:text-white hover:bg-hover transition-all"
                             .to_string(),
                     ),
-                    aria_label: Some(
-                        if current_direction == SortDirection::Ascending {
-                            "Sort descending"
-                        } else {
-                            "Sort ascending"
-                        }
-                            .to_string(),
-                    ),
+                    aria_label: Some("Remove sort criterion".to_string()),
                     onclick: move |_| {
-                        let new_dir = match current_direction {
-                            SortDirection::Ascending => SortDirection::Descending,
-                            SortDirection::Descending => SortDirection::Ascending,
-                        };
-                        sort_direction.set(new_dir);
+                        sort_criteria.write().remove(index);
                     },
-                    if current_direction == SortDirection::Ascending {
-                        ArrowUpIcon { class: "w-4 h-4" }
-                    } else {
-                        ArrowDownIcon { class: "w-4 h-4" }
-                    }
+                    XIcon { class: "w-3 h-3" }
                 }
             }
         }

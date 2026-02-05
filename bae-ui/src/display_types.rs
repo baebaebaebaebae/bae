@@ -15,11 +15,26 @@ pub enum LibrarySortField {
     DateAdded,
 }
 
+impl LibrarySortField {
+    pub const ALL: [LibrarySortField; 4] = [
+        LibrarySortField::Title,
+        LibrarySortField::Artist,
+        LibrarySortField::Year,
+        LibrarySortField::DateAdded,
+    ];
+}
+
 /// Sort direction
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SortDirection {
     Ascending,
     Descending,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SortCriterion {
+    pub field: LibrarySortField,
+    pub direction: SortDirection,
 }
 
 /// Album display info
