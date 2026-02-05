@@ -205,7 +205,7 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
             let status = *playback_store.status().read();
             if matches!(status, PlaybackStatus::Playing | PlaybackStatus::Paused) {
                 if let Some(current_release) = playback_store.current_release_id().read().clone() {
-                    let releases_list = state.read().releases.clone();
+                    let releases_list = state.releases().read().clone();
                     if releases_list.iter().any(|r| r.id == current_release) {
                         playback.stop();
                     }

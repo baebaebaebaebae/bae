@@ -9,6 +9,7 @@ use crate::ui::Route;
 use bae_ui::components::import::FolderImportView;
 use bae_ui::display_types::{MatchCandidate, SearchSource, SearchTab, SelectedCover};
 use bae_ui::stores::import::CandidateEvent;
+use bae_ui::stores::import::ImportStateStoreExt;
 use bae_ui::stores::{AppStateStoreExt, StorageProfilesStateStoreExt};
 use bae_ui::ImportSource;
 use dioxus::prelude::*;
@@ -28,7 +29,7 @@ pub fn FolderImport() -> Element {
     let storage_profiles = app.state.storage_profiles().profiles();
 
     // Extract values needed by handlers (handlers need current values, not lenses)
-    let current_candidate_key = import_state.read().current_candidate_key.clone();
+    let current_candidate_key = import_state.current_candidate_key().read().clone();
 
     // Handlers
     let on_folder_select = {
@@ -510,9 +511,11 @@ pub fn FolderImport() -> Element {
     let text_file_contents_resource = use_resource(move || {
         let idx = *viewing_index.read();
         let folder = folder_path.clone().unwrap_or_default();
-        let files = import_state
-            .read()
-            .current_candidate_state()
+        let key = import_state.current_candidate_key().read().clone();
+        let states = import_state.candidate_states().read().clone();
+        let files = key
+            .as_ref()
+            .and_then(|k| states.get(k))
             .map(|s| s.files().clone());
         async move {
             let idx = idx?;
