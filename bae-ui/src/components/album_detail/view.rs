@@ -42,6 +42,7 @@ pub fn AlbumDetailView(
     on_track_add_next: EventHandler<String>,
     on_track_add_to_queue: EventHandler<String>,
     on_track_export: EventHandler<String>,
+    on_artist_click: EventHandler<String>,
     on_play_album: EventHandler<Vec<String>>,
     on_add_album_to_queue: EventHandler<Vec<String>>,
     #[props(default)] modal_files: Vec<File>,
@@ -91,6 +92,7 @@ pub fn AlbumDetailView(
                         on_open_gallery: EventHandler::new(move |id: String| {
                             show_release_info_modal.set(Some((id, Tab::Gallery)));
                         }),
+                        on_artist_click,
                         on_play_album,
                         on_add_to_queue: on_add_album_to_queue,
                     }
@@ -122,6 +124,7 @@ pub fn AlbumDetailView(
                         on_track_add_next,
                         on_track_add_to_queue,
                         on_track_export,
+                        on_artist_click,
                     }
                 }
             }
@@ -178,6 +181,7 @@ fn AlbumInfoSection(
     on_delete_album: EventHandler<String>,
     on_view_release_info: EventHandler<String>,
     on_open_gallery: EventHandler<String>,
+    on_artist_click: EventHandler<String>,
     on_play_album: EventHandler<Vec<String>>,
     on_add_to_queue: EventHandler<Vec<String>>,
 ) -> Element {
@@ -214,6 +218,7 @@ fn AlbumInfoSection(
             artists,
             track_count,
             selected_release: releases.iter().find(|r| Some(r.id.clone()) == selected_release_id).cloned(),
+            on_artist_click,
         }
         PlayAlbumButton {
             track_ids,
@@ -279,6 +284,7 @@ fn TrackListSection(
     on_track_add_next: EventHandler<String>,
     on_track_add_to_queue: EventHandler<String>,
     on_track_export: EventHandler<String>,
+    on_artist_click: EventHandler<String>,
 ) -> Element {
     // Use lenses for individual fields - avoids subscribing to track import_state changes
     let artists = state.artists().read().clone();
@@ -372,6 +378,7 @@ fn TrackListSection(
                                 on_add_next: on_track_add_next,
                                 on_add_to_queue: on_track_add_to_queue,
                                 on_export: on_track_export,
+                                on_artist_click,
                             }
                         }
                     }

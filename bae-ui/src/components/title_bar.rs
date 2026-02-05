@@ -4,12 +4,16 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::components::icons::{ChevronDownIcon, ImageIcon, SettingsIcon};
+use crate::components::icons::{ChevronDownIcon, DiscIcon, ImageIcon, SettingsIcon, UserIcon};
+use crate::components::utils::format_duration;
 use crate::components::{ChromelessButton, Dropdown, Placement};
 use dioxus::prelude::*;
 
 /// Counter for generating unique element IDs
 static BUTTON_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Well-known ID for the search input, used by "/" keyboard shortcut
+pub const SEARCH_INPUT_ID: &str = "global-search-input";
 
 /// Navigation item for title bar
 #[derive(Clone, PartialEq)]
@@ -19,13 +23,55 @@ pub struct NavItem {
     pub is_active: bool,
 }
 
-/// Search result for title bar dropdown
+/// Grouped search results for the dropdown
+#[derive(Clone, PartialEq, Default)]
+pub struct GroupedSearchResults {
+    pub artists: Vec<ArtistResult>,
+    pub albums: Vec<AlbumResult>,
+    pub tracks: Vec<TrackResult>,
+}
+
+impl GroupedSearchResults {
+    pub fn is_empty(&self) -> bool {
+        self.artists.is_empty() && self.albums.is_empty() && self.tracks.is_empty()
+    }
+}
+
+/// Artist search result
 #[derive(Clone, PartialEq)]
-pub struct SearchResult {
+pub struct ArtistResult {
+    pub id: String,
+    pub name: String,
+    pub album_count: usize,
+}
+
+/// Album search result
+#[derive(Clone, PartialEq)]
+pub struct AlbumResult {
     pub id: String,
     pub title: String,
-    pub subtitle: String,
+    pub artist_name: String,
+    pub year: Option<i32>,
     pub cover_url: Option<String>,
+}
+
+/// Track search result
+#[derive(Clone, PartialEq)]
+pub struct TrackResult {
+    pub id: String,
+    pub album_id: String,
+    pub title: String,
+    pub artist_name: String,
+    pub album_title: String,
+    pub duration_ms: Option<i64>,
+}
+
+/// Action when a search result is clicked
+#[derive(Clone, Debug)]
+pub enum SearchAction {
+    Artist(String),
+    Album(String),
+    Track { album_id: String },
 }
 
 /// Title bar view (pure, props-based)
@@ -38,11 +84,12 @@ pub fn TitleBarView(
     // Search
     search_value: String,
     on_search_change: EventHandler<String>,
-    search_results: Vec<SearchResult>,
-    on_search_result_click: EventHandler<String>,
+    search_results: GroupedSearchResults,
+    on_search_result_click: EventHandler<SearchAction>,
     show_search_results: ReadSignal<bool>,
     on_search_dismiss: EventHandler<()>,
     on_search_focus: EventHandler<()>,
+    on_search_blur: EventHandler<()>,
     // Settings
     on_settings_click: EventHandler<()>,
     #[props(default)] settings_active: bool,
@@ -58,10 +105,8 @@ pub fn TitleBarView(
     // Left padding for traffic lights on macOS
     #[props(default = 80)] left_padding: u32,
 ) -> Element {
-    let search_input_id = use_hook(|| {
-        let id = BUTTON_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-        format!("search-input-{}", id)
-    });
+    let mut is_search_active = use_signal(|| false);
+    let search_active = is_search_active();
 
     let chevron_button_id = use_hook(|| {
         let id = BUTTON_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -126,16 +171,25 @@ pub fn TitleBarView(
                 style: "-webkit-app-region: no-drag;",
 
                 // Search input with dropdown
-                div { class: "relative w-40",
+                div {
+                    class: "relative transition-all duration-200",
+                    class: if search_active { "w-56" } else { "w-40" },
                     input {
-                        id: "{search_input_id}",
+                        id: SEARCH_INPUT_ID,
                         r#type: "text",
                         placeholder: "Search...",
                         autocomplete: "off",
                         class: "w-full h-7 px-2 bg-surface-input border border-border-default rounded text-white text-xs placeholder-gray-400 focus:outline-none focus:border-border-strong",
                         value: "{search_value}",
                         oninput: move |evt| on_search_change.call(evt.value()),
-                        onfocus: move |_| on_search_focus.call(()),
+                        onfocus: move |_| {
+                            is_search_active.set(true);
+                            on_search_focus.call(());
+                        },
+                        onblur: move |_| {
+                            is_search_active.set(false);
+                            on_search_blur.call(());
+                        },
                         onkeydown: move |evt| {
                             if evt.key() == Key::Escape {
                                 on_search_dismiss.call(());
@@ -146,17 +200,14 @@ pub fn TitleBarView(
                     // Search results dropdown
                     if !search_results.is_empty() {
                         Dropdown {
-                            anchor_id: search_input_id.clone(),
+                            anchor_id: SEARCH_INPUT_ID.to_string(),
                             is_open: show_search_results,
                             on_close: on_search_dismiss,
                             placement: Placement::Bottom,
-                            class: "bg-surface-overlay border border-border-strong rounded-lg shadow-lg w-64 max-h-96 overflow-y-auto",
-                            for result in search_results.iter() {
-                                SearchResultItem {
-                                    key: "{result.id}",
-                                    result: result.clone(),
-                                    on_click: on_search_result_click,
-                                }
+                            class: "bg-surface-overlay border border-border-strong rounded-lg shadow-lg w-72 max-h-96 overflow-y-auto",
+                            SearchResultsContent {
+                                results: search_results,
+                                on_click: on_search_result_click,
                             }
                         }
                     }
@@ -243,6 +294,148 @@ fn ImportSplitButton(
     }
 }
 
+/// Grouped search results content
+#[component]
+fn SearchResultsContent(
+    results: GroupedSearchResults,
+    on_click: EventHandler<SearchAction>,
+) -> Element {
+    rsx! {
+        // Artists section
+        if !results.artists.is_empty() {
+            SearchSectionHeader { label: "Artists" }
+            for artist in results.artists.iter() {
+                ArtistResultItem {
+                    key: "{artist.id}",
+                    artist: artist.clone(),
+                    on_click,
+                }
+            }
+        }
+
+        // Albums section
+        if !results.albums.is_empty() {
+            SearchSectionHeader { label: "Albums" }
+            for album in results.albums.iter() {
+                AlbumResultItem { key: "{album.id}", album: album.clone(), on_click }
+            }
+        }
+
+        // Tracks section
+        if !results.tracks.is_empty() {
+            SearchSectionHeader { label: "Tracks" }
+            for track in results.tracks.iter() {
+                TrackResultItem { key: "{track.id}", track: track.clone(), on_click }
+            }
+        }
+    }
+}
+
+/// Section header in search results
+#[component]
+fn SearchSectionHeader(label: &'static str) -> Element {
+    rsx! {
+        div { class: "px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider",
+            "{label}"
+        }
+    }
+}
+
+/// Artist result item
+#[component]
+fn ArtistResultItem(artist: ArtistResult, on_click: EventHandler<SearchAction>) -> Element {
+    let id = artist.id.clone();
+    let album_label = if artist.album_count == 1 {
+        "1 album".to_string()
+    } else {
+        format!("{} albums", artist.album_count)
+    };
+
+    rsx! {
+        div {
+            class: "flex items-center gap-3 px-3 py-2 hover:bg-hover cursor-pointer",
+            onclick: move |evt| {
+                evt.stop_propagation();
+                on_click.call(SearchAction::Artist(id.clone()));
+            },
+            div { class: "w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0",
+                UserIcon { class: "w-4 h-4 text-gray-400" }
+            }
+            div { class: "flex-1 min-w-0",
+                div { class: "text-white text-xs font-medium truncate", "{artist.name}" }
+                div { class: "text-gray-400 text-[10px] truncate", "{album_label}" }
+            }
+        }
+    }
+}
+
+/// Album result item
+#[component]
+fn AlbumResultItem(album: AlbumResult, on_click: EventHandler<SearchAction>) -> Element {
+    let id = album.id.clone();
+    let subtitle = if let Some(year) = album.year {
+        format!("{} \u{2022} {}", album.artist_name, year)
+    } else {
+        album.artist_name.clone()
+    };
+
+    rsx! {
+        div {
+            class: "flex items-center gap-3 px-3 py-2 hover:bg-hover cursor-pointer",
+            onclick: move |evt| {
+                evt.stop_propagation();
+                on_click.call(SearchAction::Album(id.clone()));
+            },
+            if let Some(url) = &album.cover_url {
+                img {
+                    src: "{url}",
+                    class: "w-8 h-8 rounded object-cover flex-shrink-0",
+                    alt: "{album.title}",
+                }
+            } else {
+                div { class: "w-8 h-8 bg-gray-700 rounded flex items-center justify-center flex-shrink-0",
+                    ImageIcon { class: "w-4 h-4 text-gray-500" }
+                }
+            }
+            div { class: "flex-1 min-w-0",
+                div { class: "text-white text-xs font-medium truncate", "{album.title}" }
+                div { class: "text-gray-400 text-[10px] truncate", "{subtitle}" }
+            }
+        }
+    }
+}
+
+/// Track result item
+#[component]
+fn TrackResultItem(track: TrackResult, on_click: EventHandler<SearchAction>) -> Element {
+    let album_id = track.album_id.clone();
+    let subtitle = format!("{} \u{2022} {}", track.album_title, track.artist_name);
+    let duration = track.duration_ms.map(format_duration).unwrap_or_default();
+
+    rsx! {
+        div {
+            class: "flex items-center gap-3 px-3 py-2 hover:bg-hover cursor-pointer",
+            onclick: move |evt| {
+                evt.stop_propagation();
+                on_click
+                    .call(SearchAction::Track {
+                        album_id: album_id.clone(),
+                    });
+            },
+            div { class: "w-8 h-8 bg-gray-700 rounded flex items-center justify-center flex-shrink-0",
+                DiscIcon { class: "w-4 h-4 text-gray-500" }
+            }
+            div { class: "flex-1 min-w-0",
+                div { class: "text-white text-xs font-medium truncate", "{track.title}" }
+                div { class: "text-gray-400 text-[10px] truncate", "{subtitle}" }
+            }
+            if !duration.is_empty() {
+                span { class: "text-gray-500 text-[10px] flex-shrink-0", "{duration}" }
+            }
+        }
+    }
+}
+
 /// Navigation button with generic children
 #[component]
 fn NavButton(is_active: bool, on_click: EventHandler<()>, children: Element) -> Element {
@@ -260,40 +453,6 @@ fn NavButton(is_active: bool, on_click: EventHandler<()>, children: Element) -> 
                 class: Some(class.to_string()),
                 onclick: move |_| on_click.call(()),
                 {children}
-            }
-        }
-    }
-}
-
-/// Search result item in the dropdown
-#[component]
-fn SearchResultItem(result: SearchResult, on_click: EventHandler<String>) -> Element {
-    let id = result.id.clone();
-
-    rsx! {
-        div {
-            class: "flex items-center gap-3 px-3 py-2 hover:bg-hover border-b border-border-strong last:border-b-0 cursor-pointer",
-            onclick: {
-                let id = id.clone();
-                move |evt| {
-                    evt.stop_propagation();
-                    on_click.call(id.clone());
-                }
-            },
-            if let Some(url) = &result.cover_url {
-                img {
-                    src: "{url}",
-                    class: "w-10 h-10 rounded object-cover flex-shrink-0",
-                    alt: "{result.title}",
-                }
-            } else {
-                div { class: "w-10 h-10 bg-gray-700 rounded flex items-center justify-center flex-shrink-0",
-                    ImageIcon { class: "w-5 h-5 text-gray-500" }
-                }
-            }
-            div { class: "flex-1 min-w-0",
-                div { class: "text-white text-xs font-medium truncate", "{result.title}" }
-                div { class: "text-gray-400 text-xs truncate", "{result.subtitle}" }
             }
         }
     }

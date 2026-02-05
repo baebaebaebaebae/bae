@@ -6,12 +6,14 @@
 use crate::ui::app_service::use_app;
 use crate::ui::components::imports_dropdown::ImportsDropdown;
 use crate::ui::Route;
-use bae_ui::display_types::Album;
 use bae_ui::stores::{
     ActiveImportsUiStateStoreExt, AppStateStoreExt, LibraryStateStoreExt, SearchStateStoreExt,
     UiStateStoreExt,
 };
-use bae_ui::{NavItem, SearchResult, TitleBarView};
+use bae_ui::{
+    AlbumResult, ArtistResult, GroupedSearchResults, NavItem, SearchAction, TitleBarView,
+    TrackResult,
+};
 #[cfg(target_os = "macos")]
 use cocoa::appkit::NSApplication;
 #[cfg(target_os = "macos")]
@@ -23,6 +25,7 @@ use dioxus::prelude::*;
 use dispatch::Queue;
 #[cfg(target_os = "macos")]
 use objc::{msg_send, sel, sel_impl};
+use std::collections::HashMap;
 
 /// Custom title bar component with navigation and search
 /// On macOS: includes window dragging, zoom, and space for traffic lights
@@ -38,55 +41,85 @@ pub fn TitleBar() -> Element {
     let mut search_query_store = search_store.query();
     let mut show_results = use_signal(|| false);
     let show_results_read: ReadSignal<bool> = show_results.into();
-    let mut filtered_albums = use_signal(Vec::<Album>::new);
+    let mut search_results = use_signal(GroupedSearchResults::default);
     let mut imports_dropdown_open = use_signal(|| false);
     let imports_dropdown_open_read: ReadSignal<bool> = imports_dropdown_open.into();
 
-    // Read albums from global store (populated by App component)
-    let albums_store = app.state.library().albums();
+    // Read albums/artists from global store for suggestion computation
     let artists_store = app.state.library().artists_by_album();
 
     // Read import count for split button
     let import_count = app.state.active_imports().imports().read().len();
 
-    // Filter albums based on search query
+    // Search effect: when query changes, search the DB or show suggestions
     use_effect({
+        let library_manager = app.library_manager.clone();
         move || {
-            let query = search_query_store.read().to_lowercase();
+            let query = search_query_store.read().clone();
             if query.is_empty() {
-                filtered_albums.set(Vec::new());
+                search_results.set(GroupedSearchResults::default());
                 show_results.set(false);
             } else {
-                let albums = albums_store.read();
-                let artists_map = artists_store.read();
-                let filtered = albums
-                    .iter()
-                    .filter(|album| {
-                        if album.title.to_lowercase().contains(&query) {
-                            return true;
+                let library_manager = library_manager.clone();
+                let query = query.clone();
+                spawn(async move {
+                    match library_manager.search_library(&query, 5).await {
+                        Ok(db_results) => {
+                            let grouped = GroupedSearchResults {
+                                artists: db_results
+                                    .artists
+                                    .into_iter()
+                                    .map(|a| ArtistResult {
+                                        id: a.id,
+                                        name: a.name,
+                                        album_count: a.album_count as usize,
+                                    })
+                                    .collect(),
+                                albums: db_results
+                                    .albums
+                                    .into_iter()
+                                    .map(|a| AlbumResult {
+                                        id: a.id,
+                                        title: a.title,
+                                        artist_name: a.artist_name,
+                                        year: a.year,
+                                        cover_url: a.cover_art_url,
+                                    })
+                                    .collect(),
+                                tracks: db_results
+                                    .tracks
+                                    .into_iter()
+                                    .map(|t| TrackResult {
+                                        id: t.id,
+                                        album_id: t.album_id,
+                                        title: t.title,
+                                        artist_name: t.artist_name,
+                                        album_title: t.album_title,
+                                        duration_ms: t.duration_ms,
+                                    })
+                                    .collect(),
+                            };
+                            search_results.set(grouped);
+                            show_results.set(true);
                         }
-                        if let Some(artists) = artists_map.get(&album.id) {
-                            return artists
-                                .iter()
-                                .any(|artist| artist.name.to_lowercase().contains(&query));
+                        Err(e) => {
+                            tracing::warn!("Search failed: {}", e);
                         }
-                        false
-                    })
-                    .take(10)
-                    .cloned()
-                    .collect();
-                filtered_albums.set(filtered);
-                show_results.set(true);
+                    }
+                });
             }
         }
     });
 
-    // Build nav items (Settings is now a button on the right)
+    // Build nav items
     let nav_items = vec![
         NavItem {
             id: "library".to_string(),
             label: "Library".to_string(),
-            is_active: matches!(current_route, Route::Library {} | Route::AlbumDetail { .. }),
+            is_active: matches!(
+                current_route,
+                Route::Library {} | Route::AlbumDetail { .. } | Route::ArtistDetail { .. }
+            ),
         },
         NavItem {
             id: "import".to_string(),
@@ -94,37 +127,6 @@ pub fn TitleBar() -> Element {
             is_active: matches!(current_route, Route::ImportWorkflowManager {}),
         },
     ];
-
-    // Convert filtered albums to search results
-    let search_results: Vec<SearchResult> = {
-        let artists_map = artists_store.read();
-        filtered_albums()
-            .iter()
-            .map(|album| {
-                let artists = artists_map.get(&album.id).cloned().unwrap_or_default();
-                let artist_name = if artists.is_empty() {
-                    "Unknown Artist".to_string()
-                } else {
-                    artists
-                        .iter()
-                        .map(|a| a.name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                };
-                let subtitle = if let Some(year) = album.year {
-                    format!("{} • {}", artist_name, year)
-                } else {
-                    artist_name
-                };
-                SearchResult {
-                    id: album.id.clone(),
-                    title: album.title.clone(),
-                    subtitle,
-                    cover_url: album.cover_url.clone(),
-                }
-            })
-            .collect()
-    };
 
     // Platform-specific: left padding for traffic lights on macOS
     #[cfg(target_os = "macos")]
@@ -159,23 +161,50 @@ pub fn TitleBar() -> Element {
             },
             search_value: search_query_store.read().clone(),
             on_search_change: move |value| search_query_store.set(value),
-            search_results,
-            on_search_result_click: move |album_id: String| {
+            search_results: search_results(),
+            on_search_result_click: move |action: SearchAction| {
                 show_results.set(false);
                 search_query_store.set(String::new());
-                navigator()
-                    .push(Route::AlbumDetail {
-                        album_id,
-                        release_id: String::new(),
-                    });
+                match action {
+                    SearchAction::Artist(artist_id) => {
+                        navigator().push(Route::ArtistDetail { artist_id });
+                    }
+                    SearchAction::Album(album_id) => {
+                        navigator()
+                            .push(Route::AlbumDetail {
+                                album_id,
+                                release_id: String::new(),
+                            });
+                    }
+                    SearchAction::Track { album_id } => {
+                        navigator()
+                            .push(Route::AlbumDetail {
+                                album_id,
+                                release_id: String::new(),
+                            });
+                    }
+                }
             },
             show_search_results: show_results_read,
             on_search_dismiss: move |_| show_results.set(false),
             on_search_focus: move |_| {
-                if !search_query_store.read().is_empty() {
+                if search_query_store.read().is_empty() {
+                    // Show top artists as suggestions
+                    let top_artists = compute_top_artists(&artists_store.read());
+                    if !top_artists.is_empty() {
+                        search_results
+                            .set(GroupedSearchResults {
+                                artists: top_artists,
+                                albums: vec![],
+                                tracks: vec![],
+                            });
+                        show_results.set(true);
+                    }
+                } else {
                     show_results.set(true);
                 }
             },
+            on_search_blur: |_| {},
             on_settings_click: move |_| {
                 navigator().push(Route::Settings {});
             },
@@ -192,6 +221,36 @@ pub fn TitleBar() -> Element {
             left_padding,
         }
     }
+}
+
+/// Compute top artists by album count from the artists_by_album map
+fn compute_top_artists(
+    artists_by_album: &HashMap<String, Vec<bae_ui::Artist>>,
+) -> Vec<ArtistResult> {
+    // Count albums per artist
+    let mut artist_counts: HashMap<String, (String, usize)> = HashMap::new();
+    for artists in artists_by_album.values() {
+        for artist in artists {
+            artist_counts
+                .entry(artist.id.clone())
+                .and_modify(|(_, count)| *count += 1)
+                .or_insert((artist.name.clone(), 1));
+        }
+    }
+
+    // Sort by album count descending, take top 5
+    let mut sorted: Vec<_> = artist_counts.into_iter().collect();
+    sorted.sort_by(|a, b| b.1 .1.cmp(&a.1 .1));
+
+    sorted
+        .into_iter()
+        .take(5)
+        .map(|(id, (name, album_count))| ArtistResult {
+            id,
+            name,
+            album_count,
+        })
+        .collect()
 }
 
 /// Perform window zoom (maximize/restore) using native macOS API

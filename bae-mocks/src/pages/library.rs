@@ -27,6 +27,9 @@ pub fn Library() -> Element {
             on_album_click: move |album_id: String| {
                 navigator().push(Route::AlbumDetail { album_id });
             },
+            on_artist_click: move |artist_id: String| {
+                navigator().push(Route::ArtistDetail { artist_id });
+            },
             on_play_album: |_| {},
             on_add_album_to_queue: |_| {},
             on_empty_action: |_| {},
@@ -59,6 +62,7 @@ fn generate_albums(count: usize) -> (Vec<Album>, HashMap<String, Vec<Artist>>) {
             year: base.year,
             cover_url: base.cover_url.clone(),
             is_compilation: base.is_compilation,
+            date_added: base.date_added,
         });
 
         if let Some(artists) = base_artists.get(&base.id) {

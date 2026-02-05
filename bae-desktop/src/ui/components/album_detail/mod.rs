@@ -4,7 +4,7 @@
 //! components like the page wrapper with routing.
 
 // App-specific components
-mod back_button;
+pub mod back_button;
 mod error;
 mod loading;
 mod page;

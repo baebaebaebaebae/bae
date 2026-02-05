@@ -5,6 +5,7 @@
 
 use super::active_imports::ActiveImportsUiState;
 use super::album_detail::AlbumDetailState;
+use super::artist_detail::ArtistDetailState;
 use super::config::ConfigState;
 use super::import::ImportState;
 use super::library::LibraryState;
@@ -22,6 +23,8 @@ pub struct AppState {
     pub library: LibraryState,
     /// Album detail view state
     pub album_detail: AlbumDetailState,
+    /// Artist detail view state
+    pub artist_detail: ArtistDetailState,
     /// Active imports shown in toolbar dropdown
     pub active_imports: ActiveImportsUiState,
     /// Playback state (playing/paused, queue)

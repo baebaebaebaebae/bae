@@ -3,7 +3,7 @@ use crate::cloud_storage::CloudStorageError;
 use crate::db::{
     Database, DbAlbum, DbAlbumArtist, DbArtist, DbAudioFormat, DbFile, DbImage, DbImport,
     DbRelease, DbStorageProfile, DbTorrent, DbTrack, DbTrackArtist, ImportOperationStatus,
-    ImportStatus,
+    ImportStatus, LibrarySearchResults,
 };
 use crate::encryption::EncryptionService;
 use crate::library::export::ExportService;
@@ -330,6 +330,29 @@ impl LibraryManager {
         track_id: &str,
     ) -> Result<Vec<DbArtist>, LibraryError> {
         Ok(self.database.get_artists_for_track(track_id).await?)
+    }
+    /// Get artist by ID
+    pub async fn get_artist_by_id(
+        &self,
+        artist_id: &str,
+    ) -> Result<Option<DbArtist>, LibraryError> {
+        Ok(self.database.get_artist_by_id(artist_id).await?)
+    }
+    /// Search across artists, albums, and tracks
+    pub async fn search_library(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<LibrarySearchResults, LibraryError> {
+        Ok(self.database.search_library(query, limit).await?)
+    }
+
+    /// Get albums for an artist
+    pub async fn get_albums_for_artist(
+        &self,
+        artist_id: &str,
+    ) -> Result<Vec<DbAlbum>, LibraryError> {
+        Ok(self.database.get_albums_for_artist(artist_id).await?)
     }
     /// Add an image to a release
     pub async fn add_image(&self, image: &DbImage) -> Result<(), LibraryError> {

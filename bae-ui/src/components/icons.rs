@@ -719,6 +719,82 @@ pub fn LayersIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element 
     }
 }
 
+/// Arrow up icon (sort ascending)
+#[component]
+pub fn ArrowUpIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
+    rsx! {
+        svg {
+            class: "{class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "m5 12 7-7 7 7" }
+            path { d: "M12 19V5" }
+        }
+    }
+}
+
+/// Arrow down icon (sort descending)
+#[component]
+pub fn ArrowDownIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
+    rsx! {
+        svg {
+            class: "{class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M12 5v14" }
+            path { d: "m19 12-7 7-7-7" }
+        }
+    }
+}
+
+/// Search icon (magnifying glass)
+#[component]
+pub fn SearchIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
+    rsx! {
+        svg {
+            class: "{class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            circle { cx: "11", cy: "11", r: "8" }
+            path { d: "m21 21-4.3-4.3" }
+        }
+    }
+}
+
+/// User icon (person silhouette - for artist results)
+#[component]
+pub fn UserIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {
+    rsx! {
+        svg {
+            class: "{class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" }
+            circle { cx: "12", cy: "7", r: "4" }
+        }
+    }
+}
+
 /// Settings gear icon
 #[component]
 pub fn SettingsIcon(#[props(default = "w-4 h-4")] class: &'static str) -> Element {

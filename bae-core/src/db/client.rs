@@ -174,6 +174,191 @@ impl Database {
         }
         Ok(artists)
     }
+    /// Get artist by ID
+    pub async fn get_artist_by_id(&self, artist_id: &str) -> Result<Option<DbArtist>, sqlx::Error> {
+        let row = sqlx::query("SELECT * FROM artists WHERE id = ?")
+            .bind(artist_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| DbArtist {
+            id: row.get("id"),
+            name: row.get("name"),
+            sort_name: row.get("sort_name"),
+            discogs_artist_id: row.get("discogs_artist_id"),
+            bandcamp_artist_id: row.get("bandcamp_artist_id"),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                .unwrap()
+                .with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+                .unwrap()
+                .with_timezone(&Utc),
+        }))
+    }
+    /// Get albums for an artist (via album_artists join table)
+    pub async fn get_albums_for_artist(
+        &self,
+        artist_id: &str,
+    ) -> Result<Vec<DbAlbum>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_image_id, a.cover_art_url,
+                a.is_compilation, a.created_at, a.updated_at,
+                ad.discogs_master_id, ad.discogs_release_id,
+                amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
+            FROM albums a
+            JOIN album_artists aa ON a.id = aa.album_id
+            LEFT JOIN album_discogs ad ON a.id = ad.album_id
+            LEFT JOIN album_musicbrainz amb ON a.id = amb.album_id
+            WHERE aa.artist_id = ?
+            ORDER BY a.year DESC, a.title
+            "#,
+        )
+        .bind(artist_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut albums = Vec::new();
+        for row in rows {
+            let discogs_master_id: Option<String> = row.get("discogs_master_id");
+            let discogs_release_id: Option<String> = row.get("discogs_release_id");
+            let discogs_release =
+                discogs_release_id.map(|rid| crate::db::models::DiscogsMasterRelease {
+                    master_id: discogs_master_id,
+                    release_id: rid,
+                });
+            let mb_release_group_id: Option<String> = row.get("musicbrainz_release_group_id");
+            let mb_release_id: Option<String> = row.get("musicbrainz_release_id");
+            let musicbrainz_release = match (mb_release_group_id, mb_release_id) {
+                (Some(rgid), Some(rid)) => Some(crate::db::models::MusicBrainzRelease {
+                    release_group_id: rgid,
+                    release_id: rid,
+                }),
+                _ => None,
+            };
+            albums.push(DbAlbum {
+                id: row.get("id"),
+                title: row.get("title"),
+                year: row.get("year"),
+                discogs_release,
+                musicbrainz_release,
+                bandcamp_album_id: row.get("bandcamp_album_id"),
+                cover_image_id: row.get("cover_image_id"),
+                cover_art_url: row.get("cover_art_url"),
+                is_compilation: row.get("is_compilation"),
+                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                    .unwrap()
+                    .with_timezone(&Utc),
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+                    .unwrap()
+                    .with_timezone(&Utc),
+            });
+        }
+        Ok(albums)
+    }
+    /// Search across artists, albums, and tracks by name/title
+    pub async fn search_library(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<LibrarySearchResults, sqlx::Error> {
+        let pattern = format!("%{}%", query);
+        let limit_i64 = limit as i64;
+
+        // Search artists by name, with album count
+        let artist_rows = sqlx::query(
+            r#"
+            SELECT art.id, art.name, COUNT(DISTINCT aa.album_id) as album_count
+            FROM artists art
+            JOIN album_artists aa ON art.id = aa.artist_id
+            WHERE art.name LIKE ?
+            GROUP BY art.id
+            ORDER BY album_count DESC, art.name
+            LIMIT ?
+            "#,
+        )
+        .bind(&pattern)
+        .bind(limit_i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let artists = artist_rows
+            .into_iter()
+            .map(|row| ArtistSearchResult {
+                id: row.get("id"),
+                name: row.get("name"),
+                album_count: row.get("album_count"),
+            })
+            .collect();
+
+        // Search albums by title, with primary artist name
+        let album_rows = sqlx::query(
+            r#"
+            SELECT a.id, a.title, a.year, a.cover_art_url,
+                   COALESCE(art.name, 'Unknown Artist') as artist_name
+            FROM albums a
+            LEFT JOIN album_artists aa ON a.id = aa.album_id AND aa.position = 0
+            LEFT JOIN artists art ON aa.artist_id = art.id
+            WHERE a.title LIKE ?
+            ORDER BY a.title
+            LIMIT ?
+            "#,
+        )
+        .bind(&pattern)
+        .bind(limit_i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let albums = album_rows
+            .into_iter()
+            .map(|row| AlbumSearchResult {
+                id: row.get("id"),
+                title: row.get("title"),
+                year: row.get("year"),
+                cover_art_url: row.get("cover_art_url"),
+                artist_name: row.get("artist_name"),
+            })
+            .collect();
+
+        // Search tracks by title, with album and artist info
+        let track_rows = sqlx::query(
+            r#"
+            SELECT t.id, t.title, t.duration_ms, r.album_id,
+                   a.title as album_title,
+                   COALESCE(art.name, 'Unknown Artist') as artist_name
+            FROM tracks t
+            JOIN releases r ON t.release_id = r.id
+            JOIN albums a ON r.album_id = a.id
+            LEFT JOIN album_artists aa ON a.id = aa.album_id AND aa.position = 0
+            LEFT JOIN artists art ON aa.artist_id = art.id
+            WHERE t.title LIKE ?
+            ORDER BY t.title
+            LIMIT ?
+            "#,
+        )
+        .bind(&pattern)
+        .bind(limit_i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let tracks = track_rows
+            .into_iter()
+            .map(|row| TrackSearchResult {
+                id: row.get("id"),
+                title: row.get("title"),
+                duration_ms: row.get("duration_ms"),
+                album_id: row.get("album_id"),
+                album_title: row.get("album_title"),
+                artist_name: row.get("artist_name"),
+            })
+            .collect();
+
+        Ok(LibrarySearchResults {
+            artists,
+            albums,
+            tracks,
+        })
+    }
+
     /// Insert a new album
     pub async fn insert_album(&self, album: &DbAlbum) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;

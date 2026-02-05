@@ -192,6 +192,10 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
         navigator().push(Route::Library {});
     });
 
+    let on_artist_click = EventHandler::new(move |artist_id: String| {
+        navigator().push(Route::ArtistDetail { artist_id });
+    });
+
     // Delete album callback
     let on_delete_album = EventHandler::new({
         let library_manager = library_manager.clone();
@@ -254,6 +258,7 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
                 on_track_add_next,
                 on_track_add_to_queue,
                 on_track_export,
+                on_artist_click,
                 on_play_album,
                 on_add_album_to_queue,
             }

@@ -6,6 +6,22 @@
 
 use dioxus::prelude::*;
 
+/// Sort field for library view
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum LibrarySortField {
+    Title,
+    Artist,
+    Year,
+    DateAdded,
+}
+
+/// Sort direction
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SortDirection {
+    Ascending,
+    Descending,
+}
+
 /// Album display info
 #[derive(Clone, Debug, PartialEq)]
 pub struct Album {
@@ -14,6 +30,7 @@ pub struct Album {
     pub year: Option<i32>,
     pub cover_url: Option<String>,
     pub is_compilation: bool,
+    pub date_added: chrono::DateTime<chrono::Utc>,
 }
 
 /// Artist display info

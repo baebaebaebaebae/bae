@@ -68,6 +68,7 @@ pub fn LibraryMock(initial_state: Option<String>) -> Element {
                 key: "{cycle_val}", // Change cycle to force complete remount
                 state,
                 on_album_click: |_| {},
+                on_artist_click: |_| {},
                 on_play_album: |_| {},
                 on_add_album_to_queue: |_| {},
                 on_empty_action: |_| {},
@@ -215,6 +216,7 @@ fn mock_albums_with_artists(count: usize) -> (Vec<Album>, HashMap<String, Vec<Ar
             year: Some(year),
             cover_url: Some(cover.to_string()),
             is_compilation: false,
+            date_added: chrono::Utc::now(),
         });
 
         artists_by_album.insert(

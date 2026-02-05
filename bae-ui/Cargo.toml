@@ -11,6 +11,7 @@ web-sys-x = { workspace = true, features = ["Element", "HtmlElement", "DomRect",
 wasm-bindgen-x = { workspace = true }
 js-sys-x = { workspace = true }
 wasm-bindgen-futures-x = { workspace = true }
+chrono = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = { workspace = true }

@@ -1,7 +1,10 @@
 //! TitleBarView mock component
 
 use super::framework::{ControlRegistryBuilder, MockPage, MockPanel, Preset};
-use bae_ui::{NavItem, SearchResult, TitleBarView};
+use bae_ui::{
+    AlbumResult, ArtistResult, GroupedSearchResults, NavItem, SearchAction, TitleBarView,
+    TrackResult,
+};
 use dioxus::prelude::*;
 
 #[component]
@@ -20,13 +23,9 @@ pub fn TitleBarMock(initial_state: Option<String>) -> Element {
         )
         .inline()
         .bool_control("show_search_results", "Show Search Results", false)
-        .int_control("search_results_count", "Search Results", 3, 0, Some(10))
-        .visible_when("show_search_results", "true")
         .with_presets(vec![
             Preset::new("Default"),
-            Preset::new("With Search")
-                .set_bool("show_search_results", true)
-                .set_int("search_results_count", 5),
+            Preset::new("With Search").set_bool("show_search_results", true),
         ])
         .build(initial_state);
 
@@ -34,7 +33,6 @@ pub fn TitleBarMock(initial_state: Option<String>) -> Element {
 
     let active_nav = registry.get_string("active_nav");
     let show_search_results_bool = registry.get_bool("show_search_results");
-    let search_results_count = registry.get_int("search_results_count") as usize;
     let show_search_results: ReadSignal<bool> = use_memo(move || show_search_results_bool).into();
 
     let nav_items = vec![
@@ -52,13 +50,10 @@ pub fn TitleBarMock(initial_state: Option<String>) -> Element {
 
     let settings_active = active_nav == "settings";
 
-    let search_results: Vec<SearchResult> = if show_search_results_bool {
+    let search_results = if show_search_results_bool {
         mock_search_results()
-            .into_iter()
-            .take(search_results_count)
-            .collect()
     } else {
-        vec![]
+        GroupedSearchResults::default()
     };
 
     rsx! {
@@ -72,10 +67,11 @@ pub fn TitleBarMock(initial_state: Option<String>) -> Element {
                 search_value: if show_search_results_bool { "glass".to_string() } else { String::new() },
                 on_search_change: |_| {},
                 search_results,
-                on_search_result_click: |_| {},
+                on_search_result_click: |_: SearchAction| {},
                 show_search_results,
                 on_search_dismiss: |_| {},
                 on_search_focus: |_| {},
+                on_search_blur: |_| {},
                 on_settings_click: |_| {},
                 settings_active,
                 left_padding: 16,
@@ -84,37 +80,60 @@ pub fn TitleBarMock(initial_state: Option<String>) -> Element {
     }
 }
 
-fn mock_search_results() -> Vec<SearchResult> {
-    vec![
-        SearchResult {
-            id: "1".to_string(),
-            title: "Pacific Standard".to_string(),
-            subtitle: "Glass Harbor • 2022".to_string(),
-            cover_url: Some("/covers/glass-harbor_pacific-standard.png".to_string()),
-        },
-        SearchResult {
-            id: "2".to_string(),
-            title: "Landlocked".to_string(),
-            subtitle: "Glass Harbor • 2021".to_string(),
-            cover_url: Some("/covers/glass-harbor_landlocked.png".to_string()),
-        },
-        SearchResult {
-            id: "3".to_string(),
-            title: "Grow Light".to_string(),
-            subtitle: "Apartment Garden • 2021".to_string(),
-            cover_url: Some("/covers/apartment-garden_grow-light.png".to_string()),
-        },
-        SearchResult {
-            id: "4".to_string(),
-            title: "Set Theory".to_string(),
-            subtitle: "Velvet Mathematics • 2023".to_string(),
-            cover_url: Some("/covers/velvet-mathematics_set-theory.png".to_string()),
-        },
-        SearchResult {
-            id: "5".to_string(),
-            title: "Neon Frequencies".to_string(),
-            subtitle: "The Midnight Signal • 2023".to_string(),
-            cover_url: Some("/covers/the-midnight-signal_neon-frequencies.png".to_string()),
-        },
-    ]
+fn mock_search_results() -> GroupedSearchResults {
+    GroupedSearchResults {
+        artists: vec![
+            ArtistResult {
+                id: "a1".to_string(),
+                name: "Glass Harbor".to_string(),
+                album_count: 2,
+            },
+            ArtistResult {
+                id: "a2".to_string(),
+                name: "Apartment Garden".to_string(),
+                album_count: 2,
+            },
+        ],
+        albums: vec![
+            AlbumResult {
+                id: "1".to_string(),
+                title: "Pacific Standard".to_string(),
+                artist_name: "Glass Harbor".to_string(),
+                year: Some(2022),
+                cover_url: Some("/covers/glass-harbor_pacific-standard.png".to_string()),
+            },
+            AlbumResult {
+                id: "2".to_string(),
+                title: "Landlocked".to_string(),
+                artist_name: "Glass Harbor".to_string(),
+                year: Some(2021),
+                cover_url: Some("/covers/glass-harbor_landlocked.png".to_string()),
+            },
+            AlbumResult {
+                id: "3".to_string(),
+                title: "Grow Light".to_string(),
+                artist_name: "Apartment Garden".to_string(),
+                year: Some(2021),
+                cover_url: Some("/covers/apartment-garden_grow-light.png".to_string()),
+            },
+        ],
+        tracks: vec![
+            TrackResult {
+                id: "t1".to_string(),
+                album_id: "1".to_string(),
+                title: "Glass Ceiling".to_string(),
+                artist_name: "Glass Harbor".to_string(),
+                album_title: "Pacific Standard".to_string(),
+                duration_ms: Some(245000),
+            },
+            TrackResult {
+                id: "t2".to_string(),
+                album_id: "3".to_string(),
+                title: "Stained Glass".to_string(),
+                artist_name: "Apartment Garden".to_string(),
+                album_title: "Grow Light".to_string(),
+                duration_ms: Some(198000),
+            },
+        ],
+    }
 }

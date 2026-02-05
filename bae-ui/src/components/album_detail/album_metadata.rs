@@ -9,24 +9,29 @@ pub fn AlbumMetadata(
     artists: Vec<Artist>,
     track_count: usize,
     selected_release: Option<Release>,
+    on_artist_click: EventHandler<String>,
 ) -> Element {
-    let artist_name = if artists.is_empty() {
-        "Unknown Artist".to_string()
-    } else if artists.len() == 1 {
-        artists[0].name.clone()
-    } else {
-        artists
-            .iter()
-            .map(|a| a.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
-
     rsx! {
         div {
             h1 { class: "text-2xl font-bold text-white mb-2", "{album.title}" }
             p { class: "text-lg text-gray-300 mb-2",
-                "{artist_name}"
+                if artists.is_empty() {
+                    "Unknown Artist"
+                } else {
+                    for (i , artist) in artists.iter().enumerate() {
+                        if i > 0 {
+                            ", "
+                        }
+                        span {
+                            class: "hover:text-white hover:underline transition-colors cursor-pointer",
+                            onclick: {
+                                let artist_id = artist.id.clone();
+                                move |_| on_artist_click.call(artist_id.clone())
+                            },
+                            "{artist.name}"
+                        }
+                    }
+                }
                 if let Some(year) = album.year {
                     " · {year}"
                 }

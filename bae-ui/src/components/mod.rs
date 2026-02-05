@@ -3,6 +3,7 @@
 pub mod album_card;
 pub mod album_detail;
 pub mod app_layout;
+pub mod artist_detail;
 pub mod button;
 pub mod dropdown;
 pub mod error_toast;
@@ -31,6 +32,7 @@ pub use album_detail::{
     TrackRow,
 };
 pub use app_layout::AppLayoutView;
+pub use artist_detail::ArtistDetailView;
 pub use button::{Button, ButtonSize, ButtonVariant, ChromelessButton};
 pub use dioxus_virtual_scroll::{
     GridLayout, KeyFn, RenderFn, ScrollTarget, VirtualGrid, VirtualGridConfig,
@@ -41,11 +43,12 @@ pub use helpers::{
     BackButton, ConfirmDialogView, ErrorDisplay, LoadingSpinner, Tooltip, TooltipBubble,
 };
 pub use icons::{
-    AlertTriangleIcon, ArrowLeftIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon,
-    ChevronRightIcon, CloudOffIcon, DiscIcon, DownloadIcon, EllipsisIcon, ExternalLinkIcon,
-    FileIcon, FileTextIcon, FolderIcon, ImageIcon, InfoIcon, KeyIcon, LayersIcon, LoaderIcon,
-    LockIcon, MenuIcon, MonitorIcon, PauseIcon, PencilIcon, PlayIcon, PlusIcon, RefreshIcon,
-    RowsIcon, SettingsIcon, SkipBackIcon, SkipForwardIcon, StarIcon, TrashIcon, UploadIcon, XIcon,
+    AlertTriangleIcon, ArrowDownIcon, ArrowLeftIcon, ArrowUpIcon, CheckIcon, ChevronDownIcon,
+    ChevronLeftIcon, ChevronRightIcon, CloudOffIcon, DiscIcon, DownloadIcon, EllipsisIcon,
+    ExternalLinkIcon, FileIcon, FileTextIcon, FolderIcon, ImageIcon, InfoIcon, KeyIcon, LayersIcon,
+    LoaderIcon, LockIcon, MenuIcon, MonitorIcon, PauseIcon, PencilIcon, PlayIcon, PlusIcon,
+    RefreshIcon, RowsIcon, SearchIcon, SettingsIcon, SkipBackIcon, SkipForwardIcon, StarIcon,
+    TrashIcon, UploadIcon, UserIcon, XIcon,
 };
 pub use import::{
     CdDriveStatus, CdSelectorView, ConfirmationView, DiscIdLookupErrorView, FileListView,
@@ -71,5 +74,8 @@ pub use settings::{
     StorageProfilesSectionView, SubsonicSectionView,
 };
 pub use text_input::{TextInput, TextInputSize};
-pub use title_bar::{NavItem, SearchResult, TitleBarView};
+pub use title_bar::{
+    AlbumResult, ArtistResult, GroupedSearchResults, NavItem, SearchAction, TitleBarView,
+    TrackResult, SEARCH_INPUT_ID,
+};
 pub use utils::{format_duration, format_file_size};

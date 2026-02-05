@@ -7,6 +7,7 @@
 pub mod active_imports;
 pub mod album_detail;
 pub mod app;
+pub mod artist_detail;
 pub mod config;
 pub mod import;
 pub mod library;
@@ -17,6 +18,7 @@ pub mod ui;
 pub use active_imports::*;
 pub use album_detail::*;
 pub use app::*;
+pub use artist_detail::*;
 pub use config::*;
 pub use import::*;
 pub use library::*;
