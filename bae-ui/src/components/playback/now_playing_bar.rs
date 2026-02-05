@@ -23,6 +23,7 @@ pub fn NowPlayingBarView(
     on_seek: EventHandler<u64>,
     on_toggle_queue: EventHandler<()>,
     on_track_click: EventHandler<String>,
+    on_artist_click: EventHandler<String>,
     #[props(default)] on_dismiss_error: Option<EventHandler<()>>,
 ) -> Element {
     rsx! {
@@ -38,7 +39,7 @@ pub fn NowPlayingBarView(
 
                 AlbumCoverSection { state, on_track_click }
 
-                TrackInfoSection { state, on_track_click }
+                TrackInfoSection { state, on_track_click, on_artist_click }
 
                 PositionSection { state, on_seek }
 
@@ -180,15 +181,17 @@ fn AlbumCoverSection(
     }
 }
 
-/// Track info display - reads current_track, artist_name, status
+/// Track info display - reads current_track, artist_name, artist_id, status
 #[component]
 fn TrackInfoSection(
     state: ReadStore<PlaybackUiState>,
     on_track_click: EventHandler<String>,
+    on_artist_click: EventHandler<String>,
 ) -> Element {
     // Read only the fields we need
     let current_track = state.current_track().read().clone();
     let artist_name = state.artist_name().read().clone();
+    let artist_id = state.artist_id().read().clone();
     let status = *state.status().read();
     let is_loading = status == PlaybackStatus::Loading;
 
@@ -207,7 +210,15 @@ fn TrackInfoSection(
                     },
                     "{track.title}"
                 }
-                div { class: "text-sm text-gray-400", "{artist_name}" }
+                span {
+                    class: "text-sm text-gray-400 hover:text-white hover:underline transition-colors cursor-pointer",
+                    onclick: move |_| {
+                        if let Some(ref id) = artist_id {
+                            on_artist_click.call(id.clone());
+                        }
+                    },
+                    "{artist_name}"
+                }
             } else if is_loading {
                 div { class: "font-semibold text-gray-400", "Loading..." }
                 div { class: "text-sm text-gray-500", "Loading" }

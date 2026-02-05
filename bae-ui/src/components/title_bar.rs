@@ -4,7 +4,9 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::components::icons::{ChevronDownIcon, DiscIcon, ImageIcon, SettingsIcon, UserIcon};
+use crate::components::icons::{
+    ChevronDownIcon, DiscIcon, ImageIcon, SettingsIcon, UserIcon, XIcon,
+};
 use crate::components::utils::format_duration;
 use crate::components::{ChromelessButton, Dropdown, Placement};
 use dioxus::prelude::*;
@@ -202,7 +204,7 @@ pub fn TitleBarView(
                         autocapitalize: "off",
                         autocorrect: "off",
                         spellcheck: false,
-                        class: "w-full h-7 px-2 bg-surface-input border border-border-default rounded text-white text-xs placeholder-gray-400 focus:outline-none focus:border-border-strong",
+                        class: if search_value.is_empty() { "w-full h-7 px-2 bg-surface-input border border-border-default rounded text-white text-xs placeholder-gray-400 focus:outline-none focus:border-border-strong" } else { "w-full h-7 pl-2 pr-6 bg-surface-input border border-border-default rounded text-white text-xs placeholder-gray-400 focus:outline-none focus:border-border-strong" },
                         value: "{search_value}",
                         oninput: move |evt| {
                             selected_index.set(None);
@@ -266,6 +268,19 @@ pub fn TitleBarView(
                                 _ => {}
                             }
                         },
+                    }
+
+                    // Clear button
+                    if !search_value.is_empty() {
+                        button {
+                            class: "absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors",
+                            // Prevent blur so search stays focused
+                            onmousedown: move |evt| evt.prevent_default(),
+                            onclick: move |_| {
+                                on_search_change.call(String::new());
+                            },
+                            XIcon { class: "w-3 h-3" }
+                        }
                     }
 
                     // Search results panel (visible when focused with results)

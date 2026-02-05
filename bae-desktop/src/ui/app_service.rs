@@ -180,59 +180,71 @@ impl AppService {
                         state.playback().pregap_ms().set(pregap_ms);
 
                         // Load album and artist info for current track
-                        let (current_track, artist_name, cover_url) = if let Some(track) = db_track
-                        {
-                            let (album_title, cover, artist) = if let Some(ref track_id) =
-                                current_track_id
-                            {
-                                if let Ok(album_id) =
-                                    library_manager.get().get_album_id_for_track(track_id).await
-                                {
-                                    let album_info = if let Ok(Some(album)) =
-                                        library_manager.get().get_album_by_id(&album_id).await
-                                    {
-                                        let cover = album
-                                            .cover_image_id
-                                            .as_ref()
-                                            .map(|id| image_url(id))
-                                            .or(album.cover_art_url.clone());
-                                        (album.title, cover)
+                        let (current_track, artist_name, artist_id, cover_url) =
+                            if let Some(track) = db_track {
+                                let (album_title, cover, artist_name, artist_id) =
+                                    if let Some(ref track_id) = current_track_id {
+                                        if let Ok(album_id) = library_manager
+                                            .get()
+                                            .get_album_id_for_track(track_id)
+                                            .await
+                                        {
+                                            let album_info = if let Ok(Some(album)) =
+                                                library_manager
+                                                    .get()
+                                                    .get_album_by_id(&album_id)
+                                                    .await
+                                            {
+                                                let cover = album
+                                                    .cover_image_id
+                                                    .as_ref()
+                                                    .map(|id| image_url(id))
+                                                    .or(album.cover_art_url.clone());
+                                                (album.title, cover)
+                                            } else {
+                                                ("Unknown Album".to_string(), None)
+                                            };
+
+                                            // Get artist name and ID
+                                            let (artist_name, artist_id) = if let Ok(artists) =
+                                                library_manager
+                                                    .get()
+                                                    .get_artists_for_album(&album_id)
+                                                    .await
+                                            {
+                                                match artists.first() {
+                                                    Some(a) => (a.name.clone(), Some(a.id.clone())),
+                                                    None => (String::new(), None),
+                                                }
+                                            } else {
+                                                (String::new(), None)
+                                            };
+
+                                            (album_info.0, album_info.1, artist_name, artist_id)
+                                        } else {
+                                            ("Unknown Album".to_string(), None, String::new(), None)
+                                        }
                                     } else {
-                                        ("Unknown Album".to_string(), None)
+                                        ("Unknown Album".to_string(), None, String::new(), None)
                                     };
 
-                                    // Get artist name
-                                    let artist = if let Ok(artists) =
-                                        library_manager.get().get_artists_for_album(&album_id).await
-                                    {
-                                        artists.first().map(|a| a.name.clone()).unwrap_or_default()
-                                    } else {
-                                        String::new()
-                                    };
-
-                                    (album_info.0, album_info.1, artist)
-                                } else {
-                                    ("Unknown Album".to_string(), None, String::new())
-                                }
+                                (
+                                    Some(QueueItem {
+                                        track: track_from_db_ref(&track),
+                                        album_title,
+                                        cover_url: cover.clone(),
+                                    }),
+                                    artist_name,
+                                    artist_id,
+                                    cover,
+                                )
                             } else {
-                                ("Unknown Album".to_string(), None, String::new())
+                                (None, String::new(), None, None)
                             };
-
-                            (
-                                Some(QueueItem {
-                                    track: track_from_db_ref(&track),
-                                    album_title,
-                                    cover_url: cover.clone(),
-                                }),
-                                artist,
-                                cover,
-                            )
-                        } else {
-                            (None, String::new(), None)
-                        };
 
                         state.playback().current_track().set(current_track);
                         state.playback().artist_name().set(artist_name);
+                        state.playback().artist_id().set(artist_id);
                         state.playback().cover_url().set(cover_url);
                     }
                     PlaybackProgress::PositionUpdate { position, .. } => {

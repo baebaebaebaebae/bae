@@ -118,6 +118,7 @@ pub fn DemoLayout() -> Element {
         duration_ms: 245_000,
         pregap_ms: None,
         artist_name: "The Midnight Signal".to_string(),
+        artist_id: Some("artist-1".to_string()),
         cover_url: Some("/covers/the-midnight-signal_neon-frequencies.png".to_string()),
         playback_error: None,
         repeat_mode: Default::default(),
@@ -273,6 +274,7 @@ pub fn DemoLayout() -> Element {
                         sidebar_is_open.set(!current);
                     },
                     on_track_click: move |_track_id: String| {},
+                    on_artist_click: move |_artist_id: String| {},
                 }
             },
             queue_sidebar: rsx! {

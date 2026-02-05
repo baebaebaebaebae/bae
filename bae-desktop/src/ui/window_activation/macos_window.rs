@@ -64,6 +64,10 @@ unsafe fn register_menu_handler_class() {
             request_nav(NavAction::GoTo(NavTarget::Settings));
         }
 
+        extern "C" fn go_now_playing(_this: &Object, _cmd: Sel, _sender: id) {
+            request_nav(NavAction::GoToNowPlaying);
+        }
+
         extern "C" fn toggle_repeat_mode(_this: &Object, _cmd: Sel, _sender: id) {
             let current = REPEAT_MODE.load(std::sync::atomic::Ordering::SeqCst);
             let next = match current {
@@ -124,6 +128,10 @@ unsafe fn register_menu_handler_class() {
         decl.add_method(
             sel!(goSettings:),
             go_settings as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(goNowPlaying:),
+            go_now_playing as extern "C" fn(&Object, Sel, id),
         );
         decl.add_method(
             sel!(toggleRepeatMode:),
@@ -511,6 +519,21 @@ unsafe fn setup_app_menu_inner(app: id) {
     settings_item.autorelease();
     let _: () = msg_send![settings_item, setTarget: menu_handler];
     go_menu.addItem_(settings_item);
+
+    let go_separator2 = NSMenuItem::separatorItem(nil);
+    go_menu.addItem_(go_separator2);
+
+    // Now Playing
+    let now_playing_title = NSString::alloc(nil).init_str("Now Playing");
+    let now_playing_key = NSString::alloc(nil).init_str("l");
+    let now_playing_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+        now_playing_title,
+        selector("goNowPlaying:"),
+        now_playing_key,
+    );
+    now_playing_item.autorelease();
+    let _: () = msg_send![now_playing_item, setTarget: menu_handler];
+    go_menu.addItem_(now_playing_item);
 
     // Playback menu
     let playback_menu = NSMenu::new(nil);

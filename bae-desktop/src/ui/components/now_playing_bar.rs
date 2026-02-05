@@ -66,6 +66,9 @@ pub fn NowPlayingBar() -> Element {
                 sidebar_is_open.set(!current);
             },
             on_track_click,
+            on_artist_click: move |artist_id: String| {
+                navigator().push(Route::ArtistDetail { artist_id });
+            },
             on_dismiss_error: Some(EventHandler::new(move |_| playback_error_store.set(None))),
         }
     }

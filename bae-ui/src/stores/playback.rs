@@ -45,6 +45,8 @@ pub struct PlaybackUiState {
     pub pregap_ms: Option<i64>,
     /// Artist name for current track
     pub artist_name: String,
+    /// Artist ID for current track (for navigation)
+    pub artist_id: Option<String>,
     /// Cover art URL for current track
     pub cover_url: Option<String>,
     /// Transient playback error message

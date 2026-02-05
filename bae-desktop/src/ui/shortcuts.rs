@@ -3,9 +3,11 @@
 //! Maps Cmd+N (macOS) / Ctrl+N (Windows/Linux) to navigation actions.
 //! Also provides a mechanism for native menus to request navigation.
 
+use crate::ui::app_service::use_app;
 use crate::ui::Route;
 #[cfg(target_os = "macos")]
 use bae_core::playback::RepeatMode;
+use bae_ui::stores::{AppStateStoreExt, PlaybackUiStateStoreExt};
 use dioxus::prelude::*;
 use std::sync::OnceLock;
 use tokio::sync::broadcast;
@@ -16,6 +18,7 @@ pub enum NavAction {
     Back,
     Forward,
     GoTo(NavTarget),
+    GoToNowPlaying,
 }
 
 /// Navigation targets for direct routing.
@@ -125,13 +128,14 @@ pub fn handle_shortcut(evt: &KeyboardEvent) -> Option<NavAction> {
         return None;
     }
 
-    // On macOS, Cmd+1/2 and Cmd+[/] are handled by the native menu
+    // On macOS, Cmd+1/2/3, Cmd+L, and Cmd+[/] are handled by the native menu
     // and won't reach the webview. Only non-menu shortcuts need to go here.
     #[cfg(not(target_os = "macos"))]
     match evt.key() {
         Key::Character(c) if c == "1" => return Some(NavAction::GoTo(NavTarget::Library)),
         Key::Character(c) if c == "2" => return Some(NavAction::GoTo(NavTarget::Import)),
         Key::Character(c) if c == "3" => return Some(NavAction::GoTo(NavTarget::Settings)),
+        Key::Character(c) if c == "l" => return Some(NavAction::GoToNowPlaying),
         Key::Character(c) if c == "[" => return Some(NavAction::Back),
         Key::Character(c) if c == "]" => return Some(NavAction::Forward),
         _ => {}
@@ -147,17 +151,29 @@ fn execute_nav_action(action: NavAction) {
         NavAction::GoTo(target) => {
             let _ = navigator().push(target.to_route());
         }
+        // Handled in ShortcutsHandler where we have access to app state
+        NavAction::GoToNowPlaying => {}
     }
 }
 
 #[component]
 pub fn ShortcutsHandler(children: Element) -> Element {
+    let app = use_app();
+
     // Listen for menu-triggered navigation (subscribes fresh on each mount)
     use_hook(|| {
+        let library_manager = app.library_manager.clone();
+        let playback = app.state.playback();
         let mut rx = subscribe_nav();
         spawn(async move {
             while let Ok(action) = rx.recv().await {
-                execute_nav_action(action);
+                match action {
+                    NavAction::GoToNowPlaying => {
+                        let release_id = playback.current_release_id().read().clone();
+                        go_to_now_playing(&library_manager, release_id);
+                    }
+                    other => execute_nav_action(other),
+                }
             }
         });
     });
@@ -187,11 +203,39 @@ pub fn ShortcutsHandler(children: Element) -> Element {
     let onkeydown = move |evt: KeyboardEvent| {
         if let Some(action) = handle_shortcut(&evt) {
             evt.prevent_default();
-            execute_nav_action(action);
+            match action {
+                NavAction::GoToNowPlaying => {
+                    let release_id = app.state.playback().current_release_id().read().clone();
+                    go_to_now_playing(&app.library_manager, release_id);
+                }
+                other => execute_nav_action(other),
+            }
         }
     };
 
     rsx! {
         div { class: "contents", onkeydown, {children} }
+    }
+}
+
+/// Navigate to the album page of the currently playing track.
+fn go_to_now_playing(
+    library_manager: &bae_core::library::SharedLibraryManager,
+    release_id: Option<String>,
+) {
+    if let Some(release_id) = release_id {
+        let library_manager = library_manager.clone();
+        spawn(async move {
+            if let Ok(album_id) = library_manager
+                .get()
+                .get_album_id_for_release(&release_id)
+                .await
+            {
+                navigator().push(Route::AlbumDetail {
+                    album_id,
+                    release_id,
+                });
+            }
+        });
     }
 }
