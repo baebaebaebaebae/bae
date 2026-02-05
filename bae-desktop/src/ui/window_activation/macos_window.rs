@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use bae_core::playback::RepeatMode;
 use cocoa::appkit::{
     NSApplication, NSApplicationActivationPolicy, NSEventModifierFlags, NSMenu, NSMenuItem,
@@ -9,7 +11,7 @@ use dispatch::Queue;
 use objc::declare::ClassDecl;
 use objc::runtime::{Class, Object, Sel};
 use objc::{class, msg_send, sel, sel_impl};
-use tracing::info;
+use tracing::{error, info};
 
 static MENU_HANDLER_CLASS_REGISTERED: std::sync::Once = std::sync::Once::new();
 static MENU_DELEGATE_CLASS_REGISTERED: std::sync::Once = std::sync::Once::new();
@@ -90,6 +92,14 @@ unsafe fn register_menu_handler_class() {
             request_playback_action(PlaybackAction::Previous);
         }
 
+        extern "C" fn open_library(_this: &Object, _cmd: Sel, _sender: id) {
+            unsafe { open_library_picker(false) };
+        }
+
+        extern "C" fn new_library(_this: &Object, _cmd: Sel, _sender: id) {
+            unsafe { open_library_picker(true) };
+        }
+
         decl.add_method(
             sel!(checkForUpdates:),
             check_for_updates as extern "C" fn(&Object, Sel, id),
@@ -122,6 +132,14 @@ unsafe fn register_menu_handler_class() {
         decl.add_method(
             sel!(previousTrack:),
             previous_track as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(openLibrary:),
+            open_library as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(newLibrary:),
+            new_library as extern "C" fn(&Object, Sel, id),
         );
 
         decl.register();
@@ -218,6 +236,107 @@ pub fn set_playback_repeat_mode(mode: RepeatMode) {
     Queue::main().exec_async(|| unsafe {
         update_repeat_menu_state_inner();
     });
+}
+
+/// Show an NSOpenPanel folder picker for library selection.
+/// `create_new`: if true, the selected folder becomes a new library (warns if library.db exists).
+///               if false, the selected folder must contain an existing library.db.
+unsafe fn open_library_picker(create_new: bool) {
+    let panel: id = msg_send![class!(NSOpenPanel), openPanel];
+    let _: () = msg_send![panel, setCanChooseDirectories: YES];
+    let _: () = msg_send![panel, setCanChooseFiles: NO];
+    let _: () = msg_send![panel, setAllowsMultipleSelection: NO];
+    if create_new {
+        let _: () = msg_send![panel, setCanCreateDirectories: YES];
+    }
+
+    let message = if create_new {
+        "Choose a folder for your new library"
+    } else {
+        "Choose a folder containing a bae library"
+    };
+    let message = NSString::alloc(nil).init_str(message);
+    let _: () = msg_send![panel, setMessage: message];
+
+    let result: i64 = msg_send![panel, runModal];
+    // NSModalResponseOK = 1
+    if result != 1 {
+        return;
+    }
+
+    let urls: id = msg_send![panel, URLs];
+    let url: id = msg_send![urls, objectAtIndex: 0usize];
+    let path_ns: id = msg_send![url, path];
+    let c_str: *const std::os::raw::c_char = msg_send![path_ns, UTF8String];
+    let path_str = std::ffi::CStr::from_ptr(c_str)
+        .to_str()
+        .unwrap()
+        .to_string();
+    let path = PathBuf::from(&path_str);
+    let db_path = path.join("library.db");
+
+    if create_new {
+        if db_path.exists() {
+            // Warn that a library already exists - opening it instead
+            show_alert(
+                "Library already exists",
+                "The selected folder already contains a bae library. It will be opened instead.",
+            );
+        }
+    } else if !db_path.exists() {
+        show_alert(
+            "No library found",
+            "The selected folder does not contain a bae library.",
+        );
+        return;
+    }
+
+    info!("Switching library to: {}", path.display());
+
+    // Save the library path pointer (persists for future launches)
+    let mut config = bae_core::config::Config::load();
+    config.set_library_path(path.clone());
+    if let Err(e) = config.save_library_path() {
+        error!("Failed to save library path: {}", e);
+        return;
+    }
+
+    relaunch(&path);
+}
+
+/// Replace the current process with a fresh instance of itself.
+/// Clears all BAE_ env vars (which dotenvy may have set from .env) so the
+/// new process loads config fresh, then sets BAE_LIBRARY_PATH to the new path.
+fn relaunch(library_path: &std::path::Path) {
+    use std::os::unix::process::CommandExt;
+
+    // Clear config-derived env vars so the new process doesn't inherit stale values
+    for (key, _) in std::env::vars() {
+        if key.starts_with("BAE_") && key != "BAE_DEV_MODE" {
+            std::env::remove_var(&key);
+        }
+    }
+    std::env::set_var("BAE_LIBRARY_PATH", library_path);
+
+    let exe = std::env::current_exe().expect("Failed to get current executable path");
+    let err = std::process::Command::new(exe)
+        .args(std::env::args().skip(1))
+        .exec();
+
+    // exec() only returns on error
+    error!("Failed to relaunch: {}", err);
+}
+
+unsafe fn show_alert(message: &str, info: &str) {
+    let alert: id = msg_send![class!(NSAlert), alloc];
+    let alert: id = msg_send![alert, init];
+    let message = NSString::alloc(nil).init_str(message);
+    let _: () = msg_send![alert, setMessageText: message];
+    let info = NSString::alloc(nil).init_str(info);
+    let _: () = msg_send![alert, setInformativeText: info];
+    let ok = NSString::alloc(nil).init_str("OK");
+    let _: () = msg_send![alert, addButtonWithTitle: ok];
+    let _: i64 = msg_send![alert, runModal];
 }
 
 unsafe fn setup_app_menu_inner(app: id) {
@@ -503,6 +622,40 @@ unsafe fn setup_app_menu_inner(app: id) {
     let edit_menu_item = NSMenuItem::new(nil);
     edit_menu_item.autorelease();
     edit_menu_item.setSubmenu_(edit_menu);
+
+    // Library menu
+    let file_menu = NSMenu::new(nil);
+    file_menu.autorelease();
+    let file_menu_title = NSString::alloc(nil).init_str("Library");
+    let _: () = msg_send![file_menu, setTitle: file_menu_title];
+
+    let menu_handler = get_menu_handler();
+
+    let open_library_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+        NSString::alloc(nil).init_str("Open..."),
+        selector("openLibrary:"),
+        NSString::alloc(nil).init_str("o"),
+    );
+    open_library_item.autorelease();
+    let _: () = msg_send![open_library_item, setTarget: menu_handler];
+    file_menu.addItem_(open_library_item);
+
+    let new_library_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+        NSString::alloc(nil).init_str("New..."),
+        selector("newLibrary:"),
+        NSString::alloc(nil).init_str("N"),
+    );
+    new_library_item.autorelease();
+    let _: () = msg_send![new_library_item, setTarget: menu_handler];
+    let _: () = msg_send![new_library_item, setKeyEquivalentModifierMask: command_shift];
+    file_menu.addItem_(new_library_item);
+
+    let file_menu_item = NSMenuItem::new(nil);
+    file_menu_item.autorelease();
+    file_menu_item.setSubmenu_(file_menu);
+
+    // Add menus in order: File, Edit, Go, Playback
+    main_menu.addItem_(file_menu_item);
     main_menu.addItem_(edit_menu_item);
 
     // Add remaining menus
