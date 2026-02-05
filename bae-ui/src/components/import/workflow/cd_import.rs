@@ -260,20 +260,20 @@ fn CdConfirmContent(
         .unwrap_or_default();
     let selected_profile_id = st.get_storage_profile_id();
 
-    let (is_importing, preparing_step_text, import_error) = st
+    let (is_importing, is_completed, completed_album_id, preparing_step_text, import_error) = st
         .current_candidate_state()
         .and_then(|s| match s {
             CandidateState::Confirming(cs) => Some(&cs.phase),
             _ => None,
         })
         .map(|phase| match phase {
-            ConfirmPhase::Ready => (false, None, None),
-            ConfirmPhase::Preparing(msg) => (false, Some(msg.clone()), None),
-            ConfirmPhase::Importing => (true, None, None),
-            ConfirmPhase::Failed(err) => (false, None, Some(err.clone())),
-            ConfirmPhase::Completed => (false, None, None),
+            ConfirmPhase::Ready => (false, false, None, None, None),
+            ConfirmPhase::Preparing(msg) => (false, false, None, Some(msg.clone()), None),
+            ConfirmPhase::Importing => (true, false, None, None, None),
+            ConfirmPhase::Failed(err) => (false, false, None, None, Some(err.clone())),
+            ConfirmPhase::Completed(album_id) => (false, true, Some(album_id.clone()), None, None),
         })
-        .unwrap_or((false, None, None));
+        .unwrap_or((false, false, None, None, None));
 
     drop(st);
 
@@ -299,6 +299,8 @@ fn CdConfirmContent(
                 storage_profiles,
                 selected_profile_id,
                 is_importing,
+                is_completed,
+                completed_album_id,
                 preparing_step_text,
                 on_select_cover,
                 on_storage_profile_change,

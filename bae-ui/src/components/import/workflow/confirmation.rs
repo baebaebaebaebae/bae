@@ -1,7 +1,7 @@
 //! Confirmation view component
 
 use super::gallery_lightbox::{GalleryItem, GalleryItemContent, GalleryLightbox};
-use crate::components::icons::{ImageIcon, PencilIcon};
+use crate::components::icons::{CheckIcon, ImageIcon, PencilIcon};
 use crate::components::{
     Button, ButtonSize, ButtonVariant, ChromelessButton, Select, SelectOption, StorageProfile,
 };
@@ -27,6 +27,10 @@ pub fn ConfirmationView(
     selected_profile_id: Option<String>,
     /// Whether import is in progress
     is_importing: bool,
+    /// Whether import has completed
+    is_completed: bool,
+    /// Album ID from completed import (for "View in Library" link)
+    completed_album_id: Option<String>,
     /// Current preparing step text (if preparing)
     preparing_step_text: Option<String>,
     /// Called when user selects a cover
@@ -39,7 +43,7 @@ pub fn ConfirmationView(
     on_confirm: EventHandler<()>,
     /// Called to navigate to settings
     on_configure_storage: EventHandler<()>,
-    /// Called when user clicks "View in library" for a duplicate
+    /// Called to navigate to the album in the library
     on_view_in_library: EventHandler<String>,
 ) -> Element {
     let is_duplicate = candidate.existing_album_id.is_some();
@@ -52,6 +56,8 @@ pub fn ConfirmationView(
     let format_text = candidate.format.clone();
     let country_text = candidate.country.clone();
     let label_text = candidate.label.clone();
+
+    let disabled = is_importing || is_completed;
 
     let has_cover_options = !artwork_files.is_empty() || remote_cover_url.is_some();
 
@@ -107,8 +113,8 @@ pub fn ConfirmationView(
             // Release info card
             div { class: "bg-gray-800/50 rounded-lg px-5 py-4",
                 div { class: "flex items-center gap-5",
-                    // Cover art thumbnail (clickable if options available)
-                    if has_cover_options {
+                    // Cover art thumbnail (clickable if options available and not disabled)
+                    if has_cover_options && !disabled {
                         ChromelessButton {
                             class: Some("flex-shrink-0 relative group".to_string()),
                             onclick: move |_| {
@@ -178,7 +184,7 @@ pub fn ConfirmationView(
                     Button {
                         variant: ButtonVariant::Outline,
                         size: ButtonSize::Small,
-                        disabled: is_importing,
+                        disabled,
                         onclick: move |_| on_edit.call(()),
                         "Change"
                     }
@@ -208,7 +214,7 @@ pub fn ConfirmationView(
                     label { class: "text-sm text-gray-400 ml-auto", "Storage:" }
                     Select {
                         value: selected_profile_id.clone().unwrap_or_else(|| "__none__".to_string()),
-                        disabled: is_importing,
+                        disabled,
                         onchange: move |val: String| {
                             if val == "__none__" {
                                 on_storage_profile_change.call(None);
@@ -231,26 +237,50 @@ pub fn ConfirmationView(
                     Button {
                         variant: ButtonVariant::Ghost,
                         size: ButtonSize::Small,
+                        disabled,
                         onclick: move |_| on_configure_storage.call(()),
                         "Configure"
                     }
 
-                    // Import status and button
-                    if is_importing {
+                    // Import status area: three visual states
+                    if is_completed {
+                        // Completed state: green check + "Imported" + "View in Library" link
+                        div { class: "flex items-center gap-2",
+                            CheckIcon { class: "w-4 h-4 text-green-500" }
+                            span { class: "text-sm text-green-400", "Imported" }
+                            if let Some(album_id) = completed_album_id.clone() {
+                                ChromelessButton {
+                                    class: Some(
+                                        "text-sm text-indigo-400 hover:text-indigo-300 underline underline-offset-2"
+                                            .to_string(),
+                                    ),
+                                    onclick: move |_| on_view_in_library.call(album_id.clone()),
+                                    "View in Library"
+                                }
+                            }
+                        }
+                    } else if is_importing {
+                        // Importing state: spinner + disabled button
                         if let Some(ref step) = preparing_step_text {
                             span { class: "text-sm text-gray-400", "{step}" }
                         }
-                    }
-                    Button {
-                        variant: ButtonVariant::Primary,
-                        size: ButtonSize::Small,
-                        disabled: is_importing,
-                        loading: is_importing,
-                        onclick: move |_| on_confirm.call(()),
-                        if is_importing {
+                        Button {
+                            variant: ButtonVariant::Primary,
+                            size: ButtonSize::Small,
+                            disabled: true,
+                            loading: true,
+                            onclick: |_| {},
                             div { class: "animate-spin rounded-full h-4 w-4 border-b-2 border-white" }
+                            "Import"
                         }
-                        "Import"
+                    } else {
+                        // Ready state: normal Import button
+                        Button {
+                            variant: ButtonVariant::Primary,
+                            size: ButtonSize::Small,
+                            onclick: move |_| on_confirm.call(()),
+                            "Import"
+                        }
                     }
                 }
             }

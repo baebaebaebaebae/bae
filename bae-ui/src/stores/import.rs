@@ -160,8 +160,8 @@ pub enum ConfirmPhase {
     Importing,
     /// Error occurred
     Failed(String),
-    /// Import finished successfully
-    Completed,
+    /// Import finished successfully (carries album_id for navigation)
+    Completed(String),
 }
 
 // ============================================================================
@@ -230,8 +230,8 @@ pub enum CandidateEvent {
     ImportStarted,
     /// Import failed (from async operation)
     ImportFailed(String),
-    /// Import completed successfully
-    ImportComplete,
+    /// Import completed successfully (carries album_id)
+    ImportCompleted(String),
 }
 
 /// Which search field is being updated
@@ -286,7 +286,7 @@ impl CandidateState {
     pub fn is_imported(&self) -> bool {
         matches!(
             self,
-            CandidateState::Confirming(s) if matches!(s.phase, ConfirmPhase::Completed)
+            CandidateState::Confirming(s) if matches!(s.phase, ConfirmPhase::Completed(_))
         )
     }
 
@@ -496,7 +496,7 @@ impl IdentifyingState {
             | CandidateEvent::ImportPreparing(_)
             | CandidateEvent::ImportStarted
             | CandidateEvent::ImportFailed(_)
-            | CandidateEvent::ImportComplete => CandidateState::Identifying(self),
+            | CandidateEvent::ImportCompleted(_) => CandidateState::Identifying(self),
         }
     }
 }
@@ -551,9 +551,9 @@ impl ConfirmingState {
                 state.phase = ConfirmPhase::Failed(error);
                 CandidateState::Confirming(Box::new(state))
             }
-            CandidateEvent::ImportComplete => {
+            CandidateEvent::ImportCompleted(album_id) => {
                 let mut state = self;
-                state.phase = ConfirmPhase::Completed;
+                state.phase = ConfirmPhase::Completed(album_id);
                 CandidateState::Confirming(Box::new(state))
             }
             CandidateEvent::SelectExactMatch(_)
