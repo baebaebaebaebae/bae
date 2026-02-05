@@ -501,4 +501,24 @@ impl ControlRegistry {
             });
         });
     }
+
+    pub fn use_url_sync_settings(&self) {
+        let registry = self.clone();
+        let mut is_mounted = use_signal(|| false);
+
+        use_effect(move || {
+            for signal in registry.values.values() {
+                let _ = signal.read();
+            }
+
+            if !*is_mounted.peek() {
+                is_mounted.set(true);
+                return;
+            }
+
+            navigator().replace(Route::MockSettings {
+                state: registry.build_state(),
+            });
+        });
+    }
 }

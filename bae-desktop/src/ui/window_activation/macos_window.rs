@@ -60,6 +60,10 @@ unsafe fn register_menu_handler_class() {
             request_nav(NavAction::GoTo(NavTarget::Import));
         }
 
+        extern "C" fn go_settings(_this: &Object, _cmd: Sel, _sender: id) {
+            request_nav(NavAction::GoTo(NavTarget::Settings));
+        }
+
         extern "C" fn toggle_repeat_mode(_this: &Object, _cmd: Sel, _sender: id) {
             let current = REPEAT_MODE.load(std::sync::atomic::Ordering::SeqCst);
             let next = match current {
@@ -116,6 +120,10 @@ unsafe fn register_menu_handler_class() {
         decl.add_method(
             sel!(goImport:),
             go_import as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(goSettings:),
+            go_settings as extern "C" fn(&Object, Sel, id),
         );
         decl.add_method(
             sel!(toggleRepeatMode:),
@@ -491,6 +499,18 @@ unsafe fn setup_app_menu_inner(app: id) {
     import_item.autorelease();
     let _: () = msg_send![import_item, setTarget: menu_handler];
     go_menu.addItem_(import_item);
+
+    // Settings
+    let settings_title = NSString::alloc(nil).init_str("Settings");
+    let settings_key = NSString::alloc(nil).init_str("3");
+    let settings_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+        settings_title,
+        selector("goSettings:"),
+        settings_key,
+    );
+    settings_item.autorelease();
+    let _: () = msg_send![settings_item, setTarget: menu_handler];
+    go_menu.addItem_(settings_item);
 
     // Playback menu
     let playback_menu = NSMenu::new(nil);

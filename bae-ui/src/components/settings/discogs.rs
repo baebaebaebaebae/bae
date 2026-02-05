@@ -1,11 +1,11 @@
-//! API keys section view
+//! Discogs section view
 
 use crate::components::{Button, ButtonSize, ButtonVariant};
 use dioxus::prelude::*;
 
-/// API keys section view
+/// Discogs API key configuration
 #[component]
-pub fn ApiKeysSectionView(
+pub fn DiscogsSectionView(
     /// Whether a Discogs key is configured (don't pass the actual key for security)
     discogs_configured: bool,
     /// Current key value when editing (masked or empty)
@@ -25,12 +25,12 @@ pub fn ApiKeysSectionView(
 ) -> Element {
     rsx! {
         div { class: "max-w-2xl",
-            h2 { class: "text-xl font-semibold text-white mb-6", "API Keys" }
+            h2 { class: "text-xl font-semibold text-white mb-6", "Discogs" }
             div { class: "bg-gray-800 rounded-lg p-6",
                 div { class: "space-y-4",
                     div { class: "flex items-center justify-between",
                         div {
-                            h3 { class: "text-lg font-medium text-white", "Discogs" }
+                            h3 { class: "text-lg font-medium text-white", "API Key" }
                             p { class: "text-sm text-gray-400 mt-1",
                                 "Used for release metadata and cover art"
                             }

@@ -3,7 +3,7 @@
 use crate::mocks::framework::{MockPage, MockSection};
 use crate::mocks::{
     AlbumDetailMock, ButtonMock, FolderImportMock, LibraryMock, MenuMock, PillMock,
-    SegmentedControlMock, TextInputMock, TitleBarMock, TooltipMock,
+    SegmentedControlMock, SettingsMock, TextInputMock, TitleBarMock, TooltipMock,
 };
 use crate::ui::LinkCard;
 use crate::Route;
@@ -258,6 +258,17 @@ pub fn MockTextInput(state: Option<String>) -> Element {
 pub fn MockTooltip(state: Option<String>) -> Element {
     rsx! {
         TooltipMock { initial_state: state }
+    }
+}
+
+// ============================================================================
+// TitleBar page wrapper
+// ============================================================================
+
+#[component]
+pub fn MockSettings(state: Option<String>) -> Element {
+    rsx! {
+        SettingsMock { initial_state: state }
     }
 }
 

@@ -162,8 +162,8 @@ jobs:
         find "$APP_PATH/Contents/Frameworks" -name "*.dylib" -exec \
           codesign --force --sign "$IDENTITY" --options runtime {} \;
         
-        # Finally sign the main app
-        codesign --force --sign "$IDENTITY" --options runtime "$APP_PATH"
+        # Finally sign the main app (with entitlements for protected keychain / iCloud sync)
+        codesign --force --sign "$IDENTITY" --options runtime --entitlements bae-desktop/bae.entitlements "$APP_PATH"
         
         codesign --verify --verbose "$APP_PATH"
 

@@ -53,10 +53,10 @@ fn get_discogs_client() -> Option<DiscogsClient> {
         .ok()
         .filter(|k| !k.is_empty())
         .or_else(|| {
-            keyring::Entry::new("bae", "discogs_api_key")
+            keyring_core::Entry::new("bae", "discogs_api_key")
                 .ok()
                 .and_then(|e| e.get_password().ok())
-                .filter(|k| !k.is_empty())
+                .filter(|k: &String| !k.is_empty())
         })
         .map(DiscogsClient::new)
 }

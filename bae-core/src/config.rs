@@ -4,11 +4,38 @@ use std::path::PathBuf;
 use thiserror::Error;
 use tracing::{info, warn};
 
+/// Initialize the keyring credential store.
+///
+/// On macOS, uses the protected data store with iCloud cloud-sync enabled,
+/// so the encryption key is backed up via iCloud Keychain (if the user has it on).
+///
+/// Must be called once at startup before any keyring operations.
+pub fn init_keyring() {
+    #[cfg(target_os = "macos")]
+    {
+        use std::collections::HashMap;
+        let config = HashMap::from([("cloud-sync", "true")]);
+        match apple_native_keyring_store::protected::Store::new_with_configuration(&config) {
+            Ok(store) => {
+                keyring_core::set_default_store(store);
+                info!("Keyring initialized (protected store, iCloud sync enabled)");
+            }
+            Err(e) => {
+                warn!("Failed to create protected keyring store: {e}, falling back to local");
+                if let Ok(store) = apple_native_keyring_store::protected::Store::new() {
+                    keyring_core::set_default_store(store);
+                    info!("Keyring initialized (protected store, local only)");
+                }
+            }
+        }
+    }
+}
+
 /// Configuration errors (production mode only)
 #[derive(Error, Debug)]
 pub enum ConfigError {
     #[error("Keyring error: {0}")]
-    Keyring(#[from] keyring::Error),
+    Keyring(#[from] keyring_core::Error),
     #[error("Serialization error: {0}")]
     Serialization(String),
     #[error("Configuration error: {0}")]
@@ -237,10 +264,10 @@ impl Config {
 
     pub fn save_to_keyring(&self) -> Result<(), ConfigError> {
         if let Some(key) = &self.discogs_api_key {
-            keyring::Entry::new("bae", "discogs_api_key")?.set_password(key)?;
+            keyring_core::Entry::new("bae", "discogs_api_key")?.set_password(key)?;
         }
         if let Some(key) = &self.encryption_key {
-            keyring::Entry::new("bae", "encryption_master_key")?.set_password(key)?;
+            keyring_core::Entry::new("bae", "encryption_master_key")?.set_password(key)?;
         }
         Ok(())
     }
@@ -286,7 +313,7 @@ impl Config {
     /// Load discogs API key from keyring (call when Discogs API is needed)
     pub fn load_discogs_key(&mut self) {
         if self.discogs_api_key.is_none() {
-            self.discogs_api_key = keyring::Entry::new("bae", "discogs_api_key")
+            self.discogs_api_key = keyring_core::Entry::new("bae", "discogs_api_key")
                 .ok()
                 .and_then(|e| e.get_password().ok());
         }
@@ -296,14 +323,14 @@ impl Config {
     pub fn load_or_create_encryption_key(&mut self) {
         if self.encryption_key.is_none() {
             // Try to load existing key from keyring
-            let existing = keyring::Entry::new("bae", "encryption_master_key")
+            let existing = keyring_core::Entry::new("bae", "encryption_master_key")
                 .ok()
                 .and_then(|e| e.get_password().ok());
 
             self.encryption_key = Some(existing.unwrap_or_else(|| {
                 // Generate new key and save to keyring
                 let key_hex = hex::encode(crate::encryption::generate_random_key());
-                if let Ok(entry) = keyring::Entry::new("bae", "encryption_master_key") {
+                if let Ok(entry) = keyring_core::Entry::new("bae", "encryption_master_key") {
                     let _ = entry.set_password(&key_hex);
                 }
                 key_hex
