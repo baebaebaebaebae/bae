@@ -55,7 +55,17 @@ pub fn TitleBar() -> Element {
         move || {
             let query = search_query_store.read().clone();
             if query.is_empty() {
-                search_results.set(GroupedSearchResults::default());
+                // Show top artists as suggestions when query is cleared
+                let top_artists = compute_top_artists(&artists_store.read());
+                if top_artists.is_empty() {
+                    search_results.set(GroupedSearchResults::default());
+                } else {
+                    search_results.set(GroupedSearchResults {
+                        artists: top_artists,
+                        albums: vec![],
+                        tracks: vec![],
+                    });
+                }
             } else {
                 let library_manager = library_manager.clone();
                 let query = query.clone();
