@@ -9,8 +9,11 @@ use crate::components::helpers::{ErrorDisplay, LoadingSpinner};
 use crate::components::icons::{ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, PlusIcon, XIcon};
 use crate::components::{Button, ButtonSize, ButtonVariant, ChromelessButton};
 use crate::components::{MenuDropdown, MenuItem, Placement};
-use crate::display_types::{Album, Artist, LibrarySortField, SortCriterion, SortDirection};
+use crate::display_types::{
+    Album, Artist, LibrarySortField, LibraryViewMode, SortCriterion, SortDirection,
+};
 use crate::stores::library::{LibraryState, LibraryStateStoreExt};
+use crate::stores::ui::{LibrarySortState, LibrarySortStateStoreExt};
 use dioxus::prelude::*;
 use dioxus_virtual_scroll::{KeyFn, RenderFn, ScrollTarget, VirtualGrid, VirtualGridConfig};
 use std::collections::HashMap;
@@ -72,12 +75,22 @@ fn sort_field_label(field: LibrarySortField) -> &'static str {
     }
 }
 
+fn view_mode_label(mode: LibraryViewMode) -> &'static str {
+    match mode {
+        LibraryViewMode::Albums => "Albums",
+        LibraryViewMode::Artists => "Artists",
+    }
+}
+
 /// Library view component - pure rendering, no data fetching
 ///
 /// Accepts `ReadStore<LibraryState>` and uses lenses for granular reactivity.
 #[component]
 pub fn LibraryView(
     state: ReadStore<LibraryState>,
+    sort_state: ReadStore<LibrarySortState>,
+    on_sort_criteria_change: EventHandler<Vec<SortCriterion>>,
+    on_view_mode_change: EventHandler<LibraryViewMode>,
     // Navigation callback - called with album_id when an album is clicked
     on_album_click: EventHandler<String>,
     // Navigation callback - called with artist_id when an artist name is clicked
@@ -94,15 +107,10 @@ pub fn LibraryView(
     let albums = state.albums().read().clone();
     let artists_by_album = state.artists_by_album().read().clone();
 
-    // Sort state is local to the view (UI concern, not persisted)
-    let sort_criteria = use_signal(|| {
-        vec![SortCriterion {
-            field: LibrarySortField::DateAdded,
-            direction: SortDirection::Descending,
-        }]
-    });
+    let sort_criteria = sort_state.sort_criteria().read().clone();
+    let view_mode = *sort_state.view_mode().read();
 
-    let sorted_albums = sort_albums(&albums, &artists_by_album, &sort_criteria.read());
+    let sorted_albums = sort_albums(&albums, &artists_by_album, &sort_criteria);
     let album_count = sorted_albums.len();
 
     let mut scroll_target: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
@@ -112,7 +120,21 @@ pub fn LibraryView(
             class: "flex-grow overflow-y-auto flex flex-col py-10",
             onmounted: move |evt| scroll_target.set(Some(evt.data())),
             div { class: "container mx-auto flex flex-col flex-1",
-                h1 { class: "text-3xl font-bold text-white mb-6", "Music Library" }
+                // Header row: title + controls on same line
+                div { class: "flex items-center justify-between mb-6",
+                    h1 { class: "text-3xl font-bold text-white", "Music Library" }
+
+                    if !loading && error.is_none() && !albums.is_empty() {
+                        SortToolbar {
+                            album_count,
+                            sort_criteria: sort_criteria.clone(),
+                            view_mode,
+                            on_sort_criteria_change,
+                            on_view_mode_change,
+                        }
+                    }
+                }
+
                 if loading {
                     LoadingSpinner { message: "Loading your music library...".to_string() }
                 } else if let Some(err) = error {
@@ -131,16 +153,21 @@ pub fn LibraryView(
                         }
                     }
                 } else {
-                    SortToolbar { album_count, sort_criteria }
-
-                    AlbumGrid {
-                        albums: sorted_albums,
-                        artists_by_album,
-                        on_album_click,
-                        on_artist_click,
-                        on_play_album,
-                        on_add_album_to_queue,
-                        scroll_target: ScrollTarget::Element(scroll_target.into()),
+                    match view_mode {
+                        LibraryViewMode::Albums => rsx! {
+                            AlbumGrid {
+                                albums: sorted_albums,
+                                artists_by_album,
+                                on_album_click,
+                                on_artist_click,
+                                on_play_album,
+                                on_add_album_to_queue,
+                                scroll_target: ScrollTarget::Element(scroll_target.into()),
+                            }
+                        },
+                        LibraryViewMode::Artists => rsx! {
+                            ArtistListView { albums, artists_by_album, on_artist_click }
+                        },
                     }
                 }
             }
@@ -148,11 +175,16 @@ pub fn LibraryView(
     }
 }
 
-/// Sort controls toolbar
+/// Sort controls toolbar (inline with header)
 #[component]
-fn SortToolbar(album_count: usize, sort_criteria: Signal<Vec<SortCriterion>>) -> Element {
-    let criteria = sort_criteria.read().clone();
-    let used_fields: Vec<LibrarySortField> = criteria.iter().map(|c| c.field).collect();
+fn SortToolbar(
+    album_count: usize,
+    sort_criteria: Vec<SortCriterion>,
+    view_mode: LibraryViewMode,
+    on_sort_criteria_change: EventHandler<Vec<SortCriterion>>,
+    on_view_mode_change: EventHandler<LibraryViewMode>,
+) -> Element {
+    let used_fields: Vec<LibrarySortField> = sort_criteria.iter().map(|c| c.field).collect();
     let all_used = used_fields.len() >= LibrarySortField::ALL.len();
 
     let album_label = if album_count == 1 {
@@ -162,42 +194,94 @@ fn SortToolbar(album_count: usize, sort_criteria: Signal<Vec<SortCriterion>>) ->
     };
 
     rsx! {
-        div { class: "flex items-center justify-between mb-4",
+        div { class: "flex items-center gap-4",
             span { class: "text-sm text-gray-400", "{album_label}" }
 
-            div { class: "flex items-center gap-1",
-                for (idx , criterion) in criteria.iter().enumerate() {
-                    SortCriterionItem {
-                        key: "{idx}",
-                        index: idx,
-                        criterion: *criterion,
-                        sort_criteria,
-                        removable: criteria.len() > 1,
+            ViewModeDropdown { view_mode, on_view_mode_change }
+
+            if view_mode == LibraryViewMode::Albums {
+                div { class: "flex items-center gap-1",
+                    for (idx , criterion) in sort_criteria.iter().enumerate() {
+                        SortCriterionItem {
+                            key: "{idx}",
+                            index: idx,
+                            criterion: *criterion,
+                            sort_criteria: sort_criteria.clone(),
+                            on_sort_criteria_change,
+                        }
+                    }
+
+                    if !all_used {
+                        ChromelessButton {
+                            class: Some(
+                                "p-1 rounded-md text-gray-400 hover:text-white hover:bg-hover transition-all"
+                                    .to_string(),
+                            ),
+                            aria_label: Some("Add sort criterion".to_string()),
+                            onclick: {
+                                let sort_criteria = sort_criteria.clone();
+                                move |_| {
+                                    let used: Vec<_> = sort_criteria.iter().map(|c| c.field).collect();
+                                    if let Some(next_field) = LibrarySortField::ALL
+                                        .iter()
+                                        .find(|f| !used.contains(f))
+                                    {
+                                        let mut new_criteria = sort_criteria.clone();
+                                        new_criteria
+                                            .push(SortCriterion {
+                                                field: *next_field,
+                                                direction: SortDirection::Ascending,
+                                            });
+                                        on_sort_criteria_change.call(new_criteria);
+                                    }
+                                }
+                            },
+                            PlusIcon { class: "w-4 h-4" }
+                        }
                     }
                 }
+            }
+        }
+    }
+}
 
-                if !all_used {
-                    ChromelessButton {
-                        class: Some(
-                            "p-1 rounded-md text-gray-400 hover:text-white hover:bg-hover transition-all"
-                                .to_string(),
-                        ),
-                        aria_label: Some("Add sort criterion".to_string()),
-                        onclick: move |_| {
-                            let mut criteria = sort_criteria.write();
-                            let used: Vec<_> = criteria.iter().map(|c| c.field).collect();
-                            if let Some(next_field) = LibrarySortField::ALL
-                                .iter()
-                                .find(|f| !used.contains(f))
-                            {
-                                criteria
-                                    .push(SortCriterion {
-                                        field: *next_field,
-                                        direction: SortDirection::Ascending,
-                                    });
-                            }
-                        },
-                        PlusIcon { class: "w-4 h-4" }
+/// View mode dropdown (Albums / Artists)
+#[component]
+fn ViewModeDropdown(
+    view_mode: LibraryViewMode,
+    on_view_mode_change: EventHandler<LibraryViewMode>,
+) -> Element {
+    let mut show_menu = use_signal(|| false);
+    let is_open: ReadSignal<bool> = show_menu.into();
+    let anchor_id = "view-mode-btn";
+
+    rsx! {
+        ChromelessButton {
+            id: Some(anchor_id.to_string()),
+            class: Some(
+                "flex items-center gap-1 px-2 py-1 rounded-md text-sm text-gray-400 hover:text-white hover:bg-hover transition-all"
+                    .to_string(),
+            ),
+            aria_label: Some("View mode".to_string()),
+            onclick: move |_| show_menu.set(!show_menu()),
+            "{view_mode_label(view_mode)}"
+            ChevronDownIcon { class: "w-3 h-3" }
+        }
+
+        MenuDropdown {
+            anchor_id: anchor_id.to_string(),
+            is_open,
+            on_close: move |_| show_menu.set(false),
+            placement: Placement::BottomEnd,
+
+            for mode in [LibraryViewMode::Albums, LibraryViewMode::Artists] {
+                MenuItem {
+                    onclick: move |_| {
+                        show_menu.set(false);
+                        on_view_mode_change.call(mode);
+                    },
+                    span { class: if view_mode == mode { "text-accent-soft" } else { "" },
+                        "{view_mode_label(mode)}"
                     }
                 }
             }
@@ -210,15 +294,16 @@ fn SortToolbar(album_count: usize, sort_criteria: Signal<Vec<SortCriterion>>) ->
 fn SortCriterionItem(
     index: usize,
     criterion: SortCriterion,
-    sort_criteria: Signal<Vec<SortCriterion>>,
-    removable: bool,
+    sort_criteria: Vec<SortCriterion>,
+    on_sort_criteria_change: EventHandler<Vec<SortCriterion>>,
 ) -> Element {
     let mut show_menu = use_signal(|| false);
     let is_open: ReadSignal<bool> = show_menu.into();
     let anchor_id = format!("sort-field-btn-{index}");
+    let removable = sort_criteria.len() > 1;
 
     // Available fields: current field + any unused fields
-    let used_fields: Vec<LibrarySortField> = sort_criteria.read().iter().map(|c| c.field).collect();
+    let used_fields: Vec<LibrarySortField> = sort_criteria.iter().map(|c| c.field).collect();
     let available_fields: Vec<LibrarySortField> = LibrarySortField::ALL
         .iter()
         .filter(|f| **f == criterion.field || !used_fields.contains(f))
@@ -248,9 +333,14 @@ fn SortCriterionItem(
 
                 for field in available_fields {
                     MenuItem {
-                        onclick: move |_| {
-                            show_menu.set(false);
-                            sort_criteria.write()[index].field = field;
+                        onclick: {
+                            let sort_criteria = sort_criteria.clone();
+                            move |_| {
+                                show_menu.set(false);
+                                let mut new_criteria = sort_criteria.clone();
+                                new_criteria[index].field = field;
+                                on_sort_criteria_change.call(new_criteria);
+                            }
                         },
                         span { class: if criterion.field == field { "text-accent-soft" } else { "" },
                             "{sort_field_label(field)}"
@@ -273,12 +363,17 @@ fn SortCriterionItem(
                     }
                         .to_string(),
                 ),
-                onclick: move |_| {
-                    let new_dir = match criterion.direction {
-                        SortDirection::Ascending => SortDirection::Descending,
-                        SortDirection::Descending => SortDirection::Ascending,
-                    };
-                    sort_criteria.write()[index].direction = new_dir;
+                onclick: {
+                    let sort_criteria = sort_criteria.clone();
+                    move |_| {
+                        let new_dir = match criterion.direction {
+                            SortDirection::Ascending => SortDirection::Descending,
+                            SortDirection::Descending => SortDirection::Ascending,
+                        };
+                        let mut new_criteria = sort_criteria.clone();
+                        new_criteria[index].direction = new_dir;
+                        on_sort_criteria_change.call(new_criteria);
+                    }
                 },
                 if criterion.direction == SortDirection::Ascending {
                     ArrowUpIcon { class: "w-3.5 h-3.5" }
@@ -295,12 +390,43 @@ fn SortCriterionItem(
                             .to_string(),
                     ),
                     aria_label: Some("Remove sort criterion".to_string()),
-                    onclick: move |_| {
-                        sort_criteria.write().remove(index);
+                    onclick: {
+                        let sort_criteria = sort_criteria.clone();
+                        move |_| {
+                            let mut new_criteria = sort_criteria.clone();
+                            new_criteria.remove(index);
+                            on_sort_criteria_change.call(new_criteria);
+                        }
                     },
                     XIcon { class: "w-3 h-3" }
                 }
             }
+        }
+    }
+}
+
+/// Placeholder for the artists list view (implemented in PR 3)
+#[component]
+fn ArtistListView(
+    albums: Vec<Album>,
+    artists_by_album: HashMap<String, Vec<Artist>>,
+    on_artist_click: EventHandler<String>,
+) -> Element {
+    // Derive unique artists from the albums data
+    let mut seen = std::collections::HashSet::new();
+    let mut artist_count = 0usize;
+    for artists in artists_by_album.values() {
+        for artist in artists {
+            if seen.insert(artist.id.clone()) {
+                artist_count += 1;
+            }
+        }
+    }
+
+    rsx! {
+        div { class: "flex-1 flex flex-col items-center justify-center",
+            p { class: "text-gray-500", "{artist_count} artists" }
+            p { class: "text-gray-600 text-sm mt-2", "Artists list view coming soon" }
         }
     }
 }

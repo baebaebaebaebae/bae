@@ -37,6 +37,13 @@ pub struct SortCriterion {
     pub direction: SortDirection,
 }
 
+/// View mode for the library page
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum LibraryViewMode {
+    Albums,
+    Artists,
+}
+
 /// Album display info
 #[derive(Clone, Debug, PartialEq)]
 pub struct Album {

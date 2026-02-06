@@ -1,7 +1,7 @@
 //! LibraryView mock component
 
 use super::framework::{ControlRegistryBuilder, MockPage, MockPanel, Preset};
-use bae_ui::stores::LibraryState;
+use bae_ui::stores::{LibrarySortState, LibrarySortStateStoreExt, LibraryState};
 use bae_ui::{Album, Artist, LibraryView};
 use dioxus::prelude::*;
 use std::collections::HashMap;
@@ -60,6 +60,16 @@ pub fn LibraryMock(initial_state: Option<String>) -> Element {
         error,
     });
 
+    let sort_state = use_store(LibrarySortState::default);
+
+    let on_sort_criteria_change = move |criteria| {
+        sort_state.sort_criteria().set(criteria);
+    };
+
+    let on_view_mode_change = move |mode| {
+        sort_state.view_mode().set(mode);
+    };
+
     let cycle_val = cycle();
 
     rsx! {
@@ -67,6 +77,9 @@ pub fn LibraryMock(initial_state: Option<String>) -> Element {
             LibraryView {
                 key: "{cycle_val}", // Change cycle to force complete remount
                 state,
+                sort_state,
+                on_sort_criteria_change,
+                on_view_mode_change,
                 on_album_click: |_| {},
                 on_artist_click: |_| {},
                 on_play_album: |_| {},
