@@ -113,8 +113,6 @@ pub fn LibraryView(
     let view_mode = *sort_state.view_mode().read();
 
     let sorted_albums = sort_albums(&albums, &artists_by_album, &sort_criteria);
-    let album_count = sorted_albums.len();
-
     let mut scroll_target: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
 
     rsx! {
@@ -128,7 +126,6 @@ pub fn LibraryView(
 
                     if !loading && error.is_none() && !albums.is_empty() {
                         SortToolbar {
-                            album_count,
                             sort_criteria: sort_criteria.clone(),
                             view_mode,
                             on_sort_criteria_change,
@@ -180,7 +177,6 @@ pub fn LibraryView(
 /// Sort controls toolbar (inline with header)
 #[component]
 fn SortToolbar(
-    album_count: usize,
     sort_criteria: Vec<SortCriterion>,
     view_mode: LibraryViewMode,
     on_sort_criteria_change: EventHandler<Vec<SortCriterion>>,
@@ -189,16 +185,8 @@ fn SortToolbar(
     let used_fields: Vec<LibrarySortField> = sort_criteria.iter().map(|c| c.field).collect();
     let all_used = used_fields.len() >= LibrarySortField::ALL.len();
 
-    let album_label = if album_count == 1 {
-        "1 album".to_string()
-    } else {
-        format!("{} albums", album_count)
-    };
-
     rsx! {
         div { class: "flex items-center gap-4",
-            span { class: "text-sm text-gray-400", "{album_label}" }
-
             ViewModeDropdown { view_mode, on_view_mode_change }
 
             if view_mode == LibraryViewMode::Albums {
