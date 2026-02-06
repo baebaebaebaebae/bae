@@ -84,7 +84,7 @@ pub fn CdImport() -> Element {
                     .and_then(|m| m.mb_discid.clone());
 
                 if let Some(mb_discid) = mb_discid {
-                    match lookup_discid(&mb_discid).await {
+                    match lookup_discid(&mb_discid, &app.key_service).await {
                         Ok(result) => {
                             let mut matches = match result {
                                 DiscIdLookupResult::NoMatches => vec![],
@@ -202,8 +202,16 @@ pub fn CdImport() -> Element {
 
                         import_store.write().dispatch(CandidateEvent::StartSearch);
 
-                        let result =
-                            search_general(metadata, source, artist, album, year, label).await;
+                        let result = search_general(
+                            metadata,
+                            source,
+                            artist,
+                            album,
+                            year,
+                            label,
+                            &app.key_service,
+                        )
+                        .await;
                         match result {
                             Ok(mut candidates) => {
                                 check_candidates_for_duplicates(&app, &mut candidates).await;
@@ -238,7 +246,9 @@ pub fn CdImport() -> Element {
 
                         import_store.write().dispatch(CandidateEvent::StartSearch);
 
-                        let result = search_by_catalog_number(metadata, source, catno).await;
+                        let result =
+                            search_by_catalog_number(metadata, source, catno, &app.key_service)
+                                .await;
                         match result {
                             Ok(mut candidates) => {
                                 check_candidates_for_duplicates(&app, &mut candidates).await;
@@ -273,7 +283,8 @@ pub fn CdImport() -> Element {
 
                         import_store.write().dispatch(CandidateEvent::StartSearch);
 
-                        let result = search_by_barcode(metadata, source, barcode).await;
+                        let result =
+                            search_by_barcode(metadata, source, barcode, &app.key_service).await;
                         match result {
                             Ok(mut candidates) => {
                                 check_candidates_for_duplicates(&app, &mut candidates).await;
@@ -380,7 +391,7 @@ pub fn CdImport() -> Element {
                         .write()
                         .dispatch(CandidateEvent::StartDiscIdLookup(mb_discid.clone()));
                     info!("Retrying DiscID lookup...");
-                    match lookup_discid(&mb_discid).await {
+                    match lookup_discid(&mb_discid, &app.key_service).await {
                         Ok(result) => {
                             let mut matches = match result {
                                 DiscIdLookupResult::NoMatches => vec![],

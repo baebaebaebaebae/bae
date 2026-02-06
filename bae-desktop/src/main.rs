@@ -1,4 +1,5 @@
 use bae_core::db::Database;
+use bae_core::keys::KeyService;
 use bae_core::library::SharedLibraryManager;
 use bae_core::subsonic::create_router;
 use bae_core::{audio_codec, cache, config, encryption, import, playback};
@@ -105,6 +106,9 @@ fn main() {
         .and_then(|key| encryption::EncryptionService::new(key).ok());
     let library_manager = create_library_manager(database.clone(), encryption_service.clone());
 
+    let dev_mode = config::Config::is_dev_mode();
+    let key_service = KeyService::new(dev_mode);
+
     #[cfg(feature = "torrent")]
     let torrent_manager = {
         let torrent_options = torrent_options_from_config(&config);
@@ -118,6 +122,7 @@ fn main() {
         encryption_service.clone(),
         torrent_manager.clone(),
         std::sync::Arc::new(database.clone()),
+        key_service.clone(),
     );
     #[cfg(not(feature = "torrent"))]
     let import_handle = import::ImportService::start(
@@ -125,6 +130,7 @@ fn main() {
         library_manager.clone(),
         encryption_service.clone(),
         std::sync::Arc::new(database.clone()),
+        key_service.clone(),
     );
 
     let playback_handle = playback::PlaybackService::start(
@@ -164,6 +170,7 @@ fn main() {
         #[cfg(feature = "torrent")]
         torrent_manager,
         cache: cache_manager.clone(),
+        key_service,
     };
 
     if config.subsonic_enabled {

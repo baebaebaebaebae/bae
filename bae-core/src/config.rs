@@ -52,6 +52,9 @@ fn default_true() -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ConfigYaml {
     pub library_id: Option<String>,
+    /// Whether a Discogs API key is stored in the keyring (hint flag, avoids keyring read)
+    #[serde(default)]
+    pub discogs_key_stored: bool,
     pub torrent_bind_interface: Option<String>,
     /// Listening port for incoming torrent connections. None = random port.
     pub torrent_listen_port: Option<u16>,
@@ -81,8 +84,8 @@ pub struct ConfigYaml {
 pub struct Config {
     pub library_id: String,
     pub library_path: Option<PathBuf>,
-    /// Discogs API key - loaded lazily from keyring when needed
-    pub discogs_api_key: Option<String>,
+    /// Whether a Discogs API key is stored (hint flag, avoids keyring read on settings render)
+    pub discogs_key_stored: bool,
     /// Encryption key - loaded lazily from keyring when needed (when creating encrypted storage profile)
     pub encryption_key: Option<String>,
     pub torrent_bind_interface: Option<String>,
@@ -115,8 +118,10 @@ impl Config {
             warn!("No BAE_LIBRARY_ID in .env, generated new ID: {}", id);
             id
         });
-        // Load from env if present, otherwise will be loaded lazily from keyring
-        let discogs_api_key = std::env::var("BAE_DISCOGS_API_KEY").ok();
+        let discogs_key_stored = std::env::var("BAE_DISCOGS_API_KEY")
+            .ok()
+            .filter(|k| !k.is_empty())
+            .is_some();
         let encryption_key = std::env::var("BAE_ENCRYPTION_KEY").ok();
         let library_path = std::env::var("BAE_LIBRARY_PATH").ok().map(PathBuf::from);
         let torrent_bind_interface = std::env::var("BAE_TORRENT_BIND_INTERFACE")
@@ -126,7 +131,7 @@ impl Config {
         Self {
             library_id,
             library_path,
-            discogs_api_key,
+            discogs_key_stored,
             encryption_key,
             torrent_bind_interface,
             torrent_listen_port: None,
@@ -178,7 +183,7 @@ impl Config {
         Self {
             library_id,
             library_path,
-            discogs_api_key: None,
+            discogs_key_stored: yaml_config.discogs_key_stored,
             encryption_key: None,
             torrent_bind_interface: yaml_config.torrent_bind_interface,
             torrent_listen_port: yaml_config.torrent_listen_port,
@@ -230,9 +235,6 @@ impl Config {
 
         let mut new_values = std::collections::HashMap::new();
         new_values.insert("BAE_LIBRARY_ID", self.library_id.clone());
-        if let Some(key) = &self.discogs_api_key {
-            new_values.insert("BAE_DISCOGS_API_KEY", key.clone());
-        }
         if let Some(key) = &self.encryption_key {
             new_values.insert("BAE_ENCRYPTION_KEY", key.clone());
         }
@@ -263,9 +265,6 @@ impl Config {
     }
 
     pub fn save_to_keyring(&self) -> Result<(), ConfigError> {
-        if let Some(key) = &self.discogs_api_key {
-            keyring_core::Entry::new("bae", "discogs_api_key")?.set_password(key)?;
-        }
         if let Some(key) = &self.encryption_key {
             keyring_core::Entry::new("bae", "encryption_master_key")?.set_password(key)?;
         }
@@ -292,6 +291,7 @@ impl Config {
         std::fs::create_dir_all(&config_dir)?;
         let yaml = ConfigYaml {
             library_id: Some(self.library_id.clone()),
+            discogs_key_stored: self.discogs_key_stored,
             torrent_bind_interface: self.torrent_bind_interface.clone(),
             torrent_listen_port: self.torrent_listen_port,
             torrent_enable_upnp: self.torrent_enable_upnp,
@@ -308,15 +308,6 @@ impl Config {
             serde_yaml::to_string(&yaml).unwrap(),
         )?;
         Ok(())
-    }
-
-    /// Load discogs API key from keyring (call when Discogs API is needed)
-    pub fn load_discogs_key(&mut self) {
-        if self.discogs_api_key.is_none() {
-            self.discogs_api_key = keyring_core::Entry::new("bae", "discogs_api_key")
-                .ok()
-                .and_then(|e| e.get_password().ok());
-        }
     }
 
     /// Load or create encryption key from keyring (call when creating encrypted storage profile)

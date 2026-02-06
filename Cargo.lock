@@ -839,7 +839,6 @@ dependencies = [
  "dirs 5.0.1",
  "dispatch",
  "futures",
- "keyring-core",
  "objc",
  "reqwest",
  "rfd",

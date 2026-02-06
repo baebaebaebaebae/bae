@@ -10,18 +10,26 @@ use dioxus::prelude::*;
 pub fn DiscogsSection() -> Element {
     let app = use_app();
 
-    // Read config from Store
-    let config_store = app.state.config();
-    let store_discogs_key = config_store.discogs_api_key().read().clone();
+    let read_only = app.key_service.is_dev_mode();
+    let discogs_configured = *app.state.config().discogs_key_stored().read();
 
-    let initial_key = store_discogs_key.clone();
-    let mut discogs_key = use_signal(move || initial_key.clone());
+    let mut discogs_key = use_signal(|| Option::<String>::None);
     let mut is_editing = use_signal(|| false);
     let mut is_saving = use_signal(|| false);
     let mut save_error = use_signal(|| Option::<String>::None);
 
-    let has_changes = *discogs_key.read() != store_discogs_key;
-    let discogs_configured = store_discogs_key.is_some();
+    let editing_key = discogs_key.read().clone();
+    let has_changes = editing_key.is_some();
+
+    let on_edit_start = {
+        let app = app.clone();
+        move |_| {
+            // Lazy read: only touch the keyring when the user clicks Edit
+            let current = app.key_service.get_discogs_key();
+            discogs_key.set(current);
+            is_editing.set(true);
+        }
+    };
 
     let save_changes = {
         let app = app.clone();
@@ -31,33 +39,38 @@ pub fn DiscogsSection() -> Element {
             is_saving.set(true);
             save_error.set(None);
 
-            app.save_config(move |config| {
-                config.discogs_api_key = new_key;
-            });
+            if let Some(ref key) = new_key {
+                if !key.is_empty() {
+                    if let Err(e) = app.key_service.set_discogs_key(key) {
+                        save_error.set(Some(format!("{}", e)));
+                        is_saving.set(false);
+                        return;
+                    }
+
+                    app.save_config(|c| c.discogs_key_stored = true);
+                }
+            }
 
             is_saving.set(false);
             is_editing.set(false);
         }
     };
 
-    let cancel_edit = {
-        let store_discogs_key = store_discogs_key.clone();
-        move |_| {
-            discogs_key.set(store_discogs_key.clone());
-            is_editing.set(false);
-            save_error.set(None);
-        }
+    let cancel_edit = move |_| {
+        discogs_key.set(None);
+        is_editing.set(false);
+        save_error.set(None);
     };
 
     rsx! {
         DiscogsSectionView {
             discogs_configured,
-            discogs_key_value: discogs_key.read().clone().unwrap_or_default(),
-            is_editing: *is_editing.read(),
+            discogs_key_value: editing_key.unwrap_or_default(),
+            is_editing: *is_editing.read() && !read_only,
             is_saving: *is_saving.read(),
             has_changes,
             save_error: save_error.read().clone(),
-            on_edit_start: move |_| is_editing.set(true),
+            on_edit_start,
             on_key_change: move |val: String| {
                 discogs_key.set(if val.is_empty() { None } else { Some(val) });
             },

@@ -7,6 +7,7 @@
 use bae_core::cache;
 use bae_core::config;
 use bae_core::import;
+use bae_core::keys::KeyService;
 use bae_core::library::SharedLibraryManager;
 use bae_core::playback;
 #[cfg(feature = "torrent")]
@@ -32,6 +33,8 @@ pub struct AppServices {
     /// Torrent manager (feature-gated)
     #[cfg(feature = "torrent")]
     pub torrent_manager: torrent::LazyTorrentManager,
+    /// Key service for secret management
+    pub key_service: KeyService,
 }
 
 // =============================================================================
@@ -47,4 +50,5 @@ pub struct AppContext {
     pub cache: cache::CacheManager,
     #[cfg(feature = "torrent")]
     pub torrent_manager: torrent::LazyTorrentManager,
+    pub key_service: KeyService,
 }

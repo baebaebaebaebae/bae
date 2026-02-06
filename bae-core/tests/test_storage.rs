@@ -90,6 +90,7 @@ async fn test_storageless_import() {
         shared_library_manager,
         encryption_service,
         database_arc,
+        bae_core::keys::KeyService::new(true),
     );
 
     let discogs_release = create_test_discogs_release();
@@ -239,6 +240,7 @@ async fn test_storageless_delete_preserves_files() {
         shared_library_manager.clone(),
         encryption_service,
         database_arc,
+        bae_core::keys::KeyService::new(true),
     );
 
     let discogs_release = create_test_discogs_release();
@@ -406,6 +408,7 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
             shared_library_manager,
             encryption_service.clone(),
             database_arc,
+            bae_core::keys::KeyService::new(true),
         )
     };
     let discogs_release = create_test_discogs_release();
@@ -922,6 +925,7 @@ async fn run_real_album_test(album_dir: PathBuf, location: StorageLocation, encr
         shared_library_manager,
         encryption_service.clone(),
         database_arc.clone(),
+        bae_core::keys::KeyService::new(true),
     );
     let (_album_id, release_id) = import_handle
         .send_request(ImportRequest::Folder {

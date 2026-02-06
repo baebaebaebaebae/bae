@@ -19,6 +19,7 @@ use bae_core::cache;
 use bae_core::config;
 use bae_core::db::{DbStorageProfile, ImportStatus, StorageLocation};
 use bae_core::import::{self, ImportProgress};
+use bae_core::keys::KeyService;
 use bae_core::library::{LibraryEvent, SharedLibraryManager};
 use bae_core::playback::{self, PlaybackProgress};
 #[cfg(feature = "torrent")]
@@ -58,6 +59,8 @@ pub struct AppService {
     /// Torrent manager (feature-gated)
     #[cfg(feature = "torrent")]
     pub torrent_manager: torrent::LazyTorrentManager,
+    /// Key service for secret management
+    pub key_service: KeyService,
 }
 
 impl AppService {
@@ -73,6 +76,7 @@ impl AppService {
                 playback_handle: services.playback_handle.clone(),
                 cache: services.cache.clone(),
                 torrent_manager: services.torrent_manager.clone(),
+                key_service: services.key_service.clone(),
             }
         }
         #[cfg(not(feature = "torrent"))]
@@ -84,6 +88,7 @@ impl AppService {
                 import_handle: services.import_handle.clone(),
                 playback_handle: services.playback_handle.clone(),
                 cache: services.cache.clone(),
+                key_service: services.key_service.clone(),
             }
         }
     }
@@ -420,8 +425,8 @@ impl AppService {
         let config = &self.config;
         self.state
             .config()
-            .discogs_api_key()
-            .set(config.discogs_api_key.clone());
+            .discogs_key_stored()
+            .set(config.discogs_key_stored);
         self.state
             .config()
             .subsonic_enabled()
@@ -553,8 +558,8 @@ impl AppService {
         // Update Store
         self.state
             .config()
-            .discogs_api_key()
-            .set(new_config.discogs_api_key.clone());
+            .discogs_key_stored()
+            .set(new_config.discogs_key_stored);
         self.state
             .config()
             .subsonic_enabled()

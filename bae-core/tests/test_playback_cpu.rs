@@ -176,6 +176,7 @@ impl CueFlacTestFixture {
             shared_library_manager.clone(),
             encryption_service.clone(),
             database_arc,
+            bae_core::keys::KeyService::new(true),
         );
 
         let master_year = discogs_release.year.unwrap_or(2024);
