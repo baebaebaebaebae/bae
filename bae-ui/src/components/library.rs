@@ -6,7 +6,9 @@
 
 use crate::components::album_card::AlbumCard;
 use crate::components::helpers::{ErrorDisplay, LoadingSpinner};
-use crate::components::icons::{ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, PlusIcon, XIcon};
+use crate::components::icons::{
+    ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, PlusIcon, UserIcon, XIcon,
+};
 use crate::components::{Button, ButtonSize, ButtonVariant, ChromelessButton};
 use crate::components::{MenuDropdown, MenuItem, Placement};
 use crate::display_types::{
@@ -405,28 +407,154 @@ fn SortCriterionItem(
     }
 }
 
-/// Placeholder for the artists list view (implemented in PR 3)
+/// An artist with their first non-compilation album cover
+struct ArtistListItem {
+    artist: Artist,
+    cover_url: Option<String>,
+}
+
+/// A group of artists under the same letter heading
+struct ArtistGroup {
+    letter: String,
+    artists: Vec<ArtistListItem>,
+}
+
+/// Derive unique artists from album data, picking the first non-compilation
+/// album cover as the artist thumbnail.
+fn derive_artist_list(
+    albums: &[Album],
+    artists_by_album: &HashMap<String, Vec<Artist>>,
+) -> Vec<ArtistListItem> {
+    // Invert the map: artist_id -> (Artist, first cover_url)
+    let mut artist_map: HashMap<String, ArtistListItem> = HashMap::new();
+
+    for album in albums {
+        if album.is_compilation {
+            continue;
+        }
+
+        if let Some(artists) = artists_by_album.get(&album.id) {
+            for artist in artists {
+                artist_map
+                    .entry(artist.id.clone())
+                    .and_modify(|item| {
+                        // Keep the first cover we found
+                        if item.cover_url.is_none() {
+                            item.cover_url = album.cover_url.clone();
+                        }
+                    })
+                    .or_insert_with(|| ArtistListItem {
+                        artist: artist.clone(),
+                        cover_url: album.cover_url.clone(),
+                    });
+            }
+        }
+    }
+
+    let mut items: Vec<ArtistListItem> = artist_map.into_values().collect();
+    items.sort_by(|a, b| {
+        a.artist
+            .name
+            .to_lowercase()
+            .cmp(&b.artist.name.to_lowercase())
+    });
+    items
+}
+
+/// Group a sorted list of artists by their first letter (# for non-alpha)
+fn group_artists_by_letter(items: Vec<ArtistListItem>) -> Vec<ArtistGroup> {
+    let mut groups: Vec<ArtistGroup> = Vec::new();
+
+    for item in items {
+        let first_char = item
+            .artist
+            .name
+            .chars()
+            .next()
+            .unwrap_or('#')
+            .to_uppercase()
+            .next()
+            .unwrap_or('#');
+        let letter = if first_char.is_ascii_alphabetic() {
+            first_char.to_string()
+        } else {
+            "#".to_string()
+        };
+
+        if let Some(last_group) = groups.last_mut() {
+            if last_group.letter == letter {
+                last_group.artists.push(item);
+                continue;
+            }
+        }
+        groups.push(ArtistGroup {
+            letter,
+            artists: vec![item],
+        });
+    }
+
+    groups
+}
+
+/// Artists list view — groups artists alphabetically with letter headings
 #[component]
 fn ArtistListView(
     albums: Vec<Album>,
     artists_by_album: HashMap<String, Vec<Artist>>,
     on_artist_click: EventHandler<String>,
 ) -> Element {
-    // Derive unique artists from the albums data
-    let mut seen = std::collections::HashSet::new();
-    let mut artist_count = 0usize;
-    for artists in artists_by_album.values() {
-        for artist in artists {
-            if seen.insert(artist.id.clone()) {
-                artist_count += 1;
+    let items = derive_artist_list(&albums, &artists_by_album);
+    let groups = group_artists_by_letter(items);
+
+    rsx! {
+        div { class: "flex flex-col gap-6",
+            for group in groups {
+                div { key: "{group.letter}",
+                    // Letter heading
+                    div { class: "text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 border-b border-gray-800 pb-1",
+                        "{group.letter}"
+                    }
+
+                    div { class: "flex flex-col",
+                        for item in group.artists {
+                            ArtistRow {
+                                key: "{item.artist.id}",
+                                artist: item.artist,
+                                cover_url: item.cover_url,
+                                on_click: on_artist_click,
+                            }
+                        }
+                    }
+                }
             }
         }
     }
+}
+
+/// Single artist row with round thumbnail + name
+#[component]
+fn ArtistRow(artist: Artist, cover_url: Option<String>, on_click: EventHandler<String>) -> Element {
+    let artist_id = artist.id.clone();
 
     rsx! {
-        div { class: "flex-1 flex flex-col items-center justify-center",
-            p { class: "text-gray-500", "{artist_count} artists" }
-            p { class: "text-gray-600 text-sm mt-2", "Artists list view coming soon" }
+        button {
+            class: "flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-hover transition-colors text-left w-full",
+            onclick: move |_| on_click.call(artist_id.clone()),
+
+            // Round thumbnail
+            div { class: "w-10 h-10 rounded-full overflow-clip flex-shrink-0 bg-gray-800 flex items-center justify-center",
+                if let Some(url) = &cover_url {
+                    img {
+                        src: "{url}",
+                        alt: "{artist.name}",
+                        class: "w-full h-full object-cover",
+                    }
+                } else {
+                    UserIcon { class: "w-5 h-5 text-gray-500" }
+                }
+            }
+
+            span { class: "text-sm text-white truncate", "{artist.name}" }
         }
     }
 }
