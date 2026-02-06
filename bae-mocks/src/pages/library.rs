@@ -2,7 +2,7 @@
 
 use crate::demo_data;
 use crate::Route;
-use bae_ui::stores::LibraryState;
+use bae_ui::stores::{LibrarySortState, LibrarySortStateStoreExt, LibraryState};
 use bae_ui::{Album, Artist, LibraryView};
 use dioxus::prelude::*;
 use std::collections::HashMap;
@@ -21,9 +21,22 @@ pub fn Library() -> Element {
         error: None,
     });
 
+    let sort_state = use_store(LibrarySortState::default);
+
+    let on_sort_criteria_change = move |criteria| {
+        sort_state.sort_criteria().set(criteria);
+    };
+
+    let on_view_mode_change = move |mode| {
+        sort_state.view_mode().set(mode);
+    };
+
     rsx! {
         LibraryView {
             state,
+            sort_state,
+            on_sort_criteria_change,
+            on_view_mode_change,
             on_album_click: move |album_id: String| {
                 navigator().push(Route::AlbumDetail { album_id });
             },

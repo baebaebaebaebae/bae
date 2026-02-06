@@ -6,7 +6,7 @@
 use crate::ui::app_service::use_app;
 use crate::ui::components::album_detail::utils::get_album_track_ids;
 use crate::ui::Route;
-use bae_ui::stores::AppStateStoreExt;
+use bae_ui::stores::{AppStateStoreExt, LibrarySortStateStoreExt, UiStateStoreExt};
 use bae_ui::LibraryView;
 use dioxus::prelude::*;
 
@@ -19,6 +19,21 @@ pub fn LibraryPage() -> Element {
 
     // Pass the state lens directly - don't read here!
     let state = app.state.library();
+    let sort_state = app.state.ui().library_sort();
+
+    let on_sort_criteria_change = {
+        let sort_state = app.state.ui().library_sort();
+        move |criteria| {
+            sort_state.sort_criteria().set(criteria);
+        }
+    };
+
+    let on_view_mode_change = {
+        let sort_state = app.state.ui().library_sort();
+        move |mode| {
+            sort_state.view_mode().set(mode);
+        }
+    };
 
     // Navigation callback - navigate to album detail
     let on_album_click = move |album_id: String| {
@@ -71,6 +86,9 @@ pub fn LibraryPage() -> Element {
     rsx! {
         LibraryView {
             state,
+            sort_state,
+            on_sort_criteria_change,
+            on_view_mode_change,
             on_album_click,
             on_artist_click,
             on_play_album,
