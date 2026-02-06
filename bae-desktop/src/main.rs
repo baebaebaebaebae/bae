@@ -84,7 +84,8 @@ fn configure_logging() {
 fn main() {
     crash_report::install_panic_hook();
     config::init_keyring();
-    let config = config::Config::load();
+    let mut config = config::Config::load();
+    config.load_discogs_key();
     configure_logging();
     crash_report::check_for_crash_report();
 
