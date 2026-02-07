@@ -285,6 +285,9 @@ pub fn DemoLayout() -> Element {
                     on_clear: move |_| {},
                     on_remove: move |_idx| {},
                     on_track_click: move |_track_id: String| {},
+                    on_play_index: move |_idx| {},
+                    on_pause: move |_| {},
+                    on_resume: move |_| {},
                 }
             },
             Outlet::<Route> {}

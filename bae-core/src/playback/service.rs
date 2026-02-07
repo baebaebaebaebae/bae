@@ -72,6 +72,8 @@ pub enum PlaybackCommand {
     ClearQueue,
     GetQueue,
     SetRepeatMode(RepeatMode),
+    /// Skip to a specific position in the queue (manual action, skip pregap)
+    SkipTo(usize),
 }
 /// Current playback state
 #[derive(Debug, Clone)]
@@ -164,6 +166,9 @@ impl PlaybackHandle {
     }
     pub fn set_repeat_mode(&self, mode: RepeatMode) {
         let _ = self.command_tx.send(PlaybackCommand::SetRepeatMode(mode));
+    }
+    pub fn skip_to(&self, index: usize) {
+        let _ = self.command_tx.send(PlaybackCommand::SkipTo(index));
     }
 }
 
@@ -898,6 +903,29 @@ impl PlaybackService {
                         let _ = self
                             .progress_tx
                             .send(PlaybackProgress::RepeatModeChanged { mode });
+                    }
+                }
+                PlaybackCommand::SkipTo(index) => {
+                    if index < self.queue.len() {
+                        // Drain all tracks before the target index
+                        for _ in 0..index {
+                            self.queue.pop_front();
+                        }
+
+                        // Pop the target track and play it
+                        if let Some(track_id) = self.queue.pop_front() {
+                            info!(
+                                "SkipTo: jumping to queue position {}, track {}",
+                                index, track_id
+                            );
+
+                            self.clear_next_track_state();
+                            self.emit_queue_update();
+                            if let Some(id) = self.current_track_id() {
+                                self.previous_track_id = Some(id.to_string());
+                            }
+                            self.play_track(&track_id, false, false).await;
+                        }
                     }
                 }
             }

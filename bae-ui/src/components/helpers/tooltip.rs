@@ -112,10 +112,16 @@ pub fn use_tooltip_handle() -> TooltipHandle {
 
         let cb = wasm_bindgen_x::closure::Closure::wrap(Box::new(move || {
             let _guard = RuntimeGuard::new(runtime.clone());
-            if let Some(task) = hover_task.take() {
-                task.cancel();
+            // Signals may already be dropped if the component unmounted
+            // before the deferred blur listener cleanup ran.
+            if let Ok(mut guard) = hover_task.try_write() {
+                if let Some(task) = guard.take() {
+                    task.cancel();
+                }
             }
-            is_visible.set(false);
+            if let Ok(mut guard) = is_visible.try_write() {
+                *guard = false;
+            }
         }) as Box<dyn FnMut()>);
 
         let _ = window.add_event_listener_with_callback("blur", cb.as_ref().unchecked_ref());
