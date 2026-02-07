@@ -51,13 +51,16 @@ pub fn GalleryLightbox(
 ) -> Element {
     let mut current_index = use_signal(|| initial_index);
     let mut last_initial = use_signal(|| initial_index);
+    let mut was_open = use_signal(|| false);
 
-    // Sync when parent changes initial_index (e.g. reopened on a different file).
+    // Reset when initial_index changes OR when lightbox reopens.
     // peek() avoids subscribing so the set() doesn't re-trigger render.
-    if initial_index != *last_initial.peek() {
+    let just_opened = is_open() && !*was_open.peek();
+    if initial_index != *last_initial.peek() || just_opened {
         last_initial.set(initial_index);
         current_index.set(initial_index);
     }
+    was_open.set(is_open());
 
     let has_selection = selected_index.is_some();
 
