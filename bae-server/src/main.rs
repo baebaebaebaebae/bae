@@ -1,24 +1,37 @@
 use bae_core::cloud_sync::CloudSyncService;
+use bae_core::config::ConfigYaml;
 use bae_core::db::Database;
 use bae_core::encryption::EncryptionService;
 use bae_core::library::{LibraryManager, SharedLibraryManager};
 use bae_core::subsonic::create_router;
 use clap::Parser;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use tower_http::services::{ServeDir, ServeFile};
 use tracing::{error, info};
 
 /// bae headless server — serves the subsonic API without a desktop UI.
+///
+/// Reads library configuration from {library-path}/config.yaml.
+/// Only secrets (recovery key, S3 credentials) are provided via CLI or env vars.
 #[derive(Parser)]
 #[command(name = "bae-server")]
 struct Args {
+    /// Absolute path to the library directory (contains library.db and config.yaml).
+    #[arg(long, env = "BAE_LIBRARY_PATH")]
+    library_path: PathBuf,
+
     /// Hex-encoded encryption key (64 hex chars = 32 bytes).
     /// Required if the library contains encrypted files.
     #[arg(long, env = "BAE_RECOVERY_KEY")]
     recovery_key: Option<String>,
 
-    /// Path to the library directory (contains library.db).
-    #[arg(long, env = "BAE_LIBRARY_PATH")]
-    library_path: PathBuf,
+    /// S3 access key for cloud sync.
+    #[arg(long, env = "BAE_CLOUD_ACCESS_KEY")]
+    cloud_access_key: Option<String>,
+
+    /// S3 secret key for cloud sync.
+    #[arg(long, env = "BAE_CLOUD_SECRET_KEY")]
+    cloud_secret_key: Option<String>,
 
     /// Port for the subsonic API server.
     #[arg(long, default_value = "4533", env = "BAE_PORT")]
@@ -32,29 +45,10 @@ struct Args {
     #[arg(long)]
     refresh: bool,
 
-    /// Library ID (used as S3 key prefix).
-    #[arg(long, env = "BAE_LIBRARY_ID")]
-    library_id: Option<String>,
-
-    /// S3 bucket for cloud sync.
-    #[arg(long, env = "BAE_CLOUD_BUCKET")]
-    cloud_bucket: Option<String>,
-
-    /// S3 region for cloud sync.
-    #[arg(long, env = "BAE_CLOUD_REGION")]
-    cloud_region: Option<String>,
-
-    /// S3 endpoint for cloud sync (for S3-compatible services).
-    #[arg(long, env = "BAE_CLOUD_ENDPOINT")]
-    cloud_endpoint: Option<String>,
-
-    /// S3 access key for cloud sync.
-    #[arg(long, env = "BAE_CLOUD_ACCESS_KEY")]
-    cloud_access_key: Option<String>,
-
-    /// S3 secret key for cloud sync.
-    #[arg(long, env = "BAE_CLOUD_SECRET_KEY")]
-    cloud_secret_key: Option<String>,
+    /// Path to the built bae-web dist directory.
+    /// When provided, serves the web UI at / alongside the API at /rest/*.
+    #[arg(long, env = "BAE_WEB_DIR")]
+    web_dir: Option<PathBuf>,
 }
 
 fn configure_logging() {
@@ -74,24 +68,55 @@ fn configure_logging() {
         .init();
 }
 
+fn load_library_config(library_path: &Path) -> ConfigYaml {
+    let config_path = library_path.join("config.yaml");
+    if config_path.exists() {
+        let content = std::fs::read_to_string(&config_path).unwrap_or_else(|e| {
+            error!("Failed to read {}: {e}", config_path.display());
+            std::process::exit(1);
+        });
+        serde_yaml::from_str(&content).unwrap_or_else(|e| {
+            error!("Failed to parse {}: {e}", config_path.display());
+            std::process::exit(1);
+        })
+    } else {
+        info!(
+            "No config.yaml found at {}, using defaults",
+            library_path.display()
+        );
+        ConfigYaml::default()
+    }
+}
+
 #[tokio::main]
 async fn main() {
     configure_logging();
     let args = Args::parse();
 
-    info!("bae-server starting");
+    // Validate library path is absolute
+    if !args.library_path.is_absolute() {
+        error!(
+            "--library-path must be an absolute path, got: {}",
+            args.library_path.display()
+        );
+        std::process::exit(1);
+    }
 
+    info!("bae-server starting");
+    info!("Library path: {}", args.library_path.display());
+
+    let config = load_library_config(&args.library_path);
     let db_path = args.library_path.join("library.db");
     let needs_download = !db_path.exists() || args.refresh;
 
     // Download from cloud if library.db is missing or --refresh was passed
     if needs_download {
-        download_from_cloud(&args).await;
+        download_from_cloud(&args, &config).await;
     }
 
     if !db_path.exists() {
         error!("Database not found at {}", db_path.display());
-        error!("Provide a valid --library-path or use cloud args to download");
+        error!("Ensure the library directory is populated or configure cloud sync in config.yaml");
         std::process::exit(1);
     }
 
@@ -122,8 +147,25 @@ async fn main() {
     let library_manager =
         SharedLibraryManager::new(LibraryManager::new(database, encryption_service.clone()));
 
-    // Start subsonic server
-    let app = create_router(library_manager, encryption_service);
+    // Build the API router
+    let api_router = create_router(
+        library_manager,
+        encryption_service,
+        args.library_path.clone(),
+    );
+
+    // If --web-dir is provided, serve static files with SPA fallback
+    let app = if let Some(ref web_dir) = args.web_dir {
+        info!("Serving web UI from {}", web_dir.display());
+        let spa_fallback =
+            ServeDir::new(web_dir).fallback(ServeFile::new(web_dir.join("index.html")));
+        axum::Router::new()
+            .merge(api_router)
+            .fallback_service(spa_fallback)
+    } else {
+        api_router
+    };
+
     let addr = format!("{}:{}", args.bind, args.port);
 
     info!("Binding to {addr}");
@@ -141,22 +183,21 @@ async fn main() {
     }
 }
 
-async fn download_from_cloud(args: &Args) {
-    // All cloud args + recovery key are required for download
+async fn download_from_cloud(args: &Args, config: &ConfigYaml) {
     let recovery_key = args.recovery_key.as_deref().unwrap_or_else(|| {
         error!("--recovery-key is required to download from cloud");
         std::process::exit(1);
     });
-    let library_id = args.library_id.as_deref().unwrap_or_else(|| {
-        error!("--library-id is required to download from cloud");
+    let library_id = config.library_id.as_deref().unwrap_or_else(|| {
+        error!("library_id missing from config.yaml");
         std::process::exit(1);
     });
-    let bucket = args.cloud_bucket.as_deref().unwrap_or_else(|| {
-        error!("--cloud-bucket is required to download from cloud");
+    let bucket = config.cloud_sync_bucket.as_deref().unwrap_or_else(|| {
+        error!("cloud_sync_bucket missing from config.yaml");
         std::process::exit(1);
     });
-    let region = args.cloud_region.as_deref().unwrap_or_else(|| {
-        error!("--cloud-region is required to download from cloud");
+    let region = config.cloud_sync_region.as_deref().unwrap_or_else(|| {
+        error!("cloud_sync_region missing from config.yaml");
         std::process::exit(1);
     });
     let access_key = args.cloud_access_key.as_deref().unwrap_or_else(|| {
@@ -178,7 +219,7 @@ async fn download_from_cloud(args: &Args) {
     let cloud = CloudSyncService::new(
         bucket.to_string(),
         region.to_string(),
-        args.cloud_endpoint.clone(),
+        config.cloud_sync_endpoint.clone(),
         access_key.to_string(),
         secret_key.to_string(),
         library_id.to_string(),
