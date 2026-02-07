@@ -1,0 +1,5 @@
+@import "tailwindcss";
+@import "../bae-ui/theme.css";
+
+@source "./src/**/*.rs";
+@source "../bae-ui/src/**/*.rs";

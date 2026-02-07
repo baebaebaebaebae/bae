@@ -918,7 +918,10 @@ dependencies = [
  "axum 0.7.9",
  "bae-core",
  "clap",
+ "serde",
+ "serde_yaml",
  "tokio",
+ "tower-http 0.5.2",
  "tracing",
  "tracing-subscriber",
 ]
@@ -938,6 +941,21 @@ dependencies = [
  "tracing",
  "wasm-bindgen-futures-x",
  "wasm-bindgen-x",
+ "web-sys-x",
+]
+
+[[package]]
+name = "bae-web"
+version = "0.0.0-dev"
+dependencies = [
+ "bae-ui",
+ "chrono",
+ "dioxus",
+ "getrandom 0.2.17",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tracing",
  "web-sys-x",
 ]
 

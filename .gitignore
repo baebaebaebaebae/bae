@@ -27,6 +27,7 @@ node_modules/
 # Generated CSS (copied/built at build time)
 bae-desktop/assets/*.css
 bae-mocks/assets/*.css
+bae-web/assets/*.css
 
 # Website build artifacts
 website/dist/
