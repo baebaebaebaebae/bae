@@ -47,9 +47,9 @@ fn default_true() -> bool {
 }
 
 /// YAML config file structure for non-secret settings (per-library)
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigYaml {
-    pub library_id: Option<String>,
+    pub library_id: String,
     /// Whether a Discogs API key is stored in the keyring (hint flag, avoids keyring read)
     #[serde(default)]
     pub discogs_key_stored: bool,
@@ -136,11 +136,20 @@ impl Config {
     }
 
     fn from_env() -> Self {
-        let library_id = std::env::var("BAE_LIBRARY_ID").unwrap_or_else(|_| {
-            let id = uuid::Uuid::new_v4().to_string();
-            warn!("No BAE_LIBRARY_ID in .env, generated new ID: {}", id);
-            id
-        });
+        let env_path = std::path::Path::new(".env");
+        let library_id = match std::env::var("BAE_LIBRARY_ID")
+            .ok()
+            .filter(|s| !s.is_empty())
+        {
+            Some(id) => id,
+            None => {
+                let id = uuid::Uuid::new_v4().to_string();
+
+                info!("No BAE_LIBRARY_ID in .env, generated: {}", id);
+                append_to_env_file(env_path, "BAE_LIBRARY_ID", &id);
+                id
+            }
+        };
         let discogs_key_stored = std::env::var("BAE_DISCOGS_API_KEY")
             .ok()
             .filter(|k| !k.is_empty())
@@ -155,8 +164,7 @@ impl Config {
             Some(p) => PathBuf::from(p),
             None => {
                 let home = dirs::home_dir().expect("Failed to get home directory");
-                let id = uuid::Uuid::new_v4().to_string();
-                home.join(".bae").join("libraries").join(id)
+                home.join(".bae").join("libraries").join(&library_id)
             }
         };
         let torrent_bind_interface = std::env::var("BAE_TORRENT_BIND_INTERFACE")
@@ -196,50 +204,42 @@ impl Config {
     fn from_config_file() -> Self {
         let home_dir = dirs::home_dir().expect("Failed to get home directory");
         let bae_dir = home_dir.join(".bae");
+        Self::load_from_bae_dir(&bae_dir)
+    }
 
-        // Read library path from global pointer file, or create a new library
+    fn load_from_bae_dir(bae_dir: &std::path::Path) -> Self {
+        // Read library path from pointer file — must exist (first-run flow creates it)
         let library_path_file = bae_dir.join("library");
-        let library_path = if library_path_file.exists() {
-            let content = std::fs::read_to_string(&library_path_file)
-                .expect("Failed to read library path file");
+        let library_path = {
+            let content = std::fs::read_to_string(&library_path_file).unwrap_or_else(|e| {
+                panic!(
+                    "No library pointer at {}. Run bae to set up a library. ({})",
+                    library_path_file.display(),
+                    e
+                )
+            });
             let trimmed = content.trim();
-            if trimmed.is_empty() {
-                // Empty pointer file — create a new library
-                let id = uuid::Uuid::new_v4().to_string();
-                let path = bae_dir.join("libraries").join(&id);
-                std::fs::create_dir_all(&bae_dir).expect("Failed to create ~/.bae");
-                std::fs::write(&library_path_file, path.to_string_lossy().as_ref())
-                    .expect("Failed to write library pointer");
-
-                info!("Created new library at {}", path.display());
-                path
-            } else {
-                PathBuf::from(trimmed)
-            }
-        } else {
-            // No pointer file — fresh install, create new library
-            let id = uuid::Uuid::new_v4().to_string();
-            let path = bae_dir.join("libraries").join(&id);
-            std::fs::create_dir_all(&bae_dir).expect("Failed to create ~/.bae");
-            std::fs::write(&library_path_file, path.to_string_lossy().as_ref())
-                .expect("Failed to write library pointer");
-
-            info!("Created new library at {}", path.display());
-            path
+            assert!(
+                !trimmed.is_empty(),
+                "Library pointer at {} is empty",
+                library_path_file.display()
+            );
+            PathBuf::from(trimmed)
         };
 
-        // Read library-specific config from the library directory
+        // Read library-specific config — must exist with library_id (first-run flow creates it)
         let config_path = library_path.join("config.yaml");
-        let yaml_config: ConfigYaml = if config_path.exists() {
-            serde_yaml::from_str(&std::fs::read_to_string(&config_path).unwrap())
-                .unwrap_or_default()
-        } else {
-            ConfigYaml::default()
-        };
+        let yaml_config: ConfigYaml =
+            serde_yaml::from_str(&std::fs::read_to_string(&config_path).unwrap_or_else(|e| {
+                panic!(
+                    "No config.yaml at {}. Library may be corrupted. ({})",
+                    config_path.display(),
+                    e
+                )
+            }))
+            .unwrap_or_else(|e| panic!("Failed to parse {}: {}", config_path.display(), e));
 
-        let library_id = yaml_config
-            .library_id
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let library_id = yaml_config.library_id;
 
         Self {
             library_id,
@@ -331,7 +331,7 @@ impl Config {
     pub fn save_to_config_yaml(&self) -> Result<(), ConfigError> {
         std::fs::create_dir_all(&self.library_path)?;
         let yaml = ConfigYaml {
-            library_id: Some(self.library_id.clone()),
+            library_id: self.library_id.clone(),
             discogs_key_stored: self.discogs_key_stored,
             encryption_key_stored: self.encryption_key_stored,
             encryption_key_fingerprint: self.encryption_key_fingerprint.clone(),
@@ -356,5 +356,177 @@ impl Config {
             serde_yaml::to_string(&yaml).unwrap(),
         )?;
         Ok(())
+    }
+}
+
+/// Append a key=value line to a .env file.
+fn append_to_env_file(path: &std::path::Path, key: &str, value: &str) {
+    use std::fs::OpenOptions;
+
+    match OpenOptions::new().create(true).append(true).open(path) {
+        Ok(mut f) => {
+            let _ = writeln!(f, "{}={}", key, value);
+        }
+        Err(e) => {
+            warn!("Failed to persist {} to {}: {}", key, path.display(), e);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn make_test_config(library_id: &str, library_path: PathBuf) -> Config {
+        Config {
+            library_id: library_id.to_string(),
+            library_path,
+            discogs_key_stored: false,
+            encryption_key_stored: false,
+            encryption_key_fingerprint: None,
+            torrent_bind_interface: None,
+            torrent_listen_port: None,
+            torrent_enable_upnp: true,
+            torrent_enable_natpmp: true,
+            torrent_max_connections: None,
+            torrent_max_connections_per_torrent: None,
+            torrent_max_uploads: None,
+            torrent_max_uploads_per_torrent: None,
+            subsonic_enabled: true,
+            subsonic_port: 4533,
+            cloud_sync_enabled: false,
+            cloud_sync_bucket: None,
+            cloud_sync_region: None,
+            cloud_sync_endpoint: None,
+            cloud_sync_last_upload: None,
+        }
+    }
+
+    #[test]
+    fn config_yaml_requires_library_id() {
+        let yaml = "discogs_key_stored: false\n";
+        let result: Result<ConfigYaml, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_err(), "ConfigYaml should fail without library_id");
+    }
+
+    #[test]
+    fn config_yaml_parses_with_library_id() {
+        let yaml = "library_id: abc-123\n";
+        let config: ConfigYaml = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.library_id, "abc-123");
+    }
+
+    #[test]
+    fn save_and_load_config_yaml_roundtrip() {
+        let tmp = TempDir::new().unwrap();
+        let library_path = tmp.path().to_path_buf();
+        let config = make_test_config("my-library-id", library_path.clone());
+
+        config.save_to_config_yaml().unwrap();
+
+        let yaml: ConfigYaml = serde_yaml::from_str(
+            &std::fs::read_to_string(library_path.join("config.yaml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(yaml.library_id, "my-library-id");
+    }
+
+    #[test]
+    fn load_from_bae_dir_reads_pointer_and_config() {
+        let tmp = TempDir::new().unwrap();
+        let bae_dir = tmp.path();
+        let library_id = "test-lib-id";
+        let library_path = bae_dir.join("libraries").join(library_id);
+
+        // Set up pointer file + config.yaml
+        let config = make_test_config(library_id, library_path.clone());
+        config.save_to_config_yaml().unwrap();
+        std::fs::write(
+            bae_dir.join("library"),
+            library_path.to_string_lossy().as_ref(),
+        )
+        .unwrap();
+
+        let loaded = Config::load_from_bae_dir(bae_dir);
+        assert_eq!(loaded.library_id, library_id);
+        assert_eq!(loaded.library_path, library_path);
+    }
+
+    #[test]
+    #[should_panic(expected = "No library pointer")]
+    fn load_from_bae_dir_panics_without_pointer_file() {
+        let tmp = TempDir::new().unwrap();
+        Config::load_from_bae_dir(tmp.path());
+    }
+
+    #[test]
+    #[should_panic(expected = "is empty")]
+    fn load_from_bae_dir_panics_on_empty_pointer_file() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("library"), "").unwrap();
+        Config::load_from_bae_dir(tmp.path());
+    }
+
+    #[test]
+    #[should_panic(expected = "No config.yaml")]
+    fn load_from_bae_dir_panics_without_config_yaml() {
+        let tmp = TempDir::new().unwrap();
+        let library_path = tmp.path().join("libraries").join("some-id");
+        std::fs::create_dir_all(&library_path).unwrap();
+        std::fs::write(
+            tmp.path().join("library"),
+            library_path.to_string_lossy().as_ref(),
+        )
+        .unwrap();
+
+        Config::load_from_bae_dir(tmp.path());
+    }
+
+    #[test]
+    #[should_panic(expected = "Failed to parse")]
+    fn load_from_bae_dir_panics_on_config_missing_library_id() {
+        let tmp = TempDir::new().unwrap();
+        let library_path = tmp.path().join("libraries").join("some-id");
+        std::fs::create_dir_all(&library_path).unwrap();
+        std::fs::write(
+            tmp.path().join("library"),
+            library_path.to_string_lossy().as_ref(),
+        )
+        .unwrap();
+        // config.yaml exists but has no library_id
+        std::fs::write(
+            library_path.join("config.yaml"),
+            "discogs_key_stored: false\n",
+        )
+        .unwrap();
+
+        Config::load_from_bae_dir(tmp.path());
+    }
+
+    #[test]
+    fn append_to_env_file_creates_and_appends() {
+        let tmp = TempDir::new().unwrap();
+        let env_path = tmp.path().join(".env");
+
+        append_to_env_file(&env_path, "FOO", "bar");
+        append_to_env_file(&env_path, "BAZ", "qux");
+
+        let content = std::fs::read_to_string(&env_path).unwrap();
+        assert!(content.contains("FOO=bar"));
+        assert!(content.contains("BAZ=qux"));
+    }
+
+    #[test]
+    fn append_to_env_file_preserves_existing_content() {
+        let tmp = TempDir::new().unwrap();
+        let env_path = tmp.path().join(".env");
+        std::fs::write(&env_path, "EXISTING=value\n").unwrap();
+
+        append_to_env_file(&env_path, "NEW_KEY", "new_value");
+
+        let content = std::fs::read_to_string(&env_path).unwrap();
+        assert!(content.starts_with("EXISTING=value\n"));
+        assert!(content.contains("NEW_KEY=new_value"));
     }
 }
