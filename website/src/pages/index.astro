@@ -16,7 +16,7 @@ import { Image } from 'astro:assets';
 	<div class="noise"></div>
 
 	<nav>
-		<a href="/" class="logo">bae</a>
+		<a href="/" class="logo"><img src="/sheep.png" alt="" class="logo-icon" />bae</a>
 		<div class="nav-links">
 			<a href="/getting-started/installation">Docs</a>
 			<a href="https://github.com/bae-fm/bae" target="_blank">GitHub</a>
@@ -185,6 +185,14 @@ import { Image } from 'astro:assets';
 		color: var(--text);
 		text-decoration: none;
 		letter-spacing: -0.02em;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.logo-icon {
+		width: 32px;
+		height: 32px;
 	}
 
 	.nav-links {
