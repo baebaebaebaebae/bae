@@ -34,10 +34,10 @@ pub fn SettingsMock(initial_state: Option<String>) -> Element {
         vec![]
     };
 
-    let (encryption_key_preview, encryption_key_length) = if encryption_configured {
-        ("a1b2c3d4...x7y8z9".to_string(), 32)
+    let encryption_key_fingerprint = if encryption_configured {
+        "a1b2c3d4e5f6g7h8".to_string()
     } else {
-        ("Not configured".to_string(), 0)
+        String::new()
     };
 
     rsx! {
@@ -52,8 +52,7 @@ pub fn SettingsMock(initial_state: Option<String>) -> Element {
                     editing_profile: None,
                     is_creating: false,
                     encryption_configured,
-                    encryption_key_preview,
-                    encryption_key_length,
+                    encryption_key_fingerprint,
                     on_copy_key: |_| {},
                     on_import_key: |_| {},
                     on_create: |_| {},

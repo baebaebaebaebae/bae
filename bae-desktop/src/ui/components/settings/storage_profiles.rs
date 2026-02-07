@@ -23,14 +23,7 @@ pub fn StorageProfilesSection() -> Element {
         .encryption_key_fingerprint()
         .read()
         .clone();
-    let encryption_key_preview = if let Some(ref fp) = fingerprint {
-        fp.clone()
-    } else if encryption_configured {
-        "●●●●●●●●".to_string()
-    } else {
-        "Not configured".to_string()
-    };
-    let encryption_key_length: usize = if encryption_configured { 32 } else { 0 };
+    let encryption_key_fingerprint = fingerprint.unwrap_or_default();
 
     // Local UI state for editing
     let mut editing_profile = use_signal(|| Option::<StorageProfile>::None);
@@ -74,8 +67,7 @@ pub fn StorageProfilesSection() -> Element {
             editing_profile: display_editing,
             is_creating: *is_creating.read(),
             encryption_configured,
-            encryption_key_preview,
-            encryption_key_length,
+            encryption_key_fingerprint,
             on_copy_key: {
                 let app = app.clone();
                 move |_| {
