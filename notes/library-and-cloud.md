@@ -121,11 +121,69 @@ A read-only bae instance running in the cloud (web/subsonic accessible):
 5. Existing local audio can optionally upload, or stay local
 6. New imports default to cloud storage
 
+## What's Built (PR #107)
+
+Cloud DB sync — unidirectional backup to S3. Local is authoritative, cloud is a backup copy. No SQLCipher yet; the DB is plain SQLite locally, encrypted as a blob for upload.
+
+### How Upload Works
+
+1. `VACUUM INTO` creates a point-in-time snapshot of the DB at `library.db.snapshot`. This is a SQLite feature that copies the entire database to a new file without locking or closing the connection pool — safe to run while the app is reading/writing.
+2. Read the snapshot into memory, encrypt with XChaCha20-Poly1305 (`EncryptionService.encrypt()`).
+3. Upload to `s3://bucket/bae/{library_id}/library.db.enc`.
+4. Upload `meta.json` (unencrypted) with key fingerprint + timestamp, so we can validate the key before downloading the large DB.
+5. Encrypt and upload each file in `covers/` individually.
+6. Clean up the snapshot file.
+
+### Why VACUUM INTO
+
+Can't just `tokio::fs::read("library.db")` — SQLite may be mid-write, producing a corrupt copy. `VACUUM INTO` is atomic and doesn't interfere with the connection pool. It also compacts the DB (removes deleted pages), so the upload is smaller.
+
+### Why Not Reuse CloudStorage Trait
+
+`S3CloudStorage.object_key()` applies hash-based key partitioning for audio files (distributes load across S3 prefixes). Cloud sync needs exact control over S3 keys (`bae/{library_id}/library.db.enc`), so `CloudSyncService` creates its own `aws_sdk_s3::Client`.
+
+### Credential Storage
+
+Split between config and keyring to work before the DB exists (chicken-and-egg: need creds to download the DB on restore):
+
+- **Non-secret** (bucket, region, endpoint): `config.yaml`
+- **Secrets** (access_key, secret_key): macOS keyring via `KeyService`
+- **Hint flag** (`cloud_sync_enabled: bool`): avoids keyring reads on startup
+
+### Sync Triggers
+
+- After `LibraryEvent::AlbumsChanged` (import, delete) with 2s debounce
+- Manual "Sync Now" button in Cloud Sync settings tab
+- No periodic/scheduled sync
+
+### First-Run Restore
+
+On first run (no `~/.bae/library` pointer file), `main.rs` detects this BEFORE `Config::load()` (which would create the pointer file). Launches a minimal Dioxus welcome screen with two choices:
+
+- **Create new library**: writes pointer file, re-execs binary
+- **Restore from cloud**: user enters library ID, S3 creds, encryption key → validates key fingerprint → downloads DB + covers → writes config + keyring + pointer file → re-execs binary
+
+### S3 Layout
+
+```
+s3://bucket/bae/{library_id}/
+  library.db.enc     # XChaCha20-Poly1305 encrypted DB
+  meta.json          # unencrypted: { fingerprint, uploaded_at }
+  covers/
+    {release_id}.jpg  # individually encrypted
+```
+
+## What's Not Built Yet
+
+- SQLCipher (DB is plain SQLite locally, encrypted only for upload)
+- Bidirectional sync / conflict resolution
+- Periodic auto-upload
+- Incremental sync
+- Cloud bae instance
+
 ## Open Questions
 
-- What does "enable cloud" look like in the UI?
 - Managed storage (we host S3) or always BYO-bucket?
 - Second-device setup when iCloud Keychain is off — QR code? Paste key?
 - DB sync conflict resolution
-- Cover art store: SQLCipher DB or encrypted files?
 - Key rotation — probably YAGNI for now
