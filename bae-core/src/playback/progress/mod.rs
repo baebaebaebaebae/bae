@@ -44,6 +44,10 @@ pub enum PlaybackProgress {
     PlaybackError {
         message: String,
     },
+    /// Volume level changed
+    VolumeChanged {
+        volume: f32,
+    },
     /// Decode statistics for completed/stopped track
     /// Sent when track finishes or is stopped, includes FFmpeg error count
     DecodeStats {

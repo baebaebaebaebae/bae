@@ -846,6 +846,9 @@ impl PlaybackService {
                 }
                 PlaybackCommand::SetVolume(volume) => {
                     self.audio_output.set_volume(volume);
+                    let _ = self
+                        .progress_tx
+                        .send(PlaybackProgress::VolumeChanged { volume });
                 }
                 PlaybackCommand::AddToQueue(track_ids) => {
                     for track_id in track_ids {
