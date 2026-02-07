@@ -5,9 +5,13 @@
 //! Each sub-component reads only the fields it needs for granular reactivity.
 
 use crate::components::error_toast::ErrorToast;
-use crate::components::icons::{MenuIcon, PauseIcon, PlayIcon, SkipBackIcon, SkipForwardIcon};
+use crate::components::icons::{
+    MenuIcon, PauseIcon, PlayIcon, Repeat1Icon, RepeatIcon, SkipBackIcon, SkipForwardIcon,
+};
 use crate::components::{Button, ButtonSize, ButtonVariant, ChromelessButton};
-use crate::stores::playback::{PlaybackStatus, PlaybackUiState, PlaybackUiStateStoreExt};
+use crate::stores::playback::{
+    PlaybackStatus, PlaybackUiState, PlaybackUiStateStoreExt, RepeatMode,
+};
 use dioxus::prelude::*;
 
 /// Now playing bar view - accepts store for granular reactivity
@@ -21,6 +25,7 @@ pub fn NowPlayingBarView(
     on_resume: EventHandler<()>,
     on_next: EventHandler<()>,
     on_seek: EventHandler<u64>,
+    on_cycle_repeat: EventHandler<()>,
     on_toggle_queue: EventHandler<()>,
     on_track_click: EventHandler<String>,
     on_artist_click: EventHandler<String>,
@@ -42,6 +47,8 @@ pub fn NowPlayingBarView(
                 TrackInfoSection { state, on_track_click, on_artist_click }
 
                 PositionSection { state, on_seek }
+
+                RepeatModeButton { state, on_cycle_repeat }
 
                 Button {
                     variant: ButtonVariant::Secondary,
@@ -310,6 +317,37 @@ fn PositionSection(state: ReadStore<PlaybackUiState>, on_seek: EventHandler<u64>
             }
         } else {
             div { class: "w-72" }
+        }
+    }
+}
+
+/// Repeat mode toggle - reads only repeat_mode
+#[component]
+fn RepeatModeButton(
+    state: ReadStore<PlaybackUiState>,
+    on_cycle_repeat: EventHandler<()>,
+) -> Element {
+    let repeat_mode = *state.repeat_mode().read();
+
+    let (aria_label, color) = match repeat_mode {
+        RepeatMode::None => ("Repeat album", "text-gray-500 hover:text-white"),
+        RepeatMode::Album => ("Repeat track", "text-blue-400 hover:text-blue-300"),
+        RepeatMode::Track => ("Repeat off", "text-blue-400 hover:text-blue-300"),
+    };
+
+    rsx! {
+        ChromelessButton {
+            class: Some(format!("p-1 rounded-md {color} transition-all")),
+            aria_label: Some(aria_label.to_string()),
+            onclick: move |_| on_cycle_repeat.call(()),
+            match repeat_mode {
+                RepeatMode::Track => rsx! {
+                    Repeat1Icon { class: "w-5 h-5" }
+                },
+                _ => rsx! {
+                    RepeatIcon { class: "w-5 h-5" }
+                },
+            }
         }
     }
 }
