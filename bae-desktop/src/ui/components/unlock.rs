@@ -91,7 +91,7 @@ fn UnlockScreen() -> Element {
         match ctx.key_service.set_encryption_key(&key_hex) {
             Ok(()) => {
                 info!("Encryption key restored to keyring, re-launching");
-                relaunch();
+                super::welcome::relaunch();
             }
             Err(e) => {
                 error!("Failed to save key to keyring: {e}");
@@ -139,28 +139,5 @@ fn UnlockScreen() -> Element {
                 }
             }
         }
-    }
-}
-
-/// Re-exec the current binary to restart the normal app flow.
-fn relaunch() {
-    let exe = std::env::current_exe().expect("Failed to get current exe path");
-
-    info!("Re-launching: {}", exe.display());
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        let err = std::process::Command::new(&exe).exec();
-        error!("Failed to re-exec: {}", err);
-        std::process::exit(1);
-    }
-
-    #[cfg(not(unix))]
-    {
-        std::process::Command::new(&exe)
-            .spawn()
-            .expect("Failed to relaunch");
-        std::process::exit(0);
     }
 }

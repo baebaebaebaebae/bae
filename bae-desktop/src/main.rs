@@ -84,11 +84,33 @@ fn configure_logging() {
         .init();
 }
 
+fn is_first_run() -> bool {
+    // In dev mode, Config::from_env() handles everything — no pointer file needed
+    if config::Config::is_dev_mode() {
+        return false;
+    }
+    let home_dir = dirs::home_dir().expect("Failed to get home directory");
+    !home_dir.join(".bae").join("library").exists()
+}
+
 fn main() {
     crash_report::install_panic_hook();
     config::init_keyring();
-    let mut config = config::Config::load();
     configure_logging();
+
+    // Detect first run BEFORE Config::load() (which creates the pointer file)
+    if is_first_run() {
+        info!("First run detected — launching welcome screen");
+        let dev_mode = config::Config::is_dev_mode();
+        let key_service = KeyService::new(dev_mode);
+        ui::components::welcome::launch_welcome(key_service);
+        // launch_welcome returns when user closes the window.
+        // If they chose "Create new" or "Restore", the process was re-exec'd.
+        // If they just closed the window, exit cleanly.
+        return;
+    }
+
+    let mut config = config::Config::load();
     crash_report::check_for_crash_report();
 
     // Initialize FFmpeg for audio processing

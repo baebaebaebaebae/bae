@@ -69,9 +69,9 @@ pub use resizable_panel::{GrabBar, PanelPosition, ResizablePanel, ResizeDirectio
 pub use segmented_control::{Segment, SegmentedControl};
 pub use select::{Select, SelectOption};
 pub use settings::{
-    AboutSectionView, BitTorrentSectionView, BitTorrentSettings, DiscogsSectionView, SettingsTab,
-    SettingsView, StorageLocation, StorageProfile, StorageProfileEditorView,
-    StorageProfilesSectionView, SubsonicSectionView,
+    AboutSectionView, BitTorrentSectionView, BitTorrentSettings, CloudSectionView,
+    DiscogsSectionView, SettingsTab, SettingsView, StorageLocation, StorageProfile,
+    StorageProfileEditorView, StorageProfilesSectionView, SubsonicSectionView,
 };
 pub use text_input::{TextInput, TextInputSize, TextInputType};
 pub use title_bar::{
