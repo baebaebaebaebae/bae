@@ -19,6 +19,14 @@ impl Database {
         })?;
         Ok(Database { pool })
     }
+
+    /// Open database in read-only mode (no migrations, no writes)
+    pub async fn open_read_only(database_path: &str) -> Result<Self, sqlx::Error> {
+        let database_url = format!("sqlite://{}?mode=ro", database_path);
+        info!("Connecting read-only to {}", database_url);
+        let pool = SqlitePool::connect(&database_url).await?;
+        Ok(Database { pool })
+    }
     /// Create a consistent snapshot of the database at the given path.
     /// Uses VACUUM INTO which copies without blocking the connection pool.
     pub async fn vacuum_into(&self, path: &str) -> Result<(), sqlx::Error> {

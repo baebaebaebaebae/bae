@@ -60,9 +60,9 @@ async fn main() {
         std::process::exit(1);
     }
 
-    // Open database
+    // Open database read-only (no migrations, no writes)
     info!("Opening database at {}", db_path.display());
-    let database = Database::new(db_path.to_str().unwrap())
+    let database = Database::open_read_only(db_path.to_str().unwrap())
         .await
         .unwrap_or_else(|e| {
             error!("Failed to open database: {e}");
