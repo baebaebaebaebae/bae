@@ -165,6 +165,28 @@ The desktop app uses cpal for audio. The web UI needs HTML5 `<audio>` element in
 
 7a-7c can be done quickly. 7d is the bulk of the work. 7e makes it actually useful as a music player.
 
+## Future: Live sync from desktop
+
+Currently the server downloads the library once on startup (or with `--refresh`). When the desktop imports new music and uploads to S3, the server doesn't know about it.
+
+### Short-term: Poll meta.json
+
+Background task checks `meta.json` in S3 every N minutes. If `uploaded_at` is newer than last download, re-download DB + covers and hot-swap the database pool. Simple, no new infrastructure.
+
+### Long-term: libsql embedded replicas
+
+[libsql](https://github.com/tursodatabase/libsql) is a SQLite fork with built-in replication. The desktop runs as the primary writer, the server creates an embedded replica that syncs automatically (over HTTP or via S3). Replication becomes a database-layer concern — invisible to application code.
+
+This would mean replacing sqlx+sqlite with libsql. Queries stay the same, but we get near real-time sync without polling, WAL shipping, or manual refresh logic.
+
+### Other options considered
+
+- **Litestream**: Continuous WAL replication to S3 as a sidecar process. Near real-time, no code changes, but it's a Go binary (not embeddable in Rust).
+- **cr-sqlite**: CRDT-based SQLite replication. Enables multi-writer, but overkill for a read-only server.
+- **Manual WAL shipping**: Upload WAL segments to S3 after each write, server applies them incrementally. Essentially reimplementing Litestream in Rust.
+
+---
+
 ## Open questions
 
 - Docker image? Probably yes for deployment, but out of scope for initial PRs.
