@@ -12,10 +12,11 @@ use super::delete_album_dialog::DeleteAlbumDialog;
 use super::delete_release_dialog::DeleteReleaseDialog;
 use super::export_error_toast::ExportErrorToast;
 use super::play_album_button::PlayAlbumButton;
-use super::release_info_modal::{ReleaseInfoModal, Tab};
+use super::release_info_modal::ReleaseInfoModal;
 use super::release_tabs_section::{ReleaseTabsSection, ReleaseTorrentInfo};
 use super::track_row::TrackRow;
-use crate::display_types::{File, Image, PlaybackDisplay, Track};
+use crate::components::{GalleryItem, GalleryItemContent, GalleryLightbox};
+use crate::display_types::{PlaybackDisplay, Track};
 use crate::stores::album_detail::{AlbumDetailState, AlbumDetailStateStoreExt};
 use dioxus::prelude::*;
 use std::collections::HashSet;
@@ -45,12 +46,6 @@ pub fn AlbumDetailView(
     on_artist_click: EventHandler<String>,
     on_play_album: EventHandler<Vec<String>>,
     on_add_album_to_queue: EventHandler<Vec<String>>,
-    #[props(default)] modal_files: Vec<File>,
-    #[props(default)] modal_images: Vec<Image>,
-    #[props(default)] modal_loading_files: bool,
-    #[props(default)] modal_loading_images: bool,
-    #[props(default)] modal_files_error: Option<String>,
-    #[props(default)] modal_images_error: Option<String>,
     #[props(default)] torrent_info: std::collections::HashMap<String, ReleaseTorrentInfo>,
     #[props(default)] on_start_seeding: Option<EventHandler<String>>,
     #[props(default)] on_stop_seeding: Option<EventHandler<String>>,
@@ -61,7 +56,8 @@ pub fn AlbumDetailView(
     let mut export_error = use_signal(|| None::<String>);
     let mut show_album_delete_confirm = use_signal(|| false);
     let mut show_release_delete_confirm = use_signal(|| None::<String>);
-    let mut show_release_info_modal = use_signal(|| None::<(String, Tab)>);
+    let mut show_release_info_modal = use_signal(|| None::<String>);
+    let mut show_gallery = use_signal(|| false);
 
     // Check if album exists - only subscribe to this field via lens
     if state.album().read().is_none() {
@@ -87,10 +83,10 @@ pub fn AlbumDetailView(
                             show_album_delete_confirm.set(true);
                         }),
                         on_view_release_info: EventHandler::new(move |id: String| {
-                            show_release_info_modal.set(Some((id, Tab::Details)));
+                            show_release_info_modal.set(Some(id));
                         }),
-                        on_open_gallery: EventHandler::new(move |id: String| {
-                            show_release_info_modal.set(Some((id, Tab::Gallery)));
+                        on_open_gallery: EventHandler::new(move |_: String| {
+                            show_gallery.set(true);
                         }),
                         on_artist_click,
                         on_play_album,
@@ -107,7 +103,7 @@ pub fn AlbumDetailView(
                         export_error,
                         torrent_info: torrent_info.clone(),
                         on_release_select,
-                        on_view_files: move |id| show_release_info_modal.set(Some((id, Tab::Details))),
+                        on_view_files: move |id| show_release_info_modal.set(Some(id)),
                         on_delete_release: move |id| show_release_delete_confirm.set(Some(id)),
                         on_export: on_export_release,
                         on_start_seeding,
@@ -147,16 +143,9 @@ pub fn AlbumDetailView(
             on_album_deleted,
         }
 
-        ReleaseInfoModalWrapper {
-            state,
-            show: show_release_info_modal,
-            modal_files,
-            modal_images,
-            modal_loading_files,
-            modal_loading_images,
-            modal_files_error,
-            modal_images_error,
-        }
+        ReleaseInfoModalWrapper { state, show: show_release_info_modal }
+
+        GalleryLightboxWrapper { state, show: show_gallery }
 
         if let Some(ref error) = export_error() {
             ExportErrorToast {
@@ -467,16 +456,9 @@ fn DeleteReleaseDialogWrapper(
 #[component]
 fn ReleaseInfoModalWrapper(
     state: ReadStore<AlbumDetailState>,
-    show: Signal<Option<(String, Tab)>>,
-    modal_files: Vec<File>,
-    modal_images: Vec<Image>,
-    modal_loading_files: bool,
-    modal_loading_images: bool,
-    modal_files_error: Option<String>,
-    modal_images_error: Option<String>,
+    show: Signal<Option<String>>,
 ) -> Element {
-    // Get release if available
-    let Some((release_id, initial_tab)) = show() else {
+    let Some(release_id) = show() else {
         return rsx! {};
     };
     let release = state
@@ -486,12 +468,12 @@ fn ReleaseInfoModalWrapper(
         .find(|r| r.id == release_id)
         .cloned();
 
-    // Only render modal if we have a release
     let Some(release) = release else {
         return rsx! {};
     };
 
-    // Get track stats
+    let files = state.files().read().clone();
+
     let track_count = *state.track_count().read();
     let total_duration_ms: Option<i64> = {
         let sum: i64 = state
@@ -507,7 +489,6 @@ fn ReleaseInfoModalWrapper(
         }
     };
 
-    // Derive is_open - always true when we have a release since show().is_some()
     let is_open_memo = use_memo(move || show().is_some());
     let is_open: ReadSignal<bool> = is_open_memo.into();
 
@@ -516,15 +497,45 @@ fn ReleaseInfoModalWrapper(
             is_open,
             release,
             on_close: move |_| show.set(None),
-            files: modal_files,
-            images: modal_images,
-            is_loading_files: modal_loading_files,
-            is_loading_images: modal_loading_images,
-            files_error: modal_files_error,
-            images_error: modal_images_error,
-            initial_tab,
+            files,
             track_count,
             total_duration_ms,
+        }
+    }
+}
+
+#[component]
+fn GalleryLightboxWrapper(state: ReadStore<AlbumDetailState>, show: Signal<bool>) -> Element {
+    let images = state.images().read().clone();
+
+    let gallery_items: Vec<GalleryItem> = images
+        .iter()
+        .map(|img| GalleryItem {
+            label: img.filename.clone(),
+            content: GalleryItemContent::Image {
+                url: img.url.clone(),
+                thumbnail_url: img.url.clone(),
+            },
+        })
+        .collect();
+
+    // Start on the cover image if there is one
+    let initial_index = images.iter().position(|img| img.is_cover).unwrap_or(0);
+
+    // Always render — visibility controlled by signal (see gallery_lightbox module docs)
+    let is_open: ReadSignal<bool> = show.into();
+
+    let selected: Option<usize> = None;
+
+    rsx! {
+        GalleryLightbox {
+            is_open,
+            items: gallery_items,
+            initial_index,
+            on_close: move |_| show.set(false),
+            on_navigate: move |_: usize| {},
+            selected_index: selected,
+            on_select: move |_: usize| {},
         }
     }
 }

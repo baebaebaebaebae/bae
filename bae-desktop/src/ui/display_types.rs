@@ -1,10 +1,10 @@
 //! Conversions from DB types to bae-ui display types
 
 use crate::ui::cover_url;
-use bae_core::db::{DbAlbum, DbArtist, DbRelease, DbTrack, ImportStatus};
+use bae_core::db::{DbAlbum, DbArtist, DbFile, DbImage, DbRelease, DbTrack, ImportStatus};
 
 // Re-export bae-ui types so existing code continues to work
-pub use bae_ui::{Album, Artist, Release, Track, TrackImportState};
+pub use bae_ui::{Album, Artist, File, Image, Release, Track, TrackImportState};
 
 pub fn album_from_db_ref(db: &DbAlbum) -> Album {
     let cover_url = db
@@ -44,6 +44,25 @@ pub fn track_from_db_ref(db: &DbTrack) -> Track {
         } else {
             TrackImportState::None
         },
+    }
+}
+
+pub fn file_from_db_ref(db: &DbFile) -> File {
+    File {
+        id: db.id.clone(),
+        filename: db.original_filename.clone(),
+        file_size: db.file_size,
+        format: db.format.clone(),
+    }
+}
+
+pub fn image_from_db_ref(db: &DbImage) -> Image {
+    Image {
+        id: db.id.clone(),
+        filename: db.filename.clone(),
+        is_cover: db.is_cover,
+        source: db.source.as_str().to_string(),
+        url: format!("bae://image/{}", db.id),
     }
 }
 

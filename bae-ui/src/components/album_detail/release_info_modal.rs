@@ -1,16 +1,15 @@
-//! Release info modal with tabs for details, files, and gallery
+//! Release info modal with tabs for details and files
 
 use crate::components::icons::XIcon;
 use crate::components::utils::{format_duration, format_file_size};
 use crate::components::Modal;
-use crate::display_types::{File, Image, Release};
+use crate::display_types::{File, Release};
 use dioxus::prelude::*;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Tab {
     Details,
     Files,
-    Gallery,
 }
 
 /// Modal component with tabs for release details and files (props-based)
@@ -19,13 +18,7 @@ pub fn ReleaseInfoModal(
     is_open: ReadSignal<bool>,
     release: Release,
     on_close: EventHandler<()>,
-    // Files and images can be loaded externally or passed as props
     #[props(default)] files: Vec<File>,
-    #[props(default)] images: Vec<Image>,
-    #[props(default)] is_loading_files: bool,
-    #[props(default)] is_loading_images: bool,
-    #[props(default)] files_error: Option<String>,
-    #[props(default)] images_error: Option<String>,
     #[props(default = Tab::Details)] initial_tab: Tab,
     #[props(default)] track_count: usize,
     #[props(default)] total_duration_ms: Option<i64>,
@@ -64,11 +57,6 @@ pub fn ReleaseInfoModal(
                             onclick: move |_| active_tab.set(Tab::Files),
                             "Files"
                         }
-                        button {
-                            class: if current_tab == Tab::Gallery { "px-4 py-2 text-sm font-medium text-white border-b-2 border-blue-500" } else { "px-4 py-2 text-sm font-medium text-gray-400 hover:text-white border-b-2 border-transparent" },
-                            onclick: move |_| active_tab.set(Tab::Gallery),
-                            "Gallery"
-                        }
                     }
                 }
                 div { class: "p-6 overflow-y-auto flex-1",
@@ -77,18 +65,7 @@ pub fn ReleaseInfoModal(
                             DetailsTab { release: release.clone(), track_count, total_duration_ms }
                         },
                         Tab::Files => rsx! {
-                            FilesTab {
-                                files: files.clone(),
-                                is_loading: is_loading_files,
-                                error: files_error.clone(),
-                            }
-                        },
-                        Tab::Gallery => rsx! {
-                            GalleryTab {
-                                images: images.clone(),
-                                is_loading: is_loading_images,
-                                error: images_error.clone(),
-                            }
+                            FilesTab { files: files.clone() }
                         },
                     }
                 }
@@ -185,13 +162,9 @@ fn DetailsTab(release: Release, track_count: usize, total_duration_ms: Option<i6
 }
 
 #[component]
-fn FilesTab(files: Vec<File>, is_loading: bool, error: Option<String>) -> Element {
+fn FilesTab(files: Vec<File>) -> Element {
     rsx! {
-        if is_loading {
-            div { class: "text-gray-400 text-center py-8", "Loading files..." }
-        } else if let Some(ref err) = error {
-            div { class: "text-red-400 text-center py-8", {err.clone()} }
-        } else if files.is_empty() {
+        if files.is_empty() {
             div { class: "text-gray-400 text-center py-8", "No files found" }
         } else {
             div { class: "space-y-2",
@@ -201,42 +174,6 @@ fn FilesTab(files: Vec<File>, is_loading: bool, error: Option<String>) -> Elemen
                             div { class: "text-white text-sm font-medium", {file.filename.clone()} }
                             div { class: "text-gray-400 text-xs mt-1",
                                 {format!("{} • {}", format_file_size(file.file_size), file.format)}
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn GalleryTab(images: Vec<Image>, is_loading: bool, error: Option<String>) -> Element {
-    rsx! {
-        if is_loading {
-            div { class: "text-gray-400 text-center py-8", "Loading images..." }
-        } else if let Some(ref err) = error {
-            div { class: "text-red-400 text-center py-8", {err.clone()} }
-        } else if images.is_empty() {
-            div { class: "text-gray-400 text-center py-8", "No images found" }
-        } else {
-            div { class: "grid grid-cols-2 sm:grid-cols-3 gap-4",
-                for image in images.iter() {
-                    div { class: "relative group",
-                        div { class: if image.is_cover { "aspect-square bg-gray-700 rounded-lg overflow-clip ring-2 ring-blue-500" } else { "aspect-square bg-gray-700 rounded-lg overflow-clip" },
-                            div { class: "w-full h-full flex items-center justify-center text-gray-500",
-                                "Image"
-                            }
-                        }
-                        div { class: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2",
-                            div { class: "text-xs text-white truncate", {image.filename.clone()} }
-                            div { class: "flex items-center gap-2 mt-1",
-                                if image.is_cover {
-                                    span { class: "text-xs px-1.5 py-0.5 bg-blue-500 text-white rounded",
-                                        "Cover"
-                                    }
-                                }
-                                span { class: "text-xs text-gray-400", {image.source.clone()} }
                             }
                         }
                     }

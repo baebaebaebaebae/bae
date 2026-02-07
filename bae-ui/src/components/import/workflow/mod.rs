@@ -28,6 +28,7 @@ pub use cd_toc_display::{CdTocDisplayView, CdTocInfo};
 pub use confirmation::ConfirmationView;
 pub use file_list::FileListView;
 pub use folder_import::{FolderImportView, FolderImportViewProps};
+pub use gallery_lightbox::{GalleryItem, GalleryItemContent, GalleryLightbox};
 pub use manual_search_panel::ManualSearchPanelView;
 pub use match_item::MatchItemView;
 pub use match_results_panel::MatchResultsPanel;

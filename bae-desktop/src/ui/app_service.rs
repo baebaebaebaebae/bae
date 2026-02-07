@@ -12,7 +12,8 @@
 
 use crate::ui::cover_url;
 use crate::ui::display_types::{
-    album_from_db_ref, artist_from_db_ref, release_from_db_ref, track_from_db_ref,
+    album_from_db_ref, artist_from_db_ref, file_from_db_ref, image_from_db_ref,
+    release_from_db_ref, track_from_db_ref,
 };
 use crate::ui::import_helpers::consume_scan_events;
 use bae_core::cache;
@@ -961,6 +962,26 @@ async fn load_album_detail(
                 .error()
                 .set(Some(format!("Failed to load tracks: {}", e)));
         }
+    }
+
+    // Load files for selected release
+    if let Ok(db_files) = library_manager
+        .get()
+        .get_files_for_release(&selected_release_id)
+        .await
+    {
+        let files = db_files.iter().map(file_from_db_ref).collect();
+        state.album_detail().files().set(files);
+    }
+
+    // Load images for selected release
+    if let Ok(db_images) = library_manager
+        .get()
+        .get_images_for_release(&selected_release_id)
+        .await
+    {
+        let images = db_images.iter().map(image_from_db_ref).collect();
+        state.album_detail().images().set(images);
     }
 
     state.album_detail().loading().set(false);
