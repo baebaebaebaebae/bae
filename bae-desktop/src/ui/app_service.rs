@@ -319,6 +319,9 @@ impl AppService {
                         }
                         state.playback().queue_items().set(queue_items);
                     }
+                    PlaybackProgress::VolumeChanged { volume } => {
+                        state.playback().volume().set(volume);
+                    }
                     PlaybackProgress::RepeatModeChanged { mode } => {
                         let ui_mode = match mode {
                             bae_core::playback::RepeatMode::None => RepeatMode::None,
@@ -414,6 +417,7 @@ impl AppService {
 
     /// Load initial data from database
     fn load_initial_data(&self) {
+        self.state.playback().volume().set(1.0);
         self.load_config();
         self.load_active_imports();
         self.load_library();

@@ -122,6 +122,7 @@ pub fn DemoLayout() -> Element {
         cover_url: Some("/covers/the-midnight-signal_neon-frequencies.png".to_string()),
         playback_error: None,
         repeat_mode: Default::default(),
+        volume: 0.75,
     });
 
     // Create sidebar store
@@ -270,6 +271,8 @@ pub fn DemoLayout() -> Element {
                     on_next: move |_| {},
                     on_seek: move |_pos| {},
                     on_cycle_repeat: move |_| {},
+                    on_volume_change: move |_vol: f32| {},
+                    on_toggle_mute: move |_| {},
                     on_toggle_queue: move |_| {
                         let current = *sidebar_is_open.read();
                         sidebar_is_open.set(!current);

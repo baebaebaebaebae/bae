@@ -53,7 +53,11 @@ pub fn NowPlayingBar() -> Element {
     let playback_for_next = playback_handle.clone();
     let playback_for_seek = playback_handle.clone();
     let playback_for_repeat = playback_handle.clone();
+    let playback_for_volume = playback_handle.clone();
+    let playback_for_mute = playback_handle.clone();
     let repeat_mode_store = playback_store.repeat_mode();
+    let volume_store = playback_store.volume();
+    let mut pre_mute_volume = use_signal(|| 1.0f32);
 
     rsx! {
         NowPlayingBarView {
@@ -70,6 +74,19 @@ pub fn NowPlayingBar() -> Element {
                     RepeatMode::Track => bae_core::playback::RepeatMode::None,
                 };
                 playback_for_repeat.set_repeat_mode(next);
+            },
+            on_volume_change: move |volume: f32| {
+                playback_for_volume.set_volume(volume);
+            },
+            on_toggle_mute: move |_| {
+                let current = *volume_store.read();
+                if current == 0.0 {
+                    let restore = *pre_mute_volume.read();
+                    playback_for_mute.set_volume(restore);
+                } else {
+                    pre_mute_volume.set(current);
+                    playback_for_mute.set_volume(0.0);
+                }
             },
             on_toggle_queue: move |_| {
                 let current = *sidebar_is_open.read();

@@ -53,4 +53,6 @@ pub struct PlaybackUiState {
     pub playback_error: Option<String>,
     /// Repeat mode
     pub repeat_mode: RepeatMode,
+    /// Volume level (0.0 to 1.0)
+    pub volume: f32,
 }

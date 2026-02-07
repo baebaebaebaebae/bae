@@ -7,6 +7,7 @@
 use crate::components::error_toast::ErrorToast;
 use crate::components::icons::{
     MenuIcon, PauseIcon, PlayIcon, Repeat1Icon, RepeatIcon, SkipBackIcon, SkipForwardIcon,
+    Volume1Icon, Volume2Icon, VolumeXIcon,
 };
 use crate::components::{Button, ButtonSize, ButtonVariant, ChromelessButton};
 use crate::stores::playback::{
@@ -26,14 +27,16 @@ pub fn NowPlayingBarView(
     on_next: EventHandler<()>,
     on_seek: EventHandler<u64>,
     on_cycle_repeat: EventHandler<()>,
+    on_volume_change: EventHandler<f32>,
+    on_toggle_mute: EventHandler<()>,
     on_toggle_queue: EventHandler<()>,
     on_track_click: EventHandler<String>,
     on_artist_click: EventHandler<String>,
     #[props(default)] on_dismiss_error: Option<EventHandler<()>>,
 ) -> Element {
     rsx! {
-        div { class: "right-0 bg-gray-800 text-white p-4 border-t border-gray-700",
-            div { class: "flex items-center gap-4",
+        div { class: "right-0 bg-gray-800 text-white px-4 border-t border-gray-700 h-[80px] flex items-center",
+            div { class: "flex items-center gap-4 w-full",
                 PlaybackControlsSection {
                     state,
                     on_previous,
@@ -49,6 +52,8 @@ pub fn NowPlayingBarView(
                 PositionSection { state, on_seek }
 
                 RepeatModeButton { state, on_cycle_repeat }
+
+                VolumeControl { state, on_volume_change, on_toggle_mute }
 
                 Button {
                     variant: ButtonVariant::Secondary,
@@ -375,6 +380,48 @@ fn PlaybackErrorSection(
         }
     } else {
         rsx! {}
+    }
+}
+
+/// Volume control - speaker icon + slider
+#[component]
+fn VolumeControl(
+    state: ReadStore<PlaybackUiState>,
+    on_volume_change: EventHandler<f32>,
+    on_toggle_mute: EventHandler<()>,
+) -> Element {
+    let volume = *state.volume().read();
+    let slider_value = (volume * 100.0) as i64;
+    let progress_percent = (volume * 100.0).min(100.0);
+
+    rsx! {
+        div { class: "flex items-center gap-1",
+            ChromelessButton {
+                class: Some("p-1 rounded-md text-gray-400 hover:text-white transition-all".to_string()),
+                aria_label: Some(if volume == 0.0 { "Unmute".to_string() } else { "Mute".to_string() }),
+                onclick: move |_| on_toggle_mute.call(()),
+                if volume == 0.0 {
+                    VolumeXIcon { class: "w-5 h-5" }
+                } else if volume < 0.5 {
+                    Volume1Icon { class: "w-5 h-5" }
+                } else {
+                    Volume2Icon { class: "w-5 h-5" }
+                }
+            }
+            input {
+                r#type: "range",
+                class: "w-24 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer",
+                style: "background: linear-gradient(to right, #3b82f6 0%, #3b82f6 {progress_percent}%, #374151 {progress_percent}%, #374151 100%);",
+                min: "0",
+                max: "100",
+                value: "{slider_value}",
+                oninput: move |evt| {
+                    if let Ok(val) = evt.value().parse::<f32>() {
+                        on_volume_change.call(val / 100.0);
+                    }
+                },
+            }
+        }
     }
 }
 
