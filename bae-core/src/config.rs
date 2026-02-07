@@ -88,7 +88,7 @@ pub struct ConfigYaml {
 #[derive(Clone, Debug)]
 pub struct Config {
     pub library_id: String,
-    pub library_path: Option<PathBuf>,
+    pub library_path: PathBuf,
     /// Whether a Discogs API key is stored (hint flag, avoids keyring read on settings render)
     pub discogs_key_stored: bool,
     /// Whether an encryption key is stored (hint flag, avoids keyring read on settings render)
@@ -135,7 +135,14 @@ impl Config {
         let encryption_key_stored = encryption_key_hex.is_some();
         let encryption_key_fingerprint =
             encryption_key_hex.and_then(|k| crate::encryption::compute_key_fingerprint(&k));
-        let library_path = std::env::var("BAE_LIBRARY_PATH").ok().map(PathBuf::from);
+        let library_path = match std::env::var("BAE_LIBRARY_PATH").ok() {
+            Some(p) => PathBuf::from(p),
+            None => {
+                let home = dirs::home_dir().expect("Failed to get home directory");
+                let id = uuid::Uuid::new_v4().to_string();
+                home.join(".bae").join("libraries").join(id)
+            }
+        };
         let torrent_bind_interface = std::env::var("BAE_TORRENT_BIND_INTERFACE")
             .ok()
             .filter(|s| !s.is_empty());
@@ -161,27 +168,41 @@ impl Config {
 
     fn from_config_file() -> Self {
         let home_dir = dirs::home_dir().expect("Failed to get home directory");
+        let bae_dir = home_dir.join(".bae");
 
-        // Read library path from global pointer file
-        let library_path_file = home_dir.join(".bae").join("library");
+        // Read library path from global pointer file, or create a new library
+        let library_path_file = bae_dir.join("library");
         let library_path = if library_path_file.exists() {
             let content = std::fs::read_to_string(&library_path_file)
                 .expect("Failed to read library path file");
             let trimmed = content.trim();
             if trimmed.is_empty() {
-                None
+                // Empty pointer file — create a new library
+                let id = uuid::Uuid::new_v4().to_string();
+                let path = bae_dir.join("libraries").join(&id);
+                std::fs::create_dir_all(&bae_dir).expect("Failed to create ~/.bae");
+                std::fs::write(&library_path_file, path.to_string_lossy().as_ref())
+                    .expect("Failed to write library pointer");
+
+                info!("Created new library at {}", path.display());
+                path
             } else {
-                Some(PathBuf::from(trimmed))
+                PathBuf::from(trimmed)
             }
         } else {
-            None
+            // No pointer file — fresh install, create new library
+            let id = uuid::Uuid::new_v4().to_string();
+            let path = bae_dir.join("libraries").join(&id);
+            std::fs::create_dir_all(&bae_dir).expect("Failed to create ~/.bae");
+            std::fs::write(&library_path_file, path.to_string_lossy().as_ref())
+                .expect("Failed to write library pointer");
+
+            info!("Created new library at {}", path.display());
+            path
         };
 
         // Read library-specific config from the library directory
-        let library_dir = library_path
-            .clone()
-            .unwrap_or_else(|| home_dir.join(".bae"));
-        let config_path = library_dir.join("config.yaml");
+        let config_path = library_path.join("config.yaml");
         let yaml_config: ConfigYaml = if config_path.exists() {
             serde_yaml::from_str(&std::fs::read_to_string(&config_path).unwrap())
                 .unwrap_or_default()
@@ -210,18 +231,6 @@ impl Config {
             subsonic_enabled: yaml_config.subsonic_enabled,
             subsonic_port: yaml_config.subsonic_port.unwrap_or(4533),
         }
-    }
-
-    pub fn get_library_path(&self) -> PathBuf {
-        if let Some(path) = &self.library_path {
-            return path.clone();
-        }
-
-        dirs::home_dir().unwrap().join(".bae")
-    }
-
-    pub fn set_library_path(&mut self, path: PathBuf) {
-        self.library_path = Some(path);
     }
 
     pub fn is_dev_mode() -> bool {
@@ -280,18 +289,15 @@ impl Config {
             .expect("Failed to get home directory")
             .join(".bae");
         std::fs::create_dir_all(&bae_dir)?;
-        let path_str = self
-            .library_path
-            .as_ref()
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        std::fs::write(bae_dir.join("library"), path_str)?;
+        std::fs::write(
+            bae_dir.join("library"),
+            self.library_path.to_string_lossy().as_ref(),
+        )?;
         Ok(())
     }
 
     pub fn save_to_config_yaml(&self) -> Result<(), ConfigError> {
-        let config_dir = self.get_library_path();
-        std::fs::create_dir_all(&config_dir)?;
+        std::fs::create_dir_all(&self.library_path)?;
         let yaml = ConfigYaml {
             library_id: Some(self.library_id.clone()),
             discogs_key_stored: self.discogs_key_stored,
@@ -309,7 +315,7 @@ impl Config {
             subsonic_port: Some(self.subsonic_port),
         };
         std::fs::write(
-            config_dir.join("config.yaml"),
+            self.library_path.join("config.yaml"),
             serde_yaml::to_string(&yaml).unwrap(),
         )?;
         Ok(())

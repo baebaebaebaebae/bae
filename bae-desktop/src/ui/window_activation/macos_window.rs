@@ -311,7 +311,7 @@ unsafe fn open_library_picker(create_new: bool) {
 
     // Save the library path pointer (persists for future launches)
     let mut config = bae_core::config::Config::load();
-    config.set_library_path(path.clone());
+    config.library_path = path.clone();
     if let Err(e) = config.save_library_path() {
         error!("Failed to save library path: {}", e);
         return;
