@@ -269,6 +269,7 @@ pub fn DemoLayout() -> Element {
                     on_resume: move |_| {},
                     on_next: move |_| {},
                     on_seek: move |_pos| {},
+                    on_cycle_repeat: move |_| {},
                     on_toggle_queue: move |_| {
                         let current = *sidebar_is_open.read();
                         sidebar_is_open.set(!current);

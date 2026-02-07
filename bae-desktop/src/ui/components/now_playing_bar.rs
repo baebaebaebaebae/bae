@@ -6,7 +6,7 @@
 use crate::ui::app_service::use_app;
 use crate::ui::Route;
 use bae_ui::stores::{
-    AppStateStoreExt, PlaybackUiStateStoreExt, SidebarStateStoreExt, UiStateStoreExt,
+    AppStateStoreExt, PlaybackUiStateStoreExt, RepeatMode, SidebarStateStoreExt, UiStateStoreExt,
 };
 use bae_ui::NowPlayingBarView;
 use dioxus::prelude::*;
@@ -52,6 +52,8 @@ pub fn NowPlayingBar() -> Element {
     let playback_for_resume = playback_handle.clone();
     let playback_for_next = playback_handle.clone();
     let playback_for_seek = playback_handle.clone();
+    let playback_for_repeat = playback_handle.clone();
+    let repeat_mode_store = playback_store.repeat_mode();
 
     rsx! {
         NowPlayingBarView {
@@ -61,6 +63,14 @@ pub fn NowPlayingBar() -> Element {
             on_resume: move |_| playback_for_resume.resume(),
             on_next: move |_| playback_for_next.next(),
             on_seek: move |ms: u64| playback_for_seek.seek(std::time::Duration::from_millis(ms)),
+            on_cycle_repeat: move |_| {
+                let next = match *repeat_mode_store.read() {
+                    RepeatMode::None => bae_core::playback::RepeatMode::Album,
+                    RepeatMode::Album => bae_core::playback::RepeatMode::Track,
+                    RepeatMode::Track => bae_core::playback::RepeatMode::None,
+                };
+                playback_for_repeat.set_repeat_mode(next);
+            },
             on_toggle_queue: move |_| {
                 let current = *sidebar_is_open.read();
                 sidebar_is_open.set(!current);
