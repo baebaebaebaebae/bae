@@ -8,7 +8,7 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'bae',
-			description: 'Your music library, beautifully organized',
+			description: 'Album-oriented desktop music player',
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/bae-fm/bae' }
 			],
@@ -25,8 +25,6 @@ export default defineConfig({
 					label: 'Importing Music',
 					items: [
 						{ label: 'Local Files', slug: 'importing/local-files' },
-						{ label: 'CD Ripping', slug: 'importing/cd-ripping' },
-						{ label: 'Torrents', slug: 'importing/torrents' },
 					],
 				},
 				{
