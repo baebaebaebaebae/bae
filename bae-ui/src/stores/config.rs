@@ -10,6 +10,8 @@ use dioxus::prelude::*;
 pub struct ConfigState {
     /// Whether a Discogs API key is stored (hint flag, avoids keyring read)
     pub discogs_key_stored: bool,
+    /// Whether an encryption key is stored (hint flag, avoids keyring read)
+    pub encryption_key_stored: bool,
 
     // Subsonic settings
     /// Whether the Subsonic API server is enabled

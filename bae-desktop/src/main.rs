@@ -99,15 +99,18 @@ fn main() {
     let cache_manager = runtime_handle.block_on(create_cache_manager());
     let database = runtime_handle.block_on(create_database(&config));
 
-    // Create encryption service only if key is configured (loaded lazily from keyring)
-    let encryption_service = config
-        .encryption_key
-        .as_ref()
-        .and_then(|key| encryption::EncryptionService::new(key).ok());
-    let library_manager = create_library_manager(database.clone(), encryption_service.clone());
-
     let dev_mode = config::Config::is_dev_mode();
     let key_service = KeyService::new(dev_mode);
+
+    // Create encryption service only if hint flag says a key is stored (avoids keyring prompt)
+    let encryption_service = if config.encryption_key_stored {
+        key_service
+            .get_encryption_key()
+            .and_then(|key| encryption::EncryptionService::new(&key).ok())
+    } else {
+        None
+    };
+    let library_manager = create_library_manager(database.clone(), encryption_service.clone());
 
     #[cfg(feature = "torrent")]
     let torrent_manager = {

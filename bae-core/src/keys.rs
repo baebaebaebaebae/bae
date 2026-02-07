@@ -9,7 +9,7 @@ pub enum KeyError {
     DevMode,
 }
 
-/// Manages secret keys (Discogs API key, etc.) with lazy reads.
+/// Manages secret keys (Discogs API key, encryption key) with lazy reads.
 ///
 /// In dev mode, reads from environment variables.
 /// In prod mode, reads from the OS keyring.
@@ -77,5 +77,51 @@ impl KeyService {
             }
             Err(e) => Err(KeyError::Keyring(e)),
         }
+    }
+
+    /// Read the encryption master key. Returns None if not configured.
+    ///
+    /// Dev mode: reads `BAE_ENCRYPTION_KEY` env var.
+    /// Prod mode: reads from OS keyring (may trigger a system prompt on first access).
+    pub fn get_encryption_key(&self) -> Option<String> {
+        if self.dev_mode {
+            std::env::var("BAE_ENCRYPTION_KEY")
+                .ok()
+                .filter(|k| !k.is_empty())
+        } else {
+            keyring_core::Entry::new("bae", "encryption_master_key")
+                .ok()
+                .and_then(|e| e.get_password().ok())
+                .filter(|k| !k.is_empty())
+        }
+    }
+
+    /// Get the encryption key, creating a new one if none exists.
+    /// Errors in dev mode (use environment variables instead).
+    pub fn get_or_create_encryption_key(&self) -> Result<String, KeyError> {
+        if self.dev_mode {
+            return self.get_encryption_key().ok_or(KeyError::DevMode);
+        }
+
+        if let Some(key) = self.get_encryption_key() {
+            return Ok(key);
+        }
+
+        let key_hex = hex::encode(crate::encryption::generate_random_key());
+        keyring_core::Entry::new("bae", "encryption_master_key")?.set_password(&key_hex)?;
+        info!("Generated and saved new encryption key to keyring");
+        Ok(key_hex)
+    }
+
+    /// Save the encryption master key to the OS keyring.
+    /// Errors in dev mode (use environment variables instead).
+    pub fn set_encryption_key(&self, value: &str) -> Result<(), KeyError> {
+        if self.dev_mode {
+            return Err(KeyError::DevMode);
+        }
+
+        keyring_core::Entry::new("bae", "encryption_master_key")?.set_password(value)?;
+        info!("Encryption key saved to keyring");
+        Ok(())
     }
 }

@@ -429,6 +429,10 @@ impl AppService {
             .set(config.discogs_key_stored);
         self.state
             .config()
+            .encryption_key_stored()
+            .set(config.encryption_key_stored);
+        self.state
+            .config()
             .subsonic_enabled()
             .set(config.subsonic_enabled);
         self.state
@@ -560,6 +564,10 @@ impl AppService {
             .config()
             .discogs_key_stored()
             .set(new_config.discogs_key_stored);
+        self.state
+            .config()
+            .encryption_key_stored()
+            .set(new_config.encryption_key_stored);
         self.state
             .config()
             .subsonic_enabled()

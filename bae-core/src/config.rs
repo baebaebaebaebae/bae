@@ -31,11 +31,9 @@ pub fn init_keyring() {
     }
 }
 
-/// Configuration errors (production mode only)
+/// Configuration errors
 #[derive(Error, Debug)]
 pub enum ConfigError {
-    #[error("Keyring error: {0}")]
-    Keyring(#[from] keyring_core::Error),
     #[error("Serialization error: {0}")]
     Serialization(String),
     #[error("Configuration error: {0}")]
@@ -55,6 +53,9 @@ pub struct ConfigYaml {
     /// Whether a Discogs API key is stored in the keyring (hint flag, avoids keyring read)
     #[serde(default)]
     pub discogs_key_stored: bool,
+    /// Whether an encryption key is stored in the keyring (hint flag, avoids keyring read)
+    #[serde(default)]
+    pub encryption_key_stored: bool,
     pub torrent_bind_interface: Option<String>,
     /// Listening port for incoming torrent connections. None = random port.
     pub torrent_listen_port: Option<u16>,
@@ -86,8 +87,8 @@ pub struct Config {
     pub library_path: Option<PathBuf>,
     /// Whether a Discogs API key is stored (hint flag, avoids keyring read on settings render)
     pub discogs_key_stored: bool,
-    /// Encryption key - loaded lazily from keyring when needed (when creating encrypted storage profile)
-    pub encryption_key: Option<String>,
+    /// Whether an encryption key is stored (hint flag, avoids keyring read on settings render)
+    pub encryption_key_stored: bool,
     pub torrent_bind_interface: Option<String>,
     pub torrent_listen_port: Option<u16>,
     pub torrent_enable_upnp: bool,
@@ -122,7 +123,10 @@ impl Config {
             .ok()
             .filter(|k| !k.is_empty())
             .is_some();
-        let encryption_key = std::env::var("BAE_ENCRYPTION_KEY").ok();
+        let encryption_key_stored = std::env::var("BAE_ENCRYPTION_KEY")
+            .ok()
+            .filter(|k| !k.is_empty())
+            .is_some();
         let library_path = std::env::var("BAE_LIBRARY_PATH").ok().map(PathBuf::from);
         let torrent_bind_interface = std::env::var("BAE_TORRENT_BIND_INTERFACE")
             .ok()
@@ -132,7 +136,7 @@ impl Config {
             library_id,
             library_path,
             discogs_key_stored,
-            encryption_key,
+            encryption_key_stored,
             torrent_bind_interface,
             torrent_listen_port: None,
             torrent_enable_upnp: true,
@@ -184,7 +188,7 @@ impl Config {
             library_id,
             library_path,
             discogs_key_stored: yaml_config.discogs_key_stored,
-            encryption_key: None,
+            encryption_key_stored: yaml_config.encryption_key_stored,
             torrent_bind_interface: yaml_config.torrent_bind_interface,
             torrent_listen_port: yaml_config.torrent_listen_port,
             torrent_enable_upnp: yaml_config.torrent_enable_upnp,
@@ -218,7 +222,6 @@ impl Config {
         if Self::is_dev_mode() {
             self.save_to_env()
         } else {
-            self.save_to_keyring()?;
             self.save_to_config_yaml()
         }
     }
@@ -235,9 +238,6 @@ impl Config {
 
         let mut new_values = std::collections::HashMap::new();
         new_values.insert("BAE_LIBRARY_ID", self.library_id.clone());
-        if let Some(key) = &self.encryption_key {
-            new_values.insert("BAE_ENCRYPTION_KEY", key.clone());
-        }
         if let Some(iface) = &self.torrent_bind_interface {
             new_values.insert("BAE_TORRENT_BIND_INTERFACE", iface.clone());
         }
@@ -264,13 +264,6 @@ impl Config {
         Ok(())
     }
 
-    pub fn save_to_keyring(&self) -> Result<(), ConfigError> {
-        if let Some(key) = &self.encryption_key {
-            keyring_core::Entry::new("bae", "encryption_master_key")?.set_password(key)?;
-        }
-        Ok(())
-    }
-
     /// Save the library path to the global pointer file (~/.bae/library).
     pub fn save_library_path(&self) -> Result<(), ConfigError> {
         let bae_dir = dirs::home_dir()
@@ -292,6 +285,7 @@ impl Config {
         let yaml = ConfigYaml {
             library_id: Some(self.library_id.clone()),
             discogs_key_stored: self.discogs_key_stored,
+            encryption_key_stored: self.encryption_key_stored,
             torrent_bind_interface: self.torrent_bind_interface.clone(),
             torrent_listen_port: self.torrent_listen_port,
             torrent_enable_upnp: self.torrent_enable_upnp,
@@ -308,24 +302,5 @@ impl Config {
             serde_yaml::to_string(&yaml).unwrap(),
         )?;
         Ok(())
-    }
-
-    /// Load or create encryption key from keyring (call when creating encrypted storage profile)
-    pub fn load_or_create_encryption_key(&mut self) {
-        if self.encryption_key.is_none() {
-            // Try to load existing key from keyring
-            let existing = keyring_core::Entry::new("bae", "encryption_master_key")
-                .ok()
-                .and_then(|e| e.get_password().ok());
-
-            self.encryption_key = Some(existing.unwrap_or_else(|| {
-                // Generate new key and save to keyring
-                let key_hex = hex::encode(crate::encryption::generate_random_key());
-                if let Ok(entry) = keyring_core::Entry::new("bae", "encryption_master_key") {
-                    let _ = entry.set_password(&key_hex);
-                }
-                key_hex
-            }));
-        }
     }
 }
