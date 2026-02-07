@@ -356,7 +356,7 @@ async fn do_restore(
 }
 
 /// Re-exec the current binary to start the normal app flow
-fn relaunch() {
+pub(crate) fn relaunch() {
     let exe = std::env::current_exe().expect("Failed to get current exe path");
 
     info!("Re-launching: {}", exe.display());
