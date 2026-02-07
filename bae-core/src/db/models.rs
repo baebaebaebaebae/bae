@@ -122,10 +122,10 @@ pub struct DbAlbum {
     pub musicbrainz_release: Option<MusicBrainzRelease>,
     /// Album ID from Bandcamp (optional, for future multi-source support)
     pub bandcamp_album_id: Option<String>,
-    /// Reference to the cover image (DbImage.id) - set after import
-    pub cover_image_id: Option<String>,
+    /// Release ID whose cover art is used for this album
+    pub cover_release_id: Option<String>,
     /// Cover art URL for immediate display (remote URL or bae://local/... for local files)
-    /// Used before import completes and cover_image_id is set
+    /// Used before import completes and cover_release_id is set
     pub cover_art_url: Option<String>,
     /// True for "Various Artists" compilation albums
     pub is_compilation: bool,
@@ -325,7 +325,7 @@ impl DbAlbum {
             discogs_release: None,
             musicbrainz_release: None,
             bandcamp_album_id: None,
-            cover_image_id: None,
+            cover_release_id: None,
             cover_art_url: None,
             is_compilation: false,
             created_at: now,
@@ -355,7 +355,7 @@ impl DbAlbum {
             discogs_release: Some(discogs_release),
             musicbrainz_release: None,
             bandcamp_album_id: None,
-            cover_image_id: None,
+            cover_release_id: None,
             cover_art_url,
             is_compilation: false,
             created_at: now,
@@ -385,7 +385,7 @@ impl DbAlbum {
             discogs_release: None,
             musicbrainz_release: Some(musicbrainz_release),
             bandcamp_album_id: None,
-            cover_image_id: None,
+            cover_release_id: None,
             cover_art_url,
             is_compilation: false,
             created_at: now,

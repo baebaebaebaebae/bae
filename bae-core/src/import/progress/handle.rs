@@ -192,7 +192,7 @@ mod tests {
         assert!(filter.matches(&ImportProgress::Complete {
             id: "release-1".to_string(),
             release_id: None,
-            cover_image_id: None,
+
             import_id: None,
         },),);
         assert!(!filter.matches(&ImportProgress::Progress {
@@ -217,13 +217,13 @@ mod tests {
         assert!(filter.matches(&ImportProgress::Complete {
             id: "track-1".to_string(),
             release_id: Some("release-1".to_string()),
-            cover_image_id: None,
+
             import_id: None,
         },),);
         assert!(!filter.matches(&ImportProgress::Complete {
             id: "track-1".to_string(),
             release_id: Some("release-2".to_string()),
-            cover_image_id: None,
+
             import_id: None,
         },),);
     }
@@ -241,7 +241,7 @@ mod tests {
         assert!(filter.matches(&ImportProgress::Complete {
             id: "track-1".to_string(),
             release_id: Some("release-1".to_string()),
-            cover_image_id: None,
+
             import_id: None,
         },),);
         assert!(!filter.matches(&ImportProgress::Progress {
@@ -303,7 +303,7 @@ mod tests {
         assert!(filter.matches(&ImportProgress::Complete {
             id: "release-1".to_string(),
             release_id: None,
-            cover_image_id: None,
+
             import_id: Some("import-1".to_string()),
         },),);
         assert!(filter.matches(&ImportProgress::Failed {
@@ -354,7 +354,7 @@ mod tests {
         assert!(filter.matches(&ImportProgress::Complete {
             id: "release-1".to_string(),
             release_id: None,
-            cover_image_id: None,
+
             import_id: Some("import-3".to_string()),
         },),);
         assert!(filter.matches(&ImportProgress::Failed {
@@ -375,7 +375,7 @@ mod tests {
         assert!(!filter.matches(&ImportProgress::Complete {
             id: "release-1".to_string(),
             release_id: None,
-            cover_image_id: None,
+
             import_id: None,
         },),);
     }

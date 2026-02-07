@@ -454,14 +454,14 @@ impl LibraryManager {
         Ok(data)
     }
 
-    /// Set an album's cover image
-    pub async fn set_album_cover_image(
+    /// Set an album's cover release (which release provides the cover art)
+    pub async fn set_album_cover_release(
         &self,
         album_id: &str,
-        cover_image_id: &str,
+        cover_release_id: &str,
     ) -> Result<(), LibraryError> {
         self.database
-            .set_album_cover_image(album_id, cover_image_id)
+            .set_album_cover_release(album_id, cover_release_id)
             .await?;
         Ok(())
     }
@@ -734,7 +734,7 @@ mod tests {
             discogs_release: None,
             musicbrainz_release: None,
             bandcamp_album_id: None,
-            cover_image_id: None,
+            cover_release_id: None,
             cover_art_url: None,
             is_compilation: false,
             created_at: Utc::now(),

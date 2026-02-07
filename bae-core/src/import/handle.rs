@@ -1,9 +1,8 @@
 use crate::cue_flac::CueFlacProcessor;
 #[cfg(feature = "torrent")]
 use crate::db::DbTorrent;
-use crate::db::{Database, DbImport, ImageSource, ImportOperationStatus};
+use crate::db::{Database, DbImport, ImportOperationStatus};
 use crate::discogs::{DiscogsClient, DiscogsRelease};
-use crate::import::cover_art::download_cover_art_to_bae_folder;
 #[cfg(feature = "cd-rip")]
 use crate::import::discogs_parser::parse_discogs_release;
 use crate::import::folder_scanner::DetectedCandidate;
@@ -20,7 +19,7 @@ use crate::import::types::{
 use crate::keys::KeyService;
 use crate::library::{LibraryManager, SharedLibraryManager};
 use crate::musicbrainz::MbRelease;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
@@ -36,6 +35,7 @@ pub struct ImportServiceHandle {
     pub scan_tx: mpsc::UnboundedSender<ScanRequest>,
     pub scan_events_tx: broadcast::Sender<ScanEvent>,
     pub key_service: KeyService,
+    pub library_path: std::path::PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +86,7 @@ impl ImportServiceHandle {
         scan_tx: mpsc::UnboundedSender<ScanRequest>,
         scan_events_tx: broadcast::Sender<ScanEvent>,
         key_service: KeyService,
+        library_path: std::path::PathBuf,
     ) -> Self {
         let progress_handle = ImportProgressHandle::new(progress_rx, runtime_handle.clone());
         Self {
@@ -98,6 +99,7 @@ impl ImportServiceHandle {
             scan_tx,
             scan_events_tx,
             key_service,
+            library_path,
         }
     }
 
@@ -262,48 +264,36 @@ impl ImportServiceHandle {
                 return Err("No release provided".to_string());
             };
 
-        let mut downloaded_cover_path: Option<PathBuf> = None;
-
-        if let Some(ref url) = cover_art_url {
+        // Download remote cover art bytes early (fail fast on network errors)
+        let remote_cover_data = if let Some(CoverSelection::Remote(ref url)) = selected_cover {
             emit_preparing(PrepareStep::DownloadingCoverArt);
-            let source = if mb_release.is_some() {
-                ImageSource::MusicBrainz
-            } else {
-                ImageSource::Discogs
-            };
-            match download_cover_art_to_bae_folder(url, &folder, source).await {
-                Ok(downloaded) => {
-                    info!("Downloaded cover art to {:?}", downloaded.path);
-                    downloaded_cover_path = Some(downloaded.path);
-                }
-                Err(e) => {
-                    warn!("Failed to download cover art: {}", e);
-                }
-            }
-        }
+            let data = crate::import::cover_art::download_cover_art_bytes(url)
+                .await
+                .map_err(|e| format!("Failed to download cover art: {}", e))?;
+            Some((data, url.clone()))
+        } else {
+            None
+        };
 
         emit_preparing(PrepareStep::DiscoveringFiles);
-        let mut discovered_files = discover_folder_files(&folder)?;
-
-        // Add downloaded cover to discovered files (scanner skips .bae/)
-        if let Some(ref path) = downloaded_cover_path {
-            if let Ok(metadata) = std::fs::metadata(path.as_path()) {
-                discovered_files.push(DiscoveredFile {
-                    path: path.clone(),
-                    size: metadata.len(),
-                });
-            }
-        }
+        let discovered_files = discover_folder_files(&folder)?;
 
         emit_preparing(PrepareStep::ValidatingTracks);
         let mapping_result = map_tracks_to_files(&db_tracks, &discovered_files).await?;
         let tracks_to_files = mapping_result.track_files.clone();
         let cue_flac_metadata = mapping_result.cue_flac_metadata.clone();
 
-        // Use the downloaded path directly for remote covers, resolve from files for local
+        // For local covers, resolve path from discovered files
         let cover_image_path = match &selected_cover {
-            Some(CoverSelection::Remote(_)) => downloaded_cover_path,
-            _ => resolve_cover_path(&selected_cover, &discovered_files),
+            Some(CoverSelection::Local(filename)) => discovered_files.iter().find_map(|f| {
+                let path_str = f.path.to_string_lossy();
+                if path_str.ends_with(filename) {
+                    Some(f.path.clone())
+                } else {
+                    None
+                }
+            }),
+            _ => None,
         };
 
         emit_preparing(PrepareStep::SavingToDatabase);
@@ -351,6 +341,27 @@ impl ImportServiceHandle {
                 .await
                 .map_err(|e| format!("Failed to insert album-artist relationship: {}", e))?;
         }
+        // Write remote cover to cache and set cover_release_id (album now exists in DB)
+        let remote_cover_set = if let Some(((bytes, ext), _url)) = remote_cover_data {
+            let covers_dir = self.library_path.join("covers");
+            std::fs::create_dir_all(&covers_dir)
+                .map_err(|e| format!("Failed to create covers directory: {}", e))?;
+            let cache_path = covers_dir.join(format!("{}.{}", db_release.id, ext));
+            std::fs::write(&cache_path, &bytes)
+                .map_err(|e| format!("Failed to write cover to cache: {}", e))?;
+
+            info!("Cached remote cover art to {}", cache_path.display());
+
+            library_manager
+                .set_album_cover_release(&db_album.id, &db_release.id)
+                .await
+                .map_err(|e| format!("Failed to set album cover release: {}", e))?;
+
+            true
+        } else {
+            false
+        };
+
         emit_preparing(PrepareStep::ExtractingDurations);
         extract_and_store_durations(library_manager, &tracks_to_files).await?;
 
@@ -375,6 +386,7 @@ impl ImportServiceHandle {
                 cue_flac_metadata,
                 storage_profile_id,
                 cover_image_path,
+                remote_cover_set,
                 import_id,
             })
             .map_err(|_| "Failed to queue validated album for import".to_string())?;
@@ -740,53 +752,6 @@ fn extract_flac_duration(file_path: &Path) -> Option<i64> {
         }
     }
 }
-/// Resolve a CoverSelection to an absolute path by matching against discovered files.
-///
-/// For Remote: The downloaded file will be in the .bae/ subfolder. Find it by matching
-/// the relative path (e.g. ".bae/cover-mb.jpg") against discovered file paths.
-/// For Local: Match the relative filename/path against discovered file paths.
-fn resolve_cover_path(
-    selected_cover: &Option<CoverSelection>,
-    discovered_files: &[DiscoveredFile],
-) -> Option<std::path::PathBuf> {
-    let relative = match selected_cover {
-        Some(CoverSelection::Remote(url)) => {
-            // Compute expected filename the same way import_helpers does
-            let extension = url
-                .rsplit('/')
-                .next()
-                .and_then(|filename| {
-                    let ext = filename.rsplit('.').next()?;
-                    let ext_lower = ext.to_lowercase();
-                    if ["jpg", "jpeg", "png", "gif", "webp"].contains(&ext_lower.as_str()) {
-                        Some(ext_lower)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or_else(|| "jpg".to_string());
-
-            let base_name = if url.contains("coverartarchive.org") || url.contains("musicbrainz") {
-                "cover-mb"
-            } else {
-                "cover-discogs"
-            };
-            format!(".bae/{}.{}", base_name, extension)
-        }
-        Some(CoverSelection::Local(filename)) => filename.clone(),
-        None => return None,
-    };
-
-    discovered_files.iter().find_map(|f| {
-        let path_str = f.path.to_string_lossy();
-        if path_str.ends_with(&relative) {
-            Some(f.path.clone())
-        } else {
-            None
-        }
-    })
-}
-
 /// Discover all files in folder with metadata.
 ///
 /// Recursively scans the folder using the folder_scanner module to support:
