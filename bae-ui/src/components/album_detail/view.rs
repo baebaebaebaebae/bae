@@ -14,9 +14,10 @@ use super::export_error_toast::ExportErrorToast;
 use super::play_album_button::PlayAlbumButton;
 use super::release_info_modal::ReleaseInfoModal;
 use super::release_tabs_section::{ReleaseTabsSection, ReleaseTorrentInfo};
+use super::storage_modal::StorageModal;
 use super::track_row::TrackRow;
 use crate::components::{GalleryItem, GalleryItemContent, GalleryLightbox};
-use crate::display_types::{PlaybackDisplay, Track};
+use crate::display_types::{PlaybackDisplay, Release, Track};
 use crate::stores::album_detail::{AlbumDetailState, AlbumDetailStateStoreExt};
 use dioxus::prelude::*;
 use std::collections::HashSet;
@@ -57,6 +58,7 @@ pub fn AlbumDetailView(
     let mut show_album_delete_confirm = use_signal(|| false);
     let mut show_release_delete_confirm = use_signal(|| None::<String>);
     let mut show_release_info_modal = use_signal(|| None::<String>);
+    let mut show_storage_modal = use_signal(|| None::<String>);
     let mut show_gallery = use_signal(|| false);
 
     // Check if album exists - only subscribe to this field via lens
@@ -85,6 +87,9 @@ pub fn AlbumDetailView(
                         on_view_release_info: EventHandler::new(move |id: String| {
                             show_release_info_modal.set(Some(id));
                         }),
+                        on_view_storage: EventHandler::new(move |id: String| {
+                            show_storage_modal.set(Some(id));
+                        }),
                         on_open_gallery: EventHandler::new(move |_: String| {
                             show_gallery.set(true);
                         }),
@@ -104,6 +109,7 @@ pub fn AlbumDetailView(
                         torrent_info: torrent_info.clone(),
                         on_release_select,
                         on_view_files: move |id| show_release_info_modal.set(Some(id)),
+                        on_view_storage: move |id| show_storage_modal.set(Some(id)),
                         on_delete_release: move |id| show_release_delete_confirm.set(Some(id)),
                         on_export: on_export_release,
                         on_start_seeding,
@@ -145,6 +151,8 @@ pub fn AlbumDetailView(
 
         ReleaseInfoModalWrapper { state, show: show_release_info_modal }
 
+        StorageModalWrapper { state, show: show_storage_modal }
+
         GalleryLightboxWrapper { state, show: show_gallery }
 
         if let Some(ref error) = export_error() {
@@ -169,6 +177,7 @@ fn AlbumInfoSection(
     on_export: EventHandler<String>,
     on_delete_album: EventHandler<String>,
     on_view_release_info: EventHandler<String>,
+    on_view_storage: EventHandler<String>,
     on_open_gallery: EventHandler<String>,
     on_artist_click: EventHandler<String>,
     on_play_album: EventHandler<Vec<String>>,
@@ -200,6 +209,7 @@ fn AlbumInfoSection(
             on_export,
             on_delete_album,
             on_view_release_info,
+            on_view_storage,
             on_open_gallery,
         }
         AlbumMetadata {
@@ -230,6 +240,7 @@ fn ReleaseTabsSectionWrapper(
     torrent_info: std::collections::HashMap<String, ReleaseTorrentInfo>,
     on_release_select: EventHandler<String>,
     on_view_files: EventHandler<String>,
+    on_view_storage: EventHandler<String>,
     on_delete_release: EventHandler<String>,
     on_export: EventHandler<String>,
     on_start_seeding: Option<EventHandler<String>>,
@@ -252,6 +263,7 @@ fn ReleaseTabsSectionWrapper(
             is_exporting,
             export_error,
             on_view_files,
+            on_view_storage,
             on_delete_release,
             on_export,
             torrent_info,
@@ -458,21 +470,29 @@ fn ReleaseInfoModalWrapper(
     state: ReadStore<AlbumDetailState>,
     show: Signal<Option<String>>,
 ) -> Element {
-    let Some(release_id) = show() else {
-        return rsx! {};
-    };
+    let is_open_memo = use_memo(move || show().is_some());
+    let is_open: ReadSignal<bool> = is_open_memo.into();
+
+    let release_id = show().unwrap_or_default();
     let release = state
         .releases()
         .read()
         .iter()
         .find(|r| r.id == release_id)
-        .cloned();
-
-    let Some(release) = release else {
-        return rsx! {};
-    };
-
-    let files = state.files().read().clone();
+        .cloned()
+        .unwrap_or_else(|| Release {
+            id: String::new(),
+            album_id: String::new(),
+            release_name: None,
+            year: None,
+            format: None,
+            label: None,
+            catalog_number: None,
+            country: None,
+            barcode: None,
+            discogs_release_id: None,
+            musicbrainz_release_id: None,
+        });
 
     let track_count = *state.track_count().read();
     let total_duration_ms: Option<i64> = {
@@ -489,18 +509,29 @@ fn ReleaseInfoModalWrapper(
         }
     };
 
-    let is_open_memo = use_memo(move || show().is_some());
-    let is_open: ReadSignal<bool> = is_open_memo.into();
-
     rsx! {
         ReleaseInfoModal {
             is_open,
             release,
             on_close: move |_| show.set(None),
-            files,
             track_count,
             total_duration_ms,
         }
+    }
+}
+
+#[component]
+fn StorageModalWrapper(
+    state: ReadStore<AlbumDetailState>,
+    show: Signal<Option<String>>,
+) -> Element {
+    let is_open_memo = use_memo(move || show().is_some());
+    let is_open: ReadSignal<bool> = is_open_memo.into();
+
+    let files = state.files().read().clone();
+
+    rsx! {
+        StorageModal { is_open, on_close: move |_| show.set(None), files }
     }
 }
 
