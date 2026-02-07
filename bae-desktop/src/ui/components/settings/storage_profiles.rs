@@ -17,7 +17,15 @@ pub fn StorageProfilesSection() -> Element {
 
     // Encryption status from store (no keyring read — actual key only read on copy)
     let encryption_configured = *app.state.config().encryption_key_stored().read();
-    let encryption_key_preview = if encryption_configured {
+    let fingerprint = app
+        .state
+        .config()
+        .encryption_key_fingerprint()
+        .read()
+        .clone();
+    let encryption_key_preview = if let Some(ref fp) = fingerprint {
+        fp.clone()
+    } else if encryption_configured {
         "●●●●●●●●".to_string()
     } else {
         "Not configured".to_string()
@@ -85,8 +93,10 @@ pub fn StorageProfilesSection() -> Element {
                         tracing::error!("Failed to save encryption key: {e}");
                         return;
                     }
+                    let fp = bae_core::encryption::compute_key_fingerprint(&key);
                     app.save_config(|config| {
                         config.encryption_key_stored = true;
+                        config.encryption_key_fingerprint = fp.clone();
                     });
                 }
             },

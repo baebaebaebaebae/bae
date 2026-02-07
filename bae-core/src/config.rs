@@ -56,6 +56,10 @@ pub struct ConfigYaml {
     /// Whether an encryption key is stored in the keyring (hint flag, avoids keyring read)
     #[serde(default)]
     pub encryption_key_stored: bool,
+    /// SHA-256 fingerprint of the encryption key (first 8 bytes, hex).
+    /// Used to detect wrong key without attempting decryption.
+    #[serde(default)]
+    pub encryption_key_fingerprint: Option<String>,
     pub torrent_bind_interface: Option<String>,
     /// Listening port for incoming torrent connections. None = random port.
     pub torrent_listen_port: Option<u16>,
@@ -89,6 +93,8 @@ pub struct Config {
     pub discogs_key_stored: bool,
     /// Whether an encryption key is stored (hint flag, avoids keyring read on settings render)
     pub encryption_key_stored: bool,
+    /// SHA-256 fingerprint of the encryption key (detects wrong key without decryption)
+    pub encryption_key_fingerprint: Option<String>,
     pub torrent_bind_interface: Option<String>,
     pub torrent_listen_port: Option<u16>,
     pub torrent_enable_upnp: bool,
@@ -123,10 +129,12 @@ impl Config {
             .ok()
             .filter(|k| !k.is_empty())
             .is_some();
-        let encryption_key_stored = std::env::var("BAE_ENCRYPTION_KEY")
+        let encryption_key_hex = std::env::var("BAE_ENCRYPTION_KEY")
             .ok()
-            .filter(|k| !k.is_empty())
-            .is_some();
+            .filter(|k| !k.is_empty());
+        let encryption_key_stored = encryption_key_hex.is_some();
+        let encryption_key_fingerprint =
+            encryption_key_hex.and_then(|k| crate::encryption::compute_key_fingerprint(&k));
         let library_path = std::env::var("BAE_LIBRARY_PATH").ok().map(PathBuf::from);
         let torrent_bind_interface = std::env::var("BAE_TORRENT_BIND_INTERFACE")
             .ok()
@@ -137,6 +145,7 @@ impl Config {
             library_path,
             discogs_key_stored,
             encryption_key_stored,
+            encryption_key_fingerprint,
             torrent_bind_interface,
             torrent_listen_port: None,
             torrent_enable_upnp: true,
@@ -189,6 +198,7 @@ impl Config {
             library_path,
             discogs_key_stored: yaml_config.discogs_key_stored,
             encryption_key_stored: yaml_config.encryption_key_stored,
+            encryption_key_fingerprint: yaml_config.encryption_key_fingerprint,
             torrent_bind_interface: yaml_config.torrent_bind_interface,
             torrent_listen_port: yaml_config.torrent_listen_port,
             torrent_enable_upnp: yaml_config.torrent_enable_upnp,
@@ -286,6 +296,7 @@ impl Config {
             library_id: Some(self.library_id.clone()),
             discogs_key_stored: self.discogs_key_stored,
             encryption_key_stored: self.encryption_key_stored,
+            encryption_key_fingerprint: self.encryption_key_fingerprint.clone(),
             torrent_bind_interface: self.torrent_bind_interface.clone(),
             torrent_listen_port: self.torrent_listen_port,
             torrent_enable_upnp: self.torrent_enable_upnp,

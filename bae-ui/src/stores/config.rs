@@ -12,6 +12,8 @@ pub struct ConfigState {
     pub discogs_key_stored: bool,
     /// Whether an encryption key is stored (hint flag, avoids keyring read)
     pub encryption_key_stored: bool,
+    /// SHA-256 fingerprint of the encryption key (for display and validation)
+    pub encryption_key_fingerprint: Option<String>,
 
     // Subsonic settings
     /// Whether the Subsonic API server is enabled

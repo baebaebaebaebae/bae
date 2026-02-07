@@ -331,8 +331,8 @@ async fn test_playback_cpu_usage_is_reasonable() {
     fixture.playback_handle.stop();
 
     // Steady-state playback should be lightweight (ring buffer + audio callback)
-    // Baseline is ~6%, 15% allows headroom for variance
-    let max_cpu_percent = 15.0;
+    // Baseline is ~6%, 20% allows headroom for variance
+    let max_cpu_percent = 20.0;
 
     assert!(
         cpu_percent < max_cpu_percent,

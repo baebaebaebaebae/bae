@@ -1,4 +1,5 @@
 use crate::sodium_ffi;
+use sha2::{Digest, Sha256};
 use std::ptr;
 use std::sync::Once;
 use thiserror::Error;
@@ -27,6 +28,17 @@ pub fn generate_random_key() -> [u8; 32] {
     let mut key = [0u8; 32];
     unsafe { sodium_ffi::randombytes_buf(key.as_mut_ptr(), 32) };
     key
+}
+
+/// Compute fingerprint from a hex-encoded key string without creating an EncryptionService.
+/// Returns None if the key is invalid (bad hex or wrong length).
+pub fn compute_key_fingerprint(key_hex: &str) -> Option<String> {
+    let key_bytes = hex::decode(key_hex).ok()?;
+    if key_bytes.len() != 32 {
+        return None;
+    }
+    let hash = Sha256::digest(&key_bytes);
+    Some(hex::encode(&hash[..8]))
 }
 
 #[derive(Error, Debug)]
@@ -71,6 +83,13 @@ impl EncryptionService {
             EncryptionError::KeyManagement("Failed to convert key bytes to array".to_string())
         })?;
         Ok(EncryptionService { key })
+    }
+
+    /// SHA-256 fingerprint of the key, first 8 bytes hex-encoded (16 hex chars).
+    /// Short enough to display in UI, long enough to detect wrong keys.
+    pub fn fingerprint(&self) -> String {
+        let hash = Sha256::digest(self.key);
+        hex::encode(&hash[..8])
     }
 
     /// Create an encryption service with a raw key (for testing)
@@ -846,5 +865,35 @@ mod tests {
             decrypted,
             &plaintext[plaintext_start as usize..plaintext_end as usize]
         );
+    }
+
+    #[test]
+    fn test_fingerprint_deterministic() {
+        let service = create_test_service();
+        assert_eq!(service.fingerprint(), service.fingerprint());
+    }
+
+    #[test]
+    fn test_fingerprint_different_keys() {
+        let service1 = EncryptionService::new_with_key(&[0u8; 32]);
+        let service2 = EncryptionService::new_with_key(&[1u8; 32]);
+        assert_ne!(service1.fingerprint(), service2.fingerprint());
+    }
+
+    #[test]
+    fn test_compute_key_fingerprint_matches_instance() {
+        let key_hex = hex::encode(test_key());
+        let service = create_test_service();
+        assert_eq!(
+            compute_key_fingerprint(&key_hex).unwrap(),
+            service.fingerprint()
+        );
+    }
+
+    #[test]
+    fn test_compute_key_fingerprint_invalid() {
+        assert!(compute_key_fingerprint("not-hex").is_none());
+        assert!(compute_key_fingerprint(&hex::encode([0u8; 16])).is_none()); // wrong length
+        assert!(compute_key_fingerprint("").is_none());
     }
 }
