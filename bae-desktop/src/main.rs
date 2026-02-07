@@ -104,6 +104,18 @@ fn main() {
     let dev_mode = config::Config::is_dev_mode();
     let key_service = KeyService::new(dev_mode);
 
+    // If config says we have an encryption key but it's missing from the keyring,
+    // show the unlock screen so the user can paste their recovery key.
+    if config.encryption_key_stored {
+        if let Some(ref fp) = config.encryption_key_fingerprint {
+            if key_service.get_encryption_key().is_none() {
+                info!("Encryption key missing from keyring — launching unlock screen");
+                ui::components::unlock::launch_unlock(key_service, fp.clone());
+                return;
+            }
+        }
+    }
+
     // Create encryption service only if hint flag says a key is stored (avoids keyring prompt)
     let encryption_service = if config.encryption_key_stored {
         key_service.get_encryption_key().and_then(|key| {
