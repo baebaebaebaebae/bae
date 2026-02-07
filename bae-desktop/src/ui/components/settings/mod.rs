@@ -1,5 +1,6 @@
 mod about;
 mod bittorrent;
+mod cloud;
 mod discogs;
 mod storage_profiles;
 mod subsonic;
@@ -29,6 +30,9 @@ pub fn Settings() -> Element {
                 },
                 SettingsTab::Subsonic => rsx! {
                     subsonic::SubsonicSection {}
+                },
+                SettingsTab::Cloud => rsx! {
+                    cloud::CloudSection {}
                 },
                 SettingsTab::About => rsx! {
                     about::AboutSection {}

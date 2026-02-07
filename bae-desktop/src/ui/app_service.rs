@@ -102,6 +102,7 @@ impl AppService {
 
         self.subscribe_import_progress();
         self.subscribe_library_events();
+        self.subscribe_cloud_sync();
         self.subscribe_folder_scan_events();
         self.load_initial_data();
     }
@@ -405,6 +406,64 @@ impl AppService {
         });
     }
 
+    /// Subscribe to library changes and auto-upload to cloud sync (2s debounce)
+    fn subscribe_cloud_sync(&self) {
+        let app = self.clone();
+
+        spawn(async move {
+            let mut rx = app.library_manager.get().subscribe_events();
+
+            loop {
+                // Wait for an AlbumsChanged event
+                match rx.recv().await {
+                    Ok(LibraryEvent::AlbumsChanged) => {}
+                    Err(_) => break,
+                }
+
+                // Check if cloud sync is enabled
+                if !app.config.cloud_sync_enabled {
+                    continue;
+                }
+
+                // Debounce: wait 2s, draining any additional events
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                while rx.try_recv().is_ok() {}
+
+                // Trigger upload
+                tracing::info!("Auto cloud sync triggered by library change");
+
+                app.state
+                    .config()
+                    .cloud_sync_status()
+                    .set(bae_ui::stores::CloudSyncStatus::Syncing);
+
+                match cloud_sync_upload(&app).await {
+                    Ok(timestamp) => {
+                        app.save_config(|c| {
+                            c.cloud_sync_last_upload = Some(timestamp.clone());
+                        });
+                        app.state
+                            .config()
+                            .cloud_sync_last_upload()
+                            .set(Some(timestamp));
+                        app.state
+                            .config()
+                            .cloud_sync_status()
+                            .set(bae_ui::stores::CloudSyncStatus::Idle);
+                    }
+                    Err(e) => {
+                        tracing::error!("Auto cloud sync failed: {}", e);
+
+                        app.state
+                            .config()
+                            .cloud_sync_status()
+                            .set(bae_ui::stores::CloudSyncStatus::Error(e.to_string()));
+                    }
+                }
+            }
+        });
+    }
+
     /// Subscribe to folder scan events
     fn subscribe_folder_scan_events(&self) {
         let app_service = self.clone();
@@ -475,6 +534,26 @@ impl AppService {
             .config()
             .torrent_max_uploads_per_torrent()
             .set(config.torrent_max_uploads_per_torrent);
+        self.state
+            .config()
+            .cloud_sync_enabled()
+            .set(config.cloud_sync_enabled);
+        self.state
+            .config()
+            .cloud_sync_bucket()
+            .set(config.cloud_sync_bucket.clone());
+        self.state
+            .config()
+            .cloud_sync_region()
+            .set(config.cloud_sync_region.clone());
+        self.state
+            .config()
+            .cloud_sync_endpoint()
+            .set(config.cloud_sync_endpoint.clone());
+        self.state
+            .config()
+            .cloud_sync_last_upload()
+            .set(config.cloud_sync_last_upload.clone());
     }
 
     /// Load active imports from database
@@ -615,6 +694,26 @@ impl AppService {
             .config()
             .torrent_max_uploads_per_torrent()
             .set(new_config.torrent_max_uploads_per_torrent);
+        self.state
+            .config()
+            .cloud_sync_enabled()
+            .set(new_config.cloud_sync_enabled);
+        self.state
+            .config()
+            .cloud_sync_bucket()
+            .set(new_config.cloud_sync_bucket.clone());
+        self.state
+            .config()
+            .cloud_sync_region()
+            .set(new_config.cloud_sync_region.clone());
+        self.state
+            .config()
+            .cloud_sync_endpoint()
+            .set(new_config.cloud_sync_endpoint.clone());
+        self.state
+            .config()
+            .cloud_sync_last_upload()
+            .set(new_config.cloud_sync_last_upload.clone());
     }
 
     // =========================================================================
@@ -1167,6 +1266,71 @@ fn handle_import_progress(state: &Store<AppState>, event: ImportProgress) {
             state.album_detail().import_error().set(Some(error));
         }
     }
+}
+
+/// Build CloudSyncService from config + keyring, upload DB + covers.
+/// Returns the upload timestamp on success.
+pub(crate) async fn cloud_sync_upload(
+    app: &AppService,
+) -> Result<String, Box<dyn std::error::Error>> {
+    use bae_core::cloud_sync::CloudSyncService;
+    use bae_core::encryption::EncryptionService;
+
+    let config = &app.config;
+
+    let bucket = config
+        .cloud_sync_bucket
+        .as_ref()
+        .ok_or("No bucket configured")?
+        .clone();
+    let region = config
+        .cloud_sync_region
+        .as_ref()
+        .ok_or("No region configured")?
+        .clone();
+    let endpoint = config.cloud_sync_endpoint.clone();
+
+    let access_key = app
+        .key_service
+        .get_cloud_sync_access_key()
+        .ok_or("No access key configured")?;
+    let secret_key = app
+        .key_service
+        .get_cloud_sync_secret_key()
+        .ok_or("No secret key configured")?;
+
+    let encryption_key = app
+        .key_service
+        .get_encryption_key()
+        .ok_or("No encryption key")?;
+    let encryption_service = EncryptionService::new(&encryption_key)?;
+
+    let sync_service = CloudSyncService::new(
+        bucket,
+        region,
+        endpoint,
+        access_key,
+        secret_key,
+        config.library_id.clone(),
+        encryption_service,
+    )
+    .await?;
+
+    // Create DB snapshot via VACUUM INTO
+    let db_path = config.library_path.join("library.db");
+    let snapshot_path = db_path.with_extension("db.snapshot");
+    app.library_manager
+        .database()
+        .vacuum_into(snapshot_path.to_str().unwrap())
+        .await?;
+
+    // Upload DB + covers
+    let timestamp = sync_service.upload_db(&db_path).await?;
+
+    let covers_dir = config.library_path.join("covers");
+    sync_service.upload_covers(&covers_dir).await?;
+
+    Ok(timestamp)
 }
 
 /// Hook to access the AppService from any component

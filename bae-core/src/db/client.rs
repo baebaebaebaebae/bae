@@ -19,6 +19,15 @@ impl Database {
         })?;
         Ok(Database { pool })
     }
+    /// Create a consistent snapshot of the database at the given path.
+    /// Uses VACUUM INTO which copies without blocking the connection pool.
+    pub async fn vacuum_into(&self, path: &str) -> Result<(), sqlx::Error> {
+        sqlx::query(&format!("VACUUM INTO '{}'", path.replace('\'', "''")))
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// Insert a new artist
     pub async fn insert_artist(&self, artist: &DbArtist) -> Result<(), sqlx::Error> {
         sqlx::query(
