@@ -25,14 +25,18 @@ pub fn AppLayoutView(
     extra: Option<Element>,
 ) -> Element {
     rsx! {
-        LayoutContainer {
-            if let Some(tb) = title_bar {
-                {tb}
+        div { class: "h-screen flex",
+            // Left: title bar, content, playback bar
+            div { class: "flex-1 flex flex-col min-w-0",
+                if let Some(tb) = title_bar {
+                    {tb}
+                }
+                div { class: "flex-1 overflow-y-auto", {children} }
+                if let Some(pb) = playback_bar {
+                    {pb}
+                }
             }
-            {children}
-            if let Some(pb) = playback_bar {
-                {pb}
-            }
+            // Right: queue sidebar (full height)
             if let Some(qs) = queue_sidebar {
                 {qs}
             }
@@ -40,12 +44,5 @@ pub fn AppLayoutView(
                 {ex}
             }
         }
-    }
-}
-
-#[component]
-fn LayoutContainer(children: Element) -> Element {
-    rsx! {
-        div { class: "h-screen flex flex-col", {children} }
     }
 }

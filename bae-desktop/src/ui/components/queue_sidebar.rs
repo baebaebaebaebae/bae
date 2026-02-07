@@ -41,6 +41,9 @@ pub fn QueueSidebar() -> Element {
 
     let playback_for_clear = playback_handle.clone();
     let playback_for_remove = playback_handle.clone();
+    let playback_for_skip = playback_handle.clone();
+    let playback_for_pause = playback_handle.clone();
+    let playback_for_resume = playback_handle.clone();
 
     rsx! {
         QueueSidebarView {
@@ -50,6 +53,9 @@ pub fn QueueSidebar() -> Element {
             on_clear: move |_| playback_for_clear.clear_queue(),
             on_remove: move |idx: usize| playback_for_remove.remove_from_queue(idx),
             on_track_click,
+            on_play_index: move |idx: usize| playback_for_skip.skip_to(idx),
+            on_pause: move |_| playback_for_pause.pause(),
+            on_resume: move |_| playback_for_resume.resume(),
         }
     }
 }
