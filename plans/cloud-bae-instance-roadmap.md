@@ -64,24 +64,46 @@ This prevents accidental writes and is a safety net for the cloud instance. Also
 
 **Scope:** Small
 
-When `bae-server` starts and the local library.db doesn't exist (or `--refresh` flag):
+### Goal
 
-1. Build `CloudSyncService` from config + CLI args
-2. Validate key fingerprint via `meta.json`
-3. Download `library.db.enc` → decrypt → write to library path
-4. Download `covers/` → decrypt → write to covers dir
-5. Open database and continue normal startup
+When `bae-server` starts and `library.db` doesn't exist (or `--refresh` is passed), download the encrypted library from S3, decrypt it, and then serve it.
 
-Reuses `CloudSyncService.download_db()` and `download_covers()` from PR 4.
+### Changes
 
-CLI args for cloud:
-- `--cloud-bucket <bucket>`
-- `--cloud-region <region>`
-- `--cloud-endpoint <endpoint>` (optional)
-- `--cloud-access-key <key>`
-- `--cloud-secret-key <key>`
+**1. `bae-server/src/main.rs`** — Add cloud CLI args and download logic
 
-Or read from env vars: `BAE_CLOUD_BUCKET`, `BAE_CLOUD_REGION`, etc.
+New CLI args (all also readable from env vars):
+- `--cloud-bucket` / `BAE_CLOUD_BUCKET`
+- `--cloud-region` / `BAE_CLOUD_REGION`
+- `--cloud-endpoint` / `BAE_CLOUD_ENDPOINT` (optional)
+- `--cloud-access-key` / `BAE_CLOUD_ACCESS_KEY`
+- `--cloud-secret-key` / `BAE_CLOUD_SECRET_KEY`
+- `--library-id` / `BAE_LIBRARY_ID` (needed for S3 key prefix `bae/{library_id}/...`)
+- `--refresh` flag (re-download even if library.db exists)
+
+New startup flow (before database open):
+1. If `library.db` doesn't exist OR `--refresh`:
+   - Require `--recovery-key` + cloud args (error if missing)
+   - Create `EncryptionService` from recovery key
+   - Create `CloudSyncService::new(bucket, region, endpoint, access_key, secret_key, library_id, encryption_service)`
+   - `validate_key()` — checks fingerprint in `meta.json`
+   - `download_db(library_path/library.db)` — downloads + decrypts
+   - `download_covers(library_path/covers/)` — downloads + decrypts
+   - Create `library_path` directory if needed
+2. Open database read-only (existing code)
+3. Continue as before
+
+**2. `bae-server/Cargo.toml`** — No changes needed (cloud deps are in `bae-core`)
+
+### Not in scope
+- No periodic re-sync (server serves whatever it downloaded at startup)
+- No config.yaml — everything via CLI/env
+
+### Verification
+- `cargo clippy -p bae-server` clean
+- `--help` shows new cloud args
+- Without cloud args and no library.db: clear error message
+- With `--refresh` and cloud args: re-downloads even if library.db exists
 
 ---
 
