@@ -152,11 +152,7 @@ fn WelcomeScreen() -> Element {
                     WelcomeMode::Restore => rsx! {
                         div { class: "space-y-4",
                             h2 { class: "text-xl font-semibold text-white", "Restore from Cloud" }
-
-        
-
                             div {
-
                                 label { class: "block text-sm font-medium text-gray-400 mb-1", "Library ID" }
                                 TextInput {
                                     value: library_id.read().clone(),
@@ -166,7 +162,6 @@ fn WelcomeScreen() -> Element {
                                     placeholder: "UUID from your other device",
                                 }
                             }
-        
                             div {
                                 label { class: "block text-sm font-medium text-gray-400 mb-1", "S3 Bucket" }
                                 TextInput {
@@ -177,7 +172,6 @@ fn WelcomeScreen() -> Element {
                                     placeholder: "my-bae-backup",
                                 }
                             }
-        
                             div {
                                 label { class: "block text-sm font-medium text-gray-400 mb-1", "Region" }
                                 TextInput {
@@ -188,7 +182,6 @@ fn WelcomeScreen() -> Element {
                                     placeholder: "us-east-1",
                                 }
                             }
-        
                             div {
                                 label { class: "block text-sm font-medium text-gray-400 mb-1", "Endpoint (optional)" }
                                 TextInput {
@@ -199,7 +192,6 @@ fn WelcomeScreen() -> Element {
                                     placeholder: "https://s3.example.com",
                                 }
                             }
-        
                             div {
                                 label { class: "block text-sm font-medium text-gray-400 mb-1", "Access Key" }
                                 TextInput {
@@ -210,7 +202,6 @@ fn WelcomeScreen() -> Element {
                                     placeholder: "Access key ID",
                                 }
                             }
-        
                             div {
                                 label { class: "block text-sm font-medium text-gray-400 mb-1", "Secret Key" }
                                 TextInput {
@@ -221,7 +212,6 @@ fn WelcomeScreen() -> Element {
                                     placeholder: "Secret access key",
                                 }
                             }
-        
                             div {
                                 label { class: "block text-sm font-medium text-gray-400 mb-1", "Encryption Key" }
                                 TextInput {
@@ -232,7 +222,6 @@ fn WelcomeScreen() -> Element {
                                     placeholder: "Hex-encoded encryption key",
                                 }
                             }
-        
                             match restore_status.read().clone() {
                                 RestoreStatus::Idle => rsx! {},
                                 RestoreStatus::Restoring => rsx! {
@@ -246,7 +235,6 @@ fn WelcomeScreen() -> Element {
                                     }
                                 },
                             }
-        
                             div { class: "flex gap-3 pt-2",
                                 Button {
                                     variant: ButtonVariant::Primary,
