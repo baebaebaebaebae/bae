@@ -240,8 +240,15 @@ fn main() {
         let subsonic_library = library_manager.clone();
         let subsonic_encryption = encryption_service.clone();
         let subsonic_port = config.subsonic_port;
+        let subsonic_library_path = config.library_path.clone();
         runtime_handle.spawn(async move {
-            start_subsonic_server(subsonic_library, subsonic_encryption, subsonic_port).await
+            start_subsonic_server(
+                subsonic_library,
+                subsonic_encryption,
+                subsonic_port,
+                subsonic_library_path,
+            )
+            .await
         });
     }
 
@@ -258,9 +265,10 @@ async fn start_subsonic_server(
     library_manager: SharedLibraryManager,
     encryption_service: Option<encryption::EncryptionService>,
     port: u16,
+    library_path: std::path::PathBuf,
 ) {
     info!("Starting Subsonic API server...");
-    let app = create_router(library_manager, encryption_service);
+    let app = create_router(library_manager, encryption_service, library_path);
     let addr = format!("127.0.0.1:{}", port);
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => {

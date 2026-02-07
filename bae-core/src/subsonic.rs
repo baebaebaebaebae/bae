@@ -10,6 +10,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info};
 /// Subsonic API server state
@@ -17,6 +18,7 @@ use tracing::{debug, error, info};
 pub struct SubsonicState {
     pub library_manager: SharedLibraryManager,
     pub encryption_service: Option<crate::encryption::EncryptionService>,
+    pub library_path: PathBuf,
 }
 /// Common query parameters for Subsonic API
 #[derive(Debug, Deserialize)]
@@ -124,10 +126,12 @@ pub struct AlbumList {
 pub fn create_router(
     library_manager: SharedLibraryManager,
     encryption_service: Option<crate::encryption::EncryptionService>,
+    library_path: PathBuf,
 ) -> Router {
     let state = SubsonicState {
         library_manager,
         encryption_service,
+        library_path,
     };
     Router::new()
         .route("/rest/ping", get(ping))
@@ -135,6 +139,7 @@ pub fn create_router(
         .route("/rest/getArtists", get(get_artists))
         .route("/rest/getAlbumList", get(get_album_list))
         .route("/rest/getAlbum", get(get_album))
+        .route("/rest/getCoverArt", get(get_cover_art))
         .route("/rest/stream", get(stream_song))
         .layer(CorsLayer::permissive())
         .with_state(state)
@@ -283,6 +288,75 @@ async fn get_album(
         }
     }
 }
+/// Get cover art for an album
+async fn get_cover_art(
+    Query(params): Query<HashMap<String, String>>,
+    State(state): State<SubsonicState>,
+) -> impl IntoResponse {
+    let album_id = match params.get("id") {
+        Some(id) => id.clone(),
+        None => {
+            return (StatusCode::BAD_REQUEST, "Missing id parameter").into_response();
+        }
+    };
+
+    // Look up the album to find its cover_release_id
+    let albums = match state.library_manager.get().get_albums().await {
+        Ok(albums) => albums,
+        Err(e) => {
+            error!("Failed to load albums for cover art: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+        }
+    };
+
+    let db_album = match albums.into_iter().find(|a| a.id == album_id) {
+        Some(album) => album,
+        None => {
+            return (StatusCode::NOT_FOUND, "Album not found").into_response();
+        }
+    };
+
+    let release_id = match db_album.cover_release_id {
+        Some(id) => id,
+        None => {
+            return (StatusCode::NOT_FOUND, "No cover art available").into_response();
+        }
+    };
+
+    // Try common image extensions
+    let covers_dir = state.library_path.join("covers");
+    let extensions = ["jpg", "jpeg", "png", "webp", "gif"];
+
+    for ext in &extensions {
+        let path = covers_dir.join(format!("{}.{}", release_id, ext));
+        if path.exists() {
+            match tokio::fs::read(&path).await {
+                Ok(data) => {
+                    let content_type = match *ext {
+                        "jpg" | "jpeg" => "image/jpeg",
+                        "png" => "image/png",
+                        "webp" => "image/webp",
+                        "gif" => "image/gif",
+                        _ => "application/octet-stream",
+                    };
+                    return (StatusCode::OK, [("Content-Type", content_type)], data)
+                        .into_response();
+                }
+                Err(e) => {
+                    error!("Failed to read cover art file: {}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to read cover art",
+                    )
+                        .into_response();
+                }
+            }
+        }
+    }
+
+    (StatusCode::NOT_FOUND, "Cover art file not found").into_response()
+}
+
 /// Stream a song - read and decrypt audio file from storage
 async fn stream_song(
     Query(params): Query<HashMap<String, String>>,
@@ -380,6 +454,12 @@ async fn load_albums(
                 .collect::<Vec<_>>()
                 .join(", ")
         };
+        let cover_art = if db_album.cover_release_id.is_some() {
+            Some(db_album.id.clone())
+        } else {
+            None
+        };
+
         albums.push(Album {
             id: db_album.id.clone(),
             name: db_album.title,
@@ -389,7 +469,7 @@ async fn load_albums(
             duration: 0,
             year: db_album.year,
             genre: None,
-            cover_art: None,
+            cover_art,
         });
     }
     Ok(AlbumListResponse {
@@ -435,6 +515,12 @@ async fn load_album_with_songs(
                 .collect::<Vec<_>>()
                 .join(", ")
         };
+        let song_cover_art = if db_album.cover_release_id.is_some() {
+            Some(db_album.id.clone())
+        } else {
+            None
+        };
+
         songs.push(Song {
             id: track.id,
             title: track.title,
@@ -445,7 +531,7 @@ async fn load_album_with_songs(
             track: track.track_number,
             year: db_album.year,
             genre: None,
-            cover_art: None,
+            cover_art: song_cover_art,
             size: None,
             content_type: "audio/flac".to_string(),
             suffix: "flac".to_string(),
@@ -454,6 +540,13 @@ async fn load_album_with_songs(
             path: format!("{}/{}", album_artist_name, db_album.title),
         });
     }
+
+    let album_cover_art = if db_album.cover_release_id.is_some() {
+        Some(db_album.id.clone())
+    } else {
+        None
+    };
+
     let album = Album {
         id: db_album.id.clone(),
         name: db_album.title,
@@ -463,7 +556,7 @@ async fn load_album_with_songs(
         duration: songs.iter().map(|s| s.duration.unwrap_or(0) as u32).sum(),
         year: db_album.year,
         genre: None,
-        cover_art: None,
+        cover_art: album_cover_art,
     };
     Ok(serde_json::json!(
         { "album" : { "id" : album.id, "name" : album.name, "artist" : album.artist,
