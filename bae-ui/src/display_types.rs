@@ -145,6 +145,7 @@ pub struct Image {
     pub filename: String,
     pub is_cover: bool,
     pub source: String,
+    pub url: String,
 }
 
 /// Import operation status for UI display

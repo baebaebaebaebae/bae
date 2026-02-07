@@ -2,6 +2,11 @@
 //!
 //! A full-screen viewer with gallery strip for images and text files,
 //! used for both plain viewing and cover art selection.
+//!
+//! **Important:** This component must be always rendered in the DOM. Do NOT
+//! conditionally mount/unmount it — instead, control visibility via the
+//! `is_open` signal. The underlying `<dialog>` element needs to stay in the
+//! DOM for `showModal()` focus management and keyboard events to work.
 
 use crate::components::helpers::Tooltip;
 use crate::components::icons::{CheckIcon, ChevronLeftIcon, ChevronRightIcon, FileTextIcon, XIcon};

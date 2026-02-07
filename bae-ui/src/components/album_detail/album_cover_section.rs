@@ -19,6 +19,7 @@ pub fn AlbumCoverSection(
     on_export: EventHandler<String>,
     on_delete_album: EventHandler<String>,
     on_view_release_info: EventHandler<String>,
+    on_view_storage: EventHandler<String>,
     on_open_gallery: EventHandler<String>,
 ) -> Element {
     let mut show_dropdown = use_signal(|| false);
@@ -98,7 +99,18 @@ pub fn AlbumCoverSection(
                                     on_view_release_info.call(release_id.clone());
                                 }
                             },
-                            "Release Info"
+                            "Info"
+                        }
+                        MenuItem {
+                            disabled: is_deleting || is_exporting,
+                            onclick: {
+                                let release_id = release_id.clone();
+                                move |_| {
+                                    show_dropdown.set(false);
+                                    on_view_storage.call(release_id.clone());
+                                }
+                            },
+                            "Storage"
                         }
                         MenuItem {
                             disabled: is_deleting || is_exporting,

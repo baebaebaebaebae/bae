@@ -52,12 +52,12 @@ pub use icons::{
 };
 pub use import::{
     CdDriveStatus, CdSelectorView, ConfirmationView, DiscIdLookupErrorView, FileListView,
-    FolderImportView, FolderImportViewProps, ImportErrorDisplayView, ImportSource,
-    ImportSourceSelectorView, ImportView, ManualSearchPanelView, MatchItemView,
-    MetadataDetectionPromptView, MultipleExactMatchesView, ReleaseSelectorView, ReleaseSidebarView,
-    SearchSourceSelectorView, SelectedSourceView, TorrentFilesDisplayView, TorrentInfoDisplayView,
-    TorrentInputMode, TorrentInputView, TorrentTrackerDisplayView, TrackerConnectionStatus,
-    TrackerStatus,
+    FolderImportView, FolderImportViewProps, GalleryItem, GalleryItemContent, GalleryLightbox,
+    ImportErrorDisplayView, ImportSource, ImportSourceSelectorView, ImportView,
+    ManualSearchPanelView, MatchItemView, MetadataDetectionPromptView, MultipleExactMatchesView,
+    ReleaseSelectorView, ReleaseSidebarView, SearchSourceSelectorView, SelectedSourceView,
+    TorrentFilesDisplayView, TorrentInfoDisplayView, TorrentInputMode, TorrentInputView,
+    TorrentTrackerDisplayView, TrackerConnectionStatus, TrackerStatus,
 };
 pub use imports::ImportsDropdownView;
 pub use library::LibraryView;

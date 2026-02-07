@@ -21,6 +21,7 @@ pub fn ReleaseTabsSection(
     is_exporting: Signal<bool>,
     export_error: Signal<Option<String>>,
     on_view_files: EventHandler<String>,
+    on_view_storage: EventHandler<String>,
     on_delete_release: EventHandler<String>,
     on_export: EventHandler<String>,
     // Optional: torrent info per release (keyed by release_id)
@@ -55,6 +56,10 @@ pub fn ReleaseTabsSection(
                                 on_view_files: {
                                     let release_id = release_id.clone();
                                     move |_| on_view_files.call(release_id.clone())
+                                },
+                                on_view_storage: {
+                                    let release_id = release_id.clone();
+                                    move |_| on_view_storage.call(release_id.clone())
                                 },
                                 on_export: {
                                     let release_id = release_id.clone();
@@ -94,6 +99,7 @@ fn ReleaseTab(
     is_exporting: Signal<bool>,
     torrent: ReleaseTorrentInfo,
     on_view_files: EventHandler<()>,
+    on_view_storage: EventHandler<()>,
     on_export: EventHandler<()>,
     on_delete: EventHandler<()>,
     #[props(default)] on_start_seeding: Option<EventHandler<()>>,
@@ -172,7 +178,15 @@ fn ReleaseTab(
                         show_release_dropdown.set(None);
                         on_view_files.call(());
                     },
-                    "Release Info"
+                    "Info"
+                }
+                MenuItem {
+                    disabled: is_deleting() || is_exporting(),
+                    onclick: move |_| {
+                        show_release_dropdown.set(None);
+                        on_view_storage.call(());
+                    },
+                    "Storage"
                 }
                 if torrent.has_torrent {
                     if torrent.is_seeding {
