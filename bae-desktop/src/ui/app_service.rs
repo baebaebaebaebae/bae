@@ -433,6 +433,10 @@ impl AppService {
             .set(config.encryption_key_stored);
         self.state
             .config()
+            .encryption_key_fingerprint()
+            .set(config.encryption_key_fingerprint.clone());
+        self.state
+            .config()
             .subsonic_enabled()
             .set(config.subsonic_enabled);
         self.state
@@ -568,6 +572,10 @@ impl AppService {
             .config()
             .encryption_key_stored()
             .set(new_config.encryption_key_stored);
+        self.state
+            .config()
+            .encryption_key_fingerprint()
+            .set(new_config.encryption_key_fingerprint.clone());
         self.state
             .config()
             .subsonic_enabled()

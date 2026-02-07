@@ -85,7 +85,7 @@ fn configure_logging() {
 fn main() {
     crash_report::install_panic_hook();
     config::init_keyring();
-    let config = config::Config::load();
+    let mut config = config::Config::load();
     configure_logging();
     crash_report::check_for_crash_report();
 
@@ -104,9 +104,30 @@ fn main() {
 
     // Create encryption service only if hint flag says a key is stored (avoids keyring prompt)
     let encryption_service = if config.encryption_key_stored {
-        key_service
-            .get_encryption_key()
-            .and_then(|key| encryption::EncryptionService::new(&key).ok())
+        key_service.get_encryption_key().and_then(|key| {
+            let service = encryption::EncryptionService::new(&key).ok()?;
+            let fingerprint = service.fingerprint();
+
+            match &config.encryption_key_fingerprint {
+                Some(stored) if stored != &fingerprint => {
+                    error!(
+                        "Encryption key fingerprint mismatch! Expected {stored}, got {fingerprint}. \
+                         Wrong key in keyring — encryption disabled."
+                    );
+                    None
+                }
+                None => {
+                    // First run after upgrade — save fingerprint for future validation
+                    info!("Saving encryption key fingerprint: {fingerprint}");
+                    config.encryption_key_fingerprint = Some(fingerprint);
+                    if let Err(e) = config.save() {
+                        error!("Failed to save config with fingerprint: {e}");
+                    }
+                    Some(service)
+                }
+                Some(_) => Some(service),
+            }
+        })
     } else {
         None
     };
