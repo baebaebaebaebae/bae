@@ -122,8 +122,6 @@ pub enum ImportProgress {
         /// For track completions, this is the parent release ID (for filtering)
         /// For release completions, this is None
         release_id: Option<String>,
-        /// For release completions, the cover image ID (for reactive UI update)
-        cover_image_id: Option<String>,
         import_id: Option<String>,
     },
     Failed {
@@ -246,8 +244,10 @@ pub enum ImportCommand {
         cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
         /// Storage profile ID. None means no bae storage (files stay in place).
         storage_profile_id: Option<String>,
-        /// Resolved absolute path to the cover image file
+        /// Resolved absolute path to a local cover image file
         cover_image_path: Option<PathBuf>,
+        /// Whether a remote cover was already downloaded and cached by the handle
+        remote_cover_set: bool,
         /// Import operation ID for progress tracking
         import_id: String,
     },

@@ -53,39 +53,6 @@ fn calculate_track_percent(bytes_written: usize, start_byte: i64, end_byte: i64)
     }
 }
 
-/// Resolve a CoverSelection to an absolute path among discovered files after torrent download.
-///
-/// For Remote covers, the file was downloaded to a .bae/ subfolder — match by that prefix.
-/// For Local covers, match by the relative filename.
-#[cfg(feature = "torrent")]
-fn resolve_torrent_cover_path(
-    selected_cover: &Option<CoverSelection>,
-    discovered_files: &[DiscoveredFile],
-) -> Option<PathBuf> {
-    let selected_cover = selected_cover.as_ref()?;
-    match selected_cover {
-        CoverSelection::Remote(_) => {
-            // Downloaded covers go into .bae/ subfolder
-            discovered_files.iter().find_map(|f| {
-                let path_str = f.path.to_string_lossy();
-                if path_str.contains(".bae/") {
-                    Some(f.path.clone())
-                } else {
-                    None
-                }
-            })
-        }
-        CoverSelection::Local(filename) => discovered_files.iter().find_map(|f| {
-            let path_str = f.path.to_string_lossy();
-            if path_str.ends_with(filename) {
-                Some(f.path.clone())
-            } else {
-                None
-            }
-        }),
-    }
-}
-
 /// Import service that orchestrates the album import workflow
 pub struct ImportService {
     /// Channel for receiving import commands from clients
@@ -101,6 +68,8 @@ pub struct ImportService {
     torrent_manager: LazyTorrentManager,
     /// Database for storage operations
     database: Arc<Database>,
+    /// Library directory path (for cover art cache)
+    library_path: PathBuf,
     /// Optional pre-built cloud storage (for testing with MockCloudStorage)
     #[cfg(feature = "test-utils")]
     injected_cloud: Option<Arc<dyn crate::cloud_storage::CloudStorage>>,
@@ -154,6 +123,7 @@ impl ImportService {
         torrent_manager: LazyTorrentManager,
         database: Arc<Database>,
         key_service: KeyService,
+        library_path: PathBuf,
     ) -> ImportServiceHandle {
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
         let (progress_tx, progress_rx) = mpsc::unbounded_channel();
@@ -162,6 +132,7 @@ impl ImportService {
         let progress_tx_for_handle = progress_tx.clone();
         let library_manager_for_worker = library_manager.clone();
         let database_for_handle = database.clone();
+        let library_path_for_handle = library_path.clone();
 
         ImportService::start_scan_worker(&runtime_handle, scan_rx, scan_events_tx.clone());
 
@@ -175,6 +146,7 @@ impl ImportService {
                     encryption_service,
                     torrent_manager,
                     database,
+                    library_path,
                     #[cfg(feature = "test-utils")]
                     injected_cloud: None,
                 };
@@ -204,6 +176,7 @@ impl ImportService {
             scan_tx,
             scan_events_tx,
             key_service,
+            library_path_for_handle,
         )
     }
 
@@ -215,6 +188,7 @@ impl ImportService {
         encryption_service: Option<EncryptionService>,
         database: Arc<Database>,
         key_service: KeyService,
+        library_path: PathBuf,
     ) -> ImportServiceHandle {
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
         let (progress_tx, progress_rx) = mpsc::unbounded_channel();
@@ -223,6 +197,7 @@ impl ImportService {
         let progress_tx_for_handle = progress_tx.clone();
         let library_manager_for_worker = library_manager.clone();
         let database_for_handle = database.clone();
+        let library_path_for_handle = library_path.clone();
 
         ImportService::start_scan_worker(&runtime_handle, scan_rx, scan_events_tx.clone());
 
@@ -235,6 +210,7 @@ impl ImportService {
                     library_manager: library_manager_for_worker,
                     encryption_service,
                     database,
+                    library_path,
                     #[cfg(feature = "test-utils")]
                     injected_cloud: None,
                 };
@@ -264,6 +240,7 @@ impl ImportService {
             scan_tx,
             scan_events_tx,
             key_service,
+            library_path_for_handle,
         )
     }
 
@@ -299,6 +276,7 @@ impl ImportService {
                     encryption_service,
                     torrent_manager,
                     database,
+                    library_path: std::env::temp_dir().join("bae-test-covers"),
                     injected_cloud: Some(cloud),
                 };
 
@@ -328,6 +306,7 @@ impl ImportService {
             scan_events_tx,
             // Tests always run in dev mode
             KeyService::new(true),
+            std::env::temp_dir().join("bae-test-covers"),
         )
     }
 
@@ -361,6 +340,7 @@ impl ImportService {
                     library_manager: library_manager_for_worker,
                     encryption_service,
                     database,
+                    library_path: std::env::temp_dir().join("bae-test-covers"),
                     injected_cloud: Some(cloud),
                 };
 
@@ -390,6 +370,7 @@ impl ImportService {
             scan_events_tx,
             // Tests always run in dev mode
             KeyService::new(true),
+            std::env::temp_dir().join("bae-test-covers"),
         )
     }
 
@@ -415,6 +396,7 @@ impl ImportService {
                 cue_flac_metadata,
                 storage_profile_id,
                 cover_image_path,
+                remote_cover_set,
                 import_id,
             } => {
                 info!("Starting folder import for '{}'", db_album.title);
@@ -430,6 +412,7 @@ impl ImportService {
                                     profile,
                                     cover_image_path.as_deref(),
                                     &import_id,
+                                    remote_cover_set,
                                 )
                                 .await
                             }
@@ -445,6 +428,7 @@ impl ImportService {
                             cue_flac_metadata,
                             cover_image_path.as_deref(),
                             &import_id,
+                            remote_cover_set,
                         )
                         .await
                     }
@@ -679,6 +663,7 @@ impl ImportService {
         storage_profile: DbStorageProfile,
         cover_image_path: Option<&Path>,
         import_id: &str,
+        remote_cover_set: bool,
     ) -> Result<(), String> {
         let library_manager = self.library_manager.get();
         library_manager
@@ -795,15 +780,15 @@ impl ImportService {
         self.persist_track_metadata(tracks_to_files, cue_flac_metadata, &file_ids)
             .await?;
 
-        let cover_image_id = self
-            .create_image_records(
-                &db_release.id,
-                &db_release.album_id,
-                discovered_files,
-                library_manager,
-                cover_image_path,
-            )
-            .await?;
+        self.create_image_records(
+            &db_release.id,
+            &db_release.album_id,
+            discovered_files,
+            library_manager,
+            cover_image_path,
+            remote_cover_set,
+        )
+        .await?;
 
         for track_file in tracks_to_files {
             library_manager
@@ -813,7 +798,6 @@ impl ImportService {
             let _ = self.progress_tx.send(ImportProgress::Complete {
                 id: track_file.db_track_id.clone(),
                 release_id: Some(db_release.id.clone()),
-                cover_image_id: None,
                 import_id: Some(import_id.to_string()),
             });
         }
@@ -831,7 +815,6 @@ impl ImportService {
         let _ = self.progress_tx.send(ImportProgress::Complete {
             id: db_release.id.clone(),
             release_id: None,
-            cover_image_id,
             import_id: Some(import_id.to_string()),
         });
 
@@ -841,8 +824,12 @@ impl ImportService {
 
     /// Create DbImage records for image files in the discovered files.
     ///
+    /// Also caches the cover image to `{library_path}/covers/{release_id}.{ext}` and
+    /// sets `cover_release_id` on the album.
+    ///
     /// `cover_image_path`: Absolute path to the user-selected cover image.
     /// If provided, that file is marked as cover. Otherwise, priority logic picks the best one.
+    /// `cover_already_set`: If true, a remote cover was already cached by the handle.
     async fn create_image_records(
         &self,
         release_id: &str,
@@ -850,7 +837,8 @@ impl ImportService {
         discovered_files: &[DiscoveredFile],
         library_manager: &LibraryManager,
         cover_image_path: Option<&Path>,
-    ) -> Result<Option<String>, String> {
+        cover_already_set: bool,
+    ) -> Result<(), String> {
         use crate::db::{DbImage, ImageSource};
         let image_extensions = ["jpg", "jpeg", "png", "gif", "webp"];
         let mut image_files: Vec<(&DiscoveredFile, String)> = discovered_files
@@ -867,7 +855,19 @@ impl ImportService {
             .collect();
 
         if image_files.is_empty() {
-            return Ok(None);
+            return Ok(());
+        }
+
+        // Remote cover already set by handle — just record local images without cover selection
+        if cover_already_set {
+            for (_file, relative_path) in &image_files {
+                let db_image = DbImage::new(release_id, relative_path, false, ImageSource::Local);
+                library_manager
+                    .add_image(&db_image)
+                    .await
+                    .map_err(|e| format!("Failed to add image record: {}", e))?;
+            }
+            return Ok(());
         }
 
         // Determine which file is the cover: match by absolute path if provided
@@ -895,17 +895,10 @@ impl ImportService {
             0
         });
 
-        let mut cover_image_id: Option<String> = None;
-        for (idx, (_file, relative_path)) in image_files.iter().enumerate() {
-            let source = std::path::Path::new(relative_path)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .and_then(super::cover_art::classify_managed_artwork)
-                .unwrap_or(ImageSource::Local);
-
+        for (idx, (file, relative_path)) in image_files.iter().enumerate() {
+            let source = ImageSource::Local;
             let is_cover = idx == cover_index;
             let db_image = DbImage::new(release_id, relative_path, is_cover, source);
-            let image_id = db_image.id.clone();
 
             library_manager
                 .add_image(&db_image)
@@ -913,11 +906,25 @@ impl ImportService {
                 .map_err(|e| format!("Failed to add image record: {}", e))?;
 
             if is_cover {
+                // Cache cover to {library_path}/covers/{release_id}.{ext} for fast browsing
+                if let Some(ext) = file.path.extension().and_then(|e| e.to_str()) {
+                    let covers_dir = self.library_path.join("covers");
+                    if let Err(e) = std::fs::create_dir_all(&covers_dir) {
+                        error!("Failed to create covers directory: {}", e);
+                    } else {
+                        let cache_path = covers_dir.join(format!("{}.{}", release_id, ext));
+                        if let Err(e) = std::fs::copy(&file.path, &cache_path) {
+                            error!("Failed to cache cover art: {}", e);
+                        } else {
+                            info!("Cached cover art to {}", cache_path.display());
+                        }
+                    }
+                }
+
                 library_manager
-                    .set_album_cover_image(album_id, &image_id)
+                    .set_album_cover_release(album_id, release_id)
                     .await
-                    .map_err(|e| format!("Failed to set album cover image: {}", e))?;
-                cover_image_id = Some(image_id.clone());
+                    .map_err(|e| format!("Failed to set album cover release: {}", e))?;
             }
 
             info!(
@@ -926,29 +933,63 @@ impl ImportService {
             );
         }
 
-        Ok(cover_image_id)
+        Ok(())
     }
 
     fn image_cover_priority(filename: &str) -> u8 {
         let lower = filename.to_lowercase();
-        if lower.starts_with(".bae/") {
+        if lower.contains("cover") || lower.contains("front") {
             return 0;
         }
-        if lower.contains("cover") || lower.contains("front") {
-            return 1;
+        1
+    }
+
+    /// Download remote cover art and write directly to the covers cache.
+    ///
+    /// Sets the album's cover_release_id. Returns true if successful.
+    #[cfg(feature = "torrent")]
+    async fn download_remote_cover(&self, album_id: &str, release_id: &str, url: &str) -> bool {
+        use super::cover_art::download_cover_art_bytes;
+
+        let (bytes, ext) = match download_cover_art_bytes(url).await {
+            Ok(result) => result,
+            Err(e) => {
+                error!("Failed to download remote cover art: {}", e);
+                return false;
+            }
+        };
+
+        let covers_dir = self.library_path.join("covers");
+        if let Err(e) = std::fs::create_dir_all(&covers_dir) {
+            error!("Failed to create covers directory: {}", e);
+            return false;
         }
-        2
+
+        let cache_path = covers_dir.join(format!("{}.{}", release_id, ext));
+        if let Err(e) = std::fs::write(&cache_path, &bytes) {
+            error!("Failed to write cover to cache: {}", e);
+            return false;
+        }
+
+        info!("Cached remote cover art to {}", cache_path.display());
+
+        let library_manager = self.library_manager.get();
+        if let Err(e) = library_manager
+            .set_album_cover_release(album_id, release_id)
+            .await
+        {
+            error!("Failed to set album cover release: {}", e);
+            return false;
+        }
+
+        true
     }
 
     fn get_relative_image_path(&self, path: &std::path::Path) -> String {
         let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         if let Some(parent) = path.parent() {
             if let Some(parent_name) = parent.file_name().and_then(|n| n.to_str()) {
-                if parent_name == ".bae"
-                    || parent_name == "scans"
-                    || parent_name == "artwork"
-                    || parent_name == "images"
-                {
+                if parent_name == "scans" || parent_name == "artwork" || parent_name == "images" {
                     return format!("{}/{}", parent_name, filename);
                 }
             }
@@ -1185,6 +1226,7 @@ impl ImportService {
         cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
         cover_image_path: Option<&Path>,
         import_id: &str,
+        remote_cover_set: bool,
     ) -> Result<(), String> {
         let library_manager = self.library_manager.get();
         library_manager
@@ -1281,20 +1323,19 @@ impl ImportService {
             let _ = self.progress_tx.send(ImportProgress::Complete {
                 id: track_file.db_track_id.clone(),
                 release_id: Some(db_release.id.clone()),
-                cover_image_id: None,
                 import_id: Some(import_id.to_string()),
             });
         }
 
-        let cover_image_id = self
-            .create_image_records(
-                &db_release.id,
-                &db_release.album_id,
-                discovered_files,
-                library_manager,
-                cover_image_path,
-            )
-            .await?;
+        self.create_image_records(
+            &db_release.id,
+            &db_release.album_id,
+            discovered_files,
+            library_manager,
+            cover_image_path,
+            remote_cover_set,
+        )
+        .await?;
 
         library_manager
             .mark_release_complete(&db_release.id)
@@ -1309,7 +1350,6 @@ impl ImportService {
         let _ = self.progress_tx.send(ImportProgress::Complete {
             id: db_release.id.clone(),
             release_id: None,
-            cover_image_id,
             import_id: Some(import_id.to_string()),
         });
 
@@ -1395,32 +1435,18 @@ impl ImportService {
             })
             .collect();
 
-        if let Some(CoverSelection::Remote(ref url)) = selected_cover {
-            use crate::db::ImageSource;
-            use crate::import::cover_art::download_cover_art_to_bae_folder;
-            let source = if url.contains("coverartarchive.org") || url.contains("musicbrainz") {
-                ImageSource::MusicBrainz
-            } else {
-                ImageSource::Discogs
-            };
-            match download_cover_art_to_bae_folder(url, &torrent_save_dir, source).await {
-                Ok(downloaded) => {
-                    info!("Downloaded cover art to {:?}", downloaded.path);
-                    if let Ok(metadata) = tokio::fs::metadata(&downloaded.path).await {
-                        discovered_files.push(DiscoveredFile {
-                            path: downloaded.path,
-                            size: metadata.len(),
-                        });
-                    }
+        // For local covers, resolve path from discovered files
+        let cover_image_path = match &selected_cover {
+            Some(CoverSelection::Local(filename)) => discovered_files.iter().find_map(|f| {
+                let path_str = f.path.to_string_lossy();
+                if path_str.ends_with(filename) {
+                    Some(f.path.clone())
+                } else {
+                    None
                 }
-                Err(e) => {
-                    warn!("Failed to download cover art: {}", e);
-                }
-            }
-        }
-
-        // Resolve cover selection to absolute path now that files exist
-        let cover_image_path = resolve_torrent_cover_path(&selected_cover, &discovered_files);
+            }),
+            _ => None,
+        };
 
         let _ = self
             .torrent_manager
@@ -1483,20 +1509,27 @@ impl ImportService {
             let _ = self.progress_tx.send(ImportProgress::Complete {
                 id: track_file.db_track_id.clone(),
                 release_id: Some(db_release.id.clone()),
-                cover_image_id: None,
                 import_id: None,
             });
         }
 
-        let cover_image_id = self
-            .create_image_records(
-                &db_release.id,
-                &db_release.album_id,
-                &discovered_files,
-                library_manager,
-                cover_image_path.as_deref(),
-            )
-            .await?;
+        // Download remote cover art directly to cache
+        let remote_cover_set = if let Some(CoverSelection::Remote(ref url)) = selected_cover {
+            self.download_remote_cover(&db_release.album_id, &db_release.id, url)
+                .await
+        } else {
+            false
+        };
+
+        self.create_image_records(
+            &db_release.id,
+            &db_release.album_id,
+            &discovered_files,
+            library_manager,
+            cover_image_path.as_deref(),
+            remote_cover_set,
+        )
+        .await?;
 
         library_manager
             .mark_release_complete(&db_release.id)
@@ -1506,7 +1539,6 @@ impl ImportService {
         let _ = self.progress_tx.send(ImportProgress::Complete {
             id: db_release.id.clone(),
             release_id: None,
-            cover_image_id,
             import_id: None,
         });
 
@@ -1594,32 +1626,18 @@ impl ImportService {
             })
             .collect();
 
-        if let Some(CoverSelection::Remote(ref url)) = selected_cover {
-            use crate::db::ImageSource;
-            use crate::import::cover_art::download_cover_art_to_bae_folder;
-            let source = if url.contains("coverartarchive.org") || url.contains("musicbrainz") {
-                ImageSource::MusicBrainz
-            } else {
-                ImageSource::Discogs
-            };
-            match download_cover_art_to_bae_folder(url, &torrent_save_dir, source).await {
-                Ok(downloaded) => {
-                    info!("Downloaded cover art to {:?}", downloaded.path);
-                    if let Ok(metadata) = tokio::fs::metadata(&downloaded.path).await {
-                        discovered_files.push(DiscoveredFile {
-                            path: downloaded.path,
-                            size: metadata.len(),
-                        });
-                    }
+        // For local covers, resolve path from discovered files
+        let cover_image_path = match &selected_cover {
+            Some(CoverSelection::Local(filename)) => discovered_files.iter().find_map(|f| {
+                let path_str = f.path.to_string_lossy();
+                if path_str.ends_with(filename) {
+                    Some(f.path.clone())
+                } else {
+                    None
                 }
-                Err(e) => {
-                    warn!("Failed to download cover art: {}", e);
-                }
-            }
-        }
-
-        // Resolve cover selection to absolute path now that files exist
-        let cover_image_path = resolve_torrent_cover_path(&selected_cover, &discovered_files);
+            }),
+            _ => None,
+        };
 
         // Detect CUE/FLAC
         let file_paths: Vec<PathBuf> = discovered_files.iter().map(|f| f.path.clone()).collect();
@@ -1658,8 +1676,15 @@ impl ImportService {
             storage_profile,
             cover_image_path.as_deref(),
             &import_id,
+            None,
         )
         .await?;
+
+        // Download remote cover art directly to cache (torrent import)
+        if let Some(CoverSelection::Remote(ref url)) = selected_cover {
+            self.download_remote_cover(&db_album.id, &db_release.id, url)
+                .await;
+        }
 
         if seed_after_download {
             let _ = self
@@ -1832,6 +1857,7 @@ impl ImportService {
             storage_profile,
             cover_image_path,
             &import_id,
+            None,
         )
         .await?;
 
@@ -1932,7 +1958,6 @@ impl ImportService {
             let _ = self.progress_tx.send(ImportProgress::Complete {
                 id: track.id.clone(),
                 release_id: Some(db_release.id.clone()),
-                cover_image_id: None,
                 import_id: None,
             });
         }
@@ -1945,7 +1970,6 @@ impl ImportService {
         let _ = self.progress_tx.send(ImportProgress::Complete {
             id: db_release.id.clone(),
             release_id: None,
-            cover_image_id: None,
             import_id: None,
         });
 

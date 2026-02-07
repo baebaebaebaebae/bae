@@ -254,7 +254,7 @@ fn create_test_album(title: &str) -> DbAlbum {
         discogs_release: None,
         musicbrainz_release: None,
         bandcamp_album_id: None,
-        cover_image_id: None,
+        cover_release_id: None,
         cover_art_url: None,
         is_compilation: false,
         created_at: now,

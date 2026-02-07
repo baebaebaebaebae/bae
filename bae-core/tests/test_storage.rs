@@ -91,6 +91,7 @@ async fn test_storageless_import() {
         encryption_service,
         database_arc,
         bae_core::keys::KeyService::new(true),
+        std::env::temp_dir().join("bae-test-covers"),
     );
 
     let discogs_release = create_test_discogs_release();
@@ -241,6 +242,7 @@ async fn test_storageless_delete_preserves_files() {
         encryption_service,
         database_arc,
         bae_core::keys::KeyService::new(true),
+        std::env::temp_dir().join("bae-test-covers"),
     );
 
     let discogs_release = create_test_discogs_release();
@@ -409,6 +411,7 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
             encryption_service.clone(),
             database_arc,
             bae_core::keys::KeyService::new(true),
+            std::env::temp_dir().join("bae-test-covers"),
         )
     };
     let discogs_release = create_test_discogs_release();
@@ -588,11 +591,11 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
         .expect("Failed to get album")
         .expect("Album should exist");
     assert_eq!(
-        album.cover_image_id.as_ref(),
-        Some(&cover_image.id),
-        "Album cover_image_id should match the cover DbImage",
+        album.cover_release_id.as_ref(),
+        Some(&release_id),
+        "Album cover_release_id should match the release",
     );
-    info!("✓ Album cover_image_id is set correctly");
+    info!("✓ Album cover_release_id is set correctly");
     verify_image_loadable(
         cover_image,
         &library_manager,
@@ -926,6 +929,7 @@ async fn run_real_album_test(album_dir: PathBuf, location: StorageLocation, encr
         encryption_service.clone(),
         database_arc.clone(),
         bae_core::keys::KeyService::new(true),
+        std::env::temp_dir().join("bae-test-covers"),
     );
     let (_album_id, release_id) = import_handle
         .send_request(ImportRequest::Folder {

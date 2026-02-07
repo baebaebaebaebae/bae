@@ -1,16 +1,17 @@
 //! Helpers for generating bae:// URLs
 //!
 //! The bae:// custom protocol is registered in app.rs and serves:
-//! - Images from storage: bae://image/{image_id}
+//! - Cover art from cache: bae://cover/{release_id}
 //! - Local files: bae://local{url_encoded_path}
+//! - Images from storage: bae://image/{image_id} (legacy, requires DB + decrypt)
 
 use std::path::Path;
 
-/// Convert a DbImage ID to a bae:// URL for serving from storage.
+/// Convert a release ID to a bae://cover/ URL for serving from the covers cache.
 ///
-/// The image will be read and decrypted on demand.
-pub fn image_url(image_id: &str) -> String {
-    format!("bae://image/{}", image_id)
+/// The cover is served directly from disk — no DB lookup or decryption.
+pub fn cover_url(release_id: &str) -> String {
+    format!("bae://cover/{}", release_id)
 }
 
 /// Convert a local file path to a bae://local/... URL.
@@ -33,8 +34,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_image_url() {
-        assert_eq!(image_url("abc"), "bae://image/abc");
+    fn test_cover_url() {
+        assert_eq!(cover_url("abc"), "bae://cover/abc");
     }
 
     #[test]

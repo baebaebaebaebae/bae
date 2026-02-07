@@ -10,10 +10,10 @@
 //! - Read state reactively from `app.state`
 //! - Call action methods like `app.play_album()`
 
+use crate::ui::cover_url;
 use crate::ui::display_types::{
     album_from_db_ref, artist_from_db_ref, release_from_db_ref, track_from_db_ref,
 };
-use crate::ui::image_url;
 use crate::ui::import_helpers::consume_scan_events;
 use bae_core::cache;
 use bae_core::config;
@@ -201,9 +201,9 @@ impl AppService {
                                                     .await
                                             {
                                                 let cover = album
-                                                    .cover_image_id
+                                                    .cover_release_id
                                                     .as_ref()
-                                                    .map(|id| image_url(id))
+                                                    .map(|release_id| cover_url(release_id))
                                                     .or(album.cover_art_url.clone());
                                                 (album.title, cover)
                                             } else {
@@ -298,9 +298,9 @@ impl AppService {
                                         library_manager.get().get_album_by_id(&album_id).await
                                     {
                                         let cover = album
-                                            .cover_image_id
+                                            .cover_release_id
                                             .as_ref()
-                                            .map(|id| image_url(id))
+                                            .map(|release_id| cover_url(release_id))
                                             .or(album.cover_art_url.clone());
                                         (album.title, cover)
                                     } else {
@@ -493,7 +493,6 @@ impl AppService {
                             progress_percent: None,
                             release_id: db.release_id,
                             cover_art_url: None,
-                            cover_image_id: None,
                         })
                         .collect();
                     state.active_imports().imports().set(imports);
@@ -1071,7 +1070,6 @@ fn handle_import_progress(state: &Store<AppState>, event: ImportProgress) {
                         progress_percent: None,
                         release_id: None,
                         cover_art_url,
-                        cover_image_id: None,
                     });
                 }
             });
@@ -1119,7 +1117,6 @@ fn handle_import_progress(state: &Store<AppState>, event: ImportProgress) {
             id,
             import_id,
             release_id,
-            cover_image_id,
             ..
         } => {
             // Update active imports
@@ -1130,9 +1127,6 @@ fn handle_import_progress(state: &Store<AppState>, event: ImportProgress) {
                         import.progress_percent = Some(100);
                         if release_id.is_some() {
                             import.release_id = release_id.clone();
-                        }
-                        if cover_image_id.is_some() {
-                            import.cover_image_id = cover_image_id.clone();
                         }
                     }
                 });

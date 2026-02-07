@@ -3,7 +3,7 @@
 //! Thin wrapper that bridges App state to ImportsDropdownView.
 
 use crate::ui::app_service::use_app;
-use crate::ui::{image_url, Route};
+use crate::ui::Route;
 use bae_ui::display_types::{ActiveImport as DisplayActiveImport, ImportStatus};
 use bae_ui::stores::{ActiveImportsUiStateStoreExt, AppStateStoreExt, ImportOperationStatus};
 use bae_ui::ImportsDropdownView;
@@ -22,11 +22,7 @@ pub fn ImportsDropdown() -> Element {
     let display_imports: Vec<DisplayActiveImport> = imports
         .iter()
         .map(|i| {
-            let cover_url = i
-                .cover_image_id
-                .as_ref()
-                .map(|id| image_url(id))
-                .or_else(|| i.cover_art_url.clone());
+            let cover_url = i.cover_art_url.clone();
 
             DisplayActiveImport {
                 import_id: i.import_id.clone(),

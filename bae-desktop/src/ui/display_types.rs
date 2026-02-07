@@ -1,6 +1,6 @@
 //! Conversions from DB types to bae-ui display types
 
-use crate::ui::image_url;
+use crate::ui::cover_url;
 use bae_core::db::{DbAlbum, DbArtist, DbRelease, DbTrack, ImportStatus};
 
 // Re-export bae-ui types so existing code continues to work
@@ -8,9 +8,9 @@ pub use bae_ui::{Album, Artist, Release, Track, TrackImportState};
 
 pub fn album_from_db_ref(db: &DbAlbum) -> Album {
     let cover_url = db
-        .cover_image_id
+        .cover_release_id
         .as_ref()
-        .map(|id| image_url(id))
+        .map(|release_id| cover_url(release_id))
         .or_else(|| db.cover_art_url.clone());
 
     Album {

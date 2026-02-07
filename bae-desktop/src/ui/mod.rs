@@ -12,4 +12,4 @@ pub mod window_activation;
 pub use app::*;
 // Legacy re-exports for backwards compatibility
 pub use app_context::AppContext;
-pub use local_file_url::image_url;
+pub use local_file_url::cover_url;

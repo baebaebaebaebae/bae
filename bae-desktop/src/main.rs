@@ -149,6 +149,7 @@ fn main() {
         torrent_manager.clone(),
         std::sync::Arc::new(database.clone()),
         key_service.clone(),
+        config.library_path.clone(),
     );
     #[cfg(not(feature = "torrent"))]
     let import_handle = import::ImportService::start(
@@ -157,6 +158,7 @@ fn main() {
         encryption_service.clone(),
         std::sync::Arc::new(database.clone()),
         key_service.clone(),
+        config.library_path.clone(),
     );
 
     let playback_handle = playback::PlaybackService::start(
@@ -168,6 +170,7 @@ fn main() {
     let media_controls = match media_controls::setup_media_controls(
         playback_handle.clone(),
         library_manager.clone(),
+        config.library_path.clone(),
         runtime_handle.clone(),
     ) {
         Ok(controls) => {

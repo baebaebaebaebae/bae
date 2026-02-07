@@ -36,8 +36,6 @@ pub struct ActiveImport {
     pub release_id: Option<String>,
     /// External cover art URL (ephemeral, shown during import)
     pub cover_art_url: Option<String>,
-    /// Stored cover image ID (shown after import complete)
-    pub cover_image_id: Option<String>,
 }
 
 /// UI state for active imports (shown in toolbar dropdown)
