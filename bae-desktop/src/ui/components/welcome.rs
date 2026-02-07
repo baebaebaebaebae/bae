@@ -155,11 +155,7 @@ fn WelcomeScreen() -> Element {
 
         
 
-        
-        
-
                             div {
-        
 
                                 label { class: "block text-sm font-medium text-gray-400 mb-1", "Library ID" }
                                 TextInput {
