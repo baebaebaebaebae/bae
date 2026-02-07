@@ -11,6 +11,7 @@ pub mod library;
 pub mod now_playing_bar;
 pub mod queue_sidebar;
 pub mod settings;
+pub mod welcome;
 
 pub use album_detail::AlbumDetail;
 pub use app::App;

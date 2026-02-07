@@ -3,6 +3,7 @@ pub mod cache;
 #[cfg(feature = "cd-rip")]
 pub mod cd;
 pub mod cloud_storage;
+pub mod cloud_sync;
 #[doc(hidden)]
 pub mod config;
 pub mod cue_flac;
