@@ -10,6 +10,7 @@ pub mod db;
 pub mod discogs;
 pub mod encryption;
 pub mod import;
+pub mod keys;
 pub mod library;
 pub mod musicbrainz;
 pub mod network;

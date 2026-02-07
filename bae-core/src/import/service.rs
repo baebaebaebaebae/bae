@@ -19,6 +19,7 @@ use crate::import::types::TorrentSource;
 use crate::import::types::{
     CueFlacMetadata, DiscoveredFile, ImportCommand, ImportPhase, ImportProgress, TrackFile,
 };
+use crate::keys::KeyService;
 use crate::library::{LibraryManager, SharedLibraryManager};
 use crate::storage::{ReleaseStorage, ReleaseStorageImpl};
 #[cfg(feature = "torrent")]
@@ -152,6 +153,7 @@ impl ImportService {
         encryption_service: Option<EncryptionService>,
         torrent_manager: LazyTorrentManager,
         database: Arc<Database>,
+        key_service: KeyService,
     ) -> ImportServiceHandle {
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
         let (progress_tx, progress_rx) = mpsc::unbounded_channel();
@@ -201,6 +203,7 @@ impl ImportService {
             runtime_handle,
             scan_tx,
             scan_events_tx,
+            key_service,
         )
     }
 
@@ -211,6 +214,7 @@ impl ImportService {
         library_manager: SharedLibraryManager,
         encryption_service: Option<EncryptionService>,
         database: Arc<Database>,
+        key_service: KeyService,
     ) -> ImportServiceHandle {
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
         let (progress_tx, progress_rx) = mpsc::unbounded_channel();
@@ -259,6 +263,7 @@ impl ImportService {
             runtime_handle,
             scan_tx,
             scan_events_tx,
+            key_service,
         )
     }
 
@@ -321,6 +326,8 @@ impl ImportService {
             runtime_handle,
             scan_tx,
             scan_events_tx,
+            // Tests always run in dev mode
+            KeyService::new(true),
         )
     }
 
@@ -381,6 +388,8 @@ impl ImportService {
             runtime_handle,
             scan_tx,
             scan_events_tx,
+            // Tests always run in dev mode
+            KeyService::new(true),
         )
     }
 

@@ -10,6 +10,7 @@ use bae_core::import::{
     cover_art, detect_folder_contents, CoverSelection, DetectedCandidate as CoreDetectedCandidate,
     ImportProgress, ImportRequest, MatchCandidate, MatchSource, ScanEvent,
 };
+use bae_core::keys::KeyService;
 use bae_core::musicbrainz::{
     lookup_by_discid, lookup_release_by_id, search_releases_with_params, ExternalUrls, MbRelease,
     ReleaseSearchParams,
@@ -127,20 +128,11 @@ pub fn to_display_candidate(candidate: &MatchCandidate) -> DisplayMatchCandidate
 // Discogs client helper
 // ============================================================================
 
-/// Get or create the Discogs client.
-pub fn get_discogs_client() -> Result<DiscogsClient, String> {
-    let api_key = std::env::var("BAE_DISCOGS_API_KEY")
-        .ok()
-        .filter(|k| !k.is_empty())
-        .or_else(|| {
-            keyring_core::Entry::new("bae", "discogs_api_key")
-                .ok()
-                .and_then(|e| e.get_password().ok())
-        });
-
-    match api_key {
-        Some(key) if !key.is_empty() => Ok(DiscogsClient::new(key)),
-        _ => Err(
+/// Get or create the Discogs client using the KeyService.
+pub fn get_discogs_client(key_service: &KeyService) -> Result<DiscogsClient, String> {
+    match key_service.get_discogs_key() {
+        Some(key) => Ok(DiscogsClient::new(key)),
+        None => Err(
             "Discogs API key not configured. Go to Settings → Discogs to add your key.".to_string(),
         ),
     }
@@ -182,12 +174,15 @@ pub fn detect_candidate_locally(
 }
 
 /// Lookup a MusicBrainz release by DiscID.
-pub async fn lookup_discid(mb_discid: &str) -> Result<DiscIdLookupResult, String> {
+pub async fn lookup_discid(
+    mb_discid: &str,
+    key_service: &KeyService,
+) -> Result<DiscIdLookupResult, String> {
     info!("🎵 Looking up MB DiscID: {}", mb_discid);
 
     match lookup_by_discid(mb_discid).await {
         Ok((releases, external_urls)) => {
-            Ok(handle_discid_lookup_result(releases, external_urls).await)
+            Ok(handle_discid_lookup_result(releases, external_urls, key_service).await)
         }
         Err(e) => {
             info!("MB DiscID lookup failed: {}", e);
@@ -203,6 +198,7 @@ pub async fn lookup_discid(mb_discid: &str) -> Result<DiscIdLookupResult, String
 async fn handle_discid_lookup_result(
     releases: Vec<MbRelease>,
     external_urls: ExternalUrls,
+    key_service: &KeyService,
 ) -> DiscIdLookupResult {
     if releases.is_empty() {
         info!("No exact matches found");
@@ -211,7 +207,7 @@ async fn handle_discid_lookup_result(
     info!("Found {} exact matches", releases.len());
 
     // Get discogs client if available (for cover art fallback)
-    let discogs_client = get_discogs_client().ok();
+    let discogs_client = get_discogs_client(key_service).ok();
     let cover_art_futures: Vec<_> = releases
         .iter()
         .map(|mb_release| {
@@ -499,6 +495,7 @@ pub async fn search_general(
     album: String,
     year: String,
     label: String,
+    key_service: &KeyService,
 ) -> Result<Vec<DisplayMatchCandidate>, String> {
     let core_metadata = metadata.as_ref().map(from_display_metadata);
     match source {
@@ -517,7 +514,7 @@ pub async fn search_general(
             search_mb_and_rank(params, core_metadata).await
         }
         SearchSource::Discogs => {
-            let client = get_discogs_client()?;
+            let client = get_discogs_client(key_service)?;
             let params = DiscogsSearchParams {
                 artist: non_empty(artist),
                 release_title: non_empty(album),
@@ -539,6 +536,7 @@ pub async fn search_by_catalog_number(
     metadata: Option<DisplayFolderMetadata>,
     source: SearchSource,
     catalog_number: String,
+    key_service: &KeyService,
 ) -> Result<Vec<DisplayMatchCandidate>, String> {
     let core_metadata = metadata.as_ref().map(from_display_metadata);
     match source {
@@ -557,7 +555,7 @@ pub async fn search_by_catalog_number(
             search_mb_and_rank(params, core_metadata).await
         }
         SearchSource::Discogs => {
-            let client = get_discogs_client()?;
+            let client = get_discogs_client(key_service)?;
             let params = DiscogsSearchParams {
                 artist: None,
                 release_title: None,
@@ -579,6 +577,7 @@ pub async fn search_by_barcode(
     metadata: Option<DisplayFolderMetadata>,
     source: SearchSource,
     barcode: String,
+    key_service: &KeyService,
 ) -> Result<Vec<DisplayMatchCandidate>, String> {
     let core_metadata = metadata.as_ref().map(from_display_metadata);
     match source {
@@ -597,7 +596,7 @@ pub async fn search_by_barcode(
             search_mb_and_rank(params, core_metadata).await
         }
         SearchSource::Discogs => {
-            let client = get_discogs_client()?;
+            let client = get_discogs_client(key_service)?;
             let params = DiscogsSearchParams {
                 artist: None,
                 release_title: None,
@@ -622,8 +621,9 @@ pub async fn search_by_barcode(
 async fn fetch_discogs_release(
     release_id: &str,
     master_id: Option<&str>,
+    key_service: &KeyService,
 ) -> Result<DiscogsRelease, String> {
-    let client = get_discogs_client()?;
+    let client = get_discogs_client(key_service)?;
     match client.get_release(release_id).await {
         Ok(mut release) => {
             // Prefer the master_id from the search result (if any) over what
@@ -684,9 +684,12 @@ pub async fn confirm_and_start_import(
                     .as_ref()
                     .ok_or_else(|| "Missing Discogs release ID".to_string())?;
 
-                let discogs_release =
-                    fetch_discogs_release(release_id, candidate.discogs_master_id.as_deref())
-                        .await?;
+                let discogs_release = fetch_discogs_release(
+                    release_id,
+                    candidate.discogs_master_id.as_deref(),
+                    &app.key_service,
+                )
+                .await?;
 
                 ImportRequest::Folder {
                     import_id: import_id.clone(),
@@ -819,7 +822,7 @@ pub async fn load_selected_release(
             &release_path,
             CandidateEvent::StartDiscIdLookup(mb_discid.clone()),
         );
-        let result = lookup_discid(&mb_discid).await;
+        let result = lookup_discid(&mb_discid, &app.key_service).await;
 
         let event = match result {
             Ok(DiscIdLookupResult::NoMatches) => CandidateEvent::DiscIdLookupComplete {

@@ -1,4 +1,5 @@
 use bae_core::db::Database;
+use bae_core::keys::KeyService;
 use bae_core::library::SharedLibraryManager;
 use bae_core::subsonic::create_router;
 use bae_core::{audio_codec, cache, config, encryption, import, playback};
@@ -98,11 +99,17 @@ fn main() {
     let cache_manager = runtime_handle.block_on(create_cache_manager());
     let database = runtime_handle.block_on(create_database(&config));
 
-    // Create encryption service only if key is configured (loaded lazily from keyring)
-    let encryption_service = config
-        .encryption_key
-        .as_ref()
-        .and_then(|key| encryption::EncryptionService::new(key).ok());
+    let dev_mode = config::Config::is_dev_mode();
+    let key_service = KeyService::new(dev_mode);
+
+    // Create encryption service only if hint flag says a key is stored (avoids keyring prompt)
+    let encryption_service = if config.encryption_key_stored {
+        key_service
+            .get_encryption_key()
+            .and_then(|key| encryption::EncryptionService::new(&key).ok())
+    } else {
+        None
+    };
     let library_manager = create_library_manager(database.clone(), encryption_service.clone());
 
     #[cfg(feature = "torrent")]
@@ -118,6 +125,7 @@ fn main() {
         encryption_service.clone(),
         torrent_manager.clone(),
         std::sync::Arc::new(database.clone()),
+        key_service.clone(),
     );
     #[cfg(not(feature = "torrent"))]
     let import_handle = import::ImportService::start(
@@ -125,6 +133,7 @@ fn main() {
         library_manager.clone(),
         encryption_service.clone(),
         std::sync::Arc::new(database.clone()),
+        key_service.clone(),
     );
 
     let playback_handle = playback::PlaybackService::start(
@@ -164,6 +173,7 @@ fn main() {
         #[cfg(feature = "torrent")]
         torrent_manager,
         cache: cache_manager.clone(),
+        key_service,
     };
 
     if config.subsonic_enabled {

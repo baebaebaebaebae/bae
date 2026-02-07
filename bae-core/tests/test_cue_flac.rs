@@ -47,6 +47,7 @@ async fn test_cue_flac_records_track_positions() {
         shared_library_manager,
         encryption_service,
         database_arc,
+        bae_core::keys::KeyService::new(true),
     );
     let discogs_release = create_test_discogs_release();
     let import_id = uuid::Uuid::new_v4().to_string();
@@ -195,6 +196,7 @@ async fn test_cue_flac_playback_uses_track_positions() {
         shared_library_manager,
         encryption_service.clone(),
         database_arc,
+        bae_core::keys::KeyService::new(true),
     );
     let discogs_release = create_test_discogs_release();
     let import_id = uuid::Uuid::new_v4().to_string();
@@ -347,6 +349,7 @@ async fn test_cue_flac_decoded_duration_matches_cue_timing() {
         shared_library_manager,
         encryption_service.clone(),
         database_arc,
+        bae_core::keys::KeyService::new(true),
     );
     let discogs_release = create_test_discogs_release();
     let import_id = uuid::Uuid::new_v4().to_string();
@@ -483,6 +486,7 @@ async fn test_cue_flac_byte_ranges_have_no_gaps() {
         shared_library_manager,
         encryption_service,
         database_arc,
+        bae_core::keys::KeyService::new(true),
     );
 
     let discogs_release = create_test_discogs_release();
@@ -635,6 +639,7 @@ async fn test_cue_flac_builds_dense_seektable() {
         shared_library_manager,
         encryption_service,
         database_arc,
+        bae_core::keys::KeyService::new(true),
     );
 
     let discogs_release = create_test_discogs_release();

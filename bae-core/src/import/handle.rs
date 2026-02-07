@@ -17,6 +17,7 @@ use crate::import::types::{
     CoverSelection, DiscoveredFile, ImportCommand, ImportProgress, ImportRequest, PrepareStep,
     TrackFile,
 };
+use crate::keys::KeyService;
 use crate::library::{LibraryManager, SharedLibraryManager};
 use crate::musicbrainz::MbRelease;
 use std::path::{Path, PathBuf};
@@ -34,6 +35,7 @@ pub struct ImportServiceHandle {
     pub runtime_handle: tokio::runtime::Handle,
     pub scan_tx: mpsc::UnboundedSender<ScanRequest>,
     pub scan_events_tx: broadcast::Sender<ScanEvent>,
+    pub key_service: KeyService,
 }
 
 #[derive(Debug, Clone)]
@@ -47,19 +49,10 @@ pub struct ScanRequest {
     pub path: std::path::PathBuf,
 }
 
-/// Try to create a DiscogsClient from env var or keyring.
+/// Try to create a DiscogsClient using the KeyService.
 /// Returns None if no API key is configured.
-fn get_discogs_client() -> Option<DiscogsClient> {
-    std::env::var("BAE_DISCOGS_API_KEY")
-        .ok()
-        .filter(|k| !k.is_empty())
-        .or_else(|| {
-            keyring_core::Entry::new("bae", "discogs_api_key")
-                .ok()
-                .and_then(|e| e.get_password().ok())
-                .filter(|k: &String| !k.is_empty())
-        })
-        .map(DiscogsClient::new)
+fn get_discogs_client(key_service: &KeyService) -> Option<DiscogsClient> {
+    key_service.get_discogs_key().map(DiscogsClient::new)
 }
 /// Torrent-specific metadata for import
 #[cfg(feature = "torrent")]
@@ -92,6 +85,7 @@ impl ImportServiceHandle {
         runtime_handle: tokio::runtime::Handle,
         scan_tx: mpsc::UnboundedSender<ScanRequest>,
         scan_events_tx: broadcast::Sender<ScanEvent>,
+        key_service: KeyService,
     ) -> Self {
         let progress_handle = ImportProgressHandle::new(progress_rx, runtime_handle.clone());
         Self {
@@ -103,6 +97,7 @@ impl ImportServiceHandle {
             runtime_handle,
             scan_tx,
             scan_events_tx,
+            key_service,
         }
     }
 
@@ -255,7 +250,7 @@ impl ImportServiceHandle {
                 parse_discogs_release(discogs_rel, master_year, cover_art_url.clone())?
             } else if let Some(ref mb_rel) = mb_release {
                 use crate::import::musicbrainz_parser::fetch_and_parse_mb_release;
-                let discogs_client = get_discogs_client();
+                let discogs_client = get_discogs_client(&self.key_service);
                 fetch_and_parse_mb_release(
                     &mb_rel.release_id,
                     master_year,
@@ -420,7 +415,7 @@ impl ImportServiceHandle {
                 parse_discogs_release(discogs_rel, master_year, cover_art_url.clone())?
             } else if let Some(ref mb_rel) = mb_release {
                 use crate::import::musicbrainz_parser::fetch_and_parse_mb_release;
-                let discogs_client = get_discogs_client();
+                let discogs_client = get_discogs_client(&self.key_service);
                 fetch_and_parse_mb_release(
                     &mb_rel.release_id,
                     master_year,
@@ -551,7 +546,7 @@ impl ImportServiceHandle {
             if let Some(ref discogs_rel) = discogs_release {
                 parse_discogs_release(discogs_rel, master_year, cover_art_url.clone())?
             } else if let Some(ref mb_rel) = mb_release {
-                let discogs_client = get_discogs_client();
+                let discogs_client = get_discogs_client(&self.key_service);
                 fetch_and_parse_mb_release(
                     &mb_rel.release_id,
                     master_year,

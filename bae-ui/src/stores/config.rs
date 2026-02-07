@@ -8,8 +8,10 @@ use dioxus::prelude::*;
 /// relevant to the UI. The Store is updated when config changes.
 #[derive(Clone, Debug, Default, PartialEq, Store)]
 pub struct ConfigState {
-    /// Discogs API key for metadata lookups
-    pub discogs_api_key: Option<String>,
+    /// Whether a Discogs API key is stored (hint flag, avoids keyring read)
+    pub discogs_key_stored: bool,
+    /// Whether an encryption key is stored (hint flag, avoids keyring read)
+    pub encryption_key_stored: bool,
 
     // Subsonic settings
     /// Whether the Subsonic API server is enabled

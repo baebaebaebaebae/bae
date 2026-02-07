@@ -1,7 +1,7 @@
 //! Storage Profiles section wrapper - handles persistence, delegates UI to StorageProfilesSectionView
 
 use crate::ui::app_service::use_app;
-use bae_ui::stores::{AppStateStoreExt, StorageProfilesStateStoreExt};
+use bae_ui::stores::{AppStateStoreExt, ConfigStateStoreExt, StorageProfilesStateStoreExt};
 use bae_ui::{StorageProfile, StorageProfilesSectionView};
 use dioxus::prelude::*;
 
@@ -15,20 +15,14 @@ pub fn StorageProfilesSection() -> Element {
     let profiles = store.profiles();
     let is_loading = store.loading();
 
-    // Encryption key info
-    let config = app.config.clone();
-    let (encryption_key_preview, encryption_key_length, encryption_configured) =
-        if let Some(ref key) = config.encryption_key {
-            let preview = if key.len() > 16 {
-                format!("{}...{}", &key[..8], &key[key.len() - 8..])
-            } else {
-                "***".to_string()
-            };
-            let length = key.len() / 2;
-            (preview, length, true)
-        } else {
-            ("Not configured".to_string(), 0, false)
-        };
+    // Encryption status from store (no keyring read — actual key only read on copy)
+    let encryption_configured = *app.state.config().encryption_key_stored().read();
+    let encryption_key_preview = if encryption_configured {
+        "●●●●●●●●".to_string()
+    } else {
+        "Not configured".to_string()
+    };
+    let encryption_key_length: usize = if encryption_configured { 32 } else { 0 };
 
     // Local UI state for editing
     let mut editing_profile = use_signal(|| Option::<StorageProfile>::None);
@@ -75,11 +69,11 @@ pub fn StorageProfilesSection() -> Element {
             encryption_key_preview,
             encryption_key_length,
             on_copy_key: {
-                let config = config.clone();
+                let app = app.clone();
                 move |_| {
-                    if let Some(ref key) = config.encryption_key {
+                    if let Some(key) = app.key_service.get_encryption_key() {
                         if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                            let _ = clipboard.set_text(key.clone());
+                            let _ = clipboard.set_text(key);
                         }
                     }
                 }
@@ -87,8 +81,12 @@ pub fn StorageProfilesSection() -> Element {
             on_import_key: {
                 let app = app.clone();
                 move |key: String| {
-                    app.save_config(move |config| {
-                        config.encryption_key = Some(key.clone());
+                    if let Err(e) = app.key_service.set_encryption_key(&key) {
+                        tracing::error!("Failed to save encryption key: {e}");
+                        return;
+                    }
+                    app.save_config(|config| {
+                        config.encryption_key_stored = true;
                     });
                 }
             },
