@@ -3,6 +3,7 @@
 mod album_art;
 mod album_cover_section;
 mod album_metadata;
+mod cover_picker;
 mod delete_album_dialog;
 mod delete_release_dialog;
 mod export_error_toast;

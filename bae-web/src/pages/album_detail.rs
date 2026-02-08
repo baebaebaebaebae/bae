@@ -139,6 +139,8 @@ pub fn AlbumDetail(album_id: String) -> Element {
                     },
                     on_transfer_to_profile: |_| {},
                     on_eject: |_| {},
+                    on_fetch_remote_covers: |_| {},
+                    on_select_cover: |_| {},
                     available_profiles: vec![],
                 }
             }

@@ -5,7 +5,7 @@ use super::utils::maybe_not_empty;
 use super::AlbumDetailView;
 use crate::ui::app_service::use_app;
 use crate::ui::Route;
-use bae_ui::display_types::PlaybackDisplay;
+use bae_ui::display_types::{CoverChange, PlaybackDisplay};
 use bae_ui::stores::{
     AlbumDetailStateStoreExt, AppStateStoreExt, PlaybackStatus, PlaybackUiStateStoreExt,
     StorageProfilesStateStoreExt,
@@ -236,6 +236,26 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
         }
     });
 
+    // Cover picker callbacks
+    let on_fetch_remote_covers = EventHandler::new({
+        let app = app.clone();
+        move |_: ()| {
+            app.fetch_remote_covers();
+        }
+    });
+    let on_select_cover = EventHandler::new({
+        let app = app.clone();
+        move |selection: CoverChange| {
+            let album_id = album_id();
+            let release_id = state
+                .selected_release_id()
+                .read()
+                .clone()
+                .unwrap_or_default();
+            app.change_cover(&album_id, &release_id, selection);
+        }
+    });
+
     // Available storage profiles for transfer
     let available_profiles = app.state.storage_profiles().profiles().read().clone();
 
@@ -281,6 +301,8 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
                 on_add_album_to_queue,
                 on_transfer_to_profile,
                 on_eject,
+                on_fetch_remote_covers,
+                on_select_cover,
                 available_profiles,
             }
         } else {

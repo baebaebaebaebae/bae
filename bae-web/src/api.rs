@@ -201,5 +201,7 @@ pub async fn fetch_album(album_id: &str) -> Result<AlbumDetailState, String> {
         storage_profile: None,
         transfer_progress: None,
         transfer_error: None,
+        remote_covers: vec![],
+        loading_remote_covers: false,
     })
 }
