@@ -60,7 +60,7 @@ impl PlaybackTestFixture {
             shared_library_manager.clone(),
             encryption_service.clone(),
             database_arc,
-            bae_core::keys::KeyService::new(true),
+            bae_core::keys::KeyService::new(true, "test".to_string()),
             std::env::temp_dir().join("bae-test-covers"),
         );
         let master_year = discogs_release.year.unwrap_or(2024);
@@ -368,7 +368,7 @@ impl CueFlacTestFixture {
             shared_library_manager.clone(),
             encryption_service.clone(),
             database_arc,
-            bae_core::keys::KeyService::new(true),
+            bae_core::keys::KeyService::new(true, "test".to_string()),
             std::env::temp_dir().join("bae-test-covers"),
         );
 
@@ -2005,7 +2005,7 @@ impl HighSampleRateTestFixture {
             shared_library_manager.clone(),
             encryption_service.clone(),
             database_arc,
-            bae_core::keys::KeyService::new(true),
+            bae_core::keys::KeyService::new(true, "test".to_string()),
             std::env::temp_dir().join("bae-test-covers"),
         );
 

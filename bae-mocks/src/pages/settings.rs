@@ -3,8 +3,8 @@
 use bae_ui::stores::CloudSyncStatus;
 use bae_ui::{
     AboutSectionView, BitTorrentSectionView, BitTorrentSettings, CloudSectionView,
-    DiscogsSectionView, SettingsTab, SettingsView, StorageLocation, StorageProfile,
-    StorageProfilesSectionView, SubsonicSectionView,
+    DiscogsSectionView, LibraryInfo, LibrarySectionView, SettingsTab, SettingsView,
+    StorageLocation, StorageProfile, StorageProfilesSectionView, SubsonicSectionView,
 };
 use dioxus::prelude::*;
 
@@ -18,6 +18,16 @@ pub fn Settings() -> Element {
             on_tab_change: move |tab| active_tab.set(tab),
 
             match *active_tab.read() {
+                SettingsTab::Library => rsx! {
+                    LibrarySectionView {
+                        libraries: mock_libraries(),
+                        on_switch: |_| {},
+                        on_create: |_| {},
+                        on_add_existing: |_| {},
+                        on_rename: |_| {},
+                        on_remove: |_| {},
+                    }
+                },
                 SettingsTab::Storage => rsx! {
                     StorageProfilesSectionView {
                         profiles: mock_storage_profiles(),
@@ -140,6 +150,29 @@ pub fn Settings() -> Element {
             }
         }
     }
+}
+
+fn mock_libraries() -> Vec<LibraryInfo> {
+    vec![
+        LibraryInfo {
+            id: "abc-123".to_string(),
+            name: Some("My Music".to_string()),
+            path: "/Users/demo/.bae/libraries/abc-123".to_string(),
+            is_active: true,
+        },
+        LibraryInfo {
+            id: "def-456".to_string(),
+            name: Some("Jazz Collection".to_string()),
+            path: "/Users/demo/.bae/libraries/def-456".to_string(),
+            is_active: false,
+        },
+        LibraryInfo {
+            id: "ghi-789".to_string(),
+            name: None,
+            path: "/Volumes/External/bae-library".to_string(),
+            is_active: false,
+        },
+    ]
 }
 
 fn mock_storage_profiles() -> Vec<StorageProfile> {

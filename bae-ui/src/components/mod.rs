@@ -70,8 +70,9 @@ pub use segmented_control::{Segment, SegmentedControl};
 pub use select::{Select, SelectOption};
 pub use settings::{
     AboutSectionView, BitTorrentSectionView, BitTorrentSettings, CloudSectionView,
-    DiscogsSectionView, SettingsTab, SettingsView, StorageLocation, StorageProfile,
-    StorageProfileEditorView, StorageProfilesSectionView, SubsonicSectionView,
+    DiscogsSectionView, LibraryInfo, LibrarySectionView, SettingsTab, SettingsView,
+    StorageLocation, StorageProfile, StorageProfileEditorView, StorageProfilesSectionView,
+    SubsonicSectionView,
 };
 pub use text_input::{TextInput, TextInputSize, TextInputType};
 pub use title_bar::{

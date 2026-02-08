@@ -102,8 +102,7 @@ fn main() {
     if is_first_run() {
         info!("First run detected — launching welcome screen");
         let dev_mode = config::Config::is_dev_mode();
-        let key_service = KeyService::new(dev_mode);
-        ui::components::welcome::launch_welcome(key_service);
+        ui::components::welcome::launch_welcome(dev_mode);
         // launch_welcome returns when user closes the window.
         // If they chose "Create new" or "Restore", the process was re-exec'd.
         // If they just closed the window, exit cleanly.
@@ -124,7 +123,16 @@ fn main() {
     let database = runtime_handle.block_on(create_database(&config));
 
     let dev_mode = config::Config::is_dev_mode();
-    let key_service = KeyService::new(dev_mode);
+    let key_service = KeyService::new(dev_mode, config.library_id.clone());
+
+    // One-time migration from global keyring entries to per-library namespaced entries
+    if !config.keys_migrated {
+        key_service.migrate_global_keys();
+        config.keys_migrated = true;
+        if let Err(e) = config.save() {
+            error!("Failed to save config after key migration: {e}");
+        }
+    }
 
     // If config says we have an encryption key but it's missing from the keyring,
     // show the unlock screen so the user can paste their recovery key.

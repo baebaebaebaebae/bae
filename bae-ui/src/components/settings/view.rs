@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 /// Available settings tabs
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum SettingsTab {
+    Library,
     #[default]
     Storage,
     Discogs,
@@ -18,6 +19,7 @@ pub enum SettingsTab {
 impl SettingsTab {
     pub fn label(&self) -> &'static str {
         match self {
+            SettingsTab::Library => "Library",
             SettingsTab::Storage => "Storage",
             SettingsTab::Discogs => "Discogs",
             SettingsTab::BitTorrent => "BitTorrent",
@@ -29,6 +31,7 @@ impl SettingsTab {
 
     pub fn all() -> &'static [SettingsTab] {
         &[
+            SettingsTab::Library,
             SettingsTab::Storage,
             SettingsTab::Discogs,
             #[cfg(feature = "torrent")]
