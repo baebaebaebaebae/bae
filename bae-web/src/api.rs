@@ -198,5 +198,8 @@ pub async fn fetch_album(album_id: &str) -> Result<AlbumDetailState, String> {
         error: None,
         import_progress: None,
         import_error: None,
+        storage_profile: None,
+        transfer_progress: None,
+        transfer_error: None,
     })
 }

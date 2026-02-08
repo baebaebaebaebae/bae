@@ -9,6 +9,7 @@
 //! - **`TooltipPopover`**: Renders just the tooltip bubble. Takes a `TooltipHandle`.
 //! - **`Tooltip`**: Sugar that wraps children in a span, creates its own handle internally.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use dioxus::prelude::*;
@@ -98,6 +99,13 @@ pub fn use_tooltip_handle() -> TooltipHandle {
     // Store the closure so we can remove the listener on unmount.
     let mut blur_cleanup: Signal<Option<BlurCleanup>> = use_signal(|| None);
 
+    // Track whether the component is still alive. Shared between the blur
+    // callback and use_drop so the callback can bail out after unmount.
+    // Needed because listener cleanup is deferred (see #83 workaround below),
+    // leaving a window where blur fires after the Dioxus runtime is dropped.
+    let alive = Rc::new(Cell::new(true));
+    let alive_for_blur = alive.clone();
+
     // WORKAROUND: use_effect instead of use_hook so the web_sys_x::window() IPC
     // call runs after the render cycle. Calling it during render (use_hook) causes
     // wry-bindgen U8BufferEmpty panics. https://github.com/bae-fm/bae/issues/82
@@ -109,11 +117,15 @@ pub fn use_tooltip_handle() -> TooltipHandle {
         // Capture the Dioxus runtime so we can restore it inside the blur callback,
         // which runs from wasm-bindgen outside the Dioxus runtime.
         let runtime = Runtime::current();
+        let alive = alive_for_blur.clone();
 
         let cb = wasm_bindgen_x::closure::Closure::wrap(Box::new(move || {
+            // Component may have unmounted but listener cleanup is deferred (#83).
+            // The runtime's generational box is already dropped → skip everything.
+            if !alive.get() {
+                return;
+            }
             let _guard = RuntimeGuard::new(runtime.clone());
-            // Signals may already be dropped if the component unmounted
-            // before the deferred blur listener cleanup ran.
             if let Ok(mut guard) = hover_task.try_write() {
                 if let Some(task) = guard.take() {
                     task.cancel();
@@ -133,6 +145,9 @@ pub fn use_tooltip_handle() -> TooltipHandle {
     });
 
     use_drop(move || {
+        // Mark dead before any deferred cleanup — blur callback will bail out.
+        alive.set(false);
+
         if let Some(task) = hover_task.peek().as_ref() {
             task.cancel();
         }
