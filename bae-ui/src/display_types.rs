@@ -161,7 +161,7 @@ pub struct RemoteCoverOption {
 /// Cover selection from the cover picker
 #[derive(Clone, Debug, PartialEq)]
 pub enum CoverChange {
-    ExistingImage { image_id: String },
+    ReleaseImage { file_id: String },
     RemoteCover { url: String, source: String },
 }
 

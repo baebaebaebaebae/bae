@@ -1476,11 +1476,10 @@ async fn change_cover_async(
     selection: bae_ui::display_types::CoverChange,
 ) -> Result<(), String> {
     match selection {
-        bae_ui::display_types::CoverChange::ExistingImage { image_id } => {
-            // image_id is a file ID -- get the file to read its bytes
+        bae_ui::display_types::CoverChange::ReleaseImage { file_id } => {
             let file = library_manager
                 .get()
-                .get_file_by_id(&image_id)
+                .get_file_by_id(&file_id)
                 .await
                 .map_err(|e| format!("Failed to get file: {}", e))?
                 .ok_or_else(|| "File not found".to_string())?;

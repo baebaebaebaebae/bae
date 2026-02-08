@@ -29,8 +29,8 @@ pub fn CoverPickerWrapper(
         if img.is_cover {
             cover_index = Some(gallery_items.len());
         }
-        change_map.push(CoverChange::ExistingImage {
-            image_id: img.id.clone(),
+        change_map.push(CoverChange::ReleaseImage {
+            file_id: img.id.clone(),
         });
         gallery_items.push(GalleryItem {
             label: img.filename.clone(),
