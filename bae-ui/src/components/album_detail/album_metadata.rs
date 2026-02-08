@@ -23,7 +23,7 @@ pub fn AlbumMetadata(
                             ", "
                         }
                         span {
-                            class: "hover:text-white hover:underline transition-colors cursor-pointer",
+                            class: "hover:text-white transition-colors cursor-pointer",
                             onclick: {
                                 let artist_id = artist.id.clone();
                                 move |_| on_artist_click.call(artist_id.clone())

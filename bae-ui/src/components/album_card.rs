@@ -99,7 +99,7 @@ pub fn AlbumCard(
                                 ", "
                             }
                             span {
-                                class: "hover:text-white hover:underline transition-colors cursor-pointer",
+                                class: "hover:text-white transition-colors cursor-pointer",
                                 onclick: {
                                     let artist_id = artist.id.clone();
                                     move |evt: Event<MouseData>| {

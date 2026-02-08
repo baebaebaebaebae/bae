@@ -223,7 +223,7 @@ fn TrackInfoSection(
                     "{track.title}"
                 }
                 span {
-                    class: "text-sm text-gray-400 hover:text-white hover:underline transition-colors cursor-pointer",
+                    class: "text-sm text-gray-400 hover:text-white transition-colors cursor-pointer",
                     onclick: move |_| {
                         if let Some(ref id) = artist_id {
                             on_artist_click.call(id.clone());

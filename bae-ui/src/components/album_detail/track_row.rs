@@ -140,7 +140,7 @@ pub fn TrackRow(
                                 ", "
                             }
                             span {
-                                class: if is_importing { "" } else { "hover:text-white hover:underline transition-colors cursor-pointer" },
+                                class: if is_importing { "" } else { "hover:text-white transition-colors cursor-pointer" },
                                 onclick: {
                                     let artist_id = artist.id.clone();
                                     move |evt: Event<MouseData>| {
