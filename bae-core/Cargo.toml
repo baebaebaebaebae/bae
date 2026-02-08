@@ -79,6 +79,11 @@ name = "test_playback_cpu"
 path = "tests/test_playback_cpu.rs"
 required-features = ["test-utils"]
 
+[[test]]
+name = "test_transfer"
+path = "tests/test_transfer.rs"
+required-features = ["test-utils"]
+
 [features]
 default = []
 test-utils = []

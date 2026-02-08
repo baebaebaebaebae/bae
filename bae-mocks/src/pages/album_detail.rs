@@ -39,6 +39,9 @@ pub fn AlbumDetail(album_id: String) -> Element {
         error: None,
         import_progress: None,
         import_error: None,
+        storage_profile: None,
+        transfer_progress: None,
+        transfer_error: None,
     });
 
     // Get tracks lens for per-track reactivity
@@ -72,6 +75,9 @@ pub fn AlbumDetail(album_id: String) -> Element {
                 },
                 on_play_album: |_| {},
                 on_add_album_to_queue: |_| {},
+                on_transfer_to_profile: |_| {},
+                on_eject: |_| {},
+                available_profiles: vec![],
             }
         } else {
             ErrorDisplay { message: "Album not found in demo data".to_string() }

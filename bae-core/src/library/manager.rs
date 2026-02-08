@@ -672,6 +672,27 @@ impl LibraryManager {
             .get_storage_profile_for_release(release_id)
             .await?)
     }
+    /// Delete release storage link
+    pub async fn delete_release_storage(&self, release_id: &str) -> Result<(), LibraryError> {
+        Ok(self.database.delete_release_storage(release_id).await?)
+    }
+
+    /// Delete all file records for a release
+    pub async fn delete_files_for_release(&self, release_id: &str) -> Result<(), LibraryError> {
+        Ok(self.database.delete_files_for_release(release_id).await?)
+    }
+
+    /// Insert release storage link
+    pub async fn insert_release_storage(
+        &self,
+        release_storage: &crate::db::DbReleaseStorage,
+    ) -> Result<(), LibraryError> {
+        Ok(self
+            .database
+            .insert_release_storage(release_storage)
+            .await?)
+    }
+
     /// Insert a new import operation record
     pub async fn insert_import(&self, import: &DbImport) -> Result<(), LibraryError> {
         Ok(self.database.insert_import(import).await?)

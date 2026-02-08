@@ -43,12 +43,12 @@ pub use helpers::{
     BackButton, ConfirmDialogView, ErrorDisplay, LoadingSpinner, Tooltip, TooltipBubble,
 };
 pub use icons::{
-    AlertTriangleIcon, ArrowDownIcon, ArrowLeftIcon, ArrowUpIcon, CheckIcon, ChevronDownIcon,
-    ChevronLeftIcon, ChevronRightIcon, CloudOffIcon, DiscIcon, DownloadIcon, EllipsisIcon,
-    ExternalLinkIcon, FileIcon, FileTextIcon, FolderIcon, ImageIcon, InfoIcon, KeyIcon, LayersIcon,
-    LoaderIcon, LockIcon, MenuIcon, MonitorIcon, PauseIcon, PencilIcon, PlayIcon, PlusIcon,
-    RefreshIcon, RowsIcon, SearchIcon, SettingsIcon, SkipBackIcon, SkipForwardIcon, StarIcon,
-    TrashIcon, UploadIcon, UserIcon, XIcon,
+    AlertTriangleIcon, ArrowDownIcon, ArrowLeftIcon, ArrowRightLeftIcon, ArrowUpIcon, CheckIcon,
+    ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, CloudIcon, CloudOffIcon, DiscIcon,
+    DownloadIcon, EllipsisIcon, ExternalLinkIcon, FileIcon, FileTextIcon, FolderIcon,
+    HardDriveIcon, ImageIcon, InfoIcon, KeyIcon, LayersIcon, LoaderIcon, LockIcon, MenuIcon,
+    MonitorIcon, PauseIcon, PencilIcon, PlayIcon, PlusIcon, RefreshIcon, RowsIcon, SearchIcon,
+    SettingsIcon, SkipBackIcon, SkipForwardIcon, StarIcon, TrashIcon, UploadIcon, UserIcon, XIcon,
 };
 pub use import::{
     CdDriveStatus, CdSelectorView, ConfirmationView, DiscIdLookupErrorView, FileListView,

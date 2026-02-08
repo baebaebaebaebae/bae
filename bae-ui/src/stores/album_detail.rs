@@ -1,7 +1,17 @@
 //! Album detail state store
 
+use crate::components::settings::StorageProfile;
 use crate::display_types::{Album, Artist, File, Image, Release, Track};
 use dioxus::prelude::*;
+
+/// Transfer progress state
+#[derive(Clone, Debug, PartialEq)]
+pub struct TransferProgressState {
+    pub file_index: usize,
+    pub total_files: usize,
+    pub filename: String,
+    pub percent: u8,
+}
 
 /// State for the album detail view
 #[derive(Clone, Debug, Default, PartialEq, Store)]
@@ -34,4 +44,10 @@ pub struct AlbumDetailState {
     pub import_progress: Option<u8>,
     /// Import error message if import failed
     pub import_error: Option<String>,
+    /// Storage profile for the current release (None = self-managed)
+    pub storage_profile: Option<StorageProfile>,
+    /// Transfer progress (Some when a transfer is active)
+    pub transfer_progress: Option<TransferProgressState>,
+    /// Transfer error message
+    pub transfer_error: Option<String>,
 }

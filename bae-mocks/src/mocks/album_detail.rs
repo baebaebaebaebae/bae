@@ -144,6 +144,9 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
         error: None,
         import_progress: None,
         import_error: None,
+        storage_profile: None,
+        transfer_progress: None,
+        transfer_error: None,
     });
 
     // Get tracks lens for per-track reactivity
@@ -190,6 +193,9 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
                 on_artist_click: |_| {},
                 on_play_album: |_| {},
                 on_add_album_to_queue: |_| {},
+                on_transfer_to_profile: |_| {},
+                on_eject: |_| {},
+                available_profiles: vec![],
             }
         }
     }

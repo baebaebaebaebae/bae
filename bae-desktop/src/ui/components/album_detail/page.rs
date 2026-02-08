@@ -8,6 +8,7 @@ use crate::ui::Route;
 use bae_ui::display_types::PlaybackDisplay;
 use bae_ui::stores::{
     AlbumDetailStateStoreExt, AppStateStoreExt, PlaybackStatus, PlaybackUiStateStoreExt,
+    StorageProfilesStateStoreExt,
 };
 use dioxus::prelude::*;
 use rfd::AsyncFileDialog;
@@ -221,6 +222,23 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
         }
     });
 
+    // Transfer callbacks
+    let on_transfer_to_profile = EventHandler::new({
+        let app = app.clone();
+        move |(release_id, profile_id): (String, String)| {
+            app.transfer_release_storage(&release_id, &profile_id);
+        }
+    });
+    let on_eject = EventHandler::new({
+        let app = app.clone();
+        move |release_id: String| {
+            app.eject_release_storage(&release_id);
+        }
+    });
+
+    // Available storage profiles for transfer
+    let available_profiles = app.state.storage_profiles().profiles().read().clone();
+
     // Release select callback - navigate to new URL which triggers data reload
     let on_release_select = {
         move |new_release_id: String| {
@@ -261,6 +279,9 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
                 on_artist_click,
                 on_play_album,
                 on_add_album_to_queue,
+                on_transfer_to_profile,
+                on_eject,
+                available_profiles,
             }
         } else {
             AlbumDetailLoading {}
