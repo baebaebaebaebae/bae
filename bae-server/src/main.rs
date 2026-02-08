@@ -80,11 +80,11 @@ fn load_library_config(library_path: &Path) -> ConfigYaml {
             std::process::exit(1);
         })
     } else {
-        info!(
-            "No config.yaml found at {}, using defaults",
+        error!(
+            "config.yaml not found at {} — required for library_id",
             library_path.display()
         );
-        ConfigYaml::default()
+        std::process::exit(1);
     }
 }
 
@@ -188,10 +188,7 @@ async fn download_from_cloud(args: &Args, config: &ConfigYaml) {
         error!("--recovery-key is required to download from cloud");
         std::process::exit(1);
     });
-    let library_id = config.library_id.as_deref().unwrap_or_else(|| {
-        error!("library_id missing from config.yaml");
-        std::process::exit(1);
-    });
+    let library_id = &config.library_id;
     let bucket = config.cloud_sync_bucket.as_deref().unwrap_or_else(|| {
         error!("cloud_sync_bucket missing from config.yaml");
         std::process::exit(1);
