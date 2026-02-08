@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 
 #[component]
 pub fn Library() -> Element {
-    let data = use_resource(|| api::fetch_albums());
+    let data = use_resource(api::fetch_albums);
     let read = data.read();
 
     let result = match &*read {
