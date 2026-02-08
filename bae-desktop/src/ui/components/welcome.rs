@@ -339,6 +339,7 @@ async fn do_restore(
         cloud_sync_last_upload: None,
     };
     config.save_to_config_yaml()?;
+    bae_core::config::Config::add_known_library(&library_path)?;
 
     // Write secrets to keyring
     key_service.set_encryption_key(&encryption_key_hex)?;
