@@ -126,10 +126,8 @@ pub async fn fetch_cover_art_for_mb_release(
     None
 }
 
-/// Download cover art from a URL and return the raw bytes and file extension.
+/// Download cover art from a URL and return the raw bytes and content type.
 pub async fn download_cover_art_bytes(cover_art_url: &str) -> Result<(Vec<u8>, String), String> {
-    let extension = super::image_extension_from_url(cover_art_url);
-
     info!("Downloading cover art from {}", cover_art_url);
 
     let client = reqwest::Client::builder()
@@ -147,6 +145,28 @@ pub async fn download_cover_art_bytes(cover_art_url: &str) -> Result<(Vec<u8>, S
             response.status()
         ));
     }
+
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|ct| {
+            let mime = ct.split(';').next().unwrap_or(ct).trim();
+            if mime.starts_with("image/") {
+                Some(mime.to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| {
+            // Fall back to guessing from URL extension
+            let ext = reqwest::Url::parse(cover_art_url)
+                .ok()
+                .and_then(|parsed| parsed.path().rsplit('.').next().map(|e| e.to_lowercase()))
+                .unwrap_or_default();
+            crate::util::content_type_for_extension(&ext).to_string()
+        });
+
     let bytes = response
         .bytes()
         .await
@@ -156,5 +176,5 @@ pub async fn download_cover_art_bytes(cover_art_url: &str) -> Result<(Vec<u8>, S
     }
 
     info!("Downloaded cover art ({} bytes)", bytes.len());
-    Ok((bytes.to_vec(), extension))
+    Ok((bytes.to_vec(), content_type))
 }

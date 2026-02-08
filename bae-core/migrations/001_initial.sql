@@ -5,7 +5,7 @@ CREATE TABLE artists (
     discogs_artist_id TEXT,
     bandcamp_artist_id TEXT,
     musicbrainz_artist_id TEXT,
-    image_path TEXT,
+
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -148,16 +148,16 @@ CREATE TABLE torrent_piece_mappings (
     UNIQUE(torrent_id, piece_index)
 );
 
-CREATE TABLE images (
+CREATE TABLE library_images (
     id TEXT PRIMARY KEY,
-    release_id TEXT NOT NULL,
-    filename TEXT NOT NULL,
-    is_cover BOOLEAN NOT NULL DEFAULT FALSE,
-    source TEXT NOT NULL,
+    type TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    file_size INTEGER NOT NULL,
     width INTEGER,
     height INTEGER,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (release_id) REFERENCES releases (id) ON DELETE CASCADE
+    source TEXT NOT NULL,
+    source_url TEXT,
+    created_at TEXT NOT NULL
 );
 
 CREATE TABLE storage_profiles (
@@ -212,7 +212,7 @@ CREATE INDEX idx_torrents_release_id ON torrents (release_id);
 CREATE INDEX idx_torrents_info_hash ON torrents (info_hash);
 CREATE INDEX idx_torrent_piece_mappings_torrent_id ON torrent_piece_mappings (torrent_id);
 CREATE INDEX idx_audio_formats_track_id ON audio_formats (track_id);
-CREATE INDEX idx_images_release_id ON images (release_id);
+CREATE INDEX idx_library_images_type ON library_images (type);
 CREATE INDEX idx_release_storage_profile_id ON release_storage (storage_profile_id);
 CREATE INDEX idx_imports_status ON imports (status);
 CREATE INDEX idx_imports_release_id ON imports (release_id);

@@ -44,7 +44,6 @@ impl Database {
             discogs_artist_id: row.get("discogs_artist_id"),
             bandcamp_artist_id: row.get("bandcamp_artist_id"),
             musicbrainz_artist_id: row.get("musicbrainz_artist_id"),
-            image_path: row.get("image_path"),
             created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                 .unwrap()
                 .with_timezone(&Utc),
@@ -60,9 +59,9 @@ impl Database {
             r#"
             INSERT INTO artists (
                 id, name, sort_name, discogs_artist_id,
-                bandcamp_artist_id, musicbrainz_artist_id, image_path,
+                bandcamp_artist_id, musicbrainz_artist_id,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&artist.id)
@@ -71,7 +70,6 @@ impl Database {
         .bind(&artist.discogs_artist_id)
         .bind(&artist.bandcamp_artist_id)
         .bind(&artist.musicbrainz_artist_id)
-        .bind(&artist.image_path)
         .bind(artist.created_at.to_rfc3339())
         .bind(artist.updated_at.to_rfc3339())
         .execute(&self.pool)
@@ -137,16 +135,6 @@ impl Database {
         Ok(())
     }
 
-    /// Update artist image path
-    pub async fn update_artist_image(&self, id: &str, image_path: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE artists SET image_path = ?, updated_at = ? WHERE id = ?")
-            .bind(image_path)
-            .bind(Utc::now().to_rfc3339())
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
     /// Insert album-artist relationship
     pub async fn insert_album_artist(
         &self,
@@ -1425,146 +1413,76 @@ impl Database {
             })
             .collect())
     }
-    /// Insert an image record
-    pub async fn insert_image(&self, image: &DbImage) -> Result<(), sqlx::Error> {
+    /// Upsert a library image record
+    pub async fn upsert_library_image(&self, image: &DbLibraryImage) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
-            INSERT INTO images (
-                id, release_id, filename, is_cover, source, width, height, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO library_images (id, type, content_type, file_size, width, height, source, source_url, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                type = excluded.type,
+                content_type = excluded.content_type,
+                file_size = excluded.file_size,
+                width = excluded.width,
+                height = excluded.height,
+                source = excluded.source,
+                source_url = excluded.source_url
             "#,
         )
         .bind(&image.id)
-        .bind(&image.release_id)
-        .bind(&image.filename)
-        .bind(image.is_cover)
-        .bind(image.source)
+        .bind(image.image_type.as_str())
+        .bind(&image.content_type)
+        .bind(image.file_size)
         .bind(image.width)
         .bind(image.height)
+        .bind(&image.source)
+        .bind(&image.source_url)
         .bind(image.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
         Ok(())
     }
-    /// Get all images for a release
-    pub async fn get_images_for_release(
+
+    /// Get a library image by ID and type
+    pub async fn get_library_image(
         &self,
-        release_id: &str,
-    ) -> Result<Vec<DbImage>, sqlx::Error> {
-        let rows = sqlx::query(
-            "SELECT * FROM images WHERE release_id = ? ORDER BY is_cover DESC, filename",
-        )
-        .bind(release_id)
-        .fetch_all(&self.pool)
-        .await?;
-        let mut images = Vec::new();
-        for row in rows {
-            images.push(DbImage {
-                id: row.get("id"),
-                release_id: row.get("release_id"),
-                filename: row.get("filename"),
-                is_cover: row.get("is_cover"),
-                source: row.get("source"),
-                width: row.get("width"),
-                height: row.get("height"),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
-                    .unwrap()
-                    .with_timezone(&Utc),
-            });
-        }
-        Ok(images)
-    }
-    /// Get the cover image for a release
-    pub async fn get_cover_image_for_release(
-        &self,
-        release_id: &str,
-    ) -> Result<Option<DbImage>, sqlx::Error> {
-        let row = sqlx::query("SELECT * FROM images WHERE release_id = ? AND is_cover = TRUE")
-            .bind(release_id)
+        id: &str,
+        image_type: &LibraryImageType,
+    ) -> Result<Option<DbLibraryImage>, sqlx::Error> {
+        let row = sqlx::query("SELECT * FROM library_images WHERE id = ? AND type = ?")
+            .bind(id)
+            .bind(image_type.as_str())
             .fetch_optional(&self.pool)
             .await?;
-        Ok(row.map(|row| DbImage {
+        Ok(row.map(|row| DbLibraryImage {
             id: row.get("id"),
-            release_id: row.get("release_id"),
-            filename: row.get("filename"),
-            is_cover: row.get("is_cover"),
-            source: row.get("source"),
+            image_type: row.get::<String, _>("type").parse().unwrap(),
+            content_type: row.get("content_type"),
+            file_size: row.get("file_size"),
             width: row.get("width"),
             height: row.get("height"),
+            source: row.get("source"),
+            source_url: row.get("source_url"),
             created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                 .unwrap()
                 .with_timezone(&Utc),
         }))
     }
-    /// Set an image as the cover (and unset any previous cover)
-    pub async fn set_cover_image(
+
+    /// Delete a library image by ID and type
+    pub async fn delete_library_image(
         &self,
-        release_id: &str,
-        image_id: &str,
+        id: &str,
+        image_type: &LibraryImageType,
     ) -> Result<(), sqlx::Error> {
-        let mut tx = self.pool.begin().await?;
-        sqlx::query("UPDATE images SET is_cover = FALSE WHERE release_id = ? AND is_cover = TRUE")
-            .bind(release_id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("UPDATE images SET is_cover = TRUE WHERE id = ?")
-            .bind(image_id)
-            .execute(&mut *tx)
-            .await?;
-        tx.commit().await?;
-        Ok(())
-    }
-    /// Delete an image by ID
-    pub async fn delete_image(&self, image_id: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("DELETE FROM images WHERE id = ?")
-            .bind(image_id)
+        sqlx::query("DELETE FROM library_images WHERE id = ? AND type = ?")
+            .bind(id)
+            .bind(image_type.as_str())
             .execute(&self.pool)
             .await?;
         Ok(())
     }
-    /// Get an image by ID
-    pub async fn get_image_by_id(&self, image_id: &str) -> Result<Option<DbImage>, sqlx::Error> {
-        let row = sqlx::query("SELECT * FROM images WHERE id = ?")
-            .bind(image_id)
-            .fetch_optional(&self.pool)
-            .await?;
-        Ok(row.map(|row| DbImage {
-            id: row.get("id"),
-            release_id: row.get("release_id"),
-            filename: row.get("filename"),
-            is_cover: row.get("is_cover"),
-            source: row.get("source"),
-            width: row.get("width"),
-            height: row.get("height"),
-            created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
-                .unwrap()
-                .with_timezone(&Utc),
-        }))
-    }
-    /// Get a file by release ID and filename
-    pub async fn get_file_by_release_and_filename(
-        &self,
-        release_id: &str,
-        filename: &str,
-    ) -> Result<Option<DbFile>, sqlx::Error> {
-        let row = sqlx::query("SELECT * FROM files WHERE release_id = ? AND original_filename = ?")
-            .bind(release_id)
-            .bind(filename)
-            .fetch_optional(&self.pool)
-            .await?;
-        Ok(row.map(|row| DbFile {
-            id: row.get("id"),
-            release_id: row.get("release_id"),
-            original_filename: row.get("original_filename"),
-            file_size: row.get("file_size"),
-            format: row.get("format"),
-            source_path: row.get("source_path"),
-            encryption_nonce: row.get("encryption_nonce"),
-            created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
-                .unwrap()
-                .with_timezone(&Utc),
-        }))
-    }
+
     /// Update album's cover_release_id
     pub async fn set_album_cover_release(
         &self,

@@ -323,38 +323,29 @@ async fn get_cover_art(
         }
     };
 
-    // Try common image extensions
-    let covers_dir = state.library_dir.covers_dir();
-    let extensions = ["jpg", "jpeg", "png", "webp", "gif"];
+    let cover_path = state.library_dir.cover_path(&release_id);
 
-    for ext in &extensions {
-        let path = covers_dir.join(format!("{}.{}", release_id, ext));
-        if path.exists() {
-            match tokio::fs::read(&path).await {
-                Ok(data) => {
-                    let content_type = match *ext {
-                        "jpg" | "jpeg" => "image/jpeg",
-                        "png" => "image/png",
-                        "webp" => "image/webp",
-                        "gif" => "image/gif",
-                        _ => "application/octet-stream",
-                    };
-                    return (StatusCode::OK, [("Content-Type", content_type)], data)
-                        .into_response();
-                }
-                Err(e) => {
-                    error!("Failed to read cover art file: {}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Failed to read cover art",
-                    )
-                        .into_response();
-                }
-            }
+    match tokio::fs::read(&cover_path).await {
+        Ok(data) => {
+            let content_type = state
+                .library_manager
+                .get()
+                .get_library_image(&release_id, &crate::db::LibraryImageType::Cover)
+                .await
+                .ok()
+                .flatten()
+                .map(|img| img.content_type)
+                .unwrap_or_else(|| "image/jpeg".to_string());
+
+            (
+                StatusCode::OK,
+                [("Content-Type", content_type.as_str())],
+                data,
+            )
+                .into_response()
         }
+        Err(_) => (StatusCode::NOT_FOUND, "Cover art file not found").into_response(),
     }
-
-    (StatusCode::NOT_FOUND, "Cover art file not found").into_response()
 }
 
 /// Stream a song - read and decrypt audio file from storage

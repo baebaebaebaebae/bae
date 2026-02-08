@@ -30,6 +30,23 @@ impl LibraryDir {
     pub fn artists_dir(&self) -> PathBuf {
         self.path.join("artists")
     }
+
+    pub fn cover_path(&self, release_id: &str) -> PathBuf {
+        self.covers_dir().join(release_id)
+    }
+
+    pub fn artist_image_path(&self, artist_id: &str) -> PathBuf {
+        self.artists_dir().join(artist_id)
+    }
+
+    pub fn pending_deletions_path(&self) -> PathBuf {
+        self.path.join("pending_deletions.json")
+    }
+
+    /// All asset directories that should be synced/created.
+    pub fn asset_dirs(&self) -> Vec<PathBuf> {
+        vec![self.covers_dir(), self.artists_dir()]
+    }
 }
 
 impl Deref for LibraryDir {

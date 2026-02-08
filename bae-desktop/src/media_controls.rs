@@ -300,20 +300,16 @@ async fn update_media_metadata(
 }
 
 /// Resolve cover art to a file:// URL for macOS media controls.
-/// Looks up the cover in the library's covers cache directory.
+/// Looks up the cover in the library's covers directory.
 fn resolve_cover_file_url(
     library_path: &std::path::Path,
     cover_release_id: Option<String>,
 ) -> Option<String> {
     let release_id = cover_release_id?;
-    let covers_dir = library_path.join("covers");
-
-    for ext in &["jpg", "jpeg", "png", "webp", "gif"] {
-        let path = covers_dir.join(format!("{}.{}", release_id, ext));
-        if path.exists() {
-            return Some(format!("file://{}", path.display()));
-        }
+    let cover_path = library_path.join("covers").join(&release_id);
+    if cover_path.exists() {
+        Some(format!("file://{}", cover_path.display()))
+    } else {
+        None
     }
-
-    None
 }

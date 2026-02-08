@@ -176,12 +176,32 @@ impl CloudSyncService {
 
     /// Upload all cover images (encrypted) to S3.
     pub async fn upload_covers(&self, covers_dir: &Path) -> Result<(), CloudSyncError> {
-        if !covers_dir.exists() {
-            debug!("No covers directory, skipping cover upload");
+        self.upload_image_dir(covers_dir, "covers").await
+    }
+
+    /// Download and decrypt all cover images from S3.
+    pub async fn download_covers(&self, covers_dir: &Path) -> Result<(), CloudSyncError> {
+        self.download_image_dir(covers_dir, "covers").await
+    }
+
+    /// Upload all artist images (encrypted) to S3.
+    pub async fn upload_artists(&self, artists_dir: &Path) -> Result<(), CloudSyncError> {
+        self.upload_image_dir(artists_dir, "artists").await
+    }
+
+    /// Download and decrypt all artist images from S3.
+    pub async fn download_artists(&self, artists_dir: &Path) -> Result<(), CloudSyncError> {
+        self.download_image_dir(artists_dir, "artists").await
+    }
+
+    /// Upload all files in a directory (encrypted) to S3 under the given subdirectory.
+    async fn upload_image_dir(&self, dir: &Path, subdir: &str) -> Result<(), CloudSyncError> {
+        if !dir.exists() {
+            debug!("No {} directory, skipping upload", subdir);
             return Ok(());
         }
 
-        let mut entries = tokio::fs::read_dir(covers_dir).await?;
+        let mut entries = tokio::fs::read_dir(dir).await?;
         let mut count = 0u32;
 
         while let Some(entry) = entries.next_entry().await? {
@@ -197,20 +217,20 @@ impl CloudSyncService {
 
             let data = tokio::fs::read(&path).await?;
             let encrypted = self.encryption_service.encrypt(&data);
-            let key = format!("bae/{}/covers/{}", self.library_id, filename);
+            let key = format!("bae/{}/{}/{}", self.library_id, subdir, filename);
             self.put_object(&key, &encrypted).await?;
             count += 1;
         }
 
-        info!("Uploaded {} cover images", count);
+        info!("Uploaded {} {} images", count, subdir);
         Ok(())
     }
 
-    /// Download and decrypt all cover images from S3.
-    pub async fn download_covers(&self, covers_dir: &Path) -> Result<(), CloudSyncError> {
-        tokio::fs::create_dir_all(covers_dir).await?;
+    /// Download and decrypt all files from an S3 subdirectory into a local directory.
+    async fn download_image_dir(&self, dir: &Path, subdir: &str) -> Result<(), CloudSyncError> {
+        tokio::fs::create_dir_all(dir).await?;
 
-        let prefix = format!("bae/{}/covers/", self.library_id);
+        let prefix = format!("bae/{}/{}/", self.library_id, subdir);
         let keys = self.list_objects(&prefix).await?;
 
         let mut count = 0u32;
@@ -222,12 +242,12 @@ impl CloudSyncService {
 
             let encrypted = self.get_object(key).await?;
             let decrypted = self.encryption_service.decrypt(&encrypted)?;
-            let target = covers_dir.join(filename);
+            let target = dir.join(filename);
             tokio::fs::write(&target, &decrypted).await?;
             count += 1;
         }
 
-        info!("Downloaded {} cover images", count);
+        info!("Downloaded {} {} images", count, subdir);
         Ok(())
     }
 
