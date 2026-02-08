@@ -1,6 +1,6 @@
 //! About section view
 
-use crate::components::{Button, ButtonSize, ButtonVariant};
+use crate::components::{Button, ButtonSize, ButtonVariant, SettingsCard, SettingsSection};
 use dioxus::prelude::*;
 
 /// About section view
@@ -14,10 +14,10 @@ pub fn AboutSectionView(
     on_check_updates: EventHandler<()>,
 ) -> Element {
     rsx! {
-        div { class: "max-w-2xl",
-            h2 { class: "text-xl font-semibold text-white mb-6", "About" }
+        SettingsSection {
+            h2 { class: "text-xl font-semibold text-white", "About" }
 
-            div { class: "bg-gray-800 rounded-lg p-6 mb-6",
+            SettingsCard {
                 h3 { class: "text-lg font-medium text-white mb-4", "Application" }
                 div { class: "space-y-3",
                     div { class: "flex justify-between items-center",
@@ -39,7 +39,7 @@ pub fn AboutSectionView(
                 }
             }
 
-            div { class: "bg-gray-800 rounded-lg p-6",
+            SettingsCard {
                 h3 { class: "text-lg font-medium text-white mb-4", "Library Statistics" }
                 div { class: "bg-gray-700 rounded-lg p-4 text-center",
                     div { class: "text-3xl font-bold text-indigo-400", "{album_count}" }

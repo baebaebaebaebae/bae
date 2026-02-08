@@ -1,5 +1,6 @@
 //! Library management section for settings
 
+use crate::components::SettingsSection;
 use dioxus::prelude::*;
 
 /// Library info for the settings UI (uses String for path since bae-ui targets wasm too)
@@ -40,7 +41,7 @@ pub fn LibrarySectionView(
     };
 
     rsx! {
-        div { class: "space-y-6",
+        SettingsSection {
             div { class: "flex items-center justify-between",
                 div {
                     h2 { class: "text-xl font-semibold text-white", "Library" }
@@ -71,7 +72,7 @@ pub fn LibrarySectionView(
                         rsx! {
                             div {
                                 key: "{lib.id}",
-                                class: "flex items-center justify-between p-4 bg-gray-800 rounded-lg border border-gray-700",
+                                class: "flex items-center justify-between p-4 rounded-lg border border-border-subtle",
                                 div { class: "flex-1 min-w-0",
                                     div { class: "flex items-center gap-2",
                                         if is_renaming {

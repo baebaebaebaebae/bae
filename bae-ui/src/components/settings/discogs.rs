@@ -1,7 +1,8 @@
 //! Discogs section view
 
 use crate::components::{
-    Button, ButtonSize, ButtonVariant, TextInput, TextInputSize, TextInputType,
+    Button, ButtonSize, ButtonVariant, SettingsCard, SettingsSection, TextInput, TextInputSize,
+    TextInputType,
 };
 use dioxus::prelude::*;
 
@@ -26,9 +27,9 @@ pub fn DiscogsSectionView(
     on_cancel: EventHandler<()>,
 ) -> Element {
     rsx! {
-        div { class: "max-w-2xl",
+        SettingsSection {
             h2 { class: "text-xl font-semibold text-white mb-6", "Discogs" }
-            div { class: "bg-gray-800 rounded-lg p-6",
+            SettingsCard {
                 div { class: "space-y-4",
                     div { class: "flex items-center justify-between",
                         div {

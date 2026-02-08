@@ -4,10 +4,9 @@ use crate::components::{Button, ButtonSize, ButtonVariant};
 use dioxus::prelude::*;
 
 /// Available settings tabs
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum SettingsTab {
     Library,
-    #[default]
     Storage,
     Discogs,
     BitTorrent,
@@ -51,12 +50,12 @@ pub fn SettingsView(
     children: Element,
 ) -> Element {
     rsx! {
-        div { class: "flex flex-col h-full min-h-0 bg-gray-900",
-            div { class: "p-6 border-b border-gray-700",
+        div { class: "flex flex-col w-full h-full min-h-0",
+            div { class: "px-6 pt-6 pb-2",
                 h1 { class: "text-2xl font-bold text-white", "Settings" }
             }
             div { class: "flex flex-1 min-h-0 overflow-clip",
-                nav { class: "w-56 bg-gray-800 border-r border-gray-700 p-4 flex-shrink-0",
+                nav { class: "w-56 p-4 flex-shrink-0",
                     ul { class: "space-y-1",
                         for tab in SettingsTab::all() {
                             li {

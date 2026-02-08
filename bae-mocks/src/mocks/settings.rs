@@ -1,70 +1,220 @@
 //! Settings mock component
 
-use super::framework::{ControlRegistryBuilder, MockPage, MockPanel, Preset};
+use super::framework::{ControlRegistryBuilder, MockPage, MockPanel};
+use bae_ui::stores::CloudSyncStatus;
 use bae_ui::{
-    SettingsTab, SettingsView, StorageLocation, StorageProfile, StorageProfilesSectionView,
+    AboutSectionView, BitTorrentSectionView, BitTorrentSettings, CloudSectionView,
+    DiscogsSectionView, LibraryInfo, LibrarySectionView, SettingsTab, SettingsView,
+    StorageLocation, StorageProfile, StorageProfilesSectionView, SubsonicSectionView,
 };
 use dioxus::prelude::*;
 
 #[component]
 pub fn SettingsMock(initial_state: Option<String>) -> Element {
-    let registry = ControlRegistryBuilder::new()
-        .bool_control("encryption_configured", "Encryption Configured", true)
-        .bool_control("has_profiles", "Has Profiles", true)
-        .bool_control("loading", "Loading", false)
-        .with_presets(vec![
-            Preset::new("Default"),
-            Preset::new("No Encryption").set_bool("encryption_configured", false),
-            Preset::new("Empty")
-                .set_bool("has_profiles", false)
-                .set_bool("encryption_configured", false),
-            Preset::new("Loading").set_bool("loading", true),
-        ])
-        .build(initial_state);
+    let registry = ControlRegistryBuilder::new().build(initial_state);
+    let mut active_tab = use_signal(|| SettingsTab::Library);
 
-    registry.use_url_sync_settings();
+    // Storage section state
+    let mut editing_profile = use_signal(|| Option::<StorageProfile>::None);
+    let mut is_creating = use_signal(|| false);
+    let browsed_directory = use_signal(|| Option::<String>::None);
+    let display_editing = editing_profile.read().clone();
 
-    let encryption_configured = registry.get_bool("encryption_configured");
-    let has_profiles = registry.get_bool("has_profiles");
-    let loading = registry.get_bool("loading");
+    // Discogs state
+    let mut discogs_editing = use_signal(|| false);
+    let mut discogs_key = use_signal(String::new);
 
-    let profiles = if has_profiles {
-        mock_storage_profiles()
-    } else {
-        vec![]
-    };
+    // Subsonic state
+    let mut subsonic_editing = use_signal(|| false);
+    let mut subsonic_edit_enabled = use_signal(|| true);
+    let mut subsonic_edit_port = use_signal(|| "4533".to_string());
 
-    let encryption_key_fingerprint = if encryption_configured {
-        "a1b2c3d4e5f6g7h8".to_string()
-    } else {
-        String::new()
-    };
+    // Cloud state
+    let mut cloud_editing = use_signal(|| false);
+    let mut cloud_edit_enabled = use_signal(|| true);
+    let mut cloud_edit_bucket = use_signal(String::new);
+    let mut cloud_edit_region = use_signal(String::new);
+    let mut cloud_edit_endpoint = use_signal(String::new);
+    let mut cloud_edit_access_key = use_signal(String::new);
+    let mut cloud_edit_secret_key = use_signal(String::new);
 
     rsx! {
         MockPanel {
             current_mock: MockPage::Settings,
             registry,
             max_width: "full",
-            SettingsView { active_tab: SettingsTab::Storage, on_tab_change: |_| {},
-                StorageProfilesSectionView {
-                    profiles,
-                    is_loading: loading,
-                    editing_profile: None,
-                    is_creating: false,
-                    encryption_configured,
-                    encryption_key_fingerprint,
-                    on_copy_key: |_| {},
-                    on_import_key: |_| {},
-                    on_create: |_| {},
-                    on_edit: |_| {},
-                    on_delete: |_| {},
-                    on_set_default: |_| {},
-                    on_save: |_| {},
-                    on_cancel_edit: |_| {},
+            SettingsView {
+                active_tab: *active_tab.read(),
+                on_tab_change: move |tab| active_tab.set(tab),
+
+                match *active_tab.read() {
+                    SettingsTab::Library => rsx! {
+                        LibrarySectionView {
+                            libraries: mock_libraries(),
+                            on_switch: |_| {},
+                            on_create: |_| {},
+                            on_add_existing: |_| {},
+                            on_rename: |_| {},
+                            on_remove: |_| {},
+                        }
+                    },
+                    SettingsTab::Storage => rsx! {
+                        StorageProfilesSectionView {
+                            profiles: mock_storage_profiles(),
+                            is_loading: false,
+                            editing_profile: display_editing,
+                            is_creating: *is_creating.read(),
+                            encryption_configured: true,
+                            encryption_key_fingerprint: "a1b2c3d4e5f6g7h8".to_string(),
+                            on_copy_key: |_| {},
+                            on_import_key: |_| {},
+                            on_create: move |_| {
+                                is_creating.set(true);
+                                editing_profile.set(None);
+                            },
+                            on_edit: move |profile: StorageProfile| {
+                                editing_profile.set(Some(profile));
+                                is_creating.set(false);
+                            },
+                            on_delete: |_| {},
+                            on_set_default: |_| {},
+                            on_save: move |_: StorageProfile| {
+                                is_creating.set(false);
+                                editing_profile.set(None);
+                            },
+                            on_cancel_edit: move |_| {
+                                is_creating.set(false);
+                                editing_profile.set(None);
+                            },
+                            on_browse_directory: |_| {},
+                            browsed_directory,
+                        }
+                    },
+                    SettingsTab::Discogs => rsx! {
+                        DiscogsSectionView {
+                            discogs_configured: true,
+                            discogs_key_value: discogs_key(),
+                            is_editing: *discogs_editing.read(),
+                            is_saving: false,
+                            has_changes: !discogs_key.read().is_empty(),
+                            save_error: None,
+                            on_edit_start: move |_| discogs_editing.set(true),
+                            on_key_change: move |v| discogs_key.set(v),
+                            on_save: move |_| discogs_editing.set(false),
+                            on_cancel: move |_| {
+                                discogs_editing.set(false);
+                                discogs_key.set(String::new());
+                            },
+                        }
+                    },
+                    SettingsTab::BitTorrent => rsx! {
+                        BitTorrentSectionView {
+                            settings: BitTorrentSettings {
+                                listen_port: Some(51413),
+                                enable_upnp: true,
+                                enable_natpmp: true,
+                                max_connections: Some(200),
+                                max_connections_per_torrent: Some(50),
+                                max_uploads: Some(10),
+                                max_uploads_per_torrent: Some(5),
+                                bind_interface: None,
+                            },
+                            editing_section: None,
+                            edit_listen_port: String::new(),
+                            edit_enable_upnp: true,
+                            edit_max_connections: String::new(),
+                            edit_max_connections_per_torrent: String::new(),
+                            edit_max_uploads: String::new(),
+                            edit_max_uploads_per_torrent: String::new(),
+                            edit_bind_interface: String::new(),
+                            is_saving: false,
+                            has_changes: false,
+                            save_error: None,
+                            on_edit_section: |_| {},
+                            on_cancel_edit: |_| {},
+                            on_save: |_| {},
+                            on_listen_port_change: |_| {},
+                            on_enable_upnp_change: |_| {},
+                            on_max_connections_change: |_| {},
+                            on_max_connections_per_torrent_change: |_| {},
+                            on_max_uploads_change: |_| {},
+                            on_max_uploads_per_torrent_change: |_| {},
+                            on_bind_interface_change: |_| {},
+                        }
+                    },
+                    SettingsTab::Subsonic => rsx! {
+                        SubsonicSectionView {
+                            enabled: true,
+                            port: 4533,
+                            is_editing: *subsonic_editing.read(),
+                            edit_enabled: *subsonic_edit_enabled.read(),
+                            edit_port: subsonic_edit_port(),
+                            is_saving: false,
+                            has_changes: false,
+                            save_error: None,
+                            on_edit_start: move |_| subsonic_editing.set(true),
+                            on_cancel: move |_| subsonic_editing.set(false),
+                            on_save: move |_| subsonic_editing.set(false),
+                            on_enabled_change: move |v| subsonic_edit_enabled.set(v),
+                            on_port_change: move |v| subsonic_edit_port.set(v),
+                        }
+                    },
+                    SettingsTab::Cloud => rsx! {
+                        CloudSectionView {
+                            encryption_configured: true,
+                            enabled: true,
+                            last_upload: Some("2025-01-15T10:30:00Z".to_string()),
+                            sync_status: CloudSyncStatus::Idle,
+                            is_editing: *cloud_editing.read(),
+                            edit_enabled: *cloud_edit_enabled.read(),
+                            edit_bucket: cloud_edit_bucket(),
+                            edit_region: cloud_edit_region(),
+                            edit_endpoint: cloud_edit_endpoint(),
+                            edit_access_key: cloud_edit_access_key(),
+                            edit_secret_key: cloud_edit_secret_key(),
+                            is_saving: false,
+                            has_changes: false,
+                            save_error: None,
+                            on_edit_start: move |_| cloud_editing.set(true),
+                            on_cancel: move |_| cloud_editing.set(false),
+                            on_save: move |_| cloud_editing.set(false),
+                            on_sync_now: |_| {},
+                            on_enabled_change: move |v| cloud_edit_enabled.set(v),
+                            on_bucket_change: move |v| cloud_edit_bucket.set(v),
+                            on_region_change: move |v| cloud_edit_region.set(v),
+                            on_endpoint_change: move |v| cloud_edit_endpoint.set(v),
+                            on_access_key_change: move |v| cloud_edit_access_key.set(v),
+                            on_secret_key_change: move |v| cloud_edit_secret_key.set(v),
+                        }
+                    },
+                    SettingsTab::About => rsx! {
+                        AboutSectionView {
+                            version: "0.1.0-demo".to_string(),
+                            album_count: 20,
+                            on_check_updates: |_| {},
+                        }
+                    },
                 }
             }
         }
     }
+}
+
+fn mock_libraries() -> Vec<LibraryInfo> {
+    vec![
+        LibraryInfo {
+            id: "abc-123".to_string(),
+            name: Some("My Music".to_string()),
+            path: "/Users/demo/.bae/libraries/abc-123".to_string(),
+            is_active: true,
+        },
+        LibraryInfo {
+            id: "def-456".to_string(),
+            name: Some("Jazz Collection".to_string()),
+            path: "/Users/demo/.bae/libraries/def-456".to_string(),
+            is_active: false,
+        },
+    ]
 }
 
 fn mock_storage_profiles() -> Vec<StorageProfile> {
