@@ -12,8 +12,7 @@ use bae_core::import::{
 };
 use bae_core::keys::KeyService;
 use bae_core::musicbrainz::{
-    lookup_by_discid, lookup_release_by_id, search_releases_with_params, ExternalUrls, MbRelease,
-    ReleaseSearchParams,
+    lookup_by_discid, search_releases_with_params, ExternalUrls, MbRelease, ReleaseSearchParams,
 };
 use bae_ui::display_types::{
     AudioContentInfo, CategorizedFileInfo, FolderMetadata as DisplayFolderMetadata,
@@ -360,73 +359,52 @@ async fn search_mb_and_rank(
     params: ReleaseSearchParams,
     metadata: Option<bae_core::import::FolderMetadata>,
 ) -> Result<Vec<DisplayMatchCandidate>, String> {
-    let mut last_err = String::new();
+    let releases =
+        bae_core::retry::retry_with_backoff(MAX_SEARCH_RETRIES, "MusicBrainz search", || {
+            search_releases_with_params(&params)
+        })
+        .await
+        .map_err(|e| format!("MusicBrainz search failed: {}", e))?;
 
-    for attempt in 1..=MAX_SEARCH_RETRIES {
-        match search_releases_with_params(&params).await {
-            Ok(releases) => {
-                info!("✓ MusicBrainz search returned {} result(s)", releases.len());
-                let candidates = if let Some(ref meta) = metadata {
-                    use bae_core::import::rank_mb_matches;
-                    rank_mb_matches(meta, releases)
-                } else {
-                    releases
-                        .into_iter()
-                        .map(|release| MatchCandidate {
-                            source: MatchSource::MusicBrainz(release),
-                            confidence: 50.0,
-                            match_reasons: vec!["Manual search result".to_string()],
-                            cover_art_url: None,
-                        })
-                        .collect()
-                };
+    info!("✓ MusicBrainz search returned {} result(s)", releases.len());
+    let candidates = if let Some(ref meta) = metadata {
+        use bae_core::import::rank_mb_matches;
+        rank_mb_matches(meta, releases)
+    } else {
+        releases
+            .into_iter()
+            .map(|release| MatchCandidate {
+                source: MatchSource::MusicBrainz(release),
+                confidence: 50.0,
+                match_reasons: vec!["Manual search result".to_string()],
+                cover_art_url: None,
+            })
+            .collect()
+    };
 
-                // Check CAA for cover art existence concurrently.
-                // 307 → use redirect URL, 404 → no art, error → mark failed for retry.
-                let release_ids: Vec<Option<&str>> = candidates
-                    .iter()
-                    .map(|c| match &c.source {
-                        MatchSource::MusicBrainz(r) if c.cover_art_url.is_none() => {
-                            Some(r.release_id.as_str())
-                        }
-                        _ => None,
-                    })
-                    .collect();
+    // Check CAA for cover art existence concurrently.
+    // 307 → use redirect URL, 404 → no art, error → mark failed for retry.
+    let release_ids: Vec<Option<&str>> = candidates
+        .iter()
+        .map(|c| match &c.source {
+            MatchSource::MusicBrainz(r) if c.cover_art_url.is_none() => Some(r.release_id.as_str()),
+            _ => None,
+        })
+        .collect();
 
-                let cover_results = check_cover_art_batch(&release_ids).await;
+    let cover_results = check_cover_art_batch(&release_ids).await;
 
-                let mut display: Vec<DisplayMatchCandidate> =
-                    candidates.iter().map(to_display_candidate).collect();
+    let mut display: Vec<DisplayMatchCandidate> =
+        candidates.iter().map(to_display_candidate).collect();
 
-                for (d, (url, failed)) in display.iter_mut().zip(cover_results) {
-                    if d.cover_url.is_none() {
-                        d.cover_url = url;
-                        d.cover_fetch_failed = failed;
-                    }
-                }
-
-                return Ok(display);
-            }
-            Err(e) => {
-                last_err = format!("{}", e);
-
-                if attempt < MAX_SEARCH_RETRIES {
-                    warn!(
-                        "✗ MusicBrainz search failed (attempt {}/{}): {}",
-                        attempt, MAX_SEARCH_RETRIES, e
-                    );
-                    tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64))
-                        .await;
-                }
-            }
+    for (d, (url, failed)) in display.iter_mut().zip(cover_results) {
+        if d.cover_url.is_none() {
+            d.cover_url = url;
+            d.cover_fetch_failed = failed;
         }
     }
 
-    warn!(
-        "✗ MusicBrainz search failed after {} attempts: {}",
-        MAX_SEARCH_RETRIES, last_err
-    );
-    Err(format!("MusicBrainz search failed: {}", last_err))
+    Ok(display)
 }
 
 /// Search Discogs and rank results
@@ -435,56 +413,36 @@ async fn search_discogs_and_rank(
     params: DiscogsSearchParams,
     metadata: Option<bae_core::import::FolderMetadata>,
 ) -> Result<Vec<DisplayMatchCandidate>, String> {
-    let mut last_err = String::new();
+    let results = bae_core::retry::retry_with_backoff(MAX_SEARCH_RETRIES, "Discogs search", || {
+        client.search_with_params(&params)
+    })
+    .await
+    .map_err(|e| format!("Discogs search failed: {}", e))?;
 
-    for attempt in 1..=MAX_SEARCH_RETRIES {
-        match client.search_with_params(&params).await {
-            Ok(results) => {
-                info!("✓ Discogs search returned {} result(s)", results.len());
-                let candidates: Vec<MatchCandidate> = if let Some(ref meta) = metadata {
-                    use bae_core::import::rank_discogs_matches;
-                    rank_discogs_matches(meta, results)
-                } else {
-                    results
-                        .into_iter()
-                        .map(|result| {
-                            let cover_art_url = result
-                                .cover_image
-                                .clone()
-                                .or_else(|| result.thumb.clone())
-                                .map(|url| bae_core::network::upgrade_to_https(&url));
-                            MatchCandidate {
-                                source: MatchSource::Discogs(result),
-                                confidence: 50.0,
-                                match_reasons: vec!["Manual search result".to_string()],
-                                cover_art_url,
-                            }
-                        })
-                        .collect()
-                };
-
-                return Ok(candidates.iter().map(to_display_candidate).collect());
-            }
-            Err(e) => {
-                last_err = format!("{}", e);
-
-                if attempt < MAX_SEARCH_RETRIES {
-                    warn!(
-                        "✗ Discogs search failed (attempt {}/{}): {}",
-                        attempt, MAX_SEARCH_RETRIES, e
-                    );
-                    tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64))
-                        .await;
+    info!("✓ Discogs search returned {} result(s)", results.len());
+    let candidates: Vec<MatchCandidate> = if let Some(ref meta) = metadata {
+        use bae_core::import::rank_discogs_matches;
+        rank_discogs_matches(meta, results)
+    } else {
+        results
+            .into_iter()
+            .map(|result| {
+                let cover_art_url = result
+                    .cover_image
+                    .clone()
+                    .or_else(|| result.thumb.clone())
+                    .map(|url| bae_core::network::upgrade_to_https(&url));
+                MatchCandidate {
+                    source: MatchSource::Discogs(result),
+                    confidence: 50.0,
+                    match_reasons: vec!["Manual search result".to_string()],
+                    cover_art_url,
                 }
-            }
-        }
-    }
+            })
+            .collect()
+    };
 
-    warn!(
-        "✗ Discogs search failed after {} attempts: {}",
-        MAX_SEARCH_RETRIES, last_err
-    );
-    Err(format!("Discogs search failed: {}", last_err))
+    Ok(candidates.iter().map(to_display_candidate).collect())
 }
 
 /// General search by artist, album, year, label
@@ -709,9 +667,24 @@ pub async fn confirm_and_start_import(
                     candidate.title
                 );
 
-                let (mb_release, _external_urls, _raw) = lookup_release_by_id(release_id)
-                    .await
-                    .map_err(|e| format!("Failed to fetch MusicBrainz release: {}", e))?;
+                // Only release_id, title, and artist are used downstream;
+                // the full release is re-fetched in fetch_and_parse_mb_release.
+                let mb_release = MbRelease {
+                    release_id: release_id.clone(),
+                    release_group_id: candidate
+                        .musicbrainz_release_group_id
+                        .clone()
+                        .unwrap_or_default(),
+                    title: candidate.title.clone(),
+                    artist: candidate.artist.clone(),
+                    date: None,
+                    first_release_date: candidate.original_year.clone(),
+                    format: candidate.format.clone(),
+                    country: candidate.country.clone(),
+                    label: candidate.label.clone(),
+                    catalog_number: candidate.catalog_number.clone(),
+                    barcode: None,
+                };
 
                 ImportRequest::Folder {
                     import_id: import_id.clone(),

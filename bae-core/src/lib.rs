@@ -16,6 +16,7 @@ pub mod library;
 pub mod musicbrainz;
 pub mod network;
 pub mod playback;
+pub mod retry;
 pub mod sodium_ffi;
 pub mod storage;
 pub mod subsonic;
