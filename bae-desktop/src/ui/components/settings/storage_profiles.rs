@@ -41,6 +41,7 @@ pub fn StorageProfilesSection() -> Element {
             app.save_storage_profile(profile);
             is_creating.set(false);
             editing_profile.set(None);
+            browsed_directory.set(None);
         }
     };
 
@@ -106,6 +107,7 @@ pub fn StorageProfilesSection() -> Element {
             on_cancel_edit: move |_| {
                 editing_profile.set(None);
                 is_creating.set(false);
+                browsed_directory.set(None);
             },
             on_browse_directory: move |_| {
                 spawn(async move {
