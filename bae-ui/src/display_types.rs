@@ -60,6 +60,7 @@ pub struct Album {
 pub struct Artist {
     pub id: String,
     pub name: String,
+    pub image_url: Option<String>,
 }
 
 /// Track import state for UI display

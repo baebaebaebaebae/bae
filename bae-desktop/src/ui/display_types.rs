@@ -24,9 +24,14 @@ pub fn album_from_db_ref(db: &DbAlbum) -> Album {
 }
 
 pub fn artist_from_db_ref(db: &DbArtist) -> Artist {
+    let image_url = db
+        .image_path
+        .as_ref()
+        .map(|_| format!("bae://artist-image/{}", db.id));
     Artist {
         id: db.id.clone(),
         name: db.name.clone(),
+        image_url,
     }
 }
 

@@ -33,9 +33,11 @@ pub fn parse_discogs_release(
         let artist = DbArtist {
             id: Uuid::new_v4().to_string(),
             name: artist_name.clone(),
-            sort_name: Some(artist_name.clone()),
+            sort_name: Some(artist_name),
             discogs_artist_id: None,
             bandcamp_artist_id: None,
+            musicbrainz_artist_id: None,
+            image_path: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -55,6 +57,8 @@ pub fn parse_discogs_release(
                 sort_name: Some(discogs_artist.name.clone()),
                 discogs_artist_id: Some(discogs_artist.id.clone()),
                 bandcamp_artist_id: None,
+                musicbrainz_artist_id: None,
+                image_path: None,
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
             };

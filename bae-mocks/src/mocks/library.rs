@@ -237,6 +237,7 @@ fn mock_albums_with_artists(count: usize) -> (Vec<Album>, HashMap<String, Vec<Ar
             vec![Artist {
                 id: format!("a{}", idx + 1),
                 name: artist_name.to_string(),
+                image_url: None,
             }],
         );
     }

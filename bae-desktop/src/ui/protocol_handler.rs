@@ -20,6 +20,8 @@ pub fn handle_protocol_request(uri: &str, services: &ImageServices) -> ProtocolR
         handle_local_file(encoded_path)
     } else if let Some(release_id) = uri.strip_prefix("bae://cover/") {
         handle_cover(release_id, services)
+    } else if let Some(artist_id) = uri.strip_prefix("bae://artist-image/") {
+        handle_artist_image(artist_id, services)
     } else if let Some(image_id) = uri.strip_prefix("bae://image/") {
         handle_image(image_id, services)
     } else {
@@ -51,6 +53,28 @@ fn handle_cover(release_id: &str, services: &ImageServices) -> ProtocolResponse 
     HttpResponse::builder()
         .status(404)
         .body(Cow::Borrowed(b"Cover not found" as &[u8]))
+        .unwrap()
+}
+
+fn handle_artist_image(artist_id: &str, services: &ImageServices) -> ProtocolResponse {
+    let artists_dir = services.library_path.join("artists");
+
+    for ext in &["jpg", "jpeg", "png", "webp", "gif"] {
+        let path = artists_dir.join(format!("{}.{}", artist_id, ext));
+        if let Ok(data) = std::fs::read(&path) {
+            let mime = mime_type_for_extension(ext);
+            return HttpResponse::builder()
+                .status(200)
+                .header("Content-Type", mime)
+                .body(Cow::Owned(data))
+                .unwrap();
+        }
+    }
+
+    warn!("Artist image not found for {}", artist_id);
+    HttpResponse::builder()
+        .status(404)
+        .body(Cow::Borrowed(b"Artist image not found" as &[u8]))
         .unwrap()
 }
 

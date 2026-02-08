@@ -53,6 +53,10 @@ pub struct DbArtist {
     pub discogs_artist_id: Option<String>,
     /// Artist ID from Bandcamp (for future multi-source support)
     pub bandcamp_artist_id: Option<String>,
+    /// Artist ID from MusicBrainz (for deduplication across imports)
+    pub musicbrainz_artist_id: Option<String>,
+    /// Path to artist image on disk (relative to library, e.g. "artists/{id}.jpg")
+    pub image_path: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -288,6 +292,8 @@ impl DbArtist {
             sort_name: None,
             discogs_artist_id: Some(discogs_artist_id.to_string()),
             bandcamp_artist_id: None,
+            musicbrainz_artist_id: None,
+            image_path: None,
             created_at: now,
             updated_at: now,
         }

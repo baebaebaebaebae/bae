@@ -36,14 +36,33 @@ impl Database {
         Ok(())
     }
 
+    fn row_to_artist(row: &sqlx::sqlite::SqliteRow) -> DbArtist {
+        DbArtist {
+            id: row.get("id"),
+            name: row.get("name"),
+            sort_name: row.get("sort_name"),
+            discogs_artist_id: row.get("discogs_artist_id"),
+            bandcamp_artist_id: row.get("bandcamp_artist_id"),
+            musicbrainz_artist_id: row.get("musicbrainz_artist_id"),
+            image_path: row.get("image_path"),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                .unwrap()
+                .with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+                .unwrap()
+                .with_timezone(&Utc),
+        }
+    }
+
     /// Insert a new artist
     pub async fn insert_artist(&self, artist: &DbArtist) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
             INSERT INTO artists (
-                id, name, sort_name, discogs_artist_id, 
-                bandcamp_artist_id, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                id, name, sort_name, discogs_artist_id,
+                bandcamp_artist_id, musicbrainz_artist_id, image_path,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&artist.id)
@@ -51,6 +70,8 @@ impl Database {
         .bind(&artist.sort_name)
         .bind(&artist.discogs_artist_id)
         .bind(&artist.bandcamp_artist_id)
+        .bind(&artist.musicbrainz_artist_id)
+        .bind(&artist.image_path)
         .bind(artist.created_at.to_rfc3339())
         .bind(artist.updated_at.to_rfc3339())
         .execute(&self.pool)
@@ -66,23 +87,65 @@ impl Database {
             .bind(discogs_artist_id)
             .fetch_optional(&self.pool)
             .await?;
-        if let Some(row) = row {
-            Ok(Some(DbArtist {
-                id: row.get("id"),
-                name: row.get("name"),
-                sort_name: row.get("sort_name"),
-                discogs_artist_id: row.get("discogs_artist_id"),
-                bandcamp_artist_id: row.get("bandcamp_artist_id"),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
-                    .unwrap()
-                    .with_timezone(&Utc),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
-                    .unwrap()
-                    .with_timezone(&Utc),
-            }))
-        } else {
-            Ok(None)
-        }
+        Ok(row.as_ref().map(Self::row_to_artist))
+    }
+
+    /// Get artist by MusicBrainz artist ID (for deduplication)
+    pub async fn get_artist_by_mb_id(&self, mb_id: &str) -> Result<Option<DbArtist>, sqlx::Error> {
+        let row = sqlx::query("SELECT * FROM artists WHERE musicbrainz_artist_id = ?")
+            .bind(mb_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.as_ref().map(Self::row_to_artist))
+    }
+
+    /// Get artist by name (case-insensitive, first match)
+    pub async fn get_artist_by_name(&self, name: &str) -> Result<Option<DbArtist>, sqlx::Error> {
+        let row = sqlx::query("SELECT * FROM artists WHERE name = ? COLLATE NOCASE LIMIT 1")
+            .bind(name)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.as_ref().map(Self::row_to_artist))
+    }
+
+    /// Fill in NULL external IDs on an existing artist via COALESCE (never overwrites).
+    /// Also updates sort_name if currently NULL.
+    pub async fn update_artist_external_ids(
+        &self,
+        id: &str,
+        discogs_id: Option<&str>,
+        mb_id: Option<&str>,
+        sort_name: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE artists SET
+                discogs_artist_id = COALESCE(discogs_artist_id, ?),
+                musicbrainz_artist_id = COALESCE(musicbrainz_artist_id, ?),
+                sort_name = COALESCE(sort_name, ?),
+                updated_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(discogs_id)
+        .bind(mb_id)
+        .bind(sort_name)
+        .bind(Utc::now().to_rfc3339())
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Update artist image path
+    pub async fn update_artist_image(&self, id: &str, image_path: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE artists SET image_path = ?, updated_at = ? WHERE id = ?")
+            .bind(image_path)
+            .bind(Utc::now().to_rfc3339())
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
     /// Insert album-artist relationship
     pub async fn insert_album_artist(
@@ -139,23 +202,7 @@ impl Database {
         .bind(album_id)
         .fetch_all(&self.pool)
         .await?;
-        let mut artists = Vec::new();
-        for row in rows {
-            artists.push(DbArtist {
-                id: row.get("id"),
-                name: row.get("name"),
-                sort_name: row.get("sort_name"),
-                discogs_artist_id: row.get("discogs_artist_id"),
-                bandcamp_artist_id: row.get("bandcamp_artist_id"),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
-                    .unwrap()
-                    .with_timezone(&Utc),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
-                    .unwrap()
-                    .with_timezone(&Utc),
-            });
-        }
-        Ok(artists)
+        Ok(rows.iter().map(Self::row_to_artist).collect())
     }
     /// Get artists for a track (ordered by position)
     pub async fn get_artists_for_track(
@@ -173,23 +220,7 @@ impl Database {
         .bind(track_id)
         .fetch_all(&self.pool)
         .await?;
-        let mut artists = Vec::new();
-        for row in rows {
-            artists.push(DbArtist {
-                id: row.get("id"),
-                name: row.get("name"),
-                sort_name: row.get("sort_name"),
-                discogs_artist_id: row.get("discogs_artist_id"),
-                bandcamp_artist_id: row.get("bandcamp_artist_id"),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
-                    .unwrap()
-                    .with_timezone(&Utc),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
-                    .unwrap()
-                    .with_timezone(&Utc),
-            });
-        }
-        Ok(artists)
+        Ok(rows.iter().map(Self::row_to_artist).collect())
     }
     /// Get artist by ID
     pub async fn get_artist_by_id(&self, artist_id: &str) -> Result<Option<DbArtist>, sqlx::Error> {
@@ -197,19 +228,7 @@ impl Database {
             .bind(artist_id)
             .fetch_optional(&self.pool)
             .await?;
-        Ok(row.map(|row| DbArtist {
-            id: row.get("id"),
-            name: row.get("name"),
-            sort_name: row.get("sort_name"),
-            discogs_artist_id: row.get("discogs_artist_id"),
-            bandcamp_artist_id: row.get("bandcamp_artist_id"),
-            created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
-                .unwrap()
-                .with_timezone(&Utc),
-            updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
-                .unwrap()
-                .with_timezone(&Utc),
-        }))
+        Ok(row.as_ref().map(Self::row_to_artist))
     }
     /// Get albums for an artist (via album_artists join table)
     pub async fn get_albums_for_artist(

@@ -46,7 +46,15 @@ pub fn ArtistDetailView(
                 } else if let Some(err) = error {
                     ErrorDisplay { message: err }
                 } else if let Some(artist) = artist {
-                    h1 { class: "text-3xl font-bold text-white mb-2", "{artist.name}" }
+                    div { class: "flex items-center gap-6 mb-2",
+                        if let Some(ref image_url) = artist.image_url {
+                            img {
+                                class: "w-32 h-32 rounded-full object-cover",
+                                src: "{image_url}",
+                            }
+                        }
+                        h1 { class: "text-3xl font-bold text-white", "{artist.name}" }
+                    }
 
                     if !albums.is_empty() {
                         {

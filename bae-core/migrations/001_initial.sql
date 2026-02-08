@@ -4,6 +4,8 @@ CREATE TABLE artists (
     sort_name TEXT,
     discogs_artist_id TEXT,
     bandcamp_artist_id TEXT,
+    musicbrainz_artist_id TEXT,
+    image_path TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -197,6 +199,8 @@ CREATE TABLE imports (
 
 -- Indexes
 CREATE INDEX idx_artists_discogs_id ON artists (discogs_artist_id);
+CREATE INDEX idx_artists_mb_id ON artists (musicbrainz_artist_id);
+CREATE INDEX idx_artists_name ON artists (name COLLATE NOCASE);
 CREATE INDEX idx_album_artists_album_id ON album_artists (album_id);
 CREATE INDEX idx_album_artists_artist_id ON album_artists (artist_id);
 CREATE INDEX idx_track_artists_track_id ON track_artists (track_id);

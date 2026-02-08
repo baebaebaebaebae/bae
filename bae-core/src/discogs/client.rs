@@ -267,4 +267,50 @@ impl DiscogsClient {
             ))
         }
     }
+
+    /// Get the primary image URL for a Discogs artist
+    pub async fn get_artist_image(&self, artist_id: &str) -> Result<Option<String>, DiscogsError> {
+        let url = format!("{}/artists/{}", self.base_url, artist_id);
+        let mut params = std::collections::HashMap::new();
+        params.insert("token", &self.api_key);
+        let response = self
+            .client
+            .get(&url)
+            .query(&params)
+            .header("User-Agent", "bae/1.0 +https://github.com/hideselfview/bae")
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let json: serde_json::Value = response.json().await.map_err(DiscogsError::Request)?;
+            let image_url = json
+                .get("images")
+                .and_then(|images| images.as_array())
+                .and_then(|images| {
+                    images
+                        .iter()
+                        .find(|img| {
+                            img.get("type")
+                                .and_then(|t| t.as_str())
+                                .map(|t| t == "primary")
+                                .unwrap_or(false)
+                        })
+                        .or_else(|| images.first())
+                })
+                .and_then(|img| img.get("uri").and_then(|u| u.as_str()))
+                .map(|s| s.to_string());
+
+            Ok(image_url)
+        } else if response.status() == 404 {
+            Ok(None)
+        } else if response.status() == 429 {
+            Err(DiscogsError::RateLimit)
+        } else if response.status() == 401 {
+            Err(DiscogsError::InvalidApiKey)
+        } else {
+            Err(DiscogsError::Request(
+                response.error_for_status().unwrap_err(),
+            ))
+        }
+    }
 }

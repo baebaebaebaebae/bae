@@ -87,16 +87,23 @@ fn parse_mb_release_from_json(
                     .and_then(|v| v.as_str())
                     .unwrap_or("Unknown Artist")
                     .to_string();
-                let _mb_artist_id = artist_obj
+                let mb_artist_id = artist_obj
                     .get("id")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
+                let sort_name = artist_obj
+                    .get("sort-name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| artist_name.clone());
                 let artist = DbArtist {
                     id: Uuid::new_v4().to_string(),
-                    name: artist_name.clone(),
-                    sort_name: Some(artist_name.clone()),
+                    name: artist_name,
+                    sort_name: Some(sort_name),
                     discogs_artist_id: None,
                     bandcamp_artist_id: None,
+                    musicbrainz_artist_id: mb_artist_id,
+                    image_path: None,
                     created_at: chrono::Utc::now(),
                     updated_at: chrono::Utc::now(),
                 };
@@ -116,9 +123,11 @@ fn parse_mb_release_from_json(
         let artist = DbArtist {
             id: Uuid::new_v4().to_string(),
             name: artist_name.clone(),
-            sort_name: Some(artist_name.clone()),
+            sort_name: Some(artist_name),
             discogs_artist_id: None,
             bandcamp_artist_id: None,
+            musicbrainz_artist_id: None,
+            image_path: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };

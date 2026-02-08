@@ -93,6 +93,7 @@ pub async fn fetch_albums() -> Result<(Vec<Album>, HashMap<String, Vec<Artist>>)
             vec![Artist {
                 id: artist_id,
                 name: artist_name,
+                image_url: None,
             }],
         );
 
@@ -144,6 +145,7 @@ pub async fn fetch_album(album_id: &str) -> Result<AlbumDetailState, String> {
     let artists = vec![Artist {
         id: artist_id,
         name: artist_name,
+        image_url: None,
     }];
 
     let songs = sa.song.unwrap_or_default();
