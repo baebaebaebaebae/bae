@@ -92,6 +92,18 @@ pub fn ReleaseSidebarView(
     // Static ID - only one sidebar menu per page
     let anchor_id = "release-sidebar-menu";
 
+    // Deferred selection: when the dropdown menu is open and a candidate is clicked,
+    // the popover light dismiss + candidate state change in the same render cycle
+    // crashes wry-bindgen (U8BufferEmpty). Store the index here, close the menu,
+    // and let the effect fire on_select after the close render completes.
+    let mut pending_select: Signal<Option<usize>> = use_signal(|| None);
+    use_effect(move || {
+        if let Some(index) = pending_select() {
+            pending_select.set(None);
+            on_select.call(index);
+        }
+    });
+
     rsx! {
         // Panel container - padding comes from parent ImportView
         div { class: "flex-1 px-2 pb-2 min-w-0 h-full",
@@ -184,7 +196,14 @@ pub fn ReleaseSidebarView(
                             path: candidate.path.clone(),
                             status: candidate.status.clone(),
                             is_selected: selected_index == Some(index),
-                            on_select,
+                            on_select: move |index: usize| {
+                                if *show_menu.peek() {
+                                    show_menu.set(false);
+                                    pending_select.set(Some(index));
+                                } else {
+                                    on_select.call(index);
+                                }
+                            },
                             on_open_folder,
                             on_remove,
                         }
