@@ -148,6 +148,22 @@ pub struct Image {
     pub url: String,
 }
 
+/// A remote cover option fetched from MusicBrainz or Discogs
+#[derive(Clone, Debug, PartialEq)]
+pub struct RemoteCoverOption {
+    pub url: String,
+    pub thumbnail_url: String,
+    pub label: String,
+    pub source: String,
+}
+
+/// Cover selection from the cover picker
+#[derive(Clone, Debug, PartialEq)]
+pub enum CoverChange {
+    ExistingImage { image_id: String },
+    RemoteCover { url: String, source: String },
+}
+
 /// Import operation status for UI display
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ImportStatus {

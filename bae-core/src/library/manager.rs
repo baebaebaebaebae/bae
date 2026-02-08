@@ -730,6 +730,36 @@ impl LibraryManager {
         Ok(self.database.delete_import(id).await?)
     }
 }
+
+/// Update the cover cache on disk for a release.
+///
+/// Writes `{library_path}/covers/{release_id}.{extension}` and removes any
+/// stale files with other extensions for the same release_id.
+pub fn update_cover_cache(
+    library_path: &Path,
+    release_id: &str,
+    bytes: &[u8],
+    extension: &str,
+) -> Result<(), LibraryError> {
+    let covers_dir = library_path.join("covers");
+    std::fs::create_dir_all(&covers_dir)
+        .map_err(|e| LibraryError::Import(format!("Failed to create covers directory: {}", e)))?;
+
+    // Remove stale files with other extensions
+    for ext in &["jpg", "jpeg", "png", "webp", "gif"] {
+        if *ext != extension {
+            let stale = covers_dir.join(format!("{}.{}", release_id, ext));
+            let _ = std::fs::remove_file(stale);
+        }
+    }
+
+    let cache_path = covers_dir.join(format!("{}.{}", release_id, extension));
+    std::fs::write(&cache_path, bytes)
+        .map_err(|e| LibraryError::Import(format!("Failed to write cover cache: {}", e)))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

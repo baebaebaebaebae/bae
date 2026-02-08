@@ -21,6 +21,7 @@ pub fn AlbumCoverSection(
     on_view_release_info: EventHandler<String>,
     on_view_storage: EventHandler<String>,
     on_open_gallery: EventHandler<String>,
+    on_change_cover: EventHandler<String>,
 ) -> Element {
     let mut show_dropdown = use_signal(|| false);
     let is_open: ReadSignal<bool> = show_dropdown.into();
@@ -87,7 +88,7 @@ pub fn AlbumCoverSection(
                 on_close: move |_| show_dropdown.set(false),
                 placement: Placement::BottomEnd,
 
-                // Release Info - only for single release
+                // Release Info, Storage, Export - only for single release
                 if has_single_release {
                     if let Some(ref release_id) = first_release_id {
                         MenuItem {
@@ -127,6 +128,20 @@ pub fn AlbumCoverSection(
                                 "Export"
                             }
                         }
+                    }
+                }
+                // Change Cover - available for all albums
+                if let Some(ref release_id) = first_release_id {
+                    MenuItem {
+                        disabled: is_deleting || is_exporting,
+                        onclick: {
+                            let release_id = release_id.clone();
+                            move |_| {
+                                show_dropdown.set(false);
+                                on_change_cover.call(release_id.clone());
+                            }
+                        },
+                        "Change Cover"
                     }
                 }
                 MenuItem {

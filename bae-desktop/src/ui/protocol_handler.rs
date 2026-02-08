@@ -32,6 +32,8 @@ pub fn handle_protocol_request(uri: &str, services: &ImageServices) -> ProtocolR
 }
 
 fn handle_cover(release_id: &str, services: &ImageServices) -> ProtocolResponse {
+    // Strip query params (e.g. ?t=123 for cache busting)
+    let release_id = release_id.split('?').next().unwrap_or(release_id);
     let covers_dir = services.library_path.join("covers");
 
     // Try common image extensions

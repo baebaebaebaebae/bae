@@ -1,7 +1,7 @@
 //! Album detail state store
 
 use crate::components::settings::StorageProfile;
-use crate::display_types::{Album, Artist, File, Image, Release, Track};
+use crate::display_types::{Album, Artist, File, Image, Release, RemoteCoverOption, Track};
 use dioxus::prelude::*;
 
 /// Transfer progress state
@@ -50,4 +50,8 @@ pub struct AlbumDetailState {
     pub transfer_progress: Option<TransferProgressState>,
     /// Transfer error message
     pub transfer_error: Option<String>,
+    /// Remote cover options fetched from MusicBrainz/Discogs
+    pub remote_covers: Vec<RemoteCoverOption>,
+    /// Whether remote covers are currently loading
+    pub loading_remote_covers: bool,
 }

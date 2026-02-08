@@ -622,6 +622,83 @@ impl AppService {
         });
     }
 
+    /// Fetch remote cover options (MusicBrainz + Discogs) for the cover picker
+    pub fn fetch_remote_covers(&self) {
+        let state = self.state;
+        let library_manager = self.library_manager.clone();
+        let key_service = self.key_service.clone();
+
+        // Read IDs from current state
+        let releases = state.album_detail().releases().read().clone();
+        let selected_release_id = state.album_detail().selected_release_id().read().clone();
+        let release =
+            selected_release_id.and_then(|rid| releases.iter().find(|r| r.id == rid).cloned());
+        let Some(release) = release else { return };
+        let release_id = release.id.clone();
+
+        state.album_detail().loading_remote_covers().set(true);
+        state.album_detail().remote_covers().set(vec![]);
+
+        spawn(async move {
+            let covers = fetch_remote_covers_async(
+                &library_manager,
+                &key_service,
+                &release_id,
+                release.musicbrainz_release_id.as_deref(),
+                release.discogs_release_id.as_deref(),
+            )
+            .await;
+            state.album_detail().remote_covers().set(covers);
+            state.album_detail().loading_remote_covers().set(false);
+        });
+    }
+
+    /// Change the cover for a release (existing image or remote download)
+    pub fn change_cover(
+        &self,
+        album_id: &str,
+        release_id: &str,
+        selection: bae_ui::display_types::CoverChange,
+    ) {
+        let state = self.state;
+        let library_manager = self.library_manager.clone();
+        let config = self.config.clone();
+        let album_id = album_id.to_string();
+        let release_id = release_id.to_string();
+
+        spawn(async move {
+            let library_path = std::path::PathBuf::from(&config.library_path);
+            let result = change_cover_async(
+                &library_manager,
+                &library_path,
+                &album_id,
+                &release_id,
+                selection,
+            )
+            .await;
+
+            if let Err(e) = result {
+                tracing::error!("Failed to change cover: {}", e);
+                return;
+            }
+
+            // Reload album detail to reflect updated cover
+            load_album_detail(&state, &library_manager, &album_id, Some(&release_id)).await;
+
+            // Update album cover_url in library grid with cache-busted URL
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let busted_url = format!("{}?t={}", cover_url(&release_id), timestamp);
+            let mut albums_lens = state.library().albums();
+            let mut albums = albums_lens.write();
+            if let Some(album) = albums.iter_mut().find(|a| a.id == album_id) {
+                album.cover_url = Some(busted_url);
+            }
+        });
+    }
+
     /// Transfer a release to a different storage profile
     pub fn transfer_release_storage(&self, release_id: &str, target_profile_id: &str) {
         let state = self.state;
@@ -1309,8 +1386,203 @@ async fn load_album_detail(
     state.album_detail().storage_profile().set(storage_profile);
     state.album_detail().transfer_progress().set(None);
     state.album_detail().transfer_error().set(None);
+    state.album_detail().remote_covers().set(vec![]);
+    state.album_detail().loading_remote_covers().set(false);
 
     state.album_detail().loading().set(false);
+}
+
+/// Fetch remote cover options from MusicBrainz Cover Art Archive and Discogs
+async fn fetch_remote_covers_async(
+    library_manager: &SharedLibraryManager,
+    key_service: &KeyService,
+    release_id: &str,
+    mb_release_id: Option<&str>,
+    discogs_release_id: Option<&str>,
+) -> Vec<bae_ui::display_types::RemoteCoverOption> {
+    use crate::ui::import_helpers::get_discogs_client;
+    use bae_core::import::cover_art::fetch_cover_art_from_archive;
+
+    let mut covers = Vec::new();
+
+    // Get existing image sources to skip duplicates
+    let existing_sources: Vec<String> = library_manager
+        .get()
+        .get_images_for_release(release_id)
+        .await
+        .unwrap_or_default()
+        .iter()
+        .map(|img| img.source.as_str().to_string())
+        .collect();
+
+    // Try MusicBrainz Cover Art Archive
+    if let Some(mb_id) = mb_release_id {
+        if !existing_sources.contains(&"musicbrainz".to_string()) {
+            if let Some(url) = fetch_cover_art_from_archive(mb_id).await {
+                covers.push(bae_ui::display_types::RemoteCoverOption {
+                    url: url.clone(),
+                    thumbnail_url: url,
+                    label: "MusicBrainz".to_string(),
+                    source: "musicbrainz".to_string(),
+                });
+            }
+        }
+    }
+
+    // Try Discogs
+    if let Some(discogs_id) = discogs_release_id {
+        if !existing_sources.contains(&"discogs".to_string()) {
+            if let Ok(client) = get_discogs_client(key_service) {
+                if let Ok(discogs_release) = client.get_release(discogs_id).await {
+                    if let Some(cover_url) = discogs_release
+                        .cover_image
+                        .or(discogs_release.thumb.clone())
+                    {
+                        let thumb = discogs_release.thumb.unwrap_or_else(|| cover_url.clone());
+                        covers.push(bae_ui::display_types::RemoteCoverOption {
+                            url: cover_url,
+                            thumbnail_url: thumb,
+                            label: "Discogs".to_string(),
+                            source: "discogs".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    covers
+}
+
+/// Change the cover for a release
+async fn change_cover_async(
+    library_manager: &SharedLibraryManager,
+    library_path: &std::path::Path,
+    album_id: &str,
+    release_id: &str,
+    selection: bae_ui::display_types::CoverChange,
+) -> Result<(), String> {
+    use bae_core::library::update_cover_cache;
+
+    match selection {
+        bae_ui::display_types::CoverChange::ExistingImage { image_id } => {
+            // Get image metadata for extension
+            let image = library_manager
+                .get()
+                .get_image_by_id(&image_id)
+                .await
+                .map_err(|e| format!("Failed to get image: {}", e))?
+                .ok_or_else(|| "Image not found".to_string())?;
+
+            let ext = image.filename.rsplit('.').next().unwrap_or("jpg");
+
+            // Set as cover in DB
+            library_manager
+                .get()
+                .set_cover_image(release_id, &image_id)
+                .await
+                .map_err(|e| format!("Failed to set cover image: {}", e))?;
+
+            // Fetch bytes and update cache (uses image_id internally, so no extra lookup)
+            let bytes = library_manager
+                .get()
+                .fetch_image_bytes(&image_id)
+                .await
+                .map_err(|e| format!("Failed to fetch image bytes: {}", e))?;
+
+            update_cover_cache(library_path, release_id, &bytes, ext)
+                .map_err(|e| format!("Failed to update cover cache: {}", e))?;
+
+            // Set album cover release
+            library_manager
+                .get()
+                .set_album_cover_release(album_id, release_id)
+                .await
+                .map_err(|e| format!("Failed to set album cover release: {}", e))?;
+        }
+        bae_ui::display_types::CoverChange::RemoteCover { url, source } => {
+            use bae_core::db::{DbFile, DbImage, ImageSource};
+            use bae_core::import::cover_art::download_cover_art_bytes;
+            use chrono::Utc;
+
+            // Download the image
+            let (bytes, ext) = download_cover_art_bytes(&url)
+                .await
+                .map_err(|e| format!("Failed to download cover: {}", e))?;
+
+            let image_id = uuid::Uuid::new_v4().to_string();
+            let file_id = uuid::Uuid::new_v4().to_string();
+            // Include image_id in filename to guarantee uniqueness across repeated downloads
+            let filename = format!("front-{}-{}.{}", source, &image_id[..8], ext);
+
+            // Save to covers/downloads/
+            let downloads_dir = library_path.join("covers").join("downloads");
+            std::fs::create_dir_all(&downloads_dir)
+                .map_err(|e| format!("Failed to create downloads dir: {}", e))?;
+            let download_path = downloads_dir.join(format!("{}.{}", image_id, ext));
+            std::fs::write(&download_path, &bytes)
+                .map_err(|e| format!("Failed to write downloaded cover: {}", e))?;
+
+            // Create DbFile
+            let db_file = DbFile {
+                id: file_id,
+                release_id: release_id.to_string(),
+                original_filename: filename.clone(),
+                file_size: bytes.len() as i64,
+                format: format!("image/{}", if ext == "jpg" { "jpeg" } else { &ext }),
+                source_path: Some(download_path.to_string_lossy().to_string()),
+                encryption_nonce: None,
+                created_at: Utc::now(),
+            };
+            library_manager
+                .get()
+                .add_file(&db_file)
+                .await
+                .map_err(|e| format!("Failed to add file record: {}", e))?;
+
+            // Create DbImage
+            let image_source = match source.as_str() {
+                "musicbrainz" => ImageSource::MusicBrainz,
+                "discogs" => ImageSource::Discogs,
+                _ => ImageSource::Local,
+            };
+            let db_image = DbImage {
+                id: image_id.clone(),
+                release_id: release_id.to_string(),
+                filename: filename.clone(),
+                is_cover: false,
+                source: image_source,
+                width: None,
+                height: None,
+                created_at: Utc::now(),
+            };
+            library_manager
+                .get()
+                .add_image(&db_image)
+                .await
+                .map_err(|e| format!("Failed to add image record: {}", e))?;
+
+            // Set as cover
+            library_manager
+                .get()
+                .set_cover_image(release_id, &image_id)
+                .await
+                .map_err(|e| format!("Failed to set cover image: {}", e))?;
+
+            // Update cover cache
+            update_cover_cache(library_path, release_id, &bytes, &ext)
+                .map_err(|e| format!("Failed to update cover cache: {}", e))?;
+
+            // Set album cover release
+            library_manager
+                .get()
+                .set_album_cover_release(album_id, release_id)
+                .await
+                .map_err(|e| format!("Failed to set album cover release: {}", e))?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Load artist detail data into the Store

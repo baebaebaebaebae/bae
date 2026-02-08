@@ -8,6 +8,7 @@
 
 use super::album_cover_section::AlbumCoverSection;
 use super::album_metadata::AlbumMetadata;
+use super::cover_picker::CoverPickerWrapper;
 use super::delete_album_dialog::DeleteAlbumDialog;
 use super::delete_release_dialog::DeleteReleaseDialog;
 use super::export_error_toast::ExportErrorToast;
@@ -17,7 +18,7 @@ use super::release_tabs_section::{ReleaseTabsSection, ReleaseTorrentInfo};
 use super::storage_modal::StorageModal;
 use super::track_row::TrackRow;
 use crate::components::{GalleryItem, GalleryItemContent, GalleryLightbox};
-use crate::display_types::{PlaybackDisplay, Release, Track};
+use crate::display_types::{CoverChange, PlaybackDisplay, Release, Track};
 use crate::stores::album_detail::{AlbumDetailState, AlbumDetailStateStoreExt};
 use dioxus::prelude::*;
 use std::collections::HashSet;
@@ -49,6 +50,8 @@ pub fn AlbumDetailView(
     on_add_album_to_queue: EventHandler<Vec<String>>,
     on_transfer_to_profile: EventHandler<(String, String)>,
     on_eject: EventHandler<String>,
+    on_fetch_remote_covers: EventHandler<()>,
+    on_select_cover: EventHandler<CoverChange>,
     available_profiles: Vec<crate::components::settings::StorageProfile>,
     #[props(default)] torrent_info: std::collections::HashMap<String, ReleaseTorrentInfo>,
     #[props(default)] on_start_seeding: Option<EventHandler<String>>,
@@ -63,6 +66,7 @@ pub fn AlbumDetailView(
     let mut show_release_info_modal = use_signal(|| None::<String>);
     let mut show_storage_modal = use_signal(|| None::<String>);
     let mut show_gallery = use_signal(|| false);
+    let mut show_cover_picker = use_signal(|| false);
 
     // Check if album exists - only subscribe to this field via lens
     if state.album().read().is_none() {
@@ -95,6 +99,10 @@ pub fn AlbumDetailView(
                         }),
                         on_open_gallery: EventHandler::new(move |_: String| {
                             show_gallery.set(true);
+                        }),
+                        on_change_cover: EventHandler::new(move |_: String| {
+                            show_cover_picker.set(true);
+                            on_fetch_remote_covers.call(());
                         }),
                         on_artist_click,
                         on_play_album,
@@ -164,6 +172,8 @@ pub fn AlbumDetailView(
 
         GalleryLightboxWrapper { state, show: show_gallery }
 
+        CoverPickerWrapper { state, show: show_cover_picker, on_select: on_select_cover }
+
         if let Some(ref error) = export_error() {
             ExportErrorToast {
                 error: error.clone(),
@@ -188,6 +198,7 @@ fn AlbumInfoSection(
     on_view_release_info: EventHandler<String>,
     on_view_storage: EventHandler<String>,
     on_open_gallery: EventHandler<String>,
+    on_change_cover: EventHandler<String>,
     on_artist_click: EventHandler<String>,
     on_play_album: EventHandler<Vec<String>>,
     on_add_to_queue: EventHandler<Vec<String>>,
@@ -220,6 +231,7 @@ fn AlbumInfoSection(
             on_view_release_info,
             on_view_storage,
             on_open_gallery,
+            on_change_cover,
         }
         AlbumMetadata {
             album: album.clone(),
