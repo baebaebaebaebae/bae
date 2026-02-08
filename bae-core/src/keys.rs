@@ -12,22 +12,32 @@ pub enum KeyError {
 /// Manages secret keys (Discogs API key, encryption key) with lazy reads.
 ///
 /// In dev mode, reads from environment variables.
-/// In prod mode, reads from the OS keyring.
+/// In prod mode, reads from the OS keyring. Each library_id gets its own
+/// namespaced keyring entries so multiple libraries can have independent keys.
 ///
 /// `new()` does no I/O — keyring reads happen lazily in `get_*` methods,
 /// because the macOS protected keyring triggers a system password prompt.
 #[derive(Clone)]
 pub struct KeyService {
     dev_mode: bool,
+    library_id: String,
 }
 
 impl KeyService {
-    pub fn new(dev_mode: bool) -> Self {
-        Self { dev_mode }
+    pub fn new(dev_mode: bool, library_id: String) -> Self {
+        Self {
+            dev_mode,
+            library_id,
+        }
     }
 
     pub fn is_dev_mode(&self) -> bool {
         self.dev_mode
+    }
+
+    /// Build a namespaced account name for keyring entries.
+    fn account(&self, base: &str) -> String {
+        format!("{}:{}", base, self.library_id)
     }
 
     /// Read the Discogs API key. Returns None if not configured.
@@ -40,7 +50,7 @@ impl KeyService {
                 .ok()
                 .filter(|k| !k.is_empty())
         } else {
-            keyring_core::Entry::new("bae", "discogs_api_key")
+            keyring_core::Entry::new("bae", &self.account("discogs_api_key"))
                 .ok()
                 .and_then(|e| e.get_password().ok())
                 .filter(|k| !k.is_empty())
@@ -54,7 +64,7 @@ impl KeyService {
             return Err(KeyError::DevMode);
         }
 
-        keyring_core::Entry::new("bae", "discogs_api_key")?.set_password(value)?;
+        keyring_core::Entry::new("bae", &self.account("discogs_api_key"))?.set_password(value)?;
         info!("Discogs API key saved to keyring");
         Ok(())
     }
@@ -66,7 +76,8 @@ impl KeyService {
             return Err(KeyError::DevMode);
         }
 
-        match keyring_core::Entry::new("bae", "discogs_api_key")?.delete_credential() {
+        match keyring_core::Entry::new("bae", &self.account("discogs_api_key"))?.delete_credential()
+        {
             Ok(()) => {
                 info!("Discogs API key deleted from keyring");
                 Ok(())
@@ -89,7 +100,7 @@ impl KeyService {
                 .ok()
                 .filter(|k| !k.is_empty())
         } else {
-            keyring_core::Entry::new("bae", "encryption_master_key")
+            keyring_core::Entry::new("bae", &self.account("encryption_master_key"))
                 .ok()
                 .and_then(|e| e.get_password().ok())
                 .filter(|k| !k.is_empty())
@@ -108,7 +119,8 @@ impl KeyService {
         }
 
         let key_hex = hex::encode(crate::encryption::generate_random_key());
-        keyring_core::Entry::new("bae", "encryption_master_key")?.set_password(&key_hex)?;
+        keyring_core::Entry::new("bae", &self.account("encryption_master_key"))?
+            .set_password(&key_hex)?;
         info!("Generated and saved new encryption key to keyring");
         Ok(key_hex)
     }
@@ -120,7 +132,8 @@ impl KeyService {
             return Err(KeyError::DevMode);
         }
 
-        keyring_core::Entry::new("bae", "encryption_master_key")?.set_password(value)?;
+        keyring_core::Entry::new("bae", &self.account("encryption_master_key"))?
+            .set_password(value)?;
         info!("Encryption key saved to keyring");
         Ok(())
     }
@@ -132,7 +145,7 @@ impl KeyService {
                 .ok()
                 .filter(|k| !k.is_empty())
         } else {
-            keyring_core::Entry::new("bae", "cloud_sync_access_key")
+            keyring_core::Entry::new("bae", &self.account("cloud_sync_access_key"))
                 .ok()
                 .and_then(|e| e.get_password().ok())
                 .filter(|k| !k.is_empty())
@@ -145,7 +158,8 @@ impl KeyService {
             return Err(KeyError::DevMode);
         }
 
-        keyring_core::Entry::new("bae", "cloud_sync_access_key")?.set_password(value)?;
+        keyring_core::Entry::new("bae", &self.account("cloud_sync_access_key"))?
+            .set_password(value)?;
         info!("Cloud sync access key saved to keyring");
         Ok(())
     }
@@ -156,7 +170,9 @@ impl KeyService {
             return Err(KeyError::DevMode);
         }
 
-        match keyring_core::Entry::new("bae", "cloud_sync_access_key")?.delete_credential() {
+        match keyring_core::Entry::new("bae", &self.account("cloud_sync_access_key"))?
+            .delete_credential()
+        {
             Ok(()) => {
                 info!("Cloud sync access key deleted from keyring");
                 Ok(())
@@ -173,7 +189,7 @@ impl KeyService {
                 .ok()
                 .filter(|k| !k.is_empty())
         } else {
-            keyring_core::Entry::new("bae", "cloud_sync_secret_key")
+            keyring_core::Entry::new("bae", &self.account("cloud_sync_secret_key"))
                 .ok()
                 .and_then(|e| e.get_password().ok())
                 .filter(|k| !k.is_empty())
@@ -186,7 +202,8 @@ impl KeyService {
             return Err(KeyError::DevMode);
         }
 
-        keyring_core::Entry::new("bae", "cloud_sync_secret_key")?.set_password(value)?;
+        keyring_core::Entry::new("bae", &self.account("cloud_sync_secret_key"))?
+            .set_password(value)?;
         info!("Cloud sync secret key saved to keyring");
         Ok(())
     }
@@ -197,13 +214,63 @@ impl KeyService {
             return Err(KeyError::DevMode);
         }
 
-        match keyring_core::Entry::new("bae", "cloud_sync_secret_key")?.delete_credential() {
+        match keyring_core::Entry::new("bae", &self.account("cloud_sync_secret_key"))?
+            .delete_credential()
+        {
             Ok(()) => {
                 info!("Cloud sync secret key deleted from keyring");
                 Ok(())
             }
             Err(keyring_core::Error::NoEntry) => Ok(()),
             Err(e) => Err(KeyError::Keyring(e)),
+        }
+    }
+
+    /// Migrate keys from the old global keyring entries to per-library namespaced entries.
+    /// Reads from old names, writes to new names, deletes old entries.
+    /// No-op in dev mode.
+    pub fn migrate_global_keys(&self) {
+        if self.dev_mode {
+            return;
+        }
+
+        let keys_to_migrate = [
+            "encryption_master_key",
+            "discogs_api_key",
+            "cloud_sync_access_key",
+            "cloud_sync_secret_key",
+        ];
+
+        for base_name in keys_to_migrate {
+            let old_entry = match keyring_core::Entry::new("bae", base_name) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+
+            let value = match old_entry.get_password() {
+                Ok(v) if !v.is_empty() => v,
+                _ => continue,
+            };
+
+            let new_account = self.account(base_name);
+            match keyring_core::Entry::new("bae", &new_account) {
+                Ok(new_entry) => {
+                    if let Err(e) = new_entry.set_password(&value) {
+                        warn!("Failed to migrate {base_name} to {new_account}: {e}");
+                        continue;
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to create entry for {new_account}: {e}");
+                    continue;
+                }
+            }
+
+            if let Err(e) = old_entry.delete_credential() {
+                warn!("Failed to delete old entry {base_name}: {e}");
+            } else {
+                info!("Migrated keyring entry {base_name} -> {new_account}");
+            }
         }
     }
 }

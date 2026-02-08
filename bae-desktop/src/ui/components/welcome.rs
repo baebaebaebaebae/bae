@@ -13,8 +13,13 @@ use tracing::{error, info};
 use crate::ui::app::MAIN_CSS;
 use crate::ui::app::TAILWIND_CSS;
 
+#[derive(Clone)]
+struct WelcomeContext {
+    dev_mode: bool,
+}
+
 /// Launch a minimal Dioxus app with just the welcome screen
-pub fn launch_welcome(key_service: KeyService) {
+pub fn launch_welcome(dev_mode: bool) {
     let config = dioxus::desktop::Config::default()
         .with_window(
             dioxus::desktop::WindowBuilder::new()
@@ -29,7 +34,7 @@ pub fn launch_welcome(key_service: KeyService) {
 
     LaunchBuilder::desktop()
         .with_cfg(config)
-        .with_context_provider(move || Box::new(key_service.clone()))
+        .with_context_provider(move || Box::new(WelcomeContext { dev_mode }))
         .launch(WelcomeApp);
 }
 
@@ -70,47 +75,14 @@ fn WelcomeScreen() -> Element {
     let mut encryption_key = use_signal(String::new);
 
     let on_create_new = move |_| {
-        let home_dir = dirs::home_dir().expect("Failed to get home directory");
-        let bae_dir = home_dir.join(".bae");
-        let id = uuid::Uuid::new_v4().to_string();
-        let library_path = bae_dir.join("libraries").join(&id);
-        std::fs::create_dir_all(&library_path).expect("Failed to create library directory");
+        let ctx = use_context::<WelcomeContext>();
+        let config = bae_core::config::Config::create_new_library(ctx.dev_mode)
+            .expect("Failed to create new library");
 
-        // Write config.yaml with library_id
-        let config = bae_core::config::Config {
-            library_id: id,
-            library_path: library_path.clone(),
-            discogs_key_stored: false,
-            encryption_key_stored: false,
-            encryption_key_fingerprint: None,
-            torrent_bind_interface: None,
-            torrent_listen_port: None,
-            torrent_enable_upnp: true,
-            torrent_enable_natpmp: true,
-            torrent_max_connections: None,
-            torrent_max_connections_per_torrent: None,
-            torrent_max_uploads: None,
-            torrent_max_uploads_per_torrent: None,
-            subsonic_enabled: true,
-            subsonic_port: 4533,
-            cloud_sync_enabled: false,
-            cloud_sync_bucket: None,
-            cloud_sync_region: None,
-            cloud_sync_endpoint: None,
-            cloud_sync_last_upload: None,
-        };
         config
-            .save_to_config_yaml()
-            .expect("Failed to write config.yaml");
+            .save_library_path()
+            .expect("Failed to write library pointer");
 
-        // Write pointer file last (makes this idempotent on failure)
-        std::fs::write(
-            bae_dir.join("library"),
-            library_path.to_string_lossy().as_ref(),
-        )
-        .expect("Failed to write library pointer");
-
-        info!("Created new library at {}", library_path.display());
         relaunch();
     };
 
@@ -138,9 +110,10 @@ fn WelcomeScreen() -> Element {
             }
 
             restore_status.set(RestoreStatus::Restoring);
-            let key_service = use_context::<KeyService>();
+            let ctx = use_context::<WelcomeContext>();
 
             spawn(async move {
+                let key_service = KeyService::new(ctx.dev_mode, lid.clone());
                 match do_restore(&key_service, lid, b, r, ep, ak, sk, ek).await {
                     Ok(()) => {
                         info!("Cloud restore complete, re-launching");
@@ -344,6 +317,8 @@ async fn do_restore(
     let config = bae_core::config::Config {
         library_id: library_id.clone(),
         library_path: library_path.clone(),
+        library_name: None,
+        keys_migrated: true,
         discogs_key_stored: false,
         encryption_key_stored: true,
         encryption_key_fingerprint: Some(fingerprint),
@@ -371,11 +346,7 @@ async fn do_restore(
     key_service.set_cloud_sync_secret_key(&secret_key)?;
 
     // Write pointer file last (makes this idempotent on failure)
-    std::fs::create_dir_all(&bae_dir)?;
-    std::fs::write(
-        bae_dir.join("library"),
-        library_path.to_string_lossy().as_ref(),
-    )?;
+    config.save_library_path()?;
 
     info!(
         "Cloud restore complete: library at {}",

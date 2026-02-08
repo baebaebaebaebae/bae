@@ -50,6 +50,12 @@ fn default_true() -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigYaml {
     pub library_id: String,
+    /// Human-readable name for this library
+    #[serde(default)]
+    pub library_name: Option<String>,
+    /// Whether global keyring entries have been migrated to per-library entries
+    #[serde(default)]
+    pub keys_migrated: bool,
     /// Whether a Discogs API key is stored in the keyring (hint flag, avoids keyring read)
     #[serde(default)]
     pub discogs_key_stored: bool,
@@ -95,11 +101,28 @@ pub struct ConfigYaml {
     pub cloud_sync_last_upload: Option<String>,
 }
 
+/// Metadata about a discovered library (for the library switcher UI)
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LibraryInfo {
+    pub id: String,
+    pub name: Option<String>,
+    pub path: PathBuf,
+    pub is_active: bool,
+}
+
+/// List of external library paths tracked in ~/.bae/known_libraries.yaml
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct KnownLibraries {
+    paths: Vec<PathBuf>,
+}
+
 /// Application configuration
 #[derive(Clone, Debug)]
 pub struct Config {
     pub library_id: String,
     pub library_path: PathBuf,
+    pub library_name: Option<String>,
+    pub keys_migrated: bool,
     /// Whether a Discogs API key is stored (hint flag, avoids keyring read on settings render)
     pub discogs_key_stored: bool,
     /// Whether an encryption key is stored (hint flag, avoids keyring read on settings render)
@@ -174,6 +197,8 @@ impl Config {
         Self {
             library_id,
             library_path,
+            library_name: None,
+            keys_migrated: true,
             discogs_key_stored,
             encryption_key_stored,
             encryption_key_fingerprint,
@@ -244,6 +269,8 @@ impl Config {
         Self {
             library_id,
             library_path,
+            library_name: yaml_config.library_name,
+            keys_migrated: yaml_config.keys_migrated,
             discogs_key_stored: yaml_config.discogs_key_stored,
             encryption_key_stored: yaml_config.encryption_key_stored,
             encryption_key_fingerprint: yaml_config.encryption_key_fingerprint,
@@ -332,6 +359,8 @@ impl Config {
         std::fs::create_dir_all(&self.library_path)?;
         let yaml = ConfigYaml {
             library_id: self.library_id.clone(),
+            library_name: self.library_name.clone(),
+            keys_migrated: self.keys_migrated,
             discogs_key_stored: self.discogs_key_stored,
             encryption_key_stored: self.encryption_key_stored,
             encryption_key_fingerprint: self.encryption_key_fingerprint.clone(),
@@ -357,6 +386,200 @@ impl Config {
         )?;
         Ok(())
     }
+
+    /// Create a brand-new library: generate ID, create directory, encryption key, and config.yaml.
+    ///
+    /// Returns the Config (with library_path set). Caller should call `save_library_path()`
+    /// and relaunch separately.
+    pub fn create_new_library(dev_mode: bool) -> Result<Config, ConfigError> {
+        let home_dir = dirs::home_dir().expect("Failed to get home directory");
+        let bae_dir = home_dir.join(".bae");
+        let id = uuid::Uuid::new_v4().to_string();
+        let library_path = bae_dir.join("libraries").join(&id);
+        std::fs::create_dir_all(&library_path)?;
+
+        let key_service = crate::keys::KeyService::new(dev_mode, id.clone());
+
+        let mut config = Config {
+            library_id: id,
+            library_path: library_path.clone(),
+            library_name: None,
+            keys_migrated: true,
+            discogs_key_stored: false,
+            encryption_key_stored: true,
+            encryption_key_fingerprint: None,
+            torrent_bind_interface: None,
+            torrent_listen_port: None,
+            torrent_enable_upnp: true,
+            torrent_enable_natpmp: true,
+            torrent_max_connections: None,
+            torrent_max_connections_per_torrent: None,
+            torrent_max_uploads: None,
+            torrent_max_uploads_per_torrent: None,
+            subsonic_enabled: true,
+            subsonic_port: 4533,
+            cloud_sync_enabled: false,
+            cloud_sync_bucket: None,
+            cloud_sync_region: None,
+            cloud_sync_endpoint: None,
+            cloud_sync_last_upload: None,
+        };
+
+        match key_service.get_or_create_encryption_key() {
+            Ok(key_hex) => {
+                config.encryption_key_fingerprint =
+                    crate::encryption::compute_key_fingerprint(&key_hex);
+            }
+            Err(e) => {
+                tracing::error!("Failed to create encryption key: {e}");
+                config.encryption_key_stored = false;
+            }
+        }
+
+        config.save_to_config_yaml()?;
+
+        info!("Created new library at {}", library_path.display());
+        Ok(config)
+    }
+
+    /// Discover all known libraries: scan ~/.bae/libraries/ and read ~/.bae/known_libraries.yaml.
+    pub fn discover_libraries() -> Vec<LibraryInfo> {
+        let home_dir = match dirs::home_dir() {
+            Some(d) => d,
+            None => return vec![],
+        };
+        let bae_dir = home_dir.join(".bae");
+
+        // Read active library path from pointer file
+        let active_path = std::fs::read_to_string(bae_dir.join("library"))
+            .ok()
+            .map(|s| PathBuf::from(s.trim()));
+
+        let mut libraries = Vec::new();
+
+        // Scan ~/.bae/libraries/
+        let libraries_dir = bae_dir.join("libraries");
+        if libraries_dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&libraries_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if let Some(info) = read_library_info(&path, &active_path) {
+                        libraries.push(info);
+                    }
+                }
+            }
+        }
+
+        // Read known_libraries.yaml for external paths
+        let known_path = bae_dir.join("known_libraries.yaml");
+        if known_path.is_file() {
+            if let Ok(content) = std::fs::read_to_string(&known_path) {
+                if let Ok(known) = serde_yaml::from_str::<KnownLibraries>(&content) {
+                    for path in known.paths {
+                        // Skip duplicates (might already be in ~/.bae/libraries/)
+                        if libraries.iter().any(|l| l.path == path) {
+                            continue;
+                        }
+                        if let Some(info) = read_library_info(&path, &active_path) {
+                            libraries.push(info);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sort: active first, then by name/id
+        libraries.sort_by(|a, b| {
+            b.is_active.cmp(&a.is_active).then_with(|| {
+                let a_name = a.name.as_deref().unwrap_or(&a.id);
+                let b_name = b.name.as_deref().unwrap_or(&b.id);
+                a_name.cmp(b_name)
+            })
+        });
+
+        libraries
+    }
+
+    /// Add an external library path to ~/.bae/known_libraries.yaml.
+    pub fn add_known_library(path: &std::path::Path) -> Result<(), ConfigError> {
+        let bae_dir = dirs::home_dir()
+            .expect("Failed to get home directory")
+            .join(".bae");
+        let known_path = bae_dir.join("known_libraries.yaml");
+
+        let mut known = if known_path.is_file() {
+            let content = std::fs::read_to_string(&known_path)?;
+            serde_yaml::from_str::<KnownLibraries>(&content).unwrap_or_default()
+        } else {
+            KnownLibraries::default()
+        };
+
+        let path = path.to_path_buf();
+        if !known.paths.contains(&path) {
+            known.paths.push(path);
+            std::fs::create_dir_all(&bae_dir)?;
+            std::fs::write(&known_path, serde_yaml::to_string(&known).unwrap())?;
+        }
+
+        Ok(())
+    }
+
+    /// Remove an external library path from ~/.bae/known_libraries.yaml.
+    pub fn remove_known_library(path: &std::path::Path) -> Result<(), ConfigError> {
+        let bae_dir = dirs::home_dir()
+            .expect("Failed to get home directory")
+            .join(".bae");
+        let known_path = bae_dir.join("known_libraries.yaml");
+
+        if !known_path.is_file() {
+            return Ok(());
+        }
+
+        let content = std::fs::read_to_string(&known_path)?;
+        let mut known = serde_yaml::from_str::<KnownLibraries>(&content).unwrap_or_default();
+
+        known.paths.retain(|p| p != path);
+        std::fs::write(&known_path, serde_yaml::to_string(&known).unwrap())?;
+
+        Ok(())
+    }
+
+    /// Rename a library by updating its config.yaml library_name field.
+    /// Handles YAML read/modify/write so callers don't need serde_yaml.
+    pub fn rename_library(
+        library_path: &std::path::Path,
+        new_name: &str,
+    ) -> Result<(), ConfigError> {
+        let config_path = library_path.join("config.yaml");
+        let content = std::fs::read_to_string(&config_path)?;
+        let mut yaml: ConfigYaml = serde_yaml::from_str(&content)
+            .map_err(|e| ConfigError::Serialization(e.to_string()))?;
+
+        yaml.library_name = if new_name.is_empty() {
+            None
+        } else {
+            Some(new_name.to_string())
+        };
+
+        std::fs::write(&config_path, serde_yaml::to_string(&yaml).unwrap())?;
+
+        Ok(())
+    }
+}
+
+/// Read library info from a directory if it contains a valid config.yaml.
+fn read_library_info(path: &std::path::Path, active_path: &Option<PathBuf>) -> Option<LibraryInfo> {
+    let config_path = path.join("config.yaml");
+    let content = std::fs::read_to_string(&config_path).ok()?;
+    let yaml: ConfigYaml = serde_yaml::from_str(&content).ok()?;
+    let is_active = active_path.as_ref().is_some_and(|a| a == path);
+
+    Some(LibraryInfo {
+        id: yaml.library_id,
+        name: yaml.library_name,
+        path: path.to_path_buf(),
+        is_active,
+    })
 }
 
 /// Append a key=value line to a .env file.
@@ -382,6 +605,8 @@ mod tests {
         Config {
             library_id: library_id.to_string(),
             library_path,
+            library_name: None,
+            keys_migrated: true,
             discogs_key_stored: false,
             encryption_key_stored: false,
             encryption_key_fingerprint: None,
@@ -528,5 +753,81 @@ mod tests {
         let content = std::fs::read_to_string(&env_path).unwrap();
         assert!(content.starts_with("EXISTING=value\n"));
         assert!(content.contains("NEW_KEY=new_value"));
+    }
+
+    #[test]
+    fn library_name_roundtrip() {
+        let tmp = TempDir::new().unwrap();
+        let library_path = tmp.path().to_path_buf();
+        let mut config = make_test_config("lib-1", library_path.clone());
+        config.library_name = Some("My Music".to_string());
+        config.save_to_config_yaml().unwrap();
+
+        let yaml: ConfigYaml = serde_yaml::from_str(
+            &std::fs::read_to_string(library_path.join("config.yaml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(yaml.library_name, Some("My Music".to_string()));
+    }
+
+    #[test]
+    fn discover_libraries_finds_dirs_with_config() {
+        let tmp = TempDir::new().unwrap();
+        let bae_dir = tmp.path();
+        let libraries_dir = bae_dir.join("libraries");
+
+        // Create two libraries
+        let lib1_path = libraries_dir.join("lib-1");
+        make_test_config("lib-1", lib1_path.clone())
+            .save_to_config_yaml()
+            .unwrap();
+
+        let lib2_path = libraries_dir.join("lib-2");
+        let mut lib2 = make_test_config("lib-2", lib2_path.clone());
+        lib2.library_name = Some("Second Library".to_string());
+        lib2.save_to_config_yaml().unwrap();
+
+        // Create an invalid dir (no config.yaml)
+        std::fs::create_dir_all(libraries_dir.join("invalid")).unwrap();
+
+        // Write pointer to lib-1
+        std::fs::write(
+            bae_dir.join("library"),
+            lib1_path.to_string_lossy().as_ref(),
+        )
+        .unwrap();
+
+        // We can't call discover_libraries() directly since it hardcodes ~/.bae,
+        // but we can test read_library_info
+        let active = Some(lib1_path.clone());
+        let info1 = read_library_info(&lib1_path, &active).unwrap();
+        assert_eq!(info1.id, "lib-1");
+        assert!(info1.is_active);
+
+        let info2 = read_library_info(&lib2_path, &active).unwrap();
+        assert_eq!(info2.id, "lib-2");
+        assert_eq!(info2.name, Some("Second Library".to_string()));
+        assert!(!info2.is_active);
+
+        // Invalid dir returns None
+        assert!(read_library_info(&libraries_dir.join("invalid"), &active).is_none());
+    }
+
+    #[test]
+    fn rename_library_updates_config_yaml() {
+        let tmp = TempDir::new().unwrap();
+        let library_path = tmp.path().to_path_buf();
+        make_test_config("lib-1", library_path.clone())
+            .save_to_config_yaml()
+            .unwrap();
+
+        Config::rename_library(&library_path, "New Name").unwrap();
+
+        let yaml: ConfigYaml = serde_yaml::from_str(
+            &std::fs::read_to_string(library_path.join("config.yaml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(yaml.library_name, Some("New Name".to_string()));
+        assert_eq!(yaml.library_id, "lib-1"); // unchanged
     }
 }

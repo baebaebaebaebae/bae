@@ -305,7 +305,7 @@ impl ImportService {
             scan_tx,
             scan_events_tx,
             // Tests always run in dev mode
-            KeyService::new(true),
+            KeyService::new(true, "test".to_string()),
             std::env::temp_dir().join("bae-test-covers"),
         )
     }
@@ -369,7 +369,7 @@ impl ImportService {
             scan_tx,
             scan_events_tx,
             // Tests always run in dev mode
-            KeyService::new(true),
+            KeyService::new(true, "test".to_string()),
             std::env::temp_dir().join("bae-test-covers"),
         )
     }
