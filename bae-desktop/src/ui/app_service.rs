@@ -1537,11 +1537,9 @@ async fn change_cover_async(
             use bae_core::import::cover_art::download_cover_art_bytes;
 
             // Download the image
-            let (bytes, ext) = download_cover_art_bytes(&url)
+            let (bytes, content_type) = download_cover_art_bytes(&url)
                 .await
                 .map_err(|e| format!("Failed to download cover: {}", e))?;
-
-            let content_type = bae_core::util::content_type_for_extension(&ext).to_string();
 
             // Write to covers/{release_id}
             let cover_path = library_dir.cover_path(release_id);
@@ -1841,11 +1839,14 @@ pub(crate) async fn cloud_sync_upload(
         .vacuum_into(snapshot_path.to_str().unwrap())
         .await?;
 
-    // Upload DB + covers
+    // Upload DB + covers + artist images
     let timestamp = sync_service.upload_db(&db_path).await?;
 
     let covers_dir = config.library_dir.covers_dir();
     sync_service.upload_covers(&covers_dir).await?;
+
+    let artists_dir = config.library_dir.artists_dir();
+    sync_service.upload_artists(&artists_dir).await?;
 
     Ok(timestamp)
 }

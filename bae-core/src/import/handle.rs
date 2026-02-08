@@ -310,7 +310,7 @@ impl ImportServiceHandle {
             .map_err(|e| format!("Failed to link import to release: {}", e))?;
         insert_album_artists(library_manager, &album_artists, &artist_id_map).await?;
         // Write remote cover and create library_images record
-        let remote_cover_set = if let Some(((bytes, ext), url)) = remote_cover_data {
+        let remote_cover_set = if let Some(((bytes, content_type), url)) = remote_cover_data {
             let cover_path = self.library_dir.cover_path(&db_release.id);
             if let Some(parent) = cover_path.parent() {
                 std::fs::create_dir_all(parent)
@@ -320,8 +320,6 @@ impl ImportServiceHandle {
                 .map_err(|e| format!("Failed to write cover: {}", e))?;
 
             info!("Wrote remote cover art to {}", cover_path.display());
-
-            let content_type = crate::util::content_type_for_extension(&ext).to_string();
             let source = if url.contains("musicbrainz") || url.contains("coverartarchive") {
                 "musicbrainz"
             } else {

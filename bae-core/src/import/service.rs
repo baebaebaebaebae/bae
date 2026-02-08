@@ -955,7 +955,7 @@ impl ImportService {
     async fn download_remote_cover(&self, album_id: &str, release_id: &str, url: &str) -> bool {
         use super::cover_art::download_cover_art_bytes;
 
-        let (bytes, ext) = match download_cover_art_bytes(url).await {
+        let (bytes, content_type) = match download_cover_art_bytes(url).await {
             Ok(result) => result,
             Err(e) => {
                 error!("Failed to download remote cover art: {}", e);
@@ -977,8 +977,6 @@ impl ImportService {
         }
 
         info!("Wrote remote cover art to {}", cover_path.display());
-
-        let content_type = crate::util::content_type_for_extension(&ext).to_string();
         let source = if url.contains("musicbrainz") || url.contains("coverartarchive") {
             "musicbrainz"
         } else {

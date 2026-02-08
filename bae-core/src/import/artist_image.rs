@@ -65,6 +65,26 @@ pub async fn fetch_and_save_artist_image(
         return false;
     }
 
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|ct| {
+            let mime = ct.split(';').next().unwrap_or(ct).trim();
+            if mime.starts_with("image/") {
+                Some(mime.to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| {
+            let ext = reqwest::Url::parse(&image_url)
+                .ok()
+                .and_then(|parsed| parsed.path().rsplit('.').next().map(|e| e.to_lowercase()))
+                .unwrap_or_default();
+            crate::util::content_type_for_extension(&ext).to_string()
+        });
+
     let bytes = match response.bytes().await {
         Ok(b) => b,
         Err(e) => {
@@ -77,9 +97,6 @@ pub async fn fetch_and_save_artist_image(
         warn!("Downloaded artist image too small ({} bytes)", bytes.len());
         return false;
     }
-
-    let ext = super::image_extension_from_url(&image_url);
-    let content_type = crate::util::content_type_for_extension(&ext).to_string();
 
     if let Err(e) = std::fs::create_dir_all(artists_dir) {
         warn!("Failed to create artists directory: {}", e);
