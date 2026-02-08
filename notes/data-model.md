@@ -45,18 +45,30 @@ Content types are stored as MIME strings and mapped to the `ContentType` enum in
 
 ### `audio_formats` — playback metadata (1:1 with tracks)
 
+Stores everything needed to play a track: codec info, FLAC headers for CUE/FLAC tracks (where the decoder needs headers prepended since playback starts mid-file), byte offsets for track boundaries, and a dense seektable for frame-accurate seeking (~93ms precision).
+
+For one-file-per-track FLAC: `start_byte_offset`/`end_byte_offset` are NULL, `needs_headers` is false. For CUE/FLAC: both offsets point into the shared FLAC file, `needs_headers` is true.
+
+`file_id` links to the `files` row containing this track's audio data.
+
 ```
 audio_formats
-  id                TEXT PK
-  track_id          TEXT FK → tracks (UNIQUE)
-  content_type      TEXT NOT NULL    -- "audio/flac"
-  flac_headers      BLOB
-  needs_headers     BOOLEAN NOT NULL
-  start_byte_offset INTEGER          -- for CUE/FLAC tracks
-  end_byte_offset   INTEGER
-  ...
-  file_id           TEXT FK → files
-  created_at        TEXT NOT NULL
+  id                  TEXT PK
+  track_id            TEXT FK → tracks (UNIQUE)
+  content_type        TEXT NOT NULL    -- "audio/flac"
+  flac_headers        BLOB            -- for CUE/FLAC: headers to prepend
+  needs_headers       BOOLEAN NOT NULL
+  start_byte_offset   INTEGER         -- CUE/FLAC: track start in shared file
+  end_byte_offset     INTEGER         -- CUE/FLAC: track end in shared file
+  pregap_ms           INTEGER         -- CUE/FLAC: INDEX 00 gap duration
+  frame_offset_samples INTEGER        -- samples to skip after frame alignment
+  exact_sample_count  INTEGER         -- for gapless playback trimming
+  sample_rate         INTEGER NOT NULL
+  bits_per_sample     INTEGER NOT NULL
+  seektable_json      TEXT NOT NULL    -- dense frame-level seektable
+  audio_data_start    INTEGER NOT NULL -- byte offset where audio data begins
+  file_id             TEXT FK → files
+  created_at          TEXT NOT NULL
 ```
 
 ### `library_images` — bae-managed metadata images
