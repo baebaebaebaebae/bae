@@ -21,6 +21,7 @@ use crate::import::types::{
 };
 use crate::keys::KeyService;
 use crate::library::{LibraryManager, SharedLibraryManager};
+use crate::library_dir::LibraryDir;
 use crate::storage::{ReleaseStorage, ReleaseStorageImpl};
 #[cfg(feature = "torrent")]
 use crate::torrent::LazyTorrentManager;
@@ -68,8 +69,8 @@ pub struct ImportService {
     torrent_manager: LazyTorrentManager,
     /// Database for storage operations
     database: Arc<Database>,
-    /// Library directory path (for cover art cache)
-    library_path: PathBuf,
+    /// Library directory (for cover art cache)
+    library_dir: LibraryDir,
     /// Optional pre-built cloud storage (for testing with MockCloudStorage)
     #[cfg(feature = "test-utils")]
     injected_cloud: Option<Arc<dyn crate::cloud_storage::CloudStorage>>,
@@ -123,7 +124,7 @@ impl ImportService {
         torrent_manager: LazyTorrentManager,
         database: Arc<Database>,
         key_service: KeyService,
-        library_path: PathBuf,
+        library_dir: LibraryDir,
     ) -> ImportServiceHandle {
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
         let (progress_tx, progress_rx) = mpsc::unbounded_channel();
@@ -132,7 +133,7 @@ impl ImportService {
         let progress_tx_for_handle = progress_tx.clone();
         let library_manager_for_worker = library_manager.clone();
         let database_for_handle = database.clone();
-        let library_path_for_handle = library_path.clone();
+        let library_dir_for_handle = library_dir.clone();
 
         ImportService::start_scan_worker(&runtime_handle, scan_rx, scan_events_tx.clone());
 
@@ -146,7 +147,7 @@ impl ImportService {
                     encryption_service,
                     torrent_manager,
                     database,
-                    library_path,
+                    library_dir,
                     #[cfg(feature = "test-utils")]
                     injected_cloud: None,
                 };
@@ -176,7 +177,7 @@ impl ImportService {
             scan_tx,
             scan_events_tx,
             key_service,
-            library_path_for_handle,
+            library_dir_for_handle,
         )
     }
 
@@ -188,7 +189,7 @@ impl ImportService {
         encryption_service: Option<EncryptionService>,
         database: Arc<Database>,
         key_service: KeyService,
-        library_path: PathBuf,
+        library_dir: LibraryDir,
     ) -> ImportServiceHandle {
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
         let (progress_tx, progress_rx) = mpsc::unbounded_channel();
@@ -197,7 +198,7 @@ impl ImportService {
         let progress_tx_for_handle = progress_tx.clone();
         let library_manager_for_worker = library_manager.clone();
         let database_for_handle = database.clone();
-        let library_path_for_handle = library_path.clone();
+        let library_dir_for_handle = library_dir.clone();
 
         ImportService::start_scan_worker(&runtime_handle, scan_rx, scan_events_tx.clone());
 
@@ -210,7 +211,7 @@ impl ImportService {
                     library_manager: library_manager_for_worker,
                     encryption_service,
                     database,
-                    library_path,
+                    library_dir,
                     #[cfg(feature = "test-utils")]
                     injected_cloud: None,
                 };
@@ -240,7 +241,7 @@ impl ImportService {
             scan_tx,
             scan_events_tx,
             key_service,
-            library_path_for_handle,
+            library_dir_for_handle,
         )
     }
 
@@ -276,7 +277,7 @@ impl ImportService {
                     encryption_service,
                     torrent_manager,
                     database,
-                    library_path: std::env::temp_dir().join("bae-test-covers"),
+                    library_dir: LibraryDir::new(std::env::temp_dir().join("bae-test-covers")),
                     injected_cloud: Some(cloud),
                 };
 
@@ -306,7 +307,7 @@ impl ImportService {
             scan_events_tx,
             // Tests always run in dev mode
             KeyService::new(true, "test".to_string()),
-            std::env::temp_dir().join("bae-test-covers"),
+            LibraryDir::new(std::env::temp_dir().join("bae-test-covers")),
         )
     }
 
@@ -340,7 +341,7 @@ impl ImportService {
                     library_manager: library_manager_for_worker,
                     encryption_service,
                     database,
-                    library_path: std::env::temp_dir().join("bae-test-covers"),
+                    library_dir: LibraryDir::new(std::env::temp_dir().join("bae-test-covers")),
                     injected_cloud: Some(cloud),
                 };
 
@@ -370,7 +371,7 @@ impl ImportService {
             scan_events_tx,
             // Tests always run in dev mode
             KeyService::new(true, "test".to_string()),
-            std::env::temp_dir().join("bae-test-covers"),
+            LibraryDir::new(std::env::temp_dir().join("bae-test-covers")),
         )
     }
 
@@ -908,7 +909,7 @@ impl ImportService {
             if is_cover {
                 // Cache cover to {library_path}/covers/{release_id}.{ext} for fast browsing
                 if let Some(ext) = file.path.extension().and_then(|e| e.to_str()) {
-                    let covers_dir = self.library_path.join("covers");
+                    let covers_dir = self.library_dir.covers_dir();
                     if let Err(e) = std::fs::create_dir_all(&covers_dir) {
                         error!("Failed to create covers directory: {}", e);
                     } else {
@@ -959,7 +960,7 @@ impl ImportService {
             }
         };
 
-        let covers_dir = self.library_path.join("covers");
+        let covers_dir = self.library_dir.covers_dir();
         if let Err(e) = std::fs::create_dir_all(&covers_dir) {
             error!("Failed to create covers directory: {}", e);
             return false;

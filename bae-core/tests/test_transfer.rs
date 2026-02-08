@@ -13,6 +13,7 @@ use bae_core::db::{
     Database, DbAlbum, DbFile, DbRelease, DbReleaseStorage, DbStorageProfile, ImportStatus,
 };
 use bae_core::library::LibraryManager;
+use bae_core::library_dir::LibraryDir;
 use bae_core::storage::cleanup::PendingDeletion;
 use bae_core::storage::transfer::{TransferProgress, TransferService, TransferTarget};
 use chrono::Utc;
@@ -192,7 +193,11 @@ async fn test_transfer_self_managed_to_local_profile() {
 
     // Execute transfer
     let shared_mgr = bae_core::library::SharedLibraryManager::new(mgr);
-    let service = TransferService::new(shared_mgr.clone(), None, library_path.clone());
+    let service = TransferService::new(
+        shared_mgr.clone(),
+        None,
+        LibraryDir::new(library_path.clone()),
+    );
     let rx = service.transfer(
         release_id.clone(),
         TransferTarget::Profile(dest_profile.clone()),
@@ -298,7 +303,11 @@ async fn test_transfer_local_profile_to_local_profile() {
 
     // Execute transfer
     let shared_mgr = bae_core::library::SharedLibraryManager::new(mgr);
-    let service = TransferService::new(shared_mgr.clone(), None, library_path.clone());
+    let service = TransferService::new(
+        shared_mgr.clone(),
+        None,
+        LibraryDir::new(library_path.clone()),
+    );
     let rx = service.transfer(
         release_id.clone(),
         TransferTarget::Profile(dest_profile.clone()),
@@ -379,7 +388,11 @@ async fn test_eject_from_local_profile() {
 
     // Execute eject
     let shared_mgr = bae_core::library::SharedLibraryManager::new(mgr);
-    let service = TransferService::new(shared_mgr.clone(), None, library_path.clone());
+    let service = TransferService::new(
+        shared_mgr.clone(),
+        None,
+        LibraryDir::new(library_path.clone()),
+    );
     let rx = service.transfer(release_id.clone(), TransferTarget::Eject(eject_dir.clone()));
     let events = collect_progress(rx).await;
 
@@ -451,7 +464,7 @@ async fn test_transfer_empty_release_fails() {
     db.insert_storage_profile(&dest_profile).await.unwrap();
 
     let shared_mgr = bae_core::library::SharedLibraryManager::new(mgr);
-    let service = TransferService::new(shared_mgr, None, library_path);
+    let service = TransferService::new(shared_mgr, None, LibraryDir::new(library_path));
     let rx = service.transfer(release_id.clone(), TransferTarget::Profile(dest_profile));
     let events = collect_progress(rx).await;
 

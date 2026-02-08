@@ -18,6 +18,7 @@ use crate::import::types::{
 };
 use crate::keys::KeyService;
 use crate::library::{LibraryManager, SharedLibraryManager};
+use crate::library_dir::LibraryDir;
 use crate::musicbrainz::MbRelease;
 use std::collections::HashMap;
 use std::path::Path;
@@ -36,7 +37,7 @@ pub struct ImportServiceHandle {
     pub scan_tx: mpsc::UnboundedSender<ScanRequest>,
     pub scan_events_tx: broadcast::Sender<ScanEvent>,
     pub key_service: KeyService,
-    pub library_path: std::path::PathBuf,
+    pub library_dir: LibraryDir,
 }
 
 #[derive(Debug, Clone)]
@@ -87,7 +88,7 @@ impl ImportServiceHandle {
         scan_tx: mpsc::UnboundedSender<ScanRequest>,
         scan_events_tx: broadcast::Sender<ScanEvent>,
         key_service: KeyService,
-        library_path: std::path::PathBuf,
+        library_dir: LibraryDir,
     ) -> Self {
         let progress_handle = ImportProgressHandle::new(progress_rx, runtime_handle.clone());
         Self {
@@ -100,7 +101,7 @@ impl ImportServiceHandle {
             scan_tx,
             scan_events_tx,
             key_service,
-            library_path,
+            library_dir,
         }
     }
 
@@ -310,7 +311,7 @@ impl ImportServiceHandle {
         insert_album_artists(library_manager, &album_artists, &artist_id_map).await?;
         // Write remote cover to cache and set cover_release_id (album now exists in DB)
         let remote_cover_set = if let Some(((bytes, ext), _url)) = remote_cover_data {
-            let covers_dir = self.library_path.join("covers");
+            let covers_dir = self.library_dir.covers_dir();
             std::fs::create_dir_all(&covers_dir)
                 .map_err(|e| format!("Failed to create covers directory: {}", e))?;
             let cache_path = covers_dir.join(format!("{}.{}", db_release.id, ext));
@@ -331,7 +332,7 @@ impl ImportServiceHandle {
 
         // Fetch artist images (best-effort, non-blocking)
         if let Some(ref discogs_client) = get_discogs_client(&self.key_service) {
-            let artists_dir = self.library_path.join("artists");
+            let artists_dir = self.library_dir.artists_dir();
             fetch_artist_images(
                 library_manager,
                 discogs_client,
@@ -439,7 +440,7 @@ impl ImportServiceHandle {
 
         // Fetch artist images (best-effort, non-blocking)
         if let Some(ref discogs_client) = get_discogs_client(&self.key_service) {
-            let artists_dir = self.library_path.join("artists");
+            let artists_dir = self.library_dir.artists_dir();
             fetch_artist_images(
                 library_manager,
                 discogs_client,
@@ -538,7 +539,7 @@ impl ImportServiceHandle {
 
         // Fetch artist images (best-effort, non-blocking)
         if let Some(ref discogs_client) = get_discogs_client(&self.key_service) {
-            let artists_dir = self.library_path.join("artists");
+            let artists_dir = self.library_dir.artists_dir();
             fetch_artist_images(
                 library_manager,
                 discogs_client,

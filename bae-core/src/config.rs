@@ -1,3 +1,4 @@
+use crate::library_dir::LibraryDir;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
@@ -120,7 +121,7 @@ struct KnownLibraries {
 #[derive(Clone, Debug)]
 pub struct Config {
     pub library_id: String,
-    pub library_path: PathBuf,
+    pub library_dir: LibraryDir,
     pub library_name: Option<String>,
     pub keys_migrated: bool,
     /// Whether a Discogs API key is stored (hint flag, avoids keyring read on settings render)
@@ -183,20 +184,20 @@ impl Config {
         let encryption_key_stored = encryption_key_hex.is_some();
         let encryption_key_fingerprint =
             encryption_key_hex.and_then(|k| crate::encryption::compute_key_fingerprint(&k));
-        let library_path = match std::env::var("BAE_LIBRARY_PATH").ok() {
+        let library_dir = LibraryDir::new(match std::env::var("BAE_LIBRARY_PATH").ok() {
             Some(p) => PathBuf::from(p),
             None => {
                 let home = dirs::home_dir().expect("Failed to get home directory");
                 home.join(".bae").join("libraries").join(&library_id)
             }
-        };
+        });
         let torrent_bind_interface = std::env::var("BAE_TORRENT_BIND_INTERFACE")
             .ok()
             .filter(|s| !s.is_empty());
 
         Self {
             library_id,
-            library_path,
+            library_dir,
             library_name: None,
             keys_migrated: true,
             discogs_key_stored,
@@ -235,7 +236,7 @@ impl Config {
     fn load_from_bae_dir(bae_dir: &std::path::Path) -> Self {
         // Read library path from pointer file — must exist (first-run flow creates it)
         let library_path_file = bae_dir.join("library");
-        let library_path = {
+        let library_dir = {
             let content = std::fs::read_to_string(&library_path_file).unwrap_or_else(|e| {
                 panic!(
                     "No library pointer at {}. Run bae to set up a library. ({})",
@@ -249,11 +250,11 @@ impl Config {
                 "Library pointer at {} is empty",
                 library_path_file.display()
             );
-            PathBuf::from(trimmed)
+            LibraryDir::new(trimmed)
         };
 
         // Read library-specific config — must exist with library_id (first-run flow creates it)
-        let config_path = library_path.join("config.yaml");
+        let config_path = library_dir.config_path();
         let yaml_config: ConfigYaml =
             serde_yaml::from_str(&std::fs::read_to_string(&config_path).unwrap_or_else(|e| {
                 panic!(
@@ -268,7 +269,7 @@ impl Config {
 
         Self {
             library_id,
-            library_path,
+            library_dir,
             library_name: yaml_config.library_name,
             keys_migrated: yaml_config.keys_migrated,
             discogs_key_stored: yaml_config.discogs_key_stored,
@@ -350,13 +351,13 @@ impl Config {
         std::fs::create_dir_all(&bae_dir)?;
         std::fs::write(
             bae_dir.join("library"),
-            self.library_path.to_string_lossy().as_ref(),
+            self.library_dir.to_string_lossy().as_ref(),
         )?;
         Ok(())
     }
 
     pub fn save_to_config_yaml(&self) -> Result<(), ConfigError> {
-        std::fs::create_dir_all(&self.library_path)?;
+        std::fs::create_dir_all(&*self.library_dir)?;
         let yaml = ConfigYaml {
             library_id: self.library_id.clone(),
             library_name: self.library_name.clone(),
@@ -381,7 +382,7 @@ impl Config {
             cloud_sync_last_upload: self.cloud_sync_last_upload.clone(),
         };
         std::fs::write(
-            self.library_path.join("config.yaml"),
+            self.library_dir.config_path(),
             serde_yaml::to_string(&yaml).unwrap(),
         )?;
         Ok(())
@@ -395,14 +396,14 @@ impl Config {
         let home_dir = dirs::home_dir().expect("Failed to get home directory");
         let bae_dir = home_dir.join(".bae");
         let id = uuid::Uuid::new_v4().to_string();
-        let library_path = bae_dir.join("libraries").join(&id);
-        std::fs::create_dir_all(&library_path)?;
+        let library_dir = LibraryDir::new(bae_dir.join("libraries").join(&id));
+        std::fs::create_dir_all(&*library_dir)?;
 
         let key_service = crate::keys::KeyService::new(dev_mode, id.clone());
 
         let mut config = Config {
             library_id: id,
-            library_path: library_path.clone(),
+            library_dir: library_dir.clone(),
             library_name: None,
             keys_migrated: true,
             discogs_key_stored: false,
@@ -437,9 +438,9 @@ impl Config {
         }
 
         config.save_to_config_yaml()?;
-        Self::add_known_library(&library_path)?;
+        Self::add_known_library(&library_dir)?;
 
-        info!("Created new library at {}", library_path.display());
+        info!("Created new library at {}", library_dir.display());
         Ok(config)
     }
 
@@ -588,7 +589,7 @@ mod tests {
     fn make_test_config(library_id: &str, library_path: PathBuf) -> Config {
         Config {
             library_id: library_id.to_string(),
-            library_path,
+            library_dir: LibraryDir::new(library_path),
             library_name: None,
             keys_migrated: true,
             discogs_key_stored: false,
@@ -659,7 +660,7 @@ mod tests {
 
         let loaded = Config::load_from_bae_dir(bae_dir);
         assert_eq!(loaded.library_id, library_id);
-        assert_eq!(loaded.library_path, library_path);
+        assert_eq!(&*loaded.library_dir, library_path.as_path());
     }
 
     #[test]

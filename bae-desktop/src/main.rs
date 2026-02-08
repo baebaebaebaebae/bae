@@ -29,10 +29,10 @@ async fn create_cache_manager() -> cache::CacheManager {
 async fn create_database(config: &config::Config) -> Database {
     info!(
         "Creating library directory: {}",
-        config.library_path.display()
+        config.library_dir.display()
     );
-    std::fs::create_dir_all(&config.library_path).expect("Failed to create library directory");
-    let db_path = config.library_path.join("library.db");
+    std::fs::create_dir_all(&*config.library_dir).expect("Failed to create library directory");
+    let db_path = config.library_dir.db_path();
     info!("Initializing database at: {}", db_path.display());
     let database = Database::new(db_path.to_str().unwrap())
         .await
@@ -191,7 +191,7 @@ fn main() {
         torrent_manager.clone(),
         std::sync::Arc::new(database.clone()),
         key_service.clone(),
-        config.library_path.clone(),
+        config.library_dir.clone(),
     );
     #[cfg(not(feature = "torrent"))]
     let import_handle = import::ImportService::start(
@@ -200,7 +200,7 @@ fn main() {
         encryption_service.clone(),
         std::sync::Arc::new(database.clone()),
         key_service.clone(),
-        config.library_path.clone(),
+        config.library_dir.clone(),
     );
 
     let playback_handle = playback::PlaybackService::start(
@@ -212,7 +212,7 @@ fn main() {
     let media_controls = match media_controls::setup_media_controls(
         playback_handle.clone(),
         library_manager.clone(),
-        config.library_path.clone(),
+        config.library_dir.clone(),
         runtime_handle.clone(),
     ) {
         Ok(controls) => {
@@ -248,13 +248,13 @@ fn main() {
         let subsonic_library = library_manager.clone();
         let subsonic_encryption = encryption_service.clone();
         let subsonic_port = config.subsonic_port;
-        let subsonic_library_path = config.library_path.clone();
+        let subsonic_library_dir = config.library_dir.clone();
         runtime_handle.spawn(async move {
             start_subsonic_server(
                 subsonic_library,
                 subsonic_encryption,
                 subsonic_port,
-                subsonic_library_path,
+                subsonic_library_dir,
             )
             .await
         });
@@ -273,10 +273,10 @@ async fn start_subsonic_server(
     library_manager: SharedLibraryManager,
     encryption_service: Option<encryption::EncryptionService>,
     port: u16,
-    library_path: std::path::PathBuf,
+    library_dir: bae_core::library_dir::LibraryDir,
 ) {
     info!("Starting Subsonic API server...");
-    let app = create_router(library_manager, encryption_service, library_path);
+    let app = create_router(library_manager, encryption_service, library_dir);
     let addr = format!("127.0.0.1:{}", port);
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => {

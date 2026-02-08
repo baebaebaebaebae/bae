@@ -33,7 +33,7 @@ pub enum Route {
 pub fn make_config(context: &AppContext) -> DioxusConfig {
     let services = ImageServices {
         library_manager: context.library_manager.clone(),
-        library_path: context.config.library_path.clone(),
+        library_dir: context.config.library_dir.clone(),
     };
 
     DioxusConfig::default()

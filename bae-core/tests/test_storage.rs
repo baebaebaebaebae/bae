@@ -91,7 +91,7 @@ async fn test_storageless_import() {
         encryption_service,
         database_arc,
         bae_core::keys::KeyService::new(true, "test".to_string()),
-        std::env::temp_dir().join("bae-test-covers"),
+        std::env::temp_dir().join("bae-test-covers").into(),
     );
 
     let discogs_release = create_test_discogs_release();
@@ -242,7 +242,7 @@ async fn test_storageless_delete_preserves_files() {
         encryption_service,
         database_arc,
         bae_core::keys::KeyService::new(true, "test".to_string()),
-        std::env::temp_dir().join("bae-test-covers"),
+        std::env::temp_dir().join("bae-test-covers").into(),
     );
 
     let discogs_release = create_test_discogs_release();
@@ -411,7 +411,7 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
             encryption_service.clone(),
             database_arc,
             bae_core::keys::KeyService::new(true, "test".to_string()),
-            std::env::temp_dir().join("bae-test-covers"),
+            std::env::temp_dir().join("bae-test-covers").into(),
         )
     };
     let discogs_release = create_test_discogs_release();
@@ -929,7 +929,7 @@ async fn run_real_album_test(album_dir: PathBuf, location: StorageLocation, encr
         encryption_service.clone(),
         database_arc.clone(),
         bae_core::keys::KeyService::new(true, "test".to_string()),
-        std::env::temp_dir().join("bae-test-covers"),
+        std::env::temp_dir().join("bae-test-covers").into(),
     );
     let (_album_id, release_id) = import_handle
         .send_request(ImportRequest::Folder {

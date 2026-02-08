@@ -302,21 +302,22 @@ async fn do_restore(
     // Set up local library directory
     let home_dir = dirs::home_dir().expect("Failed to get home directory");
     let bae_dir = home_dir.join(".bae");
-    let library_path = bae_dir.join("libraries").join(&library_id);
-    std::fs::create_dir_all(&library_path)?;
+    let library_dir =
+        bae_core::library_dir::LibraryDir::new(bae_dir.join("libraries").join(&library_id));
+    std::fs::create_dir_all(&*library_dir)?;
 
     // Download DB
-    let db_path = library_path.join("library.db");
+    let db_path = library_dir.db_path();
     sync_service.download_db(&db_path).await?;
 
     // Download covers
-    let covers_dir = library_path.join("covers");
+    let covers_dir = library_dir.covers_dir();
     sync_service.download_covers(&covers_dir).await?;
 
     // Write config.yaml with cloud sync settings already populated
     let config = bae_core::config::Config {
         library_id: library_id.clone(),
-        library_path: library_path.clone(),
+        library_dir: library_dir.clone(),
         library_name: None,
         keys_migrated: true,
         discogs_key_stored: false,
@@ -339,7 +340,7 @@ async fn do_restore(
         cloud_sync_last_upload: None,
     };
     config.save_to_config_yaml()?;
-    bae_core::config::Config::add_known_library(&library_path)?;
+    bae_core::config::Config::add_known_library(&library_dir)?;
 
     // Write secrets to keyring
     key_service.set_encryption_key(&encryption_key_hex)?;
@@ -351,7 +352,7 @@ async fn do_restore(
 
     info!(
         "Cloud restore complete: library at {}",
-        library_path.display()
+        library_dir.display()
     );
     Ok(())
 }

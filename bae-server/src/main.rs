@@ -3,6 +3,7 @@ use bae_core::config::ConfigYaml;
 use bae_core::db::Database;
 use bae_core::encryption::EncryptionService;
 use bae_core::library::{LibraryManager, SharedLibraryManager};
+use bae_core::library_dir::LibraryDir;
 use bae_core::subsonic::create_router;
 use clap::Parser;
 use std::path::{Path, PathBuf};
@@ -106,7 +107,8 @@ async fn main() {
     info!("Library path: {}", args.library_path.display());
 
     let config = load_library_config(&args.library_path);
-    let db_path = args.library_path.join("library.db");
+    let library_dir = LibraryDir::new(args.library_path.clone());
+    let db_path = library_dir.db_path();
     let needs_download = !db_path.exists() || args.refresh;
 
     // Download from cloud if library.db is missing or --refresh was passed
@@ -148,11 +150,7 @@ async fn main() {
         SharedLibraryManager::new(LibraryManager::new(database, encryption_service.clone()));
 
     // Build the API router
-    let api_router = create_router(
-        library_manager,
-        encryption_service,
-        args.library_path.clone(),
-    );
+    let api_router = create_router(library_manager, encryption_service, library_dir);
 
     // If --web-dir is provided, serve static files with SPA fallback
     let app = if let Some(ref web_dir) = args.web_dir {
@@ -245,7 +243,8 @@ async fn download_from_cloud(args: &Args, config: &ConfigYaml) {
     });
 
     // Download and decrypt database
-    let db_path = args.library_path.join("library.db");
+    let library_dir = LibraryDir::new(args.library_path.clone());
+    let db_path = library_dir.db_path();
     info!("Downloading database...");
     cloud.download_db(&db_path).await.unwrap_or_else(|e| {
         error!("Failed to download database: {e}");
@@ -253,7 +252,7 @@ async fn download_from_cloud(args: &Args, config: &ConfigYaml) {
     });
 
     // Download and decrypt covers
-    let covers_path = args.library_path.join("covers");
+    let covers_path = library_dir.covers_dir();
     info!("Downloading covers...");
     cloud
         .download_covers(&covers_path)
