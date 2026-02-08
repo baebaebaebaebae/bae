@@ -103,6 +103,10 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         )
         .visible_when("state", "Identifying")
         .visible_when("identify_mode", "ManualSearch")
+        .bool_control("search_error", "Search Error", false)
+        .doc("Shows error banner in search results")
+        .visible_when("state", "Identifying")
+        .visible_when("identify_mode", "ManualSearch")
         .bool_control("disc_id_not_found", "Disc ID Not Found", false)
         .doc("Shows 'no releases found for Disc ID' banner")
         .visible_when("state", "Identifying")
@@ -131,6 +135,10 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             Preset::new("Manual Search")
                 .set_string("state", "Identifying")
                 .set_string("identify_mode", "ManualSearch"),
+            Preset::new("Search Error")
+                .set_string("state", "Identifying")
+                .set_string("identify_mode", "ManualSearch")
+                .set_bool("search_error", true),
             Preset::new("Confirm")
                 .set_string("state", "Confirming")
                 .set_string("confirm_phase", "Ready"),
@@ -190,6 +198,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
 
     // Boolean flags
     let show_discid_lookup_error = registry.get_bool("discid_lookup_error");
+    let show_search_error = registry.get_bool("search_error");
     let show_disc_id_not_found = registry.get_bool("disc_id_not_found");
 
     // Define folder data - each folder has different file compositions
@@ -457,11 +466,16 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
 
     // Build search state with per-tab results
     let current_tab = search_tab();
+    let search_error_message = if show_search_error {
+        Some("MusicBrainz API returned 503 Service Unavailable".to_string())
+    } else {
+        None
+    };
     let active_tab_state = TabSearchState {
         has_searched,
         search_results: manual_match_candidates.clone(),
         selected_result_index: selected_match_index(),
-        error_message: None,
+        error_message: search_error_message,
     };
     let mock_search_state = ManualSearchState {
         search_source: search_source(),
