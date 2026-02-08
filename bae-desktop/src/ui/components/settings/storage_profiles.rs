@@ -29,6 +29,9 @@ pub fn StorageProfilesSection() -> Element {
     let mut editing_profile = use_signal(|| Option::<StorageProfile>::None);
     let mut is_creating = use_signal(|| false);
 
+    // Directory picker state
+    let mut browsed_directory = use_signal(|| Option::<String>::None);
+
     let display_editing = editing_profile.read().clone();
 
     // Handle save from the view
@@ -104,6 +107,15 @@ pub fn StorageProfilesSection() -> Element {
                 editing_profile.set(None);
                 is_creating.set(false);
             },
+            on_browse_directory: move |_| {
+                spawn(async move {
+                    let folder = rfd::AsyncFileDialog::new().pick_folder().await;
+                    if let Some(handle) = folder {
+                        browsed_directory.set(Some(handle.path().to_string_lossy().to_string()));
+                    }
+                });
+            },
+            browsed_directory,
         }
     }
 }

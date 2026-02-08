@@ -4,7 +4,7 @@
 //! Accepts `ReadSignal` props and reads at leaf level for granular reactivity.
 
 use crate::components::icons::{
-    CheckIcon, CopyIcon, InfoIcon, KeyIcon, PencilIcon, PlusIcon, TrashIcon,
+    CheckIcon, CopyIcon, FolderIcon, InfoIcon, KeyIcon, PencilIcon, PlusIcon, TrashIcon,
 };
 use crate::components::{
     Button, ButtonSize, ButtonVariant, ChromelessButton, TextInput, TextInputSize, TextInputType,
@@ -65,6 +65,8 @@ pub fn StorageProfilesSectionView(
     on_set_default: EventHandler<String>,
     on_save: EventHandler<StorageProfile>,
     on_cancel_edit: EventHandler<()>,
+    on_browse_directory: EventHandler<()>,
+    browsed_directory: ReadSignal<Option<String>>,
 ) -> Element {
     // Read at this level - this is a leaf component
     let profiles = profiles.read();
@@ -87,12 +89,20 @@ pub fn StorageProfilesSectionView(
             }
 
             if is_creating {
-                StorageProfileEditorView { profile: None, on_save, on_cancel: on_cancel_edit }
+                StorageProfileEditorView {
+                    profile: None,
+                    on_save,
+                    on_cancel: on_cancel_edit,
+                    on_browse_directory,
+                    browsed_directory,
+                }
             } else if let Some(ref profile) = editing_profile {
                 StorageProfileEditorView {
                     profile: Some(profile.clone()),
                     on_save,
                     on_cancel: on_cancel_edit,
+                    on_browse_directory,
+                    browsed_directory,
                 }
             }
 
@@ -131,13 +141,15 @@ pub fn StorageProfilesSectionView(
                 }
             }
 
-            // Encryption sub-section
-            h2 { class: "text-xl font-semibold text-white mt-10 mb-6", "Encryption" }
-            EncryptionSubSection {
-                encryption_configured,
-                encryption_key_fingerprint,
-                on_copy_key,
-                on_import_key,
+            // Encryption sub-section (hidden while creating/editing)
+            if !is_creating && editing_profile.is_none() {
+                h2 { class: "text-xl font-semibold text-white mt-10 mb-6", "Encryption" }
+                EncryptionSubSection {
+                    encryption_configured,
+                    encryption_key_fingerprint,
+                    on_copy_key,
+                    on_import_key,
+                }
             }
         }
     }
@@ -479,6 +491,8 @@ pub fn StorageProfileEditorView(
     profile: Option<StorageProfile>,
     on_save: EventHandler<StorageProfile>,
     on_cancel: EventHandler<()>,
+    on_browse_directory: EventHandler<()>,
+    browsed_directory: ReadSignal<Option<String>>,
 ) -> Element {
     let is_edit = profile.is_some();
     let mut name = use_signal(|| profile.as_ref().map(|p| p.name.clone()).unwrap_or_default());
@@ -486,7 +500,7 @@ pub fn StorageProfileEditorView(
         profile
             .as_ref()
             .map(|p| p.location)
-            .unwrap_or(StorageLocation::Cloud)
+            .unwrap_or(StorageLocation::Local)
     });
     let mut location_path = use_signal(|| {
         profile
@@ -525,9 +539,16 @@ pub fn StorageProfileEditorView(
             .unwrap_or_default()
     });
     let mut show_secrets = use_signal(|| false);
-    let mut encrypted = use_signal(|| profile.as_ref().map(|p| p.encrypted).unwrap_or(true));
-    let mut is_default = use_signal(|| profile.as_ref().map(|p| p.is_default).unwrap_or(false));
+    let mut encrypted = use_signal(|| profile.as_ref().map(|p| p.encrypted).unwrap_or(false));
+    let mut is_default = use_signal(|| profile.as_ref().map(|p| p.is_default).unwrap_or(true));
     let mut validation_error = use_signal(|| Option::<String>::None);
+
+    // Watch browsed_directory signal and update location_path when it changes
+    use_effect(move || {
+        if let Some(dir) = browsed_directory.read().as_ref() {
+            location_path.set(dir.clone());
+        }
+    });
 
     let existing_id = profile.as_ref().map(|p| p.id.clone());
 
@@ -619,7 +640,7 @@ pub fn StorageProfileEditorView(
     };
 
     rsx! {
-        div { class: "bg-gray-800 rounded-lg p-6 mb-6",
+        div { class: "bg-surface-raised border border-border-subtle rounded-lg p-6 mb-6",
             h3 { class: "text-lg font-medium text-white mb-4",
                 if is_edit {
                     "Edit Profile"
@@ -647,20 +668,23 @@ pub fn StorageProfileEditorView(
                                 r#type: "radio",
                                 name: "location",
                                 class: "text-indigo-600 focus:ring-indigo-500",
-                                checked: *location.read() == StorageLocation::Cloud,
-                                onchange: move |_| location.set(StorageLocation::Cloud),
+                                checked: *location.read() == StorageLocation::Local,
+                                onchange: move |_| {
+                                    location.set(StorageLocation::Local);
+                                    encrypted.set(false);
+                                },
                             }
-                            span { class: "text-white", "Cloud (S3)" }
+                            span { class: "text-white", "Local Filesystem" }
                         }
                         label { class: "flex items-center gap-2 cursor-pointer",
                             input {
                                 r#type: "radio",
                                 name: "location",
                                 class: "text-indigo-600 focus:ring-indigo-500",
-                                checked: *location.read() == StorageLocation::Local,
-                                onchange: move |_| location.set(StorageLocation::Local),
+                                checked: *location.read() == StorageLocation::Cloud,
+                                onchange: move |_| location.set(StorageLocation::Cloud),
                             }
-                            span { class: "text-white", "Local Filesystem" }
+                            span { class: "text-white", "Cloud (S3)" }
                         }
                     }
                 }
@@ -670,12 +694,23 @@ pub fn StorageProfileEditorView(
                         label { class: "block text-sm font-medium text-gray-400 mb-2",
                             "Directory Path"
                         }
-                        TextInput {
-                            value: location_path(),
-                            on_input: move |v| location_path.set(v),
-                            size: TextInputSize::Medium,
-                            input_type: TextInputType::Text,
-                            placeholder: "/path/to/storage",
+                        div { class: "flex gap-2",
+                            div { class: "flex-1 min-w-0",
+                                div { class: "flex items-center h-10 px-3 bg-gray-800/50 border border-gray-700 rounded-lg text-sm font-mono",
+                                    if location_path.read().is_empty() {
+                                        span { class: "text-gray-500 truncate", "/path/to/storage" }
+                                    } else {
+                                        span { class: "text-white truncate", "{location_path}" }
+                                    }
+                                }
+                            }
+                            Button {
+                                variant: ButtonVariant::Secondary,
+                                size: ButtonSize::Medium,
+                                onclick: move |_| on_browse_directory.call(()),
+                                FolderIcon { class: "w-5 h-5" }
+                                "Browse"
+                            }
                         }
                     }
                 } else {
@@ -702,19 +737,6 @@ pub fn StorageProfileEditorView(
                             input_type: TextInputType::Text,
                             placeholder: "us-east-1",
                         }
-                    }
-                    div {
-                        label { class: "block text-sm font-medium text-gray-400 mb-2",
-                            "Custom Endpoint (optional)"
-                        }
-                        TextInput {
-                            value: cloud_endpoint(),
-                            on_input: move |v| cloud_endpoint.set(v),
-                            size: TextInputSize::Medium,
-                            input_type: TextInputType::Text,
-                            placeholder: "https://minio.example.com",
-                        }
-                        p { class: "text-xs text-gray-500 mt-1", "Leave empty for AWS S3" }
                     }
 
                     div { class: "flex items-center justify-between",
@@ -757,20 +779,36 @@ pub fn StorageProfileEditorView(
                             monospace: true,
                         }
                     }
+
+                    div {
+                        label { class: "block text-sm font-medium text-gray-400 mb-2",
+                            "Custom Endpoint (optional)"
+                        }
+                        TextInput {
+                            value: cloud_endpoint(),
+                            on_input: move |v| cloud_endpoint.set(v),
+                            size: TextInputSize::Medium,
+                            input_type: TextInputType::Text,
+                            placeholder: "https://s3.example.com",
+                        }
+                        p { class: "text-xs text-gray-500 mt-1", "Leave empty for AWS S3" }
+                    }
                 }
 
-                div { class: "space-y-3",
-                    label { class: "flex items-start gap-3 cursor-pointer",
-                        input {
-                            r#type: "checkbox",
-                            class: "rounded text-indigo-600 focus:ring-indigo-500 bg-gray-700 border-gray-600 mt-0.5",
-                            checked: *encrypted.read(),
-                            onchange: move |e| encrypted.set(e.checked()),
-                        }
-                        div {
-                            span { class: "text-white block", "Encrypted" }
-                            span { class: "text-xs text-gray-500",
-                                "AES-256 encryption. Data is unreadable without your key."
+                if *location.read() == StorageLocation::Cloud {
+                    div { class: "space-y-3",
+                        label { class: "flex items-start gap-3 cursor-pointer",
+                            input {
+                                r#type: "checkbox",
+                                class: "rounded text-indigo-600 focus:ring-indigo-500 bg-gray-700 border-gray-600 mt-0.5",
+                                checked: *encrypted.read(),
+                                onchange: move |e| encrypted.set(e.checked()),
+                            }
+                            div {
+                                span { class: "text-white block", "Encrypted" }
+                                span { class: "text-xs text-gray-500",
+                                    "AES-256 encryption. Data is unreadable without your key."
+                                }
                             }
                         }
                     }

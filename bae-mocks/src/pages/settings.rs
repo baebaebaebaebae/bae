@@ -44,6 +44,8 @@ pub fn Settings() -> Element {
                         on_set_default: |_| {},
                         on_save: |_| {},
                         on_cancel_edit: |_| {},
+                        on_browse_directory: |_| {},
+                        browsed_directory: None,
                     }
                 },
                 SettingsTab::Discogs => rsx! {
