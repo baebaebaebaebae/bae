@@ -125,9 +125,9 @@ jobs:
           exit 1
         fi
 
-    - name: Check for overflow-hidden in UI components
+    - name: Check for banned patterns
       if: runner.os != 'Windows'
-      run: scripts/check-overflow-hidden.sh
+      run: scripts/check-banned-patterns.sh
 
     - name: Run tests (Linux/macOS)
       if: runner.os != 'Windows'

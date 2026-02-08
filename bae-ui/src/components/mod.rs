@@ -21,6 +21,7 @@ pub mod segmented_control;
 pub mod select;
 pub mod settings;
 pub mod text_input;
+pub mod text_link;
 pub mod title_bar;
 pub mod utils;
 
@@ -75,6 +76,7 @@ pub use settings::{
     StorageProfilesSectionView, SubsonicSectionView,
 };
 pub use text_input::{TextInput, TextInputSize, TextInputType};
+pub use text_link::TextLink;
 pub use title_bar::{
     AlbumResult, ArtistResult, GroupedSearchResults, NavItem, SearchAction, TitleBarView,
     TrackResult, SEARCH_INPUT_ID,

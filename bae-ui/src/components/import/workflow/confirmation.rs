@@ -250,10 +250,7 @@ pub fn ConfirmationView(
                             span { class: "text-sm text-green-400", "Imported" }
                             if let Some(album_id) = completed_album_id.clone() {
                                 ChromelessButton {
-                                    class: Some(
-                                        "text-sm text-indigo-400 hover:text-indigo-300 underline underline-offset-2"
-                                            .to_string(),
-                                    ),
+                                    class: Some("text-sm text-indigo-400 hover:text-indigo-300".to_string()),
                                     onclick: move |_| on_view_in_library.call(album_id.clone()),
                                     "View in Library"
                                 }

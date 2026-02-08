@@ -1,5 +1,6 @@
 //! Album metadata display component
 
+use crate::components::TextLink;
 use crate::display_types::{Album, Artist, Release};
 use dioxus::prelude::*;
 
@@ -22,8 +23,7 @@ pub fn AlbumMetadata(
                         if i > 0 {
                             ", "
                         }
-                        span {
-                            class: "hover:text-white hover:underline transition-colors cursor-pointer",
+                        TextLink {
                             onclick: {
                                 let artist_id = artist.id.clone();
                                 move |_| on_artist_click.call(artist_id.clone())
