@@ -1,7 +1,7 @@
 //! Album card component - pure view with callbacks
 
 use crate::components::icons::{EllipsisIcon, ImageIcon, PlayIcon, PlusIcon};
-use crate::components::{MenuDropdown, MenuItem, Placement};
+use crate::components::{MenuDropdown, MenuItem, Placement, TextLink};
 use crate::display_types::{Album, Artist};
 use dioxus::prelude::*;
 
@@ -98,8 +98,7 @@ pub fn AlbumCard(
                             if i > 0 {
                                 ", "
                             }
-                            span {
-                                class: "hover:text-white transition-colors cursor-pointer",
+                            TextLink {
                                 onclick: {
                                     let artist_id = artist.id.clone();
                                     move |evt: Event<MouseData>| {

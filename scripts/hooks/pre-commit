@@ -60,11 +60,11 @@ git --no-pager diff --name-only | while read -r file; do
     fi
 done
 
-# Ban overflow-hidden (blocks trackpad scroll propagation, use overflow-clip instead)
-if ! scripts/check-overflow-hidden.sh; then
+# Check for banned patterns in UI components
+if ! scripts/check-banned-patterns.sh; then
     echo ""
-    echo "❌ Found overflow-hidden in bae-ui components"
-    echo "Use overflow-clip instead - overflow-hidden creates a scroll container that blocks trackpad scroll."
+    echo "❌ Found banned pattern in bae-ui components"
+    echo "See error above for details."
     exit 1
 fi
 

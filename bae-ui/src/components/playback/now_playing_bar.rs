@@ -9,7 +9,7 @@ use crate::components::icons::{
     MenuIcon, PauseIcon, PlayIcon, Repeat1Icon, RepeatIcon, SkipBackIcon, SkipForwardIcon,
     Volume1Icon, Volume2Icon, VolumeXIcon,
 };
-use crate::components::{Button, ButtonSize, ButtonVariant, ChromelessButton};
+use crate::components::{Button, ButtonSize, ButtonVariant, ChromelessButton, TextLink};
 use crate::stores::playback::{
     PlaybackStatus, PlaybackUiState, PlaybackUiStateStoreExt, RepeatMode,
 };
@@ -222,8 +222,8 @@ fn TrackInfoSection(
                     },
                     "{track.title}"
                 }
-                span {
-                    class: "text-sm text-gray-400 hover:text-white transition-colors cursor-pointer",
+                TextLink {
+                    class: Some("text-sm text-gray-400".to_string()),
                     onclick: move |_| {
                         if let Some(ref id) = artist_id {
                             on_artist_click.call(id.clone());

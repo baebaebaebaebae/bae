@@ -5,7 +5,7 @@
 
 use crate::components::icons::{EllipsisIcon, PauseIcon, PlayIcon};
 use crate::components::utils::format_duration;
-use crate::components::{ChromelessButton, MenuDropdown, MenuItem, Placement};
+use crate::components::{ChromelessButton, MenuDropdown, MenuItem, Placement, TextLink};
 use crate::display_types::{Artist, TrackImportState};
 use dioxus::prelude::*;
 
@@ -139,16 +139,19 @@ pub fn TrackRow(
                             if i > 0 {
                                 ", "
                             }
-                            span {
-                                class: if is_importing { "" } else { "hover:text-white transition-colors cursor-pointer" },
-                                onclick: {
-                                    let artist_id = artist.id.clone();
-                                    move |evt: Event<MouseData>| {
-                                        evt.stop_propagation();
-                                        on_artist_click.call(artist_id.clone());
-                                    }
-                                },
-                                "{artist.name}"
+                            if is_importing {
+                                span { "{artist.name}" }
+                            } else {
+                                TextLink {
+                                    onclick: {
+                                        let artist_id = artist.id.clone();
+                                        move |evt: Event<MouseData>| {
+                                            evt.stop_propagation();
+                                            on_artist_click.call(artist_id.clone());
+                                        }
+                                    },
+                                    "{artist.name}"
+                                }
                             }
                         }
                     }
