@@ -74,7 +74,36 @@ fn WelcomeScreen() -> Element {
         let bae_dir = home_dir.join(".bae");
         let id = uuid::Uuid::new_v4().to_string();
         let library_path = bae_dir.join("libraries").join(&id);
-        std::fs::create_dir_all(&bae_dir).expect("Failed to create ~/.bae");
+        std::fs::create_dir_all(&library_path).expect("Failed to create library directory");
+
+        // Write config.yaml with library_id
+        let config = bae_core::config::Config {
+            library_id: id,
+            library_path: library_path.clone(),
+            discogs_key_stored: false,
+            encryption_key_stored: false,
+            encryption_key_fingerprint: None,
+            torrent_bind_interface: None,
+            torrent_listen_port: None,
+            torrent_enable_upnp: true,
+            torrent_enable_natpmp: true,
+            torrent_max_connections: None,
+            torrent_max_connections_per_torrent: None,
+            torrent_max_uploads: None,
+            torrent_max_uploads_per_torrent: None,
+            subsonic_enabled: true,
+            subsonic_port: 4533,
+            cloud_sync_enabled: false,
+            cloud_sync_bucket: None,
+            cloud_sync_region: None,
+            cloud_sync_endpoint: None,
+            cloud_sync_last_upload: None,
+        };
+        config
+            .save_to_config_yaml()
+            .expect("Failed to write config.yaml");
+
+        // Write pointer file last (makes this idempotent on failure)
         std::fs::write(
             bae_dir.join("library"),
             library_path.to_string_lossy().as_ref(),
