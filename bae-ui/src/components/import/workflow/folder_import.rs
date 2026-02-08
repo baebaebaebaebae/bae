@@ -459,7 +459,10 @@ fn ConfirmStep(
                 on_view_in_library,
             }
 
-            ImportErrorDisplayView { error_message: import_error }
+            ImportErrorDisplayView {
+                error_message: import_error,
+                on_retry: move |_| on_confirm.call(()),
+            }
         }
     }
 }

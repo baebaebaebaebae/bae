@@ -6,6 +6,7 @@ pub mod app_layout;
 pub mod artist_detail;
 pub mod button;
 pub mod dropdown;
+pub mod error_banner;
 pub mod error_toast;
 pub mod helpers;
 pub mod icons;
@@ -39,6 +40,7 @@ pub use dioxus_virtual_scroll::{
     GridLayout, KeyFn, RenderFn, ScrollTarget, VirtualGrid, VirtualGridConfig,
 };
 pub use dropdown::{Dropdown, Placement};
+pub use error_banner::ErrorBanner;
 pub use error_toast::ErrorToast;
 pub use helpers::{
     BackButton, ConfirmDialogView, ErrorDisplay, LoadingSpinner, Tooltip, TooltipBubble,

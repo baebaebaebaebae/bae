@@ -453,7 +453,10 @@ fn TorrentConfirmContent(
                 on_configure_storage,
                 on_view_in_library,
             }
-            ImportErrorDisplayView { error_message: import_error }
+            ImportErrorDisplayView {
+                error_message: import_error,
+                on_retry: move |_| on_confirm.call(()),
+            }
         }
     }
 }

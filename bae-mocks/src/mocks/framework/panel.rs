@@ -34,6 +34,7 @@ impl MockSection {
 pub enum MockPage {
     // Design System
     Button,
+    ErrorBanner,
     Menu,
     Pill,
     SegmentedControl,
@@ -52,6 +53,7 @@ impl MockPage {
     pub const ALL: &[MockPage] = &[
         // Design System
         MockPage::Button,
+        MockPage::ErrorBanner,
         MockPage::Menu,
         MockPage::Pill,
         MockPage::SegmentedControl,
@@ -69,6 +71,7 @@ impl MockPage {
     pub fn section(self) -> MockSection {
         match self {
             MockPage::Button
+            | MockPage::ErrorBanner
             | MockPage::Menu
             | MockPage::Pill
             | MockPage::SegmentedControl
@@ -82,6 +85,7 @@ impl MockPage {
     pub fn label(self) -> &'static str {
         match self {
             MockPage::Button => "Button",
+            MockPage::ErrorBanner => "ErrorBanner",
             MockPage::Menu => "Menu",
             MockPage::Pill => "Pill",
             MockPage::SegmentedControl => "SegmentedControl",
@@ -99,6 +103,7 @@ impl MockPage {
     pub fn key(self) -> &'static str {
         match self {
             MockPage::Button => "button",
+            MockPage::ErrorBanner => "error-banner",
             MockPage::Menu => "menu",
             MockPage::Pill => "pill",
             MockPage::SegmentedControl => "segmented-control",
@@ -116,6 +121,7 @@ impl MockPage {
     pub fn description(self) -> &'static str {
         match self {
             MockPage::Button => "Button component with variants, sizes, and states",
+            MockPage::ErrorBanner => "Amber warning banner for retryable errors",
             MockPage::Menu => "Dropdown menu with items, dividers, and danger states",
             MockPage::Pill => "Pill component for tokens, tags, and inline labels",
             MockPage::SegmentedControl => "Toggle button group for switching between options",
@@ -133,6 +139,7 @@ impl MockPage {
     pub fn to_route(self, state: Option<String>) -> Route {
         match self {
             MockPage::Button => Route::MockButton { state },
+            MockPage::ErrorBanner => Route::MockErrorBanner { state },
             MockPage::Menu => Route::MockMenu { state },
             MockPage::Pill => Route::MockPill { state },
             MockPage::SegmentedControl => Route::MockSegmentedControl { state },

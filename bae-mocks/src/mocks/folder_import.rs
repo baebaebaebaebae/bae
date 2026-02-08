@@ -134,6 +134,9 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             Preset::new("Confirm")
                 .set_string("state", "Confirming")
                 .set_string("confirm_phase", "Ready"),
+            Preset::new("Confirm Failed")
+                .set_string("state", "Confirming")
+                .set_string("confirm_phase", "Failed"),
         ])
         .build(initial_state);
 

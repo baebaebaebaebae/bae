@@ -2,7 +2,7 @@
 
 use super::{DiscIdPill, DiscIdSource};
 use crate::components::icons::AlertTriangleIcon;
-use crate::components::{Button, ButtonSize, ButtonVariant};
+use crate::components::{Button, ButtonSize, ButtonVariant, ErrorBanner};
 use crate::floating_ui::Placement;
 use dioxus::prelude::*;
 
@@ -59,36 +59,41 @@ pub fn DiscIdLookupErrorView(
     } else {
         // Simple banner for inline display
         rsx! {
-            div { class: "bg-amber-900/30 border border-amber-700/50 rounded-lg p-4 mb-4",
-                div { class: "flex items-start gap-3",
-                    AlertTriangleIcon { class: "w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" }
-                    div { class: "flex-1",
-                        p { class: "text-sm text-amber-200", "{error}" }
-                        div { class: "mt-3 flex gap-2",
-                            Button {
-                                variant: ButtonVariant::Primary,
-                                size: ButtonSize::Small,
-                                onclick: move |_| on_retry.call(()),
-                                "Retry Lookup"
-                            }
-                        }
-                    }
+            div { class: "mb-4",
+                ErrorBanner {
+                    heading: "Lookup failed".to_string(),
+                    detail: error.clone(),
+                    button_label: "Retry Lookup".to_string(),
+                    on_retry,
                 }
             }
         }
     }
 }
 
-/// Display import error
+/// Display import error with retry button.
+///
+/// Strips nested "Failed to start import:" prefixes for cleaner display.
 #[component]
-pub fn ImportErrorDisplayView(error_message: Option<String>) -> Element {
+pub fn ImportErrorDisplayView(
+    error_message: Option<String>,
+    on_retry: EventHandler<()>,
+) -> Element {
     let Some(ref error) = error_message else {
         return rsx! {};
     };
 
+    // Strip nested "Failed to start import:" prefix for cleaner display
+    let display_error = error
+        .strip_prefix("Failed to start import: ")
+        .unwrap_or(error);
+
     rsx! {
-        div { class: "bg-red-50 border border-red-200 rounded-lg p-4",
-            p { class: "text-sm text-red-700 select-text break-words font-mono", "Error: {error}" }
+        ErrorBanner {
+            heading: "Import failed".to_string(),
+            detail: display_error.to_string(),
+            button_label: "Retry Import".to_string(),
+            on_retry,
         }
     }
 }

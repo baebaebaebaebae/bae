@@ -2,6 +2,7 @@ use crate::db::{DbAlbum, DbAlbumArtist, DbArtist, DbRelease, DbTrack};
 use crate::discogs::DiscogsClient;
 use crate::import::cover_art::fetch_cover_art_for_mb_release;
 use crate::musicbrainz::lookup_release_by_id;
+use crate::retry::retry_with_backoff;
 use tracing::{info, warn};
 use uuid::Uuid;
 /// Result of parsing a MusicBrainz release into database entities
@@ -25,7 +26,10 @@ pub async fn fetch_and_parse_mb_release(
     cover_art_url: Option<String>,
     discogs_client: Option<&DiscogsClient>,
 ) -> Result<ParsedMbAlbum, String> {
-    let (mb_release, external_urls, json) = lookup_release_by_id(release_id)
+    let (mb_release, external_urls, json) =
+        retry_with_backoff(3, "MusicBrainz release fetch", || {
+            lookup_release_by_id(release_id)
+        })
         .await
         .map_err(|e| format!("Failed to fetch MusicBrainz release: {}", e))?;
     let discogs_release = match (&discogs_client, &external_urls.discogs_release_url) {
