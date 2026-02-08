@@ -1,9 +1,9 @@
 use bae_core::library::SharedLibraryManager;
+use bae_core::library_dir::LibraryDir;
 use bae_core::playback::{PlaybackHandle, PlaybackProgress, PlaybackState};
 use souvlaki::{
     MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig,
 };
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tracing::{error, info, trace};
 /// Initialize media controls for macOS
@@ -12,7 +12,7 @@ use tracing::{error, info, trace};
 pub fn setup_media_controls(
     playback_handle: PlaybackHandle,
     library_manager: SharedLibraryManager,
-    library_path: PathBuf,
+    library_dir: LibraryDir,
     runtime_handle: tokio::runtime::Handle,
 ) -> Result<Arc<Mutex<MediaControls>>, souvlaki::Error> {
     let current_state = Arc::new(Mutex::new(PlaybackState::Stopped));
@@ -109,7 +109,7 @@ pub fn setup_media_controls(
             let mut progress_rx = playback_handle_for_progress.subscribe_progress();
             let current_state = current_state_for_progress;
             let library_manager = library_manager_for_metadata;
-            let library_path = library_path;
+            let library_dir = library_dir;
             while let Some(progress) = progress_rx.recv().await {
                 match progress {
                     PlaybackProgress::StateChanged { state } => {
@@ -155,7 +155,7 @@ pub fn setup_media_controls(
                                 update_media_metadata(
                                     &controls_shared,
                                     &library_manager,
-                                    &library_path,
+                                    &library_dir,
                                     track,
                                     duration,
                                 )

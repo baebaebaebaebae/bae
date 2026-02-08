@@ -1,5 +1,6 @@
 use crate::library::LibraryError;
 use crate::library::SharedLibraryManager;
+use crate::library_dir::LibraryDir;
 use crate::storage::create_storage_reader;
 use axum::{
     extract::{Query, State},
@@ -10,7 +11,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info};
 /// Subsonic API server state
@@ -18,7 +18,7 @@ use tracing::{debug, error, info};
 pub struct SubsonicState {
     pub library_manager: SharedLibraryManager,
     pub encryption_service: Option<crate::encryption::EncryptionService>,
-    pub library_path: PathBuf,
+    pub library_dir: LibraryDir,
 }
 /// Common query parameters for Subsonic API
 #[derive(Debug, Deserialize)]
@@ -126,12 +126,12 @@ pub struct AlbumList {
 pub fn create_router(
     library_manager: SharedLibraryManager,
     encryption_service: Option<crate::encryption::EncryptionService>,
-    library_path: PathBuf,
+    library_dir: LibraryDir,
 ) -> Router {
     let state = SubsonicState {
         library_manager,
         encryption_service,
-        library_path,
+        library_dir,
     };
     Router::new()
         .route("/rest/ping", get(ping))
@@ -324,7 +324,7 @@ async fn get_cover_art(
     };
 
     // Try common image extensions
-    let covers_dir = state.library_path.join("covers");
+    let covers_dir = state.library_dir.covers_dir();
     let extensions = ["jpg", "jpeg", "png", "webp", "gif"];
 
     for ext in &extensions {

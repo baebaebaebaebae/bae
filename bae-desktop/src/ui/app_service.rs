@@ -482,11 +482,11 @@ impl AppService {
 
     /// Process any pending file deletions from previous transfers
     fn process_pending_deletions(&self) {
-        let library_path = std::path::PathBuf::from(&self.config.library_path);
+        let library_dir = self.config.library_dir.clone();
         let library_manager = self.library_manager.clone();
 
         spawn(async move {
-            bae_core::storage::cleanup::process_pending_deletions(&library_path, library_manager)
+            bae_core::storage::cleanup::process_pending_deletions(&library_dir, library_manager)
                 .await;
         });
     }
@@ -667,10 +667,9 @@ impl AppService {
         let release_id = release_id.to_string();
 
         spawn(async move {
-            let library_path = std::path::PathBuf::from(&config.library_path);
             let result = change_cover_async(
                 &library_manager,
-                &library_path,
+                &config.library_dir,
                 &album_id,
                 &release_id,
                 selection,
@@ -733,12 +732,12 @@ impl AppService {
             };
 
             let encryption_service = library_manager.get().encryption_service().cloned();
-            let library_path = std::path::PathBuf::from(&config.library_path);
+            let library_dir = config.library_dir.clone();
 
             let transfer_service = bae_core::storage::transfer::TransferService::new(
                 library_manager.clone(),
                 encryption_service,
-                library_path.clone(),
+                library_dir.clone(),
             );
 
             let mut rx = transfer_service.transfer(
@@ -797,7 +796,7 @@ impl AppService {
 
                         // Schedule deferred cleanup of old files
                         bae_core::storage::cleanup::schedule_cleanup(
-                            &library_path,
+                            &library_dir,
                             library_manager.clone(),
                         );
                     }
@@ -830,12 +829,12 @@ impl AppService {
             let target_dir = folder_handle.path().to_path_buf();
 
             let encryption_service = library_manager.get().encryption_service().cloned();
-            let library_path = std::path::PathBuf::from(&config.library_path);
+            let library_dir = config.library_dir.clone();
 
             let transfer_service = bae_core::storage::transfer::TransferService::new(
                 library_manager.clone(),
                 encryption_service,
-                library_path.clone(),
+                library_dir.clone(),
             );
 
             let mut rx = transfer_service.transfer(
@@ -894,7 +893,7 @@ impl AppService {
 
                         // Schedule deferred cleanup of old files
                         bae_core::storage::cleanup::schedule_cleanup(
-                            &library_path,
+                            &library_dir,
                             library_manager.clone(),
                         );
                     }
@@ -1837,7 +1836,7 @@ pub(crate) async fn cloud_sync_upload(
     .await?;
 
     // Create DB snapshot via VACUUM INTO
-    let db_path = config.library_path.join("library.db");
+    let db_path = config.library_dir.db_path();
     let snapshot_path = db_path.with_extension("db.snapshot");
     app.library_manager
         .database()
@@ -1847,7 +1846,7 @@ pub(crate) async fn cloud_sync_upload(
     // Upload DB + covers
     let timestamp = sync_service.upload_db(&db_path).await?;
 
-    let covers_dir = config.library_path.join("covers");
+    let covers_dir = config.library_dir.covers_dir();
     sync_service.upload_covers(&covers_dir).await?;
 
     Ok(timestamp)

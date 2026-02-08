@@ -29,9 +29,8 @@ pub fn LibrarySection() -> Element {
     let on_switch = {
         let app = app.clone();
         move |path: String| {
-            let library_path = PathBuf::from(&path);
             let mut config = app.config.clone();
-            config.library_path = library_path;
+            config.library_dir = bae_core::library_dir::LibraryDir::new(PathBuf::from(&path));
             if let Err(e) = config.save_library_path() {
                 error!("Failed to save library path: {e}");
                 return;
@@ -93,7 +92,7 @@ pub fn LibrarySection() -> Element {
 
                 // Switch to the added library
                 let mut config = config;
-                config.library_path = path;
+                config.library_dir = bae_core::library_dir::LibraryDir::new(path);
                 if let Err(e) = config.save_library_path() {
                     error!("Failed to save library path: {e}");
                     return;

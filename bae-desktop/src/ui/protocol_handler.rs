@@ -1,7 +1,7 @@
 use std::borrow::Cow;
-use std::path::PathBuf;
 
 use bae_core::library::SharedLibraryManager;
+use bae_core::library_dir::LibraryDir;
 use dioxus::desktop::wry::http::Response as HttpResponse;
 use tracing::{debug, warn};
 
@@ -10,7 +10,7 @@ type ProtocolResponse = HttpResponse<Cow<'static, [u8]>>;
 #[derive(Clone)]
 pub struct ImageServices {
     pub library_manager: SharedLibraryManager,
-    pub library_path: PathBuf,
+    pub library_dir: LibraryDir,
 }
 
 pub fn handle_protocol_request(uri: &str, services: &ImageServices) -> ProtocolResponse {
@@ -36,7 +36,7 @@ pub fn handle_protocol_request(uri: &str, services: &ImageServices) -> ProtocolR
 fn handle_cover(release_id: &str, services: &ImageServices) -> ProtocolResponse {
     // Strip query params (e.g. ?t=123 for cache busting)
     let release_id = release_id.split('?').next().unwrap_or(release_id);
-    let covers_dir = services.library_path.join("covers");
+    let covers_dir = services.library_dir.covers_dir();
 
     // Try common image extensions
     for ext in &["jpg", "jpeg", "png", "webp", "gif"] {
@@ -59,7 +59,7 @@ fn handle_cover(release_id: &str, services: &ImageServices) -> ProtocolResponse 
 }
 
 fn handle_artist_image(artist_id: &str, services: &ImageServices) -> ProtocolResponse {
-    let artists_dir = services.library_path.join("artists");
+    let artists_dir = services.library_dir.artists_dir();
 
     for ext in &["jpg", "jpeg", "png", "webp", "gif"] {
         let path = artists_dir.join(format!("{}.{}", artist_id, ext));

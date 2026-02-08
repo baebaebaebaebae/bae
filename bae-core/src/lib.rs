@@ -13,6 +13,7 @@ pub mod encryption;
 pub mod import;
 pub mod keys;
 pub mod library;
+pub mod library_dir;
 pub mod musicbrainz;
 pub mod network;
 pub mod playback;

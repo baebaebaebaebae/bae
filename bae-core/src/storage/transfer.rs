@@ -8,6 +8,7 @@ use crate::cloud_storage::CloudStorage;
 use crate::db::{DbFile, DbReleaseStorage, DbStorageProfile, StorageLocation};
 use crate::encryption::EncryptionService;
 use crate::library::SharedLibraryManager;
+use crate::library_dir::LibraryDir;
 use crate::storage::{create_storage_reader, ReleaseStorage, ReleaseStorageImpl};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -50,7 +51,7 @@ pub enum TransferTarget {
 pub struct TransferService {
     library_manager: SharedLibraryManager,
     encryption_service: Option<EncryptionService>,
-    library_path: PathBuf,
+    library_dir: LibraryDir,
     #[cfg(feature = "test-utils")]
     injected_source_cloud: Option<Arc<dyn CloudStorage>>,
     #[cfg(feature = "test-utils")]
@@ -61,12 +62,12 @@ impl TransferService {
     pub fn new(
         library_manager: SharedLibraryManager,
         encryption_service: Option<EncryptionService>,
-        library_path: PathBuf,
+        library_dir: LibraryDir,
     ) -> Self {
         Self {
             library_manager,
             encryption_service,
-            library_path,
+            library_dir,
             #[cfg(feature = "test-utils")]
             injected_source_cloud: None,
             #[cfg(feature = "test-utils")]
@@ -96,7 +97,7 @@ impl TransferService {
         let (tx, rx) = mpsc::unbounded_channel();
         let library_manager = self.library_manager.clone();
         let encryption_service = self.encryption_service.clone();
-        let library_path = self.library_path.clone();
+        let library_dir = self.library_dir.clone();
 
         #[cfg(feature = "test-utils")]
         let injected_source = self.injected_source_cloud.clone();
@@ -109,7 +110,7 @@ impl TransferService {
                 target,
                 &library_manager,
                 encryption_service.as_ref(),
-                &library_path,
+                &library_dir,
                 &tx,
                 #[cfg(feature = "test-utils")]
                 injected_source,
