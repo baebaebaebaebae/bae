@@ -93,6 +93,7 @@ fn get_demo_data() -> &'static DemoData {
             let album_artist = Artist {
                 id: artist_id,
                 name: album_data.artist.clone(),
+                image_url: None,
             };
             artists_by_album.insert(album_id.clone(), vec![album_artist]);
 

@@ -59,6 +59,7 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
     let artists = vec![Artist {
         id: "artist-1".to_string(),
         name: "The Midnight Signal".to_string(),
+        image_url: None,
     }];
 
     let all_releases = vec![

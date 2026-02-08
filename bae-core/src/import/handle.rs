@@ -19,6 +19,7 @@ use crate::import::types::{
 use crate::keys::KeyService;
 use crate::library::{LibraryManager, SharedLibraryManager};
 use crate::musicbrainz::MbRelease;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
@@ -297,28 +298,7 @@ impl ImportServiceHandle {
         };
 
         emit_preparing(PrepareStep::SavingToDatabase);
-        let mut artist_id_map = std::collections::HashMap::new();
-        for artist in &artists {
-            let parsed_id = artist.id.clone();
-            let existing = if let Some(ref discogs_id) = artist.discogs_artist_id {
-                library_manager
-                    .get_artist_by_discogs_id(discogs_id)
-                    .await
-                    .map_err(|e| format!("Database error: {}", e))?
-            } else {
-                None
-            };
-            let actual_id = if let Some(existing_artist) = existing {
-                existing_artist.id
-            } else {
-                library_manager
-                    .insert_artist(artist)
-                    .await
-                    .map_err(|e| format!("Failed to insert artist: {}", e))?;
-                artist.id.clone()
-            };
-            artist_id_map.insert(parsed_id, actual_id);
-        }
+        let artist_id_map = find_or_create_artists(library_manager, &artists).await?;
         library_manager
             .insert_album_with_release_and_tracks(&db_album, &db_release, &db_tracks)
             .await
@@ -327,20 +307,7 @@ impl ImportServiceHandle {
             .link_import_to_release(&import_id, &db_release.id)
             .await
             .map_err(|e| format!("Failed to link import to release: {}", e))?;
-        for album_artist in &album_artists {
-            let actual_artist_id = artist_id_map.get(&album_artist.artist_id).ok_or_else(|| {
-                format!(
-                    "Artist ID {} not found in artist map",
-                    album_artist.artist_id,
-                )
-            })?;
-            let mut updated_album_artist = album_artist.clone();
-            updated_album_artist.artist_id = actual_artist_id.clone();
-            library_manager
-                .insert_album_artist(&updated_album_artist)
-                .await
-                .map_err(|e| format!("Failed to insert album-artist relationship: {}", e))?;
-        }
+        insert_album_artists(library_manager, &album_artists, &artist_id_map).await?;
         // Write remote cover to cache and set cover_release_id (album now exists in DB)
         let remote_cover_set = if let Some(((bytes, ext), _url)) = remote_cover_data {
             let covers_dir = self.library_path.join("covers");
@@ -361,6 +328,19 @@ impl ImportServiceHandle {
         } else {
             false
         };
+
+        // Fetch artist images (best-effort, non-blocking)
+        if let Some(ref discogs_client) = get_discogs_client(&self.key_service) {
+            let artists_dir = self.library_path.join("artists");
+            fetch_artist_images(
+                library_manager,
+                discogs_client,
+                &artists,
+                &artist_id_map,
+                &artists_dir,
+            )
+            .await;
+        }
 
         emit_preparing(PrepareStep::ExtractingDurations);
         extract_and_store_durations(library_manager, &tracks_to_files).await?;
@@ -449,47 +429,27 @@ impl ImportServiceHandle {
             .collect();
         let mapping_result = map_tracks_to_files(&db_tracks, &discovered_files).await?;
         let tracks_to_files = mapping_result.track_files.clone();
-        let mut artist_id_map = std::collections::HashMap::new();
-        for artist in &artists {
-            let parsed_id = artist.id.clone();
-            let existing = if let Some(ref discogs_id) = artist.discogs_artist_id {
-                library_manager
-                    .get_artist_by_discogs_id(discogs_id)
-                    .await
-                    .map_err(|e| format!("Database error: {}", e))?
-            } else {
-                None
-            };
-            let actual_id = if let Some(existing_artist) = existing {
-                existing_artist.id
-            } else {
-                library_manager
-                    .insert_artist(artist)
-                    .await
-                    .map_err(|e| format!("Failed to insert artist: {}", e))?;
-                artist.id.clone()
-            };
-            artist_id_map.insert(parsed_id, actual_id);
-        }
+        let artist_id_map = find_or_create_artists(library_manager, &artists).await?;
         library_manager
             .insert_album_with_release_and_tracks(&db_album, &db_release, &db_tracks)
             .await
             .map_err(|e| format!("Database error: {}", e))?;
         extract_and_store_durations(library_manager, &tracks_to_files).await?;
-        for album_artist in &album_artists {
-            let actual_artist_id = artist_id_map.get(&album_artist.artist_id).ok_or_else(|| {
-                format!(
-                    "Artist ID {} not found in artist map",
-                    album_artist.artist_id,
-                )
-            })?;
-            let mut updated_album_artist = album_artist.clone();
-            updated_album_artist.artist_id = actual_artist_id.clone();
-            library_manager
-                .insert_album_artist(&updated_album_artist)
-                .await
-                .map_err(|e| format!("Failed to insert album-artist relationship: {}", e))?;
+        insert_album_artists(library_manager, &album_artists, &artist_id_map).await?;
+
+        // Fetch artist images (best-effort, non-blocking)
+        if let Some(ref discogs_client) = get_discogs_client(&self.key_service) {
+            let artists_dir = self.library_path.join("artists");
+            fetch_artist_images(
+                library_manager,
+                discogs_client,
+                &artists,
+                &artist_id_map,
+                &artists_dir,
+            )
+            .await;
         }
+
         let db_torrent = DbTorrent::new(
             &db_release.id,
             &torrent_metadata.info_hash,
@@ -569,46 +529,26 @@ impl ImportServiceHandle {
             } else {
                 return Err("No release provided".to_string());
             };
-        let mut artist_id_map = std::collections::HashMap::new();
-        for artist in &artists {
-            let parsed_id = artist.id.clone();
-            let existing = if let Some(ref discogs_id) = artist.discogs_artist_id {
-                library_manager
-                    .get_artist_by_discogs_id(discogs_id)
-                    .await
-                    .map_err(|e| format!("Database error: {}", e))?
-            } else {
-                None
-            };
-            let actual_id = if let Some(existing_artist) = existing {
-                existing_artist.id
-            } else {
-                library_manager
-                    .insert_artist(artist)
-                    .await
-                    .map_err(|e| format!("Failed to insert artist: {}", e))?;
-                artist.id.clone()
-            };
-            artist_id_map.insert(parsed_id, actual_id);
-        }
+        let artist_id_map = find_or_create_artists(library_manager, &artists).await?;
         library_manager
             .insert_album_with_release_and_tracks(&db_album, &db_release, &db_tracks)
             .await
             .map_err(|e| format!("Database error: {}", e))?;
-        for album_artist in &album_artists {
-            let actual_artist_id = artist_id_map.get(&album_artist.artist_id).ok_or_else(|| {
-                format!(
-                    "Artist ID {} not found in artist map",
-                    album_artist.artist_id,
-                )
-            })?;
-            let mut updated_album_artist = album_artist.clone();
-            updated_album_artist.artist_id = actual_artist_id.clone();
-            library_manager
-                .insert_album_artist(&updated_album_artist)
-                .await
-                .map_err(|e| format!("Failed to insert album-artist relationship: {}", e))?;
+        insert_album_artists(library_manager, &album_artists, &artist_id_map).await?;
+
+        // Fetch artist images (best-effort, non-blocking)
+        if let Some(ref discogs_client) = get_discogs_client(&self.key_service) {
+            let artists_dir = self.library_path.join("artists");
+            fetch_artist_images(
+                library_manager,
+                discogs_client,
+                &artists,
+                &artist_id_map,
+                &artists_dir,
+            )
+            .await;
         }
+
         let album_id = db_album.id.clone();
         let release_id = db_release.id.clone();
 
@@ -658,6 +598,136 @@ impl ImportServiceHandle {
         self.progress_handle.subscribe_all_imports()
     }
 }
+/// Deduplicate and insert artists, returning a map from parsed ID to actual DB ID.
+///
+/// Lookup chain: discogs_artist_id -> musicbrainz_artist_id -> name (case-insensitive) -> insert new.
+/// Name matches include a conflict check: if the existing artist has a *different* source ID
+/// than the incoming artist, they're different artists and won't be merged.
+/// On match, accumulates any new source IDs onto the existing row via COALESCE.
+pub async fn find_or_create_artists(
+    library_manager: &LibraryManager,
+    artists: &[crate::db::DbArtist],
+) -> Result<HashMap<String, String>, String> {
+    let mut artist_id_map = HashMap::new();
+
+    for artist in artists {
+        let parsed_id = artist.id.clone();
+
+        // 1. Try discogs_artist_id
+        let existing = if let Some(ref discogs_id) = artist.discogs_artist_id {
+            library_manager
+                .get_artist_by_discogs_id(discogs_id)
+                .await
+                .map_err(|e| format!("Database error: {}", e))?
+        } else {
+            None
+        };
+
+        // 2. Try musicbrainz_artist_id
+        let existing = match existing {
+            Some(e) => Some(e),
+            None => {
+                if let Some(ref mb_id) = artist.musicbrainz_artist_id {
+                    library_manager
+                        .get_artist_by_mb_id(mb_id)
+                        .await
+                        .map_err(|e| format!("Database error: {}", e))?
+                } else {
+                    None
+                }
+            }
+        };
+
+        // 3. Try name (case-insensitive) with conflict check
+        let existing = match existing {
+            Some(e) => Some(e),
+            None => {
+                let name_match = library_manager
+                    .get_artist_by_name(&artist.name)
+                    .await
+                    .map_err(|e| format!("Database error: {}", e))?;
+
+                match name_match {
+                    Some(ref matched) => {
+                        // Conflict check: if existing has a different source ID, skip
+                        let discogs_conflict =
+                            match (&matched.discogs_artist_id, &artist.discogs_artist_id) {
+                                (Some(a), Some(b)) => a != b,
+                                _ => false,
+                            };
+                        let mb_conflict = match (
+                            &matched.musicbrainz_artist_id,
+                            &artist.musicbrainz_artist_id,
+                        ) {
+                            (Some(a), Some(b)) => a != b,
+                            _ => false,
+                        };
+
+                        if discogs_conflict || mb_conflict {
+                            debug!(
+                                "Name match for '{}' has conflicting source IDs, inserting new artist",
+                                artist.name
+                            );
+                            None
+                        } else {
+                            name_match
+                        }
+                    }
+                    None => None,
+                }
+            }
+        };
+
+        let actual_id = if let Some(existing_artist) = existing {
+            // Accumulate any new source IDs
+            library_manager
+                .update_artist_external_ids(
+                    &existing_artist.id,
+                    artist.discogs_artist_id.as_deref(),
+                    artist.musicbrainz_artist_id.as_deref(),
+                    artist.sort_name.as_deref(),
+                )
+                .await
+                .map_err(|e| format!("Failed to update artist IDs: {}", e))?;
+
+            existing_artist.id
+        } else {
+            library_manager
+                .insert_artist(artist)
+                .await
+                .map_err(|e| format!("Failed to insert artist: {}", e))?;
+            artist.id.clone()
+        };
+
+        artist_id_map.insert(parsed_id, actual_id);
+    }
+
+    Ok(artist_id_map)
+}
+
+/// Remap and insert album-artist relationships using the artist_id_map.
+async fn insert_album_artists(
+    library_manager: &LibraryManager,
+    album_artists: &[crate::db::DbAlbumArtist],
+    artist_id_map: &HashMap<String, String>,
+) -> Result<(), String> {
+    for album_artist in album_artists {
+        let actual_artist_id = artist_id_map.get(&album_artist.artist_id).ok_or_else(|| {
+            format!(
+                "Artist ID {} not found in artist map",
+                album_artist.artist_id,
+            )
+        })?;
+        let mut updated_album_artist = album_artist.clone();
+        updated_album_artist.artist_id = actual_artist_id.clone();
+        library_manager
+            .insert_album_artist(&updated_album_artist)
+            .await
+            .map_err(|e| format!("Failed to insert album-artist relationship: {}", e))?;
+    }
+    Ok(())
+}
+
 /// Extract durations from audio files and update database immediately
 pub async fn extract_and_store_durations(
     library_manager: &LibraryManager,
@@ -752,6 +822,45 @@ fn extract_flac_duration(file_path: &Path) -> Option<i64> {
         }
     }
 }
+/// Fetch artist images for artists that have a Discogs ID but no image yet.
+/// Best-effort: never fails the import.
+async fn fetch_artist_images(
+    library_manager: &LibraryManager,
+    discogs_client: &DiscogsClient,
+    parsed_artists: &[crate::db::DbArtist],
+    artist_id_map: &HashMap<String, String>,
+    artists_dir: &std::path::Path,
+) {
+    for parsed_artist in parsed_artists {
+        let actual_id = match artist_id_map.get(&parsed_artist.id) {
+            Some(id) => id,
+            None => continue,
+        };
+
+        // Only fetch if the artist has a Discogs ID
+        let discogs_artist_id = match &parsed_artist.discogs_artist_id {
+            Some(id) => id.clone(),
+            None => continue,
+        };
+
+        // Check if artist already has an image in DB
+        if let Ok(Some(existing)) = library_manager.get_artist_by_id(actual_id).await {
+            if existing.image_path.is_some() {
+                continue;
+            }
+        }
+
+        crate::import::artist_image::fetch_and_save_artist_image(
+            actual_id,
+            &discogs_artist_id,
+            discogs_client,
+            artists_dir,
+            library_manager,
+        )
+        .await;
+    }
+}
+
 /// Discover all files in folder with metadata.
 ///
 /// Recursively scans the folder using the folder_scanner module to support:
@@ -799,4 +908,172 @@ fn discover_folder_files(folder: &Path) -> Result<Vec<DiscoveredFile>, String> {
         });
     }
     Ok(files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{Database, DbArtist};
+    use crate::encryption::EncryptionService;
+    use chrono::Utc;
+    use tempfile::TempDir;
+    use uuid::Uuid;
+
+    async fn setup_test_manager() -> (LibraryManager, TempDir) {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let database = Database::new(db_path.to_str().unwrap()).await.unwrap();
+        let encryption_service = EncryptionService::new_with_key(&[0u8; 32]);
+        let manager = LibraryManager::new(database, Some(encryption_service));
+        (manager, temp_dir)
+    }
+
+    fn make_artist(name: &str, discogs_id: Option<&str>, mb_id: Option<&str>) -> DbArtist {
+        let now = Utc::now();
+        DbArtist {
+            id: Uuid::new_v4().to_string(),
+            name: name.to_string(),
+            sort_name: None,
+            discogs_artist_id: discogs_id.map(|s| s.to_string()),
+            bandcamp_artist_id: None,
+            musicbrainz_artist_id: mb_id.map(|s| s.to_string()),
+            image_path: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_same_discogs_id_reuses_existing() {
+        let (manager, _tmp) = setup_test_manager().await;
+        let existing = make_artist("Radiohead", Some("d123"), None);
+        manager.insert_artist(&existing).await.unwrap();
+
+        let incoming = make_artist("Radiohead", Some("d123"), None);
+        let map = find_or_create_artists(&manager, std::slice::from_ref(&incoming))
+            .await
+            .unwrap();
+
+        assert_eq!(map[&incoming.id], existing.id);
+    }
+
+    #[tokio::test]
+    async fn test_same_mb_id_reuses_existing() {
+        let (manager, _tmp) = setup_test_manager().await;
+        let existing = make_artist("Radiohead", None, Some("mb-abc"));
+        manager.insert_artist(&existing).await.unwrap();
+
+        let incoming = make_artist("Radiohead", None, Some("mb-abc"));
+        let map = find_or_create_artists(&manager, std::slice::from_ref(&incoming))
+            .await
+            .unwrap();
+
+        assert_eq!(map[&incoming.id], existing.id);
+    }
+
+    #[tokio::test]
+    async fn test_same_name_no_ids_reuses_existing() {
+        let (manager, _tmp) = setup_test_manager().await;
+        let existing = make_artist("Radiohead", None, None);
+        manager.insert_artist(&existing).await.unwrap();
+
+        let incoming = make_artist("Radiohead", None, None);
+        let map = find_or_create_artists(&manager, std::slice::from_ref(&incoming))
+            .await
+            .unwrap();
+
+        assert_eq!(map[&incoming.id], existing.id);
+    }
+
+    #[tokio::test]
+    async fn test_same_name_same_mb_id_reuses() {
+        let (manager, _tmp) = setup_test_manager().await;
+        let existing = make_artist("Bush", None, Some("mb-bush"));
+        manager.insert_artist(&existing).await.unwrap();
+
+        let incoming = make_artist("Bush", None, Some("mb-bush"));
+        let map = find_or_create_artists(&manager, std::slice::from_ref(&incoming))
+            .await
+            .unwrap();
+
+        assert_eq!(map[&incoming.id], existing.id);
+    }
+
+    #[tokio::test]
+    async fn test_same_name_different_mb_id_creates_new() {
+        let (manager, _tmp) = setup_test_manager().await;
+        let existing = make_artist("Bush", None, Some("mb-bush-uk"));
+        manager.insert_artist(&existing).await.unwrap();
+
+        let incoming = make_artist("Bush", None, Some("mb-bush-ca"));
+        let map = find_or_create_artists(&manager, std::slice::from_ref(&incoming))
+            .await
+            .unwrap();
+
+        // Should create a new artist, not reuse existing
+        assert_ne!(map[&incoming.id], existing.id);
+        assert_eq!(map[&incoming.id], incoming.id);
+    }
+
+    #[tokio::test]
+    async fn test_same_name_different_discogs_id_creates_new() {
+        let (manager, _tmp) = setup_test_manager().await;
+        let existing = make_artist("Bush", Some("d100"), None);
+        manager.insert_artist(&existing).await.unwrap();
+
+        let incoming = make_artist("Bush", Some("d200"), None);
+        let map = find_or_create_artists(&manager, std::slice::from_ref(&incoming))
+            .await
+            .unwrap();
+
+        assert_ne!(map[&incoming.id], existing.id);
+        assert_eq!(map[&incoming.id], incoming.id);
+    }
+
+    #[tokio::test]
+    async fn test_name_match_accumulates_ids() {
+        let (manager, _tmp) = setup_test_manager().await;
+        // Existing has discogs ID only
+        let existing = make_artist("Radiohead", Some("d456"), None);
+        manager.insert_artist(&existing).await.unwrap();
+
+        // Incoming has MB ID only — no conflict, should merge
+        let incoming = make_artist("Radiohead", None, Some("mb-xyz"));
+        let map = find_or_create_artists(&manager, std::slice::from_ref(&incoming))
+            .await
+            .unwrap();
+
+        assert_eq!(map[&incoming.id], existing.id);
+
+        // Verify the existing artist now has both IDs
+        let updated = manager
+            .get_artist_by_id(&existing.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.discogs_artist_id.as_deref(), Some("d456"));
+        assert_eq!(updated.musicbrainz_artist_id.as_deref(), Some("mb-xyz"));
+    }
+
+    #[tokio::test]
+    async fn test_new_artist_inserts() {
+        let (manager, _tmp) = setup_test_manager().await;
+
+        let incoming = make_artist("New Band", Some("d999"), Some("mb-999"));
+        let map = find_or_create_artists(&manager, std::slice::from_ref(&incoming))
+            .await
+            .unwrap();
+
+        assert_eq!(map[&incoming.id], incoming.id);
+
+        // Verify it's in the DB
+        let saved = manager
+            .get_artist_by_id(&incoming.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.name, "New Band");
+        assert_eq!(saved.discogs_artist_id.as_deref(), Some("d999"));
+        assert_eq!(saved.musicbrainz_artist_id.as_deref(), Some("mb-999"));
+    }
 }

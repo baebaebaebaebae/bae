@@ -18,6 +18,7 @@ fn generate_test_albums() -> Vec<(Album, Vec<Artist>)> {
             let artist = Artist {
                 id: format!("artist-{}", i),
                 name: format!("Artist {}", i),
+                image_url: None,
             };
             (album, vec![artist])
         })

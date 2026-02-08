@@ -128,18 +128,7 @@ pub async fn fetch_cover_art_for_mb_release(
 
 /// Download cover art from a URL and return the raw bytes and file extension.
 pub async fn download_cover_art_bytes(cover_art_url: &str) -> Result<(Vec<u8>, String), String> {
-    let extension = cover_art_url
-        .split('.')
-        .next_back()
-        .and_then(|ext| {
-            let ext_lower = ext.to_lowercase();
-            if ["jpg", "jpeg", "png", "gif", "webp"].contains(&ext_lower.as_str()) {
-                Some(ext_lower)
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| "jpg".to_string());
+    let extension = super::image_extension_from_url(cover_art_url);
 
     info!("Downloading cover art from {}", cover_art_url);
 
