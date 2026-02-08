@@ -110,7 +110,7 @@ pub struct LibraryInfo {
     pub is_active: bool,
 }
 
-/// List of external library paths tracked in ~/.bae/known_libraries.yaml
+/// All library paths tracked in ~/.bae/known_libraries.yaml
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct KnownLibraries {
     paths: Vec<PathBuf>,
@@ -437,6 +437,7 @@ impl Config {
         }
 
         config.save_to_config_yaml()?;
+        Self::add_known_library(&library_path)?;
 
         info!("Created new library at {}", library_path.display());
         Ok(config)
@@ -457,29 +458,12 @@ impl Config {
 
         let mut libraries = Vec::new();
 
-        // Scan ~/.bae/libraries/
-        let libraries_dir = bae_dir.join("libraries");
-        if libraries_dir.is_dir() {
-            if let Ok(entries) = std::fs::read_dir(&libraries_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if let Some(info) = read_library_info(&path, &active_path) {
-                        libraries.push(info);
-                    }
-                }
-            }
-        }
-
-        // Read known_libraries.yaml for external paths
+        // Read known_libraries.yaml — single source of truth for all libraries
         let known_path = bae_dir.join("known_libraries.yaml");
         if known_path.is_file() {
             if let Ok(content) = std::fs::read_to_string(&known_path) {
                 if let Ok(known) = serde_yaml::from_str::<KnownLibraries>(&content) {
                     for path in known.paths {
-                        // Skip duplicates (might already be in ~/.bae/libraries/)
-                        if libraries.iter().any(|l| l.path == path) {
-                            continue;
-                        }
                         if let Some(info) = read_library_info(&path, &active_path) {
                             libraries.push(info);
                         }
@@ -500,7 +484,7 @@ impl Config {
         libraries
     }
 
-    /// Add an external library path to ~/.bae/known_libraries.yaml.
+    /// Register a library path in ~/.bae/known_libraries.yaml.
     pub fn add_known_library(path: &std::path::Path) -> Result<(), ConfigError> {
         let bae_dir = dirs::home_dir()
             .expect("Failed to get home directory")
@@ -524,7 +508,7 @@ impl Config {
         Ok(())
     }
 
-    /// Remove an external library path from ~/.bae/known_libraries.yaml.
+    /// Remove a library path from ~/.bae/known_libraries.yaml.
     pub fn remove_known_library(path: &std::path::Path) -> Result<(), ConfigError> {
         let bae_dir = dirs::home_dir()
             .expect("Failed to get home directory")

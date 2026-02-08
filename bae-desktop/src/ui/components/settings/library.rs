@@ -119,11 +119,11 @@ pub fn LibrarySection() -> Element {
     let on_remove = move |path: String| {
         let library_path = PathBuf::from(&path);
         if let Err(e) = Config::remove_known_library(&library_path) {
-            error!("Failed to remove library from known list: {e}");
+            error!("Failed to remove library: {e}");
             return;
         }
 
-        info!("Removed library {path} from known list");
+        info!("Removed library {path}");
         libraries.set(discover_ui_libraries());
     };
 
