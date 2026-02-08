@@ -68,6 +68,10 @@ unsafe fn register_menu_handler_class() {
             request_nav(NavAction::GoToNowPlaying);
         }
 
+        extern "C" fn toggle_queue_sidebar(_this: &Object, _cmd: Sel, _sender: id) {
+            request_nav(NavAction::ToggleQueueSidebar);
+        }
+
         extern "C" fn toggle_repeat_mode(_this: &Object, _cmd: Sel, _sender: id) {
             let current = REPEAT_MODE.load(std::sync::atomic::Ordering::SeqCst);
             let next = match current {
@@ -132,6 +136,10 @@ unsafe fn register_menu_handler_class() {
         decl.add_method(
             sel!(goNowPlaying:),
             go_now_playing as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(toggleQueueSidebar:),
+            toggle_queue_sidebar as extern "C" fn(&Object, Sel, id),
         );
         decl.add_method(
             sel!(toggleRepeatMode:),
@@ -697,11 +705,33 @@ unsafe fn setup_app_menu_inner(app: id) {
     file_menu_item.autorelease();
     file_menu_item.setSubmenu_(file_menu);
 
-    // Add menus in order: File, Edit, Go, Playback
+    // View menu
+    let view_menu = NSMenu::new(nil);
+    view_menu.autorelease();
+    let view_menu_title = NSString::alloc(nil).init_str("View");
+    let _: () = msg_send![view_menu, setTitle: view_menu_title];
+
+    let menu_handler = get_menu_handler();
+
+    let toggle_sidebar_item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
+        NSString::alloc(nil).init_str("Toggle Queue Sidebar"),
+        selector("toggleQueueSidebar:"),
+        NSString::alloc(nil).init_str("s"),
+    );
+    toggle_sidebar_item.autorelease();
+    let _: () = msg_send![toggle_sidebar_item, setTarget: menu_handler];
+    let _: () = msg_send![toggle_sidebar_item, setKeyEquivalentModifierMask: command_shift];
+    view_menu.addItem_(toggle_sidebar_item);
+
+    let view_menu_item = NSMenuItem::new(nil);
+    view_menu_item.autorelease();
+    view_menu_item.setSubmenu_(view_menu);
+
+    // Add menus in order: Library, Edit, View, Go, Playback
     main_menu.addItem_(file_menu_item);
     main_menu.addItem_(edit_menu_item);
+    main_menu.addItem_(view_menu_item);
 
-    // Add remaining menus
     let go_menu_item = NSMenuItem::new(nil);
     go_menu_item.autorelease();
     go_menu_item.setSubmenu_(go_menu);
