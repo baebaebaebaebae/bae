@@ -1,12 +1,12 @@
 # bae
 
-A desktop music library app. Album-oriented, metadata-first: you pick releases from Discogs or MusicBrainz, point bae at your files, and it handles storage, playback, and organization.
+A desktop music library app. Album-oriented, metadata-first: you pick releases from MusicBrainz or Discogs, point bae at your files, and it handles storage, playback, and organization.
 
 ## Features
 
 **Import**
 - Local folders (file-per-track or CUE/FLAC)
-- Metadata-driven: select a Discogs or MusicBrainz release, bae matches your files and pulls album art, credits, label info, catalog numbers
+- Metadata-driven: select a MusicBrainz or Discogs release, bae matches your files and pulls album art, credits, label info, catalog numbers
 
 **Playback**
 - Native audio via cpal
