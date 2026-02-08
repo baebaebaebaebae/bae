@@ -69,9 +69,9 @@ pub fn NowPlayingBar() -> Element {
             on_seek: move |ms: u64| playback_for_seek.seek(std::time::Duration::from_millis(ms)),
             on_cycle_repeat: move |_| {
                 let next = match *repeat_mode_store.read() {
-                    RepeatMode::None => bae_core::playback::RepeatMode::Album,
-                    RepeatMode::Album => bae_core::playback::RepeatMode::Track,
-                    RepeatMode::Track => bae_core::playback::RepeatMode::None,
+                    RepeatMode::None => RepeatMode::Album,
+                    RepeatMode::Album => RepeatMode::Track,
+                    RepeatMode::Track => RepeatMode::None,
                 };
                 playback_for_repeat.set_repeat_mode(next);
             },

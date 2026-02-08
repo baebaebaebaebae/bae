@@ -1,5 +1,5 @@
 [workspace]
-members = ["bae-core", "bae-ui", "bae-desktop", "bae-mocks", "bae-server", "bae-web", "dioxus-virtual-scroll"]
+members = ["bae-common", "bae-core", "bae-ui", "bae-desktop", "bae-mocks", "bae-server", "bae-web", "dioxus-virtual-scroll"]
 resolver = "2"
 
 [workspace.dependencies]

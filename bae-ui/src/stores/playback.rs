@@ -13,14 +13,7 @@ pub enum PlaybackStatus {
     Paused,
 }
 
-/// Repeat mode for playback
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub enum RepeatMode {
-    #[default]
-    None,
-    Track,
-    Album,
-}
+pub use bae_common::RepeatMode;
 
 /// UI state for playback
 #[derive(Clone, Debug, Default, PartialEq, Store)]

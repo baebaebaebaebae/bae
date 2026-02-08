@@ -1,7 +1,8 @@
+use bae_common::{NextTrack, PlaybackQueue, RepeatMode};
 use bae_ui::display_types::{QueueItem, Track};
 use bae_ui::stores::playback::{PlaybackStatus, PlaybackUiState, PlaybackUiStateStoreExt};
 use dioxus::prelude::*;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use tracing::info;
 
 /// Display info for a track, passed by callers who already have the data
@@ -23,20 +24,9 @@ struct CachedTrackInfo {
     artist_id: Option<String>,
 }
 
-/// Repeat mode for web playback
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RepeatMode {
-    None,
-    Track,
-    Album,
-}
-
 /// Web playback service managing an HTML <audio> element, queue, and store updates
 pub struct WebPlaybackService {
-    queue: VecDeque<String>,
-    current_track_id: Option<String>,
-    previous_track_id: Option<String>,
-    repeat_mode: RepeatMode,
+    queue: PlaybackQueue,
     store: Store<PlaybackUiState>,
     audio: Option<web_sys_x::HtmlMediaElement>,
     track_cache: HashMap<String, CachedTrackInfo>,
@@ -46,10 +36,7 @@ pub struct WebPlaybackService {
 impl WebPlaybackService {
     pub fn new(store: Store<PlaybackUiState>) -> Self {
         Self {
-            queue: VecDeque::new(),
-            current_track_id: None,
-            previous_track_id: None,
-            repeat_mode: RepeatMode::None,
+            queue: PlaybackQueue::new(),
             store,
             audio: None,
             track_cache: HashMap::new(),
@@ -81,14 +68,10 @@ impl WebPlaybackService {
         }
 
         // Queue all, pop first to play
-        for id in &track_ids {
-            self.queue.push_back(id.clone());
-        }
+        self.queue.add_to_queue(track_ids);
 
         if let Some(first) = self.queue.pop_front() {
-            if let Some(old) = self.current_track_id.take() {
-                self.previous_track_id = Some(old);
-            }
+            self.queue.set_current(first.clone());
             self.play_track_by_id(&first);
         }
 
@@ -115,15 +98,17 @@ impl WebPlaybackService {
 
     pub fn previous(&mut self) {
         let position_ms = *self.store.position_ms().read();
-        if position_ms < 3000 {
-            if let Some(prev_id) = self.previous_track_id.clone() {
+
+        match self.queue.previous_action(position_ms) {
+            bae_common::PreviousAction::PlayPrevious(prev_id) => {
+                self.queue.set_current(prev_id.clone());
                 self.play_track_by_id(&prev_id);
                 self.sync_queue_to_store();
-                return;
+            }
+            bae_common::PreviousAction::RestartCurrent => {
+                self.seek(0);
             }
         }
-        // Restart current track
-        self.seek(0);
     }
 
     pub fn seek(&mut self, ms: u64) {
@@ -152,56 +137,44 @@ impl WebPlaybackService {
     }
 
     pub fn cycle_repeat_mode(&mut self) {
-        self.repeat_mode = match self.repeat_mode {
+        let next = match self.queue.repeat_mode() {
             RepeatMode::None => RepeatMode::Album,
             RepeatMode::Album => RepeatMode::Track,
             RepeatMode::Track => RepeatMode::None,
         };
-
-        let store_mode = match self.repeat_mode {
-            RepeatMode::None => bae_ui::stores::playback::RepeatMode::None,
-            RepeatMode::Track => bae_ui::stores::playback::RepeatMode::Track,
-            RepeatMode::Album => bae_ui::stores::playback::RepeatMode::Album,
-        };
-        self.store.repeat_mode().set(store_mode);
+        self.queue.set_repeat_mode(next);
+        self.store.repeat_mode().set(next);
     }
 
     // Queue operations
 
     pub fn add_to_queue_with_info(&mut self, infos: Vec<TrackInfo>) {
+        let track_ids: Vec<String> = infos.iter().map(|i| i.track_id.clone()).collect();
         for info in infos {
-            self.queue.push_back(info.track_id.clone());
             self.cache_track_info(info);
         }
+        self.queue.add_to_queue(track_ids);
         self.sync_queue_to_store();
     }
 
     pub fn add_next_with_info(&mut self, infos: Vec<TrackInfo>) {
-        for info in infos.into_iter().rev() {
-            self.queue.push_front(info.track_id.clone());
+        let track_ids: Vec<String> = infos.iter().map(|i| i.track_id.clone()).collect();
+        for info in infos {
             self.cache_track_info(info);
         }
+        self.queue.add_next(track_ids);
         self.sync_queue_to_store();
     }
 
     pub fn remove_from_queue(&mut self, index: usize) {
-        if index < self.queue.len() {
-            self.queue.remove(index);
+        if self.queue.remove(index).is_some() {
             self.sync_queue_to_store();
         }
     }
 
     pub fn reorder_queue(&mut self, from: usize, to: usize) {
-        if from < self.queue.len() && to < self.queue.len() && from != to {
-            if let Some(track_id) = self.queue.remove(from) {
-                if to > from {
-                    self.queue.insert(to - 1, track_id);
-                } else {
-                    self.queue.insert(to, track_id);
-                }
-                self.sync_queue_to_store();
-            }
-        }
+        self.queue.reorder(from, to);
+        self.sync_queue_to_store();
     }
 
     pub fn clear_queue(&mut self) {
@@ -210,19 +183,8 @@ impl WebPlaybackService {
     }
 
     pub fn skip_to(&mut self, index: usize) {
-        if index >= self.queue.len() {
-            return;
-        }
-
-        // Drain all tracks before the target index
-        for _ in 0..index {
-            self.queue.pop_front();
-        }
-
-        if let Some(track_id) = self.queue.pop_front() {
-            if let Some(old) = self.current_track_id.take() {
-                self.previous_track_id = Some(old);
-            }
+        if let Some(track_id) = self.queue.skip_to(index) {
+            self.queue.set_current(track_id.clone());
             self.play_track_by_id(&track_id);
             self.sync_queue_to_store();
         }
@@ -284,7 +246,6 @@ impl WebPlaybackService {
         self.store.position_ms().set(0);
         self.store.duration_ms().set(0);
         self.store.playback_error().set(None);
-        self.current_track_id = Some(track_id.to_string());
         self.store
             .current_track_id()
             .set(Some(track_id.to_string()));
@@ -312,28 +273,19 @@ impl WebPlaybackService {
     }
 
     fn advance_to_next(&mut self) {
-        // Repeat Track: replay current
-        if self.repeat_mode == RepeatMode::Track {
-            if let Some(ref id) = self.current_track_id {
-                let id = id.clone();
+        match self.queue.next_track() {
+            NextTrack::RepeatCurrent(id) => {
                 self.play_track_by_id(&id);
-                return;
+            }
+            NextTrack::Play(next_id) => {
+                self.play_track_by_id(&next_id);
+                self.sync_queue_to_store();
+            }
+            NextTrack::RepeatAlbumNeeded | NextTrack::Stop => {
+                // Repeat Album: not implemented for web (would need API call)
+                self.stop();
             }
         }
-
-        // Try queue
-        if let Some(next_id) = self.queue.pop_front() {
-            if let Some(old) = self.current_track_id.take() {
-                self.previous_track_id = Some(old);
-            }
-            self.play_track_by_id(&next_id);
-            self.sync_queue_to_store();
-            return;
-        }
-
-        // Repeat Album: not implemented for web (would need API call)
-        // Just stop
-        self.stop();
     }
 
     fn stop(&mut self) {
@@ -349,7 +301,6 @@ impl WebPlaybackService {
         self.store.artist_name().set(String::new());
         self.store.artist_id().set(None);
         self.store.cover_url().set(None);
-        self.current_track_id = None;
     }
 
     fn cache_track_info(&mut self, info: TrackInfo) {
@@ -366,7 +317,7 @@ impl WebPlaybackService {
     }
 
     fn sync_queue_to_store(&self) {
-        let queue_ids: Vec<String> = self.queue.iter().cloned().collect();
+        let queue_ids = self.queue.tracks();
         let queue_items: Vec<QueueItem> = queue_ids
             .iter()
             .filter_map(|id| {

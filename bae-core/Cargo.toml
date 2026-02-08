@@ -10,6 +10,7 @@ name = "bae_core"
 path = "src/lib.rs"
 
 [dependencies]
+bae-common = { path = "../bae-common" }
 reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

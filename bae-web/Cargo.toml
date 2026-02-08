@@ -4,6 +4,7 @@ version = "0.0.0-dev"
 edition = "2021"
 
 [dependencies]
+bae-common = { path = "../bae-common" }
 bae-ui = { path = "../bae-ui" }
 chrono = "0.4"
 dioxus = { workspace = true, features = ["router", "web", "asset", "document", "launch"] }
