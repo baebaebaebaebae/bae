@@ -106,6 +106,7 @@ impl AppService {
         self.subscribe_cloud_sync();
         self.subscribe_folder_scan_events();
         self.load_initial_data();
+        self.process_pending_deletions();
     }
 
     // =========================================================================
@@ -484,6 +485,17 @@ impl AppService {
         self.load_storage_profiles();
     }
 
+    /// Process any pending file deletions from previous transfers
+    fn process_pending_deletions(&self) {
+        let library_path = std::path::PathBuf::from(&self.config.library_path);
+        let library_manager = self.library_manager.clone();
+
+        spawn(async move {
+            bae_core::storage::cleanup::process_pending_deletions(&library_path, library_manager)
+                .await;
+        });
+    }
+
     /// Load config into Store
     fn load_config(&self) {
         let config = &self.config;
@@ -612,6 +624,214 @@ impl AppService {
 
         spawn(async move {
             load_album_detail(&state, &library_manager, &album_id, release_id.as_deref()).await;
+        });
+    }
+
+    /// Transfer a release to a different storage profile
+    pub fn transfer_release_storage(&self, release_id: &str, target_profile_id: &str) {
+        let state = self.state;
+        let library_manager = self.library_manager.clone();
+        let config = self.config.clone();
+        let release_id = release_id.to_string();
+        let target_profile_id = target_profile_id.to_string();
+
+        spawn(async move {
+            // Look up the target profile
+            let target_profile = match library_manager
+                .get()
+                .database()
+                .get_storage_profile(&target_profile_id)
+                .await
+            {
+                Ok(Some(p)) => p,
+                Ok(None) => {
+                    state
+                        .album_detail()
+                        .transfer_error()
+                        .set(Some("Target storage profile not found".into()));
+                    return;
+                }
+                Err(e) => {
+                    state
+                        .album_detail()
+                        .transfer_error()
+                        .set(Some(format!("Failed to load target profile: {}", e)));
+                    return;
+                }
+            };
+
+            let encryption_service = library_manager.get().encryption_service().cloned();
+            let library_path = std::path::PathBuf::from(&config.library_path);
+
+            let transfer_service = bae_core::storage::transfer::TransferService::new(
+                library_manager.clone(),
+                encryption_service,
+                library_path.clone(),
+            );
+
+            let mut rx = transfer_service.transfer(
+                release_id.clone(),
+                bae_core::storage::transfer::TransferTarget::Profile(target_profile),
+            );
+
+            while let Some(progress) = rx.recv().await {
+                match progress {
+                    bae_core::storage::transfer::TransferProgress::Started { .. } => {
+                        state.album_detail().transfer_error().set(None);
+                        state.album_detail().transfer_progress().set(Some(
+                            bae_ui::stores::album_detail::TransferProgressState {
+                                file_index: 0,
+                                total_files: 0,
+                                filename: String::new(),
+                                percent: 0,
+                            },
+                        ));
+                    }
+                    bae_core::storage::transfer::TransferProgress::FileProgress {
+                        file_index,
+                        total_files,
+                        filename,
+                        percent,
+                        ..
+                    } => {
+                        state.album_detail().transfer_progress().set(Some(
+                            bae_ui::stores::album_detail::TransferProgressState {
+                                file_index,
+                                total_files,
+                                filename,
+                                percent,
+                            },
+                        ));
+                    }
+                    bae_core::storage::transfer::TransferProgress::Complete { .. } => {
+                        state.album_detail().transfer_progress().set(None);
+
+                        // Reload album detail to reflect new storage state
+                        let album_id = state
+                            .album_detail()
+                            .album()
+                            .read()
+                            .as_ref()
+                            .map(|a| a.id.clone());
+                        if let Some(album_id) = album_id {
+                            load_album_detail(
+                                &state,
+                                &library_manager,
+                                &album_id,
+                                Some(&release_id),
+                            )
+                            .await;
+                        }
+
+                        // Schedule deferred cleanup of old files
+                        bae_core::storage::cleanup::schedule_cleanup(
+                            &library_path,
+                            library_manager.clone(),
+                        );
+                    }
+                    bae_core::storage::transfer::TransferProgress::Failed { error, .. } => {
+                        state.album_detail().transfer_progress().set(None);
+                        state.album_detail().transfer_error().set(Some(error));
+                    }
+                }
+            }
+        });
+    }
+
+    /// Eject a release from managed storage to a local folder
+    pub fn eject_release_storage(&self, release_id: &str) {
+        let state = self.state;
+        let library_manager = self.library_manager.clone();
+        let config = self.config.clone();
+        let release_id = release_id.to_string();
+
+        spawn(async move {
+            // Show folder picker
+            let folder_handle = match rfd::AsyncFileDialog::new()
+                .set_title("Select Eject Directory")
+                .pick_folder()
+                .await
+            {
+                Some(handle) => handle,
+                None => return, // User cancelled
+            };
+            let target_dir = folder_handle.path().to_path_buf();
+
+            let encryption_service = library_manager.get().encryption_service().cloned();
+            let library_path = std::path::PathBuf::from(&config.library_path);
+
+            let transfer_service = bae_core::storage::transfer::TransferService::new(
+                library_manager.clone(),
+                encryption_service,
+                library_path.clone(),
+            );
+
+            let mut rx = transfer_service.transfer(
+                release_id.clone(),
+                bae_core::storage::transfer::TransferTarget::Eject(target_dir),
+            );
+
+            while let Some(progress) = rx.recv().await {
+                match progress {
+                    bae_core::storage::transfer::TransferProgress::Started { .. } => {
+                        state.album_detail().transfer_error().set(None);
+                        state.album_detail().transfer_progress().set(Some(
+                            bae_ui::stores::album_detail::TransferProgressState {
+                                file_index: 0,
+                                total_files: 0,
+                                filename: String::new(),
+                                percent: 0,
+                            },
+                        ));
+                    }
+                    bae_core::storage::transfer::TransferProgress::FileProgress {
+                        file_index,
+                        total_files,
+                        filename,
+                        percent,
+                        ..
+                    } => {
+                        state.album_detail().transfer_progress().set(Some(
+                            bae_ui::stores::album_detail::TransferProgressState {
+                                file_index,
+                                total_files,
+                                filename,
+                                percent,
+                            },
+                        ));
+                    }
+                    bae_core::storage::transfer::TransferProgress::Complete { .. } => {
+                        state.album_detail().transfer_progress().set(None);
+
+                        // Reload album detail to reflect new storage state
+                        let album_id = state
+                            .album_detail()
+                            .album()
+                            .read()
+                            .as_ref()
+                            .map(|a| a.id.clone());
+                        if let Some(album_id) = album_id {
+                            load_album_detail(
+                                &state,
+                                &library_manager,
+                                &album_id,
+                                Some(&release_id),
+                            )
+                            .await;
+                        }
+
+                        // Schedule deferred cleanup of old files
+                        bae_core::storage::cleanup::schedule_cleanup(
+                            &library_path,
+                            library_manager.clone(),
+                        );
+                    }
+                    bae_core::storage::transfer::TransferProgress::Failed { error, .. } => {
+                        state.album_detail().transfer_progress().set(None);
+                        state.album_detail().transfer_error().set(Some(error));
+                    }
+                }
+            }
         });
     }
 
@@ -1082,6 +1302,18 @@ async fn load_album_detail(
         let images = db_images.iter().map(image_from_db_ref).collect();
         state.album_detail().images().set(images);
     }
+
+    // Load storage profile for selected release
+    let storage_profile = library_manager
+        .get()
+        .get_storage_profile_for_release(&selected_release_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|p| storage_profile_from_db(&p));
+    state.album_detail().storage_profile().set(storage_profile);
+    state.album_detail().transfer_progress().set(None);
+    state.album_detail().transfer_error().set(None);
 
     state.album_detail().loading().set(false);
 }

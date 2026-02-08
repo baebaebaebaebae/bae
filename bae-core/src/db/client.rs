@@ -1743,6 +1743,24 @@ impl Database {
         .await?;
         Ok(row.map(|row| self.row_to_storage_profile(&row)))
     }
+    /// Delete release storage link (release_storage row)
+    pub async fn delete_release_storage(&self, release_id: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM release_storage WHERE release_id = ?")
+            .bind(release_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Delete all file records for a release
+    pub async fn delete_files_for_release(&self, release_id: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM files WHERE release_id = ?")
+            .bind(release_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// Insert a new import operation record
     pub async fn insert_import(&self, import: &DbImport) -> Result<(), sqlx::Error> {
         sqlx::query(

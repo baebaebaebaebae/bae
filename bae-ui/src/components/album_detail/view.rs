@@ -47,6 +47,9 @@ pub fn AlbumDetailView(
     on_artist_click: EventHandler<String>,
     on_play_album: EventHandler<Vec<String>>,
     on_add_album_to_queue: EventHandler<Vec<String>>,
+    on_transfer_to_profile: EventHandler<(String, String)>,
+    on_eject: EventHandler<String>,
+    available_profiles: Vec<crate::components::settings::StorageProfile>,
     #[props(default)] torrent_info: std::collections::HashMap<String, ReleaseTorrentInfo>,
     #[props(default)] on_start_seeding: Option<EventHandler<String>>,
     #[props(default)] on_stop_seeding: Option<EventHandler<String>>,
@@ -151,7 +154,13 @@ pub fn AlbumDetailView(
 
         ReleaseInfoModalWrapper { state, show: show_release_info_modal }
 
-        StorageModalWrapper { state, show: show_storage_modal }
+        StorageModalWrapper {
+            state,
+            show: show_storage_modal,
+            on_transfer_to_profile,
+            on_eject,
+            available_profiles: available_profiles.clone(),
+        }
 
         GalleryLightboxWrapper { state, show: show_gallery }
 
@@ -524,14 +533,37 @@ fn ReleaseInfoModalWrapper(
 fn StorageModalWrapper(
     state: ReadStore<AlbumDetailState>,
     show: Signal<Option<String>>,
+    on_transfer_to_profile: EventHandler<(String, String)>,
+    on_eject: EventHandler<String>,
+    available_profiles: Vec<crate::components::settings::StorageProfile>,
 ) -> Element {
     let is_open_memo = use_memo(move || show().is_some());
     let is_open: ReadSignal<bool> = is_open_memo.into();
 
     let files = state.files().read().clone();
+    let storage_profile = state.storage_profile().read().clone();
+    let transfer_progress = state.transfer_progress().read().clone();
+    let transfer_error = state.transfer_error().read().clone();
+
+    let release_id_for_transfer = show().unwrap_or_default();
+    let release_id_for_eject = release_id_for_transfer.clone();
 
     rsx! {
-        StorageModal { is_open, on_close: move |_| show.set(None), files }
+        StorageModal {
+            is_open,
+            on_close: move |_| show.set(None),
+            files,
+            storage_profile,
+            transfer_progress,
+            transfer_error,
+            available_profiles,
+            on_transfer_to_profile: move |profile_id: String| {
+                on_transfer_to_profile.call((release_id_for_transfer.clone(), profile_id));
+            },
+            on_eject: move |_| {
+                on_eject.call(release_id_for_eject.clone());
+            },
+        }
     }
 }
 
