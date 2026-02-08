@@ -309,16 +309,39 @@ impl ImportServiceHandle {
             .await
             .map_err(|e| format!("Failed to link import to release: {}", e))?;
         insert_album_artists(library_manager, &album_artists, &artist_id_map).await?;
-        // Write remote cover to cache and set cover_release_id (album now exists in DB)
-        let remote_cover_set = if let Some(((bytes, ext), _url)) = remote_cover_data {
-            let covers_dir = self.library_dir.covers_dir();
-            std::fs::create_dir_all(&covers_dir)
-                .map_err(|e| format!("Failed to create covers directory: {}", e))?;
-            let cache_path = covers_dir.join(format!("{}.{}", db_release.id, ext));
-            std::fs::write(&cache_path, &bytes)
-                .map_err(|e| format!("Failed to write cover to cache: {}", e))?;
+        // Write remote cover and create library_images record
+        let remote_cover_set = if let Some(((bytes, ext), url)) = remote_cover_data {
+            let cover_path = self.library_dir.cover_path(&db_release.id);
+            if let Some(parent) = cover_path.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create covers directory: {}", e))?;
+            }
+            std::fs::write(&cover_path, &bytes)
+                .map_err(|e| format!("Failed to write cover: {}", e))?;
 
-            info!("Cached remote cover art to {}", cache_path.display());
+            info!("Wrote remote cover art to {}", cover_path.display());
+
+            let content_type = crate::util::content_type_for_extension(&ext).to_string();
+            let source = if url.contains("musicbrainz") || url.contains("coverartarchive") {
+                "musicbrainz"
+            } else {
+                "discogs"
+            };
+            let library_image = crate::db::DbLibraryImage {
+                id: db_release.id.clone(),
+                image_type: crate::db::LibraryImageType::Cover,
+                content_type,
+                file_size: bytes.len() as i64,
+                width: None,
+                height: None,
+                source: source.to_string(),
+                source_url: Some(url),
+                created_at: chrono::Utc::now(),
+            };
+            library_manager
+                .upsert_library_image(&library_image)
+                .await
+                .map_err(|e| format!("Failed to upsert library image: {}", e))?;
 
             library_manager
                 .set_album_cover_release(&db_album.id, &db_release.id)
@@ -845,10 +868,11 @@ async fn fetch_artist_images(
         };
 
         // Check if artist already has an image in DB
-        if let Ok(Some(existing)) = library_manager.get_artist_by_id(actual_id).await {
-            if existing.image_path.is_some() {
-                continue;
-            }
+        if let Ok(Some(_)) = library_manager
+            .get_library_image(actual_id, &crate::db::LibraryImageType::Artist)
+            .await
+        {
+            continue;
         }
 
         crate::import::artist_image::fetch_and_save_artist_image(
@@ -938,7 +962,6 @@ mod tests {
             discogs_artist_id: discogs_id.map(|s| s.to_string()),
             bandcamp_artist_id: None,
             musicbrainz_artist_id: mb_id.map(|s| s.to_string()),
-            image_path: None,
             created_at: now,
             updated_at: now,
         }

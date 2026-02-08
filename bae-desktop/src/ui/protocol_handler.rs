@@ -34,50 +34,88 @@ pub fn handle_protocol_request(uri: &str, services: &ImageServices) -> ProtocolR
 }
 
 fn handle_cover(release_id: &str, services: &ImageServices) -> ProtocolResponse {
-    // Strip query params (e.g. ?t=123 for cache busting)
     let release_id = release_id.split('?').next().unwrap_or(release_id);
-    let covers_dir = services.library_dir.covers_dir();
+    let cover_path = services.library_dir.cover_path(release_id);
 
-    // Try common image extensions
-    for ext in &["jpg", "jpeg", "png", "webp", "gif"] {
-        let path = covers_dir.join(format!("{}.{}", release_id, ext));
-        if let Ok(data) = std::fs::read(&path) {
-            let mime = mime_type_for_extension(ext);
-            return HttpResponse::builder()
+    match std::fs::read(&cover_path) {
+        Ok(data) => {
+            // Get content type from DB, fall back to jpeg
+            let content_type = std::thread::spawn({
+                let lm = services.library_manager.clone();
+                let rid = release_id.to_string();
+                move || {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    rt.block_on(async {
+                        lm.get()
+                            .get_library_image(&rid, &bae_core::db::LibraryImageType::Cover)
+                            .await
+                            .ok()
+                            .flatten()
+                            .map(|img| img.content_type)
+                            .unwrap_or_else(|| "image/jpeg".to_string())
+                    })
+                }
+            })
+            .join()
+            .unwrap_or_else(|_| "image/jpeg".to_string());
+
+            HttpResponse::builder()
                 .status(200)
-                .header("Content-Type", mime)
+                .header("Content-Type", content_type)
                 .body(Cow::Owned(data))
-                .unwrap();
+                .unwrap()
+        }
+        Err(_) => {
+            warn!("Cover not found for release {}", release_id);
+
+            HttpResponse::builder()
+                .status(404)
+                .body(Cow::Borrowed(b"Cover not found" as &[u8]))
+                .unwrap()
         }
     }
-
-    warn!("Cover not found for album {}", release_id);
-    HttpResponse::builder()
-        .status(404)
-        .body(Cow::Borrowed(b"Cover not found" as &[u8]))
-        .unwrap()
 }
 
 fn handle_artist_image(artist_id: &str, services: &ImageServices) -> ProtocolResponse {
-    let artists_dir = services.library_dir.artists_dir();
+    let artist_id = artist_id.split('?').next().unwrap_or(artist_id);
+    let image_path = services.library_dir.artist_image_path(artist_id);
 
-    for ext in &["jpg", "jpeg", "png", "webp", "gif"] {
-        let path = artists_dir.join(format!("{}.{}", artist_id, ext));
-        if let Ok(data) = std::fs::read(&path) {
-            let mime = mime_type_for_extension(ext);
-            return HttpResponse::builder()
+    match std::fs::read(&image_path) {
+        Ok(data) => {
+            let content_type = std::thread::spawn({
+                let lm = services.library_manager.clone();
+                let aid = artist_id.to_string();
+                move || {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    rt.block_on(async {
+                        lm.get()
+                            .get_library_image(&aid, &bae_core::db::LibraryImageType::Artist)
+                            .await
+                            .ok()
+                            .flatten()
+                            .map(|img| img.content_type)
+                            .unwrap_or_else(|| "image/jpeg".to_string())
+                    })
+                }
+            })
+            .join()
+            .unwrap_or_else(|_| "image/jpeg".to_string());
+
+            HttpResponse::builder()
                 .status(200)
-                .header("Content-Type", mime)
+                .header("Content-Type", content_type)
                 .body(Cow::Owned(data))
-                .unwrap();
+                .unwrap()
+        }
+        Err(_) => {
+            warn!("Artist image not found for {}", artist_id);
+
+            HttpResponse::builder()
+                .status(404)
+                .body(Cow::Borrowed(b"Artist image not found" as &[u8]))
+                .unwrap()
         }
     }
-
-    warn!("Artist image not found for {}", artist_id);
-    HttpResponse::builder()
-        .status(404)
-        .body(Cow::Borrowed(b"Artist image not found" as &[u8]))
-        .unwrap()
 }
 
 fn handle_local_file(encoded_path: &str) -> ProtocolResponse {
@@ -96,7 +134,7 @@ fn handle_local_file(encoded_path: &str) -> ProtocolResponse {
             let mime_type = std::path::Path::new(&path)
                 .extension()
                 .and_then(|e| e.to_str())
-                .map(mime_type_for_extension)
+                .map(bae_core::util::content_type_for_extension)
                 .unwrap_or("application/octet-stream");
 
             HttpResponse::builder()
@@ -155,42 +193,22 @@ async fn serve_image(
 ) -> Result<(Vec<u8>, &'static str), String> {
     debug!("Serving image: {}", image_id);
 
-    let image = services
+    let file = services
         .library_manager
         .get()
-        .get_image_by_id(image_id)
+        .get_file_by_id(image_id)
         .await
         .map_err(|e| format!("Database error: {}", e))?
-        .ok_or_else(|| format!("Image not found: {}", image_id))?;
+        .ok_or_else(|| format!("File not found: {}", image_id))?;
 
-    let data = services
-        .library_manager
-        .get()
-        .fetch_image_bytes(image_id)
-        .await
-        .map_err(|e| format!("Failed to fetch image: {}", e))?;
+    let source_path = file
+        .source_path
+        .as_ref()
+        .ok_or_else(|| "File has no source_path".to_string())?;
 
-    let mime_type = match image.filename.rsplit('.').next() {
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("png") => "image/png",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        _ => "application/octet-stream",
-    };
+    let data = std::fs::read(source_path).map_err(|e| format!("Failed to read file: {}", e))?;
+
+    let mime_type = bae_core::util::content_type_for_extension(&file.format);
 
     Ok((data, mime_type))
-}
-
-fn mime_type_for_extension(ext: &str) -> &'static str {
-    match ext.to_lowercase().as_str() {
-        "jpg" | "jpeg" => "image/jpeg",
-        "png" => "image/png",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "bmp" => "image/bmp",
-        "ico" => "image/x-icon",
-        "svg" => "image/svg+xml",
-        "tiff" | "tif" => "image/tiff",
-        _ => "application/octet-stream",
-    }
 }

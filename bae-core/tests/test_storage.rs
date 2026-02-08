@@ -7,13 +7,11 @@
 mod support;
 use crate::support::test_encryption_service;
 use bae_core::cache::CacheManager;
-use bae_core::cloud_storage::CloudStorage;
-use bae_core::db::{Database, DbStorageProfile, ImportStatus, StorageLocation};
+use bae_core::db::{Database, DbStorageProfile, ImportStatus, LibraryImageType, StorageLocation};
 use bae_core::discogs::models::{DiscogsRelease, DiscogsTrack};
 use bae_core::encryption::EncryptionService;
 use bae_core::import::{CoverSelection, ImportPhase, ImportProgress, ImportRequest, ImportService};
 use bae_core::library::LibraryManager;
-use bae_core::storage::create_storage_reader;
 use bae_core::test_support::MockCloudStorage;
 use std::path::Path;
 use std::sync::Arc;
@@ -564,23 +562,26 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
         info!("✓ Track '{}' has audio format with file_id", track.title);
     }
 
-    let images = library_manager
-        .get_images_for_release(&release_id)
+    let cover = library_manager
+        .get_library_image(&release_id, &LibraryImageType::Cover)
         .await
-        .expect("Failed to get images");
-    assert!(!images.is_empty(), "Should have at least one image record");
+        .expect("Failed to get cover")
+        .expect("Cover should exist in library_images");
+    assert_eq!(cover.content_type, "image/jpeg");
+    assert_eq!(cover.source, "local");
+    let source_url = cover.source_url.as_ref().expect("source_url should be set");
     assert!(
-        images.iter().any(|img| img.is_cover),
-        "Should have at least one image marked as cover",
+        source_url.starts_with("release://"),
+        "source_url should start with release://, got: {}",
+        source_url,
     );
-    info!("✓ {} DbImage records, cover image exists", images.len());
-    let cover_image = images.iter().find(|img| img.is_cover).unwrap();
-    assert_eq!(
-        cover_image.filename, selected_cover,
-        "Cover should be user-selected '{}', not priority-based '{}'",
-        selected_cover, cover_image.filename,
+    assert!(
+        source_url.contains(&selected_cover),
+        "source_url should contain selected cover '{}', got: {}",
+        selected_cover,
+        source_url,
     );
-    info!("✓ Correct cover selected: {}", cover_image.filename);
+    info!("✓ Cover library_image record exists with correct source");
     let album_id = library_manager
         .get_album_id_for_release(&release_id)
         .await
@@ -596,18 +597,6 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
         "Album cover_release_id should match the release",
     );
     info!("✓ Album cover_release_id is set correctly");
-    verify_image_loadable(
-        cover_image,
-        &library_manager,
-        &storage_profile,
-        &encryption_service,
-        encrypted,
-        mock_cloud
-            .as_ref()
-            .map(|c| c.clone() as Arc<dyn CloudStorage>),
-    )
-    .await;
-    info!("✓ Cover image data is loadable");
     verify_storage_state(location, encrypted, &files, mock_cloud.as_ref()).await;
     verify_roundtrip(&tracks, &library_manager, encrypted).await;
     info!(
@@ -729,59 +718,6 @@ fn generate_test_files(dir: &Path) -> Vec<Vec<u8>> {
             flac_template.clone()
         })
         .collect()
-}
-
-/// Verify we can actually load image data from storage
-async fn verify_image_loadable(
-    image: &bae_core::db::DbImage,
-    library_manager: &LibraryManager,
-    storage_profile: &DbStorageProfile,
-    encryption_service: &Option<EncryptionService>,
-    encrypted: bool,
-    mock_cloud: Option<Arc<dyn CloudStorage>>,
-) {
-    let storage: Arc<dyn CloudStorage> = if let Some(cloud) = mock_cloud {
-        cloud
-    } else {
-        create_storage_reader(storage_profile)
-            .await
-            .expect("Failed to create storage reader")
-    };
-
-    let filename_only = std::path::Path::new(&image.filename)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(&image.filename);
-    let file = library_manager
-        .get_file_by_release_and_filename(&image.release_id, filename_only)
-        .await
-        .expect("Failed to get file")
-        .expect("File not found for image");
-
-    let source_path = file
-        .source_path
-        .as_ref()
-        .expect("File should have source_path");
-    let data = storage
-        .download(source_path)
-        .await
-        .expect("Failed to read image file");
-    let data = if encrypted {
-        encryption_service
-            .as_ref()
-            .expect("encryption_service required when encrypted=true")
-            .decrypt(&data)
-            .expect("Failed to decrypt image")
-    } else {
-        data
-    };
-    assert!(
-        data.len() >= 2 && data[0] == 0xFF && data[1] == 0xD8,
-        "Image data should be valid JPEG (got {} bytes, starts with {:02X}{:02X})",
-        data.len(),
-        data.first().unwrap_or(&0),
-        data.get(1).unwrap_or(&0),
-    );
 }
 
 async fn verify_storage_state(
@@ -1026,15 +962,11 @@ async fn run_real_album_test(album_dir: PathBuf, location: StorageLocation, encr
             track.import_status,
         );
     }
-    let images = library_manager
-        .get_images_for_release(&release_id)
+    let cover = library_manager
+        .get_library_image(&release_id, &LibraryImageType::Cover)
         .await
-        .expect("Failed to get images");
-    assert!(!images.is_empty(), "Should have at least one image record");
-    assert!(
-        images.iter().any(|img| img.is_cover),
-        "Should have at least one image marked as cover",
-    );
-    info!("✓ {} DbImage records, cover image exists", images.len());
+        .expect("Failed to get cover");
+    assert!(cover.is_some(), "Should have a cover in library_images");
+    info!("✓ Cover library_image record exists");
     info!("\n✅ All tracks are Complete!");
 }

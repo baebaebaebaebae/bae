@@ -1,9 +1,9 @@
 use crate::cache::CacheManager;
 use crate::cloud_storage::CloudStorageError;
 use crate::db::{
-    Database, DbAlbum, DbAlbumArtist, DbArtist, DbAudioFormat, DbFile, DbImage, DbImport,
+    Database, DbAlbum, DbAlbumArtist, DbArtist, DbAudioFormat, DbFile, DbImport, DbLibraryImage,
     DbRelease, DbStorageProfile, DbTorrent, DbTrack, DbTrackArtist, ImportOperationStatus,
-    ImportStatus, LibrarySearchResults,
+    ImportStatus, LibraryImageType, LibrarySearchResults,
 };
 use crate::encryption::EncryptionService;
 use crate::library::export::ExportService;
@@ -90,14 +90,6 @@ impl LibraryManager {
         self.encryption_service.as_ref()
     }
 
-    /// Get encryption service, returning error if not configured
-    fn require_encryption(&self) -> Result<&EncryptionService, LibraryError> {
-        self.encryption_service.as_ref().ok_or_else(|| {
-            LibraryError::Import(
-                "Encryption not configured. Create an encrypted storage profile first.".into(),
-            )
-        })
-    }
     /// Get a reference to the database
     pub fn database(&self) -> &Database {
         &self.database
@@ -326,14 +318,6 @@ impl LibraryManager {
             .await?)
     }
 
-    /// Update artist image path
-    pub async fn update_artist_image(
-        &self,
-        id: &str,
-        image_path: &str,
-    ) -> Result<(), LibraryError> {
-        Ok(self.database.update_artist_image(id, image_path).await?)
-    }
     /// Insert album-artist relationship
     pub async fn insert_album_artist(
         &self,
@@ -387,104 +371,29 @@ impl LibraryManager {
     ) -> Result<Vec<DbAlbum>, LibraryError> {
         Ok(self.database.get_albums_for_artist(artist_id).await?)
     }
-    /// Add an image to a release
-    pub async fn add_image(&self, image: &DbImage) -> Result<(), LibraryError> {
-        self.database.insert_image(image).await?;
+    /// Upsert a library image record
+    pub async fn upsert_library_image(&self, image: &DbLibraryImage) -> Result<(), LibraryError> {
+        self.database.upsert_library_image(image).await?;
         Ok(())
     }
-    /// Get all images for a release
-    pub async fn get_images_for_release(
+
+    /// Get a library image by ID and type
+    pub async fn get_library_image(
         &self,
-        release_id: &str,
-    ) -> Result<Vec<DbImage>, LibraryError> {
-        Ok(self.database.get_images_for_release(release_id).await?)
+        id: &str,
+        image_type: &LibraryImageType,
+    ) -> Result<Option<DbLibraryImage>, LibraryError> {
+        Ok(self.database.get_library_image(id, image_type).await?)
     }
-    /// Get the cover image for a release
-    pub async fn get_cover_image_for_release(
+
+    /// Delete a library image by ID and type
+    pub async fn delete_library_image(
         &self,
-        release_id: &str,
-    ) -> Result<Option<DbImage>, LibraryError> {
-        Ok(self
-            .database
-            .get_cover_image_for_release(release_id)
-            .await?)
-    }
-    /// Set an image as the cover for a release
-    pub async fn set_cover_image(
-        &self,
-        release_id: &str,
-        image_id: &str,
+        id: &str,
+        image_type: &LibraryImageType,
     ) -> Result<(), LibraryError> {
-        self.database.set_cover_image(release_id, image_id).await?;
+        self.database.delete_library_image(id, image_type).await?;
         Ok(())
-    }
-    /// Get an image by ID
-    pub async fn get_image_by_id(&self, image_id: &str) -> Result<Option<DbImage>, LibraryError> {
-        Ok(self.database.get_image_by_id(image_id).await?)
-    }
-    /// Get a file by release ID and filename
-    pub async fn get_file_by_release_and_filename(
-        &self,
-        release_id: &str,
-        filename: &str,
-    ) -> Result<Option<DbFile>, LibraryError> {
-        Ok(self
-            .database
-            .get_file_by_release_and_filename(release_id, filename)
-            .await?)
-    }
-
-    /// Fetch image bytes from storage, handling S3 download and decryption as needed
-    pub async fn fetch_image_bytes(&self, image_id: &str) -> Result<Vec<u8>, LibraryError> {
-        let image = self
-            .get_image_by_id(image_id)
-            .await?
-            .ok_or_else(|| LibraryError::Import(format!("Image not found: {}", image_id)))?;
-
-        let filename_only = std::path::Path::new(&image.filename)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(&image.filename);
-
-        let file = self
-            .get_file_by_release_and_filename(&image.release_id, filename_only)
-            .await?
-            .ok_or_else(|| {
-                LibraryError::Import(format!("File not found for image: {}", image.filename))
-            })?;
-
-        let source_path = file.source_path.ok_or_else(|| {
-            LibraryError::Import(format!(
-                "File {} has no source_path",
-                file.original_filename
-            ))
-        })?;
-
-        let storage_profile = self
-            .get_storage_profile_for_release(&image.release_id)
-            .await?;
-
-        let raw_data = if source_path.starts_with("s3://") {
-            let profile = storage_profile
-                .as_ref()
-                .ok_or_else(|| LibraryError::Import("No storage profile for cloud image".into()))?;
-            let storage = crate::storage::create_storage_reader(profile).await?;
-            storage.download(&source_path).await?
-        } else {
-            tokio::fs::read(&source_path).await?
-        };
-
-        let data = if storage_profile
-            .as_ref()
-            .map(|p| p.encrypted)
-            .unwrap_or(false)
-        {
-            self.require_encryption()?.decrypt(&raw_data)?
-        } else {
-            raw_data
-        };
-
-        Ok(data)
     }
 
     /// Set an album's cover release (which release provides the cover art)
@@ -762,35 +671,6 @@ impl LibraryManager {
     pub async fn delete_import(&self, id: &str) -> Result<(), LibraryError> {
         Ok(self.database.delete_import(id).await?)
     }
-}
-
-/// Update the cover cache on disk for a release.
-///
-/// Writes `{library_path}/covers/{release_id}.{extension}` and removes any
-/// stale files with other extensions for the same release_id.
-pub fn update_cover_cache(
-    library_path: &Path,
-    release_id: &str,
-    bytes: &[u8],
-    extension: &str,
-) -> Result<(), LibraryError> {
-    let covers_dir = library_path.join("covers");
-    std::fs::create_dir_all(&covers_dir)
-        .map_err(|e| LibraryError::Import(format!("Failed to create covers directory: {}", e)))?;
-
-    // Remove stale files with other extensions
-    for ext in &["jpg", "jpeg", "png", "webp", "gif"] {
-        if *ext != extension {
-            let stale = covers_dir.join(format!("{}.{}", release_id, ext));
-            let _ = std::fs::remove_file(stale);
-        }
-    }
-
-    let cache_path = covers_dir.join(format!("{}.{}", release_id, extension));
-    std::fs::write(&cache_path, bytes)
-        .map_err(|e| LibraryError::Import(format!("Failed to write cover cache: {}", e)))?;
-
-    Ok(())
 }
 
 #[cfg(test)]

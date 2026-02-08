@@ -26,3 +26,4 @@ pub mod test_support;
 pub mod text_encoding;
 #[cfg(feature = "torrent")]
 pub mod torrent;
+pub mod util;

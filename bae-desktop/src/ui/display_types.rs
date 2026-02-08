@@ -1,10 +1,10 @@
 //! Conversions from DB types to bae-ui display types
 
 use crate::ui::cover_url;
-use bae_core::db::{DbAlbum, DbArtist, DbFile, DbImage, DbRelease, DbTrack, ImportStatus};
+use bae_core::db::{DbAlbum, DbArtist, DbFile, DbRelease, DbTrack, ImportStatus};
 
 // Re-export bae-ui types so existing code continues to work
-pub use bae_ui::{Album, Artist, File, Image, Release, Track, TrackImportState};
+pub use bae_ui::{Album, Artist, File, Release, Track, TrackImportState};
 
 pub fn album_from_db_ref(db: &DbAlbum) -> Album {
     let cover_url = db
@@ -24,14 +24,10 @@ pub fn album_from_db_ref(db: &DbAlbum) -> Album {
 }
 
 pub fn artist_from_db_ref(db: &DbArtist) -> Artist {
-    let image_url = db
-        .image_path
-        .as_ref()
-        .map(|_| format!("bae://artist-image/{}", db.id));
     Artist {
         id: db.id.clone(),
         name: db.name.clone(),
-        image_url,
+        image_url: Some(format!("bae://artist-image/{}", db.id)),
     }
 }
 
@@ -58,16 +54,6 @@ pub fn file_from_db_ref(db: &DbFile) -> File {
         filename: db.original_filename.clone(),
         file_size: db.file_size,
         format: db.format.clone(),
-    }
-}
-
-pub fn image_from_db_ref(db: &DbImage) -> Image {
-    Image {
-        id: db.id.clone(),
-        filename: db.filename.clone(),
-        is_cover: db.is_cover,
-        source: db.source.as_str().to_string(),
-        url: format!("bae://image/{}", db.id),
     }
 }
 

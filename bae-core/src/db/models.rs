@@ -55,8 +55,6 @@ pub struct DbArtist {
     pub bandcamp_artist_id: Option<String>,
     /// Artist ID from MusicBrainz (for deduplication across imports)
     pub musicbrainz_artist_id: Option<String>,
-    /// Path to artist image on disk (relative to library, e.g. "artists/{id}.jpg")
-    pub image_path: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -293,7 +291,6 @@ impl DbArtist {
             discogs_artist_id: Some(discogs_artist_id.to_string()),
             bandcamp_artist_id: None,
             musicbrainz_artist_id: None,
-            image_path: None,
             created_at: now,
             updated_at: now,
         }
@@ -780,68 +777,51 @@ impl DbImport {
         }
     }
 }
-/// Source of an image file
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[sqlx(type_name = "TEXT", rename_all = "lowercase")]
-pub enum ImageSource {
-    /// Image came with the release files (scans, artwork folder, etc.)
-    Local,
-    /// Fetched from MusicBrainz Cover Art Archive
-    MusicBrainz,
-    /// Fetched from Discogs
-    Discogs,
+/// Type discriminator for library images
+#[derive(Debug, Clone, PartialEq)]
+pub enum LibraryImageType {
+    Cover,
+    Artist,
 }
-impl ImageSource {
+
+impl LibraryImageType {
     pub fn as_str(&self) -> &'static str {
         match self {
-            ImageSource::Local => "local",
-            ImageSource::MusicBrainz => "musicbrainz",
-            ImageSource::Discogs => "discogs",
+            LibraryImageType::Cover => "cover",
+            LibraryImageType::Artist => "artist",
         }
     }
 }
-/// Image metadata for a release
-///
-/// Tracks all images associated with a release, including:
-/// - Local images that came with the release (scans, artwork, etc.)
-/// - Fetched images from MusicBrainz or Discogs stored in .bae/ folder
-///
-/// One image per release is designated as the cover (is_cover = true).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DbImage {
+
+impl std::str::FromStr for LibraryImageType {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "cover" => Ok(LibraryImageType::Cover),
+            "artist" => Ok(LibraryImageType::Artist),
+            other => Err(format!("Unknown library image type: {}", other)),
+        }
+    }
+}
+
+/// bae-managed metadata image (cover art, artist photo).
+/// File lives at a deterministic path derived from type + id:
+/// - Cover: covers/{id}
+/// - Artist: artists/{id}
+#[derive(Debug, Clone)]
+pub struct DbLibraryImage {
+    /// release_id for covers, artist_id for artist images
     pub id: String,
-    /// Release this image belongs to
-    pub release_id: String,
-    /// Relative path from release root (e.g., "cover.jpg", ".bae/front-mb.jpg", "Artwork/front.jpg")
-    pub filename: String,
-    /// True if this is the designated cover image for the release
-    pub is_cover: bool,
-    /// Where this image came from
-    pub source: ImageSource,
-    /// Image width in pixels (if known)
+    pub image_type: LibraryImageType,
+    pub content_type: String,
+    pub file_size: i64,
     pub width: Option<i32>,
-    /// Image height in pixels (if known)
     pub height: Option<i32>,
+    /// "local", "musicbrainz", "discogs"
+    pub source: String,
+    /// MB: CAA image ID, Discogs: URL, local: "release://{path}"
+    pub source_url: Option<String>,
     pub created_at: DateTime<Utc>,
-}
-impl DbImage {
-    pub fn new(release_id: &str, filename: &str, is_cover: bool, source: ImageSource) -> Self {
-        DbImage {
-            id: Uuid::new_v4().to_string(),
-            release_id: release_id.to_string(),
-            filename: filename.to_string(),
-            is_cover,
-            source,
-            width: None,
-            height: None,
-            created_at: Utc::now(),
-        }
-    }
-    pub fn with_dimensions(mut self, width: i32, height: i32) -> Self {
-        self.width = Some(width);
-        self.height = Some(height);
-        self
-    }
 }
 /// Where release data is stored
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]

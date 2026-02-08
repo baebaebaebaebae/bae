@@ -107,7 +107,7 @@ fn parse_mb_release_from_json(
                     discogs_artist_id: None,
                     bandcamp_artist_id: None,
                     musicbrainz_artist_id: mb_artist_id,
-                    image_path: None,
+
                     created_at: chrono::Utc::now(),
                     updated_at: chrono::Utc::now(),
                 };
@@ -131,7 +131,6 @@ fn parse_mb_release_from_json(
             discogs_artist_id: None,
             bandcamp_artist_id: None,
             musicbrainz_artist_id: None,
-            image_path: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };

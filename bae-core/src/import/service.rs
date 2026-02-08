@@ -823,13 +823,11 @@ impl ImportService {
         Ok(())
     }
 
-    /// Create DbImage records for image files in the discovered files.
-    ///
-    /// Also caches the cover image to `{library_path}/covers/{release_id}.{ext}` and
-    /// sets `cover_release_id` on the album.
+    /// Pick a local cover image, copy it to covers/{release_id}, create a
+    /// library_images record, and set cover_release_id on the album.
     ///
     /// `cover_image_path`: Absolute path to the user-selected cover image.
-    /// If provided, that file is marked as cover. Otherwise, priority logic picks the best one.
+    /// If provided, that file is used. Otherwise, priority logic picks the best one.
     /// `cover_already_set`: If true, a remote cover was already cached by the handle.
     async fn create_image_records(
         &self,
@@ -840,7 +838,12 @@ impl ImportService {
         cover_image_path: Option<&Path>,
         cover_already_set: bool,
     ) -> Result<(), String> {
-        use crate::db::{DbImage, ImageSource};
+        use crate::db::{DbLibraryImage, LibraryImageType};
+
+        if cover_already_set {
+            return Ok(());
+        }
+
         let image_extensions = ["jpg", "jpeg", "png", "gif", "webp"];
         let mut image_files: Vec<(&DiscoveredFile, String)> = discovered_files
             .iter()
@@ -856,18 +859,6 @@ impl ImportService {
             .collect();
 
         if image_files.is_empty() {
-            return Ok(());
-        }
-
-        // Remote cover already set by handle — just record local images without cover selection
-        if cover_already_set {
-            for (_file, relative_path) in &image_files {
-                let db_image = DbImage::new(release_id, relative_path, false, ImageSource::Local);
-                library_manager
-                    .add_image(&db_image)
-                    .await
-                    .map_err(|e| format!("Failed to add image record: {}", e))?;
-            }
             return Ok(());
         }
 
@@ -896,43 +887,55 @@ impl ImportService {
             0
         });
 
-        for (idx, (file, relative_path)) in image_files.iter().enumerate() {
-            let source = ImageSource::Local;
-            let is_cover = idx == cover_index;
-            let db_image = DbImage::new(release_id, relative_path, is_cover, source);
+        let (cover_file, relative_path) = &image_files[cover_index];
+        let ext = cover_file
+            .path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("jpg");
+        let content_type = crate::util::content_type_for_extension(ext).to_string();
+        let source_url = format!("release://{}", relative_path);
 
-            library_manager
-                .add_image(&db_image)
-                .await
-                .map_err(|e| format!("Failed to add image record: {}", e))?;
-
-            if is_cover {
-                // Cache cover to {library_path}/covers/{release_id}.{ext} for fast browsing
-                if let Some(ext) = file.path.extension().and_then(|e| e.to_str()) {
-                    let covers_dir = self.library_dir.covers_dir();
-                    if let Err(e) = std::fs::create_dir_all(&covers_dir) {
-                        error!("Failed to create covers directory: {}", e);
-                    } else {
-                        let cache_path = covers_dir.join(format!("{}.{}", release_id, ext));
-                        if let Err(e) = std::fs::copy(&file.path, &cache_path) {
-                            error!("Failed to cache cover art: {}", e);
-                        } else {
-                            info!("Cached cover art to {}", cache_path.display());
-                        }
-                    }
-                }
-
-                library_manager
-                    .set_album_cover_release(album_id, release_id)
-                    .await
-                    .map_err(|e| format!("Failed to set album cover release: {}", e))?;
-            }
-
-            info!(
-                "Created DbImage: {} (cover={}, source={:?})",
-                relative_path, is_cover, source
-            );
+        // Copy cover to covers/{release_id}
+        let covers_dir = self.library_dir.covers_dir();
+        if let Err(e) = std::fs::create_dir_all(&covers_dir) {
+            error!("Failed to create covers directory: {}", e);
+            return Ok(());
         }
+
+        let cache_path = self.library_dir.cover_path(release_id);
+        if let Err(e) = std::fs::copy(&cover_file.path, &cache_path) {
+            error!("Failed to cache cover art: {}", e);
+            return Ok(());
+        }
+
+        let file_size = std::fs::metadata(&cache_path)
+            .map(|m| m.len() as i64)
+            .unwrap_or(0);
+
+        info!("Cached cover art to {}", cache_path.display());
+
+        let db_image = DbLibraryImage {
+            id: release_id.to_string(),
+            image_type: LibraryImageType::Cover,
+            content_type,
+            file_size,
+            width: None,
+            height: None,
+            source: "local".to_string(),
+            source_url: Some(source_url),
+            created_at: chrono::Utc::now(),
+        };
+
+        library_manager
+            .upsert_library_image(&db_image)
+            .await
+            .map_err(|e| format!("Failed to upsert library image: {}", e))?;
+
+        library_manager
+            .set_album_cover_release(album_id, release_id)
+            .await
+            .map_err(|e| format!("Failed to set album cover release: {}", e))?;
 
         Ok(())
     }
@@ -960,21 +963,45 @@ impl ImportService {
             }
         };
 
-        let covers_dir = self.library_dir.covers_dir();
-        if let Err(e) = std::fs::create_dir_all(&covers_dir) {
-            error!("Failed to create covers directory: {}", e);
+        let cover_path = self.library_dir.cover_path(release_id);
+        if let Some(parent) = cover_path.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                error!("Failed to create covers directory: {}", e);
+                return false;
+            }
+        }
+
+        if let Err(e) = std::fs::write(&cover_path, &bytes) {
+            error!("Failed to write cover: {}", e);
             return false;
         }
 
-        let cache_path = covers_dir.join(format!("{}.{}", release_id, ext));
-        if let Err(e) = std::fs::write(&cache_path, &bytes) {
-            error!("Failed to write cover to cache: {}", e);
-            return false;
-        }
+        info!("Wrote remote cover art to {}", cover_path.display());
 
-        info!("Cached remote cover art to {}", cache_path.display());
+        let content_type = crate::util::content_type_for_extension(&ext).to_string();
+        let source = if url.contains("musicbrainz") || url.contains("coverartarchive") {
+            "musicbrainz"
+        } else {
+            "discogs"
+        };
+        let library_image = crate::db::DbLibraryImage {
+            id: release_id.to_string(),
+            image_type: crate::db::LibraryImageType::Cover,
+            content_type,
+            file_size: bytes.len() as i64,
+            width: None,
+            height: None,
+            source: source.to_string(),
+            source_url: Some(url.to_string()),
+            created_at: chrono::Utc::now(),
+        };
 
         let library_manager = self.library_manager.get();
+        if let Err(e) = library_manager.upsert_library_image(&library_image).await {
+            error!("Failed to upsert library image: {}", e);
+            return false;
+        }
+
         if let Err(e) = library_manager
             .set_album_cover_release(album_id, release_id)
             .await
