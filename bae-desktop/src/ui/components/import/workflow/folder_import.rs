@@ -349,6 +349,10 @@ pub fn FolderImport() -> Element {
         let app = app.clone();
         move |_| {
             let app = app.clone();
+            app.state
+                .import()
+                .write()
+                .dispatch(CandidateEvent::StartImport);
             spawn(async move {
                 let confirmed = app.state.import().read().get_confirmed_candidate();
                 if let Some(candidate) = confirmed {
@@ -356,7 +360,19 @@ pub fn FolderImport() -> Element {
                         confirm_and_start_import(&app, candidate, ImportSource::Folder).await
                     {
                         warn!("Failed to confirm and start import: {}", e);
+                        app.state
+                            .import()
+                            .write()
+                            .dispatch(CandidateEvent::ImportFailed(e));
                     }
+                } else {
+                    warn!("No confirmed candidate after StartImport");
+                    app.state
+                        .import()
+                        .write()
+                        .dispatch(CandidateEvent::ImportFailed(
+                            "No candidate selected".to_string(),
+                        ));
                 }
             });
         }
