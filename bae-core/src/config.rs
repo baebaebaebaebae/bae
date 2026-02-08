@@ -443,7 +443,7 @@ impl Config {
         Ok(config)
     }
 
-    /// Discover all known libraries: scan ~/.bae/libraries/ and read ~/.bae/known_libraries.yaml.
+    /// Discover all libraries registered in ~/.bae/known_libraries.yaml.
     pub fn discover_libraries() -> Vec<LibraryInfo> {
         let home_dir = match dirs::home_dir() {
             Some(d) => d,
