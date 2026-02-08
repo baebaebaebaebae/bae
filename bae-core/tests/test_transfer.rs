@@ -9,6 +9,7 @@
 
 mod support;
 
+use bae_core::content_type::ContentType;
 use bae_core::db::{
     Database, DbAlbum, DbFile, DbRelease, DbReleaseStorage, DbStorageProfile, ImportStatus,
 };
@@ -95,7 +96,7 @@ async fn create_self_managed_files(
         let file_path = source_dir.join(name);
         tokio::fs::write(&file_path, data).await.unwrap();
 
-        let mut db_file = DbFile::new(release_id, name, data.len() as i64, "flac");
+        let mut db_file = DbFile::new(release_id, name, data.len() as i64, ContentType::Flac);
         db_file.source_path = Some(file_path.display().to_string());
         mgr.add_file(&db_file).await.unwrap();
 
@@ -126,7 +127,7 @@ async fn create_profile_files(
         let file_path = release_dir.join(name);
         tokio::fs::write(&file_path, data).await.unwrap();
 
-        let mut db_file = DbFile::new(release_id, name, data.len() as i64, "flac");
+        let mut db_file = DbFile::new(release_id, name, data.len() as i64, ContentType::Flac);
         db_file.source_path = Some(file_path.display().to_string());
         mgr.add_file(&db_file).await.unwrap();
 

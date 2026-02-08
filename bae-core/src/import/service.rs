@@ -2,6 +2,7 @@
 use crate::cd::drive::CdToc;
 #[cfg(feature = "cd-rip")]
 use crate::cd::RipProgress;
+use crate::content_type::ContentType;
 #[cfg(any(feature = "torrent", feature = "cd-rip"))]
 use crate::db::DbAlbum;
 #[cfg(feature = "cd-rip")]
@@ -893,7 +894,7 @@ impl ImportService {
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("jpg");
-        let content_type = crate::util::content_type_for_extension(ext).to_string();
+        let content_type = ContentType::from_extension(ext);
         let source_url = format!("release://{}", relative_path);
 
         // Copy cover to covers/{release_id}
@@ -1080,12 +1081,13 @@ impl ImportService {
         let mut track_indices: HashMap<PathBuf, usize> = HashMap::new();
 
         for track_file in tracks_to_files {
-            let format = track_file
+            let ext = track_file
                 .file_path
                 .extension()
                 .and_then(|ext| ext.to_str())
                 .unwrap_or("unknown")
                 .to_lowercase();
+            let audio_content_type = ContentType::from_extension(&ext);
 
             if let Some((metadata, flac_headers, flac_info, dense_seektable)) =
                 cue_flac_data.get(&track_file.file_path)
@@ -1168,7 +1170,7 @@ impl ImportService {
 
                 let audio_format = DbAudioFormat::new_with_byte_offsets(
                     &track_file.db_track_id,
-                    "flac",
+                    ContentType::Flac,
                     Some(flac_headers.clone()),
                     true, // needs_headers for CUE/FLAC
                     start_byte,
@@ -1188,10 +1190,10 @@ impl ImportService {
                     .map_err(|e| format!("Failed to insert audio format: {}", e))?;
             } else {
                 // For regular FLAC files (not CUE), extract headers and seektable for seek support
-                if format != "flac" {
+                if audio_content_type != ContentType::Flac {
                     return Err(format!(
                         "Unsupported audio format '{}' - only FLAC is supported",
-                        format
+                        ext
                     ));
                 }
 
@@ -1224,7 +1226,7 @@ impl ImportService {
 
                 let audio_format = DbAudioFormat::new(
                     &track_file.db_track_id,
-                    &format,
+                    ContentType::Flac,
                     flac_headers,
                     false,
                     flac_info.sample_rate as i64,
@@ -1291,7 +1293,7 @@ impl ImportService {
                 .file_name()
                 .and_then(|n| n.to_str())
                 .ok_or_else(|| format!("Invalid filename: {:?}", file.path))?;
-            let format = file
+            let ext = file
                 .path
                 .extension()
                 .and_then(|e| e.to_str())
@@ -1302,8 +1304,13 @@ impl ImportService {
                 .to_str()
                 .ok_or_else(|| format!("Cannot convert path to string: {:?}", file.path))?;
 
-            let db_file = DbFile::new(&db_release.id, filename, file.size as i64, &format)
-                .with_source_path(source_path);
+            let db_file = DbFile::new(
+                &db_release.id,
+                filename,
+                file.size as i64,
+                ContentType::from_extension(&ext),
+            )
+            .with_source_path(source_path);
             file_ids.insert(filename.to_string(), db_file.id.clone());
             library_manager
                 .add_file(&db_file)
@@ -1492,7 +1499,7 @@ impl ImportService {
                 .file_name()
                 .and_then(|n| n.to_str())
                 .ok_or_else(|| format!("Invalid filename: {:?}", file.path))?;
-            let format = file
+            let ext = file
                 .path
                 .extension()
                 .and_then(|e| e.to_str())
@@ -1503,8 +1510,13 @@ impl ImportService {
                 .to_str()
                 .ok_or_else(|| format!("Cannot convert path to string: {:?}", file.path))?;
 
-            let db_file = DbFile::new(&db_release.id, filename, file.size as i64, &format)
-                .with_source_path(source_path);
+            let db_file = DbFile::new(
+                &db_release.id,
+                filename,
+                file.size as i64,
+                ContentType::from_extension(&ext),
+            )
+            .with_source_path(source_path);
             library_manager
                 .add_file(&db_file)
                 .await
@@ -1960,7 +1972,7 @@ impl ImportService {
                 format!("Cannot convert path to string: {:?}", result.output_path)
             })?;
 
-            let db_file = DbFile::new(&db_release.id, filename, file_size, "flac")
+            let db_file = DbFile::new(&db_release.id, filename, file_size, ContentType::Flac)
                 .with_source_path(source_path);
             library_manager
                 .add_file(&db_file)

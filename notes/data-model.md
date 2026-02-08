@@ -41,7 +41,23 @@ files
   created_at        TEXT NOT NULL
 ```
 
-Gallery display: `SELECT * FROM files WHERE release_id = ? AND content_type LIKE 'image/%'`
+Content types are stored as MIME strings and mapped to the `ContentType` enum in Rust for type-safe comparisons (`ContentType::Flac`, `ContentType::Jpeg`, etc.) with helpers like `is_audio()`, `is_image()`, `display_name()`, and `from_extension()`.
+
+### `audio_formats` — playback metadata (1:1 with tracks)
+
+```
+audio_formats
+  id                TEXT PK
+  track_id          TEXT FK → tracks (UNIQUE)
+  content_type      TEXT NOT NULL    -- "audio/flac"
+  flac_headers      BLOB
+  needs_headers     BOOLEAN NOT NULL
+  start_byte_offset INTEGER          -- for CUE/FLAC tracks
+  end_byte_offset   INTEGER
+  ...
+  file_id           TEXT FK → files
+  created_at        TEXT NOT NULL
+```
 
 ### `library_images` — bae-managed metadata images
 

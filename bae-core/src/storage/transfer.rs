@@ -5,6 +5,7 @@
 //! deferred cleanup.
 
 use crate::cloud_storage::CloudStorage;
+use crate::content_type::ContentType;
 use crate::db::{DbFile, DbReleaseStorage, DbStorageProfile, StorageLocation};
 use crate::encryption::EncryptionService;
 use crate::library::SharedLibraryManager;
@@ -305,12 +306,17 @@ async fn do_transfer(
 
             for (filename, data) in &file_data {
                 let dest_path = target_dir.join(filename);
-                let format = Path::new(filename)
+                let ext = Path::new(filename)
                     .extension()
                     .and_then(|e| e.to_str())
                     .unwrap_or("bin")
                     .to_lowercase();
-                let mut db_file = DbFile::new(release_id, filename, data.len() as i64, &format);
+                let mut db_file = DbFile::new(
+                    release_id,
+                    filename,
+                    data.len() as i64,
+                    ContentType::from_extension(&ext),
+                );
                 db_file.source_path = Some(dest_path.display().to_string());
                 mgr.add_file(&db_file).await?;
             }

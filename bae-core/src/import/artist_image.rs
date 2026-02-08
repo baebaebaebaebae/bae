@@ -1,3 +1,4 @@
+use crate::content_type::ContentType;
 use crate::db::{DbLibraryImage, LibraryImageType};
 use crate::discogs::DiscogsClient;
 use crate::library::LibraryManager;
@@ -72,7 +73,7 @@ pub async fn fetch_and_save_artist_image(
         .and_then(|ct| {
             let mime = ct.split(';').next().unwrap_or(ct).trim();
             if mime.starts_with("image/") {
-                Some(mime.to_string())
+                Some(ContentType::from_mime(mime))
             } else {
                 None
             }
@@ -82,7 +83,7 @@ pub async fn fetch_and_save_artist_image(
                 .ok()
                 .and_then(|parsed| parsed.path().rsplit('.').next().map(|e| e.to_lowercase()))
                 .unwrap_or_default();
-            crate::util::content_type_for_extension(&ext).to_string()
+            ContentType::from_extension(&ext)
         });
 
     let bytes = match response.bytes().await {

@@ -51,7 +51,7 @@ fn handle_cover(release_id: &str, services: &ImageServices) -> ProtocolResponse 
                             .await
                             .ok()
                             .flatten()
-                            .map(|img| img.content_type)
+                            .map(|img| img.content_type.to_string())
                             .unwrap_or_else(|| "image/jpeg".to_string())
                     })
                 }
@@ -93,7 +93,7 @@ fn handle_artist_image(artist_id: &str, services: &ImageServices) -> ProtocolRes
                             .await
                             .ok()
                             .flatten()
-                            .map(|img| img.content_type)
+                            .map(|img| img.content_type.to_string())
                             .unwrap_or_else(|| "image/jpeg".to_string())
                     })
                 }
@@ -131,15 +131,15 @@ fn handle_local_file(encoded_path: &str) -> ProtocolResponse {
 
     match std::fs::read(&path) {
         Ok(data) => {
-            let mime_type = std::path::Path::new(&path)
+            let content_type = std::path::Path::new(&path)
                 .extension()
                 .and_then(|e| e.to_str())
-                .map(bae_core::util::content_type_for_extension)
-                .unwrap_or("application/octet-stream");
+                .map(bae_core::content_type::ContentType::from_extension)
+                .unwrap_or(bae_core::content_type::ContentType::OctetStream);
 
             HttpResponse::builder()
                 .status(200)
-                .header("Content-Type", mime_type)
+                .header("Content-Type", content_type.as_str())
                 .body(Cow::Owned(data))
                 .unwrap()
         }
@@ -190,7 +190,7 @@ fn handle_image(image_id: &str, services: &ImageServices) -> ProtocolResponse {
 async fn serve_image(
     image_id: &str,
     services: &ImageServices,
-) -> Result<(Vec<u8>, &'static str), String> {
+) -> Result<(Vec<u8>, String), String> {
     debug!("Serving image: {}", image_id);
 
     let file = services
@@ -208,7 +208,5 @@ async fn serve_image(
 
     let data = std::fs::read(source_path).map_err(|e| format!("Failed to read file: {}", e))?;
 
-    let mime_type = bae_core::util::content_type_for_extension(&file.format);
-
-    Ok((data, mime_type))
+    Ok((data, file.content_type.to_string()))
 }

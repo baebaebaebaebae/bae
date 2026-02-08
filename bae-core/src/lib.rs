@@ -6,6 +6,7 @@ pub mod cloud_storage;
 pub mod cloud_sync;
 #[doc(hidden)]
 pub mod config;
+pub mod content_type;
 pub mod cue_flac;
 pub mod db;
 pub mod discogs;
@@ -26,4 +27,3 @@ pub mod test_support;
 pub mod text_encoding;
 #[cfg(feature = "torrent")]
 pub mod torrent;
-pub mod util;

@@ -7,6 +7,7 @@
 mod support;
 use crate::support::test_encryption_service;
 use bae_core::cache::CacheManager;
+use bae_core::content_type::ContentType;
 use bae_core::db::{Database, DbStorageProfile, ImportStatus, LibraryImageType, StorageLocation};
 use bae_core::discogs::models::{DiscogsRelease, DiscogsTrack};
 use bae_core::encryption::EncryptionService;
@@ -553,7 +554,11 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
             .await
             .expect("Failed to get audio format")
             .expect("Audio format should exist for track");
-        assert_eq!(audio_format.format, "flac", "Should be FLAC format");
+        assert_eq!(
+            audio_format.content_type,
+            ContentType::Flac,
+            "Should be FLAC format"
+        );
         assert!(
             audio_format.file_id.is_some(),
             "Track '{}' audio_format should have a file_id",
@@ -567,7 +572,7 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
         .await
         .expect("Failed to get cover")
         .expect("Cover should exist in library_images");
-    assert_eq!(cover.content_type, "image/jpeg");
+    assert_eq!(cover.content_type, ContentType::Jpeg);
     assert_eq!(cover.source, "local");
     let source_url = cover.source_url.as_ref().expect("source_url should be set");
     assert!(
@@ -733,7 +738,7 @@ async fn verify_storage_state(
                 if let Some(ref source_path) = file.source_path {
                     let path = PathBuf::from(source_path);
                     assert!(path.exists(), "Local file should exist at: {}", source_path);
-                    if encrypted && file.format == "flac" {
+                    if encrypted && file.content_type == ContentType::Flac {
                         let data = fs::read(&path).expect("Failed to read file");
                         assert!(
                             data.len() < 4 || &data[0..4] != b"fLaC",
@@ -760,7 +765,7 @@ async fn verify_storage_state(
                         source_path
                     );
                     let data = stored_files.get(source_path).unwrap();
-                    if encrypted && file.format == "flac" {
+                    if encrypted && file.content_type == ContentType::Flac {
                         assert!(
                             data.len() < 4 || &data[0..4] != b"fLaC",
                             "Encrypted file should not have plain FLAC header",
@@ -791,7 +796,11 @@ async fn verify_roundtrip(
             .await
             .expect("Failed to get audio format")
             .expect("Audio format should exist for single-file track");
-        assert_eq!(audio_format.format, "flac", "Should be FLAC format");
+        assert_eq!(
+            audio_format.content_type,
+            ContentType::Flac,
+            "Should be FLAC format"
+        );
         assert!(
             audio_format.file_id.is_some(),
             "Track '{}' audio_format should have a file_id",
@@ -920,7 +929,7 @@ async fn run_real_album_test(album_dir: PathBuf, location: StorageLocation, encr
         if let Some(af) = audio_format {
             info!(
                 "    audio_format: {}, flac_headers={}",
-                af.format,
+                af.content_type,
                 af.flac_headers.is_some()
             );
         } else {

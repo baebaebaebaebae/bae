@@ -1,3 +1,4 @@
+use crate::content_type::ContentType;
 use crate::db::models::*;
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
@@ -845,7 +846,7 @@ impl Database {
         sqlx::query(
             r#"
             INSERT INTO files (
-                id, release_id, original_filename, file_size, format, source_path, encryption_nonce, created_at
+                id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
@@ -853,7 +854,7 @@ impl Database {
         .bind(&file.release_id)
         .bind(&file.original_filename)
         .bind(file.file_size)
-        .bind(&file.format)
+        .bind(file.content_type.as_str())
         .bind(&file.source_path)
         .bind(&file.encryption_nonce)
         .bind(file.created_at.to_rfc3339())
@@ -877,7 +878,7 @@ impl Database {
                 release_id: row.get("release_id"),
                 original_filename: row.get("original_filename"),
                 file_size: row.get("file_size"),
-                format: row.get("format"),
+                content_type: ContentType::from_mime(&row.get::<String, _>("content_type")),
                 source_path: row.get("source_path"),
                 encryption_nonce: row.get("encryption_nonce"),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
@@ -899,7 +900,7 @@ impl Database {
                 release_id: row.get("release_id"),
                 original_filename: row.get("original_filename"),
                 file_size: row.get("file_size"),
-                format: row.get("format"),
+                content_type: ContentType::from_mime(&row.get::<String, _>("content_type")),
                 source_path: row.get("source_path"),
                 encryption_nonce: row.get("encryption_nonce"),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
@@ -918,13 +919,13 @@ impl Database {
         sqlx::query(
             r#"
             INSERT INTO audio_formats (
-                id, track_id, format, flac_headers, needs_headers, start_byte_offset, end_byte_offset, pregap_ms, frame_offset_samples, exact_sample_count, sample_rate, bits_per_sample, seektable_json, audio_data_start, file_id, created_at
+                id, track_id, content_type, flac_headers, needs_headers, start_byte_offset, end_byte_offset, pregap_ms, frame_offset_samples, exact_sample_count, sample_rate, bits_per_sample, seektable_json, audio_data_start, file_id, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&audio_format.id)
         .bind(&audio_format.track_id)
-        .bind(&audio_format.format)
+        .bind(audio_format.content_type.as_str())
         .bind(&audio_format.flac_headers)
         .bind(audio_format.needs_headers)
         .bind(audio_format.start_byte_offset)
@@ -955,7 +956,7 @@ impl Database {
             Ok(Some(DbAudioFormat {
                 id: row.get("id"),
                 track_id: row.get("track_id"),
-                format: row.get("format"),
+                content_type: ContentType::from_mime(&row.get::<String, _>("content_type")),
                 flac_headers: row.get("flac_headers"),
                 needs_headers: row.get("needs_headers"),
                 start_byte_offset: row.get("start_byte_offset"),
@@ -1431,7 +1432,7 @@ impl Database {
         )
         .bind(&image.id)
         .bind(image.image_type.as_str())
-        .bind(&image.content_type)
+        .bind(image.content_type.as_str())
         .bind(image.file_size)
         .bind(image.width)
         .bind(image.height)
@@ -1457,7 +1458,7 @@ impl Database {
         Ok(row.map(|row| DbLibraryImage {
             id: row.get("id"),
             image_type: row.get::<String, _>("type").parse().unwrap(),
-            content_type: row.get("content_type"),
+            content_type: ContentType::from_mime(&row.get::<String, _>("content_type")),
             file_size: row.get("file_size"),
             width: row.get("width"),
             height: row.get("height"),

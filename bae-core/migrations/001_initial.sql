@@ -96,7 +96,7 @@ CREATE TABLE files (
     release_id TEXT NOT NULL,
     original_filename TEXT NOT NULL,
     file_size INTEGER NOT NULL,
-    format TEXT NOT NULL,
+    content_type TEXT NOT NULL,
     source_path TEXT,
     encryption_nonce BLOB,
     created_at TEXT NOT NULL,
@@ -106,7 +106,7 @@ CREATE TABLE files (
 CREATE TABLE audio_formats (
     id TEXT PRIMARY KEY,
     track_id TEXT NOT NULL UNIQUE,
-    format TEXT NOT NULL,
+    content_type TEXT NOT NULL,
     flac_headers BLOB,
     needs_headers BOOLEAN NOT NULL DEFAULT FALSE,
     start_byte_offset INTEGER,
