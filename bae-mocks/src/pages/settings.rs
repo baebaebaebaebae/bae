@@ -10,7 +10,7 @@ use dioxus::prelude::*;
 
 #[component]
 pub fn Settings() -> Element {
-    let mut active_tab = use_signal(|| SettingsTab::Storage);
+    let mut active_tab = use_signal(|| SettingsTab::Library);
 
     rsx! {
         SettingsView {

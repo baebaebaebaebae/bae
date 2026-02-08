@@ -4,6 +4,7 @@
 
 mod about;
 mod bittorrent;
+mod card;
 mod cloud;
 mod discogs;
 mod library;
@@ -13,6 +14,7 @@ mod view;
 
 pub use about::AboutSectionView;
 pub use bittorrent::{BitTorrentSectionView, BitTorrentSettings};
+pub use card::{SettingsCard, SettingsSection};
 pub use cloud::CloudSectionView;
 pub use discogs::DiscogsSectionView;
 pub use library::{LibraryInfo, LibrarySectionView};

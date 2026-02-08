@@ -1,7 +1,8 @@
 //! BitTorrent section view
 
 use crate::components::{
-    Button, ButtonSize, ButtonVariant, TextInput, TextInputSize, TextInputType,
+    Button, ButtonSize, ButtonVariant, SettingsCard, SettingsSection, TextInput, TextInputSize,
+    TextInputType,
 };
 use dioxus::prelude::*;
 
@@ -49,11 +50,11 @@ pub fn BitTorrentSectionView(
     on_bind_interface_change: EventHandler<String>,
 ) -> Element {
     rsx! {
-        div { class: "max-w-2xl space-y-6",
+        SettingsSection {
             h2 { class: "text-xl font-semibold text-white mb-6", "BitTorrent" }
 
             // Listening Port Section
-            div { class: "bg-gray-800 rounded-lg p-6",
+            SettingsCard {
                 div { class: "flex items-center justify-between mb-4",
                     h3 { class: "text-lg font-medium text-white", "Listening Port" }
                     if editing_section.as_deref() != Some("port") {
@@ -128,7 +129,7 @@ pub fn BitTorrentSectionView(
             }
 
             // Connection Limits Section
-            div { class: "bg-gray-800 rounded-lg p-6",
+            SettingsCard {
                 div { class: "flex items-center justify-between mb-4",
                     h3 { class: "text-lg font-medium text-white", "Connection Limits" }
                     if editing_section.as_deref() != Some("limits") {
@@ -199,7 +200,7 @@ pub fn BitTorrentSectionView(
             }
 
             // Network Interface Section
-            div { class: "bg-gray-800 rounded-lg p-6",
+            SettingsCard {
                 div { class: "flex items-center justify-between mb-4",
                     h3 { class: "text-lg font-medium text-white", "Network Interface" }
                     if editing_section.as_deref() != Some("interface") {
@@ -248,7 +249,7 @@ pub fn BitTorrentSectionView(
             }
 
             // About Section
-            div { class: "bg-gray-800 rounded-lg p-6",
+            SettingsCard {
                 h3 { class: "text-lg font-medium text-white mb-4", "About BitTorrent in bae" }
                 div { class: "space-y-3 text-sm text-gray-400",
                     p {

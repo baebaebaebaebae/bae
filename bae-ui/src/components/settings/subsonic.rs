@@ -1,6 +1,6 @@
 //! Subsonic section view
 
-use crate::components::{Button, ButtonSize, ButtonVariant};
+use crate::components::{Button, ButtonSize, ButtonVariant, SettingsCard, SettingsSection};
 use dioxus::prelude::*;
 
 /// Subsonic section view
@@ -27,10 +27,10 @@ pub fn SubsonicSectionView(
     on_port_change: EventHandler<String>,
 ) -> Element {
     rsx! {
-        div { class: "max-w-2xl space-y-6",
+        SettingsSection {
             h2 { class: "text-xl font-semibold text-white mb-6", "Subsonic Server" }
 
-            div { class: "bg-gray-800 rounded-lg p-6",
+            SettingsCard {
                 div { class: "flex items-center justify-between mb-4",
                     h3 { class: "text-lg font-medium text-white", "Server Settings" }
                     if !is_editing {
@@ -127,7 +127,7 @@ pub fn SubsonicSectionView(
                 }
             }
 
-            div { class: "bg-gray-800 rounded-lg p-6",
+            SettingsCard {
                 h3 { class: "text-lg font-medium text-white mb-4", "About Subsonic" }
                 div { class: "space-y-3 text-sm text-gray-400",
                     p {

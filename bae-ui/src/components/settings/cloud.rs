@@ -1,7 +1,8 @@
 //! Cloud sync section view
 
 use crate::components::{
-    Button, ButtonSize, ButtonVariant, TextInput, TextInputSize, TextInputType,
+    Button, ButtonSize, ButtonVariant, SettingsCard, SettingsSection, TextInput, TextInputSize,
+    TextInputType,
 };
 use crate::stores::CloudSyncStatus;
 use dioxus::prelude::*;
@@ -44,9 +45,9 @@ pub fn CloudSectionView(
 ) -> Element {
     if !encryption_configured {
         return rsx! {
-            div { class: "max-w-2xl",
+            SettingsSection {
                 h2 { class: "text-xl font-semibold text-white mb-6", "Cloud Sync" }
-                div { class: "bg-gray-800 rounded-lg p-6",
+                SettingsCard {
                     div { class: "text-center py-8",
                         p { class: "text-gray-400 mb-2",
                             "Cloud sync requires an encryption key to protect your data."
@@ -61,11 +62,11 @@ pub fn CloudSectionView(
     }
 
     rsx! {
-        div { class: "max-w-2xl space-y-6",
+        SettingsSection {
             h2 { class: "text-xl font-semibold text-white mb-6", "Cloud Sync" }
 
             // Status card
-            div { class: "bg-gray-800 rounded-lg p-6",
+            SettingsCard {
                 div { class: "flex items-center justify-between mb-4",
                     h3 { class: "text-lg font-medium text-white", "Sync Status" }
                     div { class: "flex items-center gap-3",
@@ -122,7 +123,7 @@ pub fn CloudSectionView(
 
             // Edit form
             if is_editing {
-                div { class: "bg-gray-800 rounded-lg p-6",
+                SettingsCard {
                     h3 { class: "text-lg font-medium text-white mb-4", "Configuration" }
 
                     div { class: "space-y-4",
@@ -235,7 +236,7 @@ pub fn CloudSectionView(
             }
 
             // Info card
-            div { class: "bg-gray-800 rounded-lg p-6",
+            SettingsCard {
                 h3 { class: "text-lg font-medium text-white mb-4", "About Cloud Sync" }
                 div { class: "space-y-3 text-sm text-gray-400",
                     p {

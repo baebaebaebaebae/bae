@@ -13,7 +13,7 @@ use dioxus::prelude::*;
 /// Settings page with tabbed navigation
 #[component]
 pub fn Settings() -> Element {
-    let mut active_tab = use_signal(|| SettingsTab::Storage);
+    let mut active_tab = use_signal(|| SettingsTab::Library);
 
     rsx! {
         SettingsView {

@@ -7,7 +7,8 @@ use crate::components::icons::{
     CheckIcon, CopyIcon, FolderIcon, InfoIcon, KeyIcon, PencilIcon, PlusIcon, TrashIcon,
 };
 use crate::components::{
-    Button, ButtonSize, ButtonVariant, ChromelessButton, TextInput, TextInputSize, TextInputType,
+    Button, ButtonSize, ButtonVariant, ChromelessButton, SettingsCard, SettingsSection, TextInput,
+    TextInputSize, TextInputType,
 };
 use dioxus::prelude::*;
 
@@ -73,7 +74,7 @@ pub fn StorageProfilesSectionView(
     let is_loading = *is_loading.read();
 
     rsx! {
-        div { class: "max-w-2xl",
+        SettingsSection {
             // Profiles sub-section
             div { class: "flex items-center justify-between mb-6",
                 h2 { class: "text-xl font-semibold text-white", "Profiles" }
@@ -226,7 +227,7 @@ fn EncryptionSubSection(
     };
 
     rsx! {
-        div { class: "bg-gray-800 rounded-lg p-6",
+        SettingsCard {
             div { class: "space-y-4",
                 div { class: "flex items-center justify-between py-3 border-b border-gray-700",
                     div {
@@ -389,7 +390,7 @@ fn ProfileCard(
     let profile_id_for_delete = profile.id.clone();
 
     rsx! {
-        div { class: "bg-gray-800 rounded-lg p-4",
+        SettingsCard { padding: "p-4",
             div { class: "flex items-start justify-between",
                 div { class: "flex-1",
                     div { class: "flex items-center gap-3",
@@ -640,210 +641,216 @@ pub fn StorageProfileEditorView(
     };
 
     rsx! {
-        div { class: "bg-surface-raised border border-border-subtle rounded-lg p-6 mb-6",
-            h3 { class: "text-lg font-medium text-white mb-4",
-                if is_edit {
-                    "Edit Profile"
-                } else {
-                    "New Profile"
-                }
-            }
-            div { class: "space-y-4",
-                div {
-                    label { class: "block text-sm font-medium text-gray-400 mb-2", "Name" }
-                    TextInput {
-                        value: name(),
-                        on_input: move |v| name.set(v),
-                        size: TextInputSize::Medium,
-                        input_type: TextInputType::Text,
-                        placeholder: "My Storage Profile",
+        div { class: "mb-6",
+            SettingsCard {
+                h3 { class: "text-lg font-medium text-white mb-4",
+                    if is_edit {
+                        "Edit Profile"
+                    } else {
+                        "New Profile"
                     }
                 }
-
-                div {
-                    label { class: "block text-sm font-medium text-gray-400 mb-2", "Storage Type" }
-                    div { class: "flex flex-col gap-3",
-                        label { class: "flex items-center gap-2 cursor-pointer",
-                            input {
-                                r#type: "radio",
-                                name: "location",
-                                class: "text-indigo-600 focus:ring-indigo-500",
-                                checked: *location.read() == StorageLocation::Local,
-                                onchange: move |_| {
-                                    location.set(StorageLocation::Local);
-                                    encrypted.set(false);
-                                },
-                            }
-                            span { class: "text-white", "Local Filesystem" }
-                        }
-                        label { class: "flex items-center gap-2 cursor-pointer",
-                            input {
-                                r#type: "radio",
-                                name: "location",
-                                class: "text-indigo-600 focus:ring-indigo-500",
-                                checked: *location.read() == StorageLocation::Cloud,
-                                onchange: move |_| location.set(StorageLocation::Cloud),
-                            }
-                            span { class: "text-white", "Cloud (S3)" }
-                        }
-                    }
-                }
-
-                if *location.read() == StorageLocation::Local {
+                div { class: "space-y-4",
                     div {
                         label { class: "block text-sm font-medium text-gray-400 mb-2",
-                            "Directory Path"
+                            "Name"
                         }
-                        div { class: "flex gap-2",
-                            div { class: "flex-1 min-w-0",
-                                div { class: "flex items-center h-10 px-3 bg-gray-800/50 border border-gray-700 rounded-lg text-sm font-mono",
-                                    if location_path.read().is_empty() {
-                                        span { class: "text-gray-500 truncate", "/path/to/storage" }
-                                    } else {
-                                        span { class: "text-white truncate", "{location_path}" }
+                        TextInput {
+                            value: name(),
+                            on_input: move |v| name.set(v),
+                            size: TextInputSize::Medium,
+                            input_type: TextInputType::Text,
+                            placeholder: "My Storage Profile",
+                        }
+                    }
+
+                    div {
+                        label { class: "block text-sm font-medium text-gray-400 mb-2",
+                            "Storage Type"
+                        }
+                        div { class: "flex flex-col gap-3",
+                            label { class: "flex items-center gap-2 cursor-pointer",
+                                input {
+                                    r#type: "radio",
+                                    name: "location",
+                                    class: "text-indigo-600 focus:ring-indigo-500",
+                                    checked: *location.read() == StorageLocation::Local,
+                                    onchange: move |_| {
+                                        location.set(StorageLocation::Local);
+                                        encrypted.set(false);
+                                    },
+                                }
+                                span { class: "text-white", "Local Filesystem" }
+                            }
+                            label { class: "flex items-center gap-2 cursor-pointer",
+                                input {
+                                    r#type: "radio",
+                                    name: "location",
+                                    class: "text-indigo-600 focus:ring-indigo-500",
+                                    checked: *location.read() == StorageLocation::Cloud,
+                                    onchange: move |_| location.set(StorageLocation::Cloud),
+                                }
+                                span { class: "text-white", "Cloud (S3)" }
+                            }
+                        }
+                    }
+
+                    if *location.read() == StorageLocation::Local {
+                        div {
+                            label { class: "block text-sm font-medium text-gray-400 mb-2",
+                                "Directory Path"
+                            }
+                            div { class: "flex gap-2",
+                                div { class: "flex-1 min-w-0",
+                                    div { class: "flex items-center h-10 px-3 bg-gray-800/50 border border-gray-700 rounded-lg text-sm font-mono",
+                                        if location_path.read().is_empty() {
+                                            span { class: "text-gray-500 truncate", "/path/to/storage" }
+                                        } else {
+                                            span { class: "text-white truncate", "{location_path}" }
+                                        }
+                                    }
+                                }
+                                Button {
+                                    variant: ButtonVariant::Secondary,
+                                    size: ButtonSize::Medium,
+                                    onclick: move |_| on_browse_directory.call(()),
+                                    FolderIcon { class: "w-5 h-5" }
+                                    "Browse"
+                                }
+                            }
+                        }
+                    } else {
+                        div {
+                            label { class: "block text-sm font-medium text-gray-400 mb-2",
+                                "Bucket Name"
+                            }
+                            TextInput {
+                                value: cloud_bucket(),
+                                on_input: move |v| cloud_bucket.set(v),
+                                size: TextInputSize::Medium,
+                                input_type: TextInputType::Text,
+                                placeholder: "my-music-bucket",
+                            }
+                        }
+                        div {
+                            label { class: "block text-sm font-medium text-gray-400 mb-2",
+                                "Region"
+                            }
+                            TextInput {
+                                value: cloud_region(),
+                                on_input: move |v| cloud_region.set(v),
+                                size: TextInputSize::Medium,
+                                input_type: TextInputType::Text,
+                                placeholder: "us-east-1",
+                            }
+                        }
+
+                        div { class: "flex items-center justify-between",
+                            span { class: "text-sm font-medium text-gray-400", "Credentials" }
+                            Button {
+                                variant: ButtonVariant::Ghost,
+                                size: ButtonSize::Small,
+                                class: Some("text-sm text-indigo-400 hover:text-indigo-300".to_string()),
+                                onclick: move |_| show_secrets.toggle(),
+                                if *show_secrets.read() {
+                                    "Hide"
+                                } else {
+                                    "Show"
+                                }
+                            }
+                        }
+                        div {
+                            label { class: "block text-sm font-medium text-gray-400 mb-2",
+                                "Access Key ID"
+                            }
+                            TextInput {
+                                value: cloud_access_key.to_string(),
+                                on_input: move |v| cloud_access_key.set(v),
+                                size: TextInputSize::Medium,
+                                input_type: if *show_secrets.read() { TextInputType::Text } else { TextInputType::Password },
+                                placeholder: "AKIAIOSFODNN7EXAMPLE",
+                                monospace: true,
+                            }
+                        }
+                        div {
+                            label { class: "block text-sm font-medium text-gray-400 mb-2",
+                                "Secret Access Key"
+                            }
+                            TextInput {
+                                value: cloud_secret_key.to_string(),
+                                on_input: move |v| cloud_secret_key.set(v),
+                                size: TextInputSize::Medium,
+                                input_type: if *show_secrets.read() { TextInputType::Text } else { TextInputType::Password },
+                                placeholder: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+                                monospace: true,
+                            }
+                        }
+
+                        div {
+                            label { class: "block text-sm font-medium text-gray-400 mb-2",
+                                "Custom Endpoint (optional)"
+                            }
+                            TextInput {
+                                value: cloud_endpoint(),
+                                on_input: move |v| cloud_endpoint.set(v),
+                                size: TextInputSize::Medium,
+                                input_type: TextInputType::Text,
+                                placeholder: "https://s3.example.com",
+                            }
+                            p { class: "text-xs text-gray-500 mt-1", "Leave empty for AWS S3" }
+                        }
+                    }
+
+                    if *location.read() == StorageLocation::Cloud {
+                        div { class: "space-y-3",
+                            label { class: "flex items-start gap-3 cursor-pointer",
+                                input {
+                                    r#type: "checkbox",
+                                    class: "rounded text-indigo-600 focus:ring-indigo-500 bg-gray-700 border-gray-600 mt-0.5",
+                                    checked: *encrypted.read(),
+                                    onchange: move |e| encrypted.set(e.checked()),
+                                }
+                                div {
+                                    span { class: "text-white block", "Encrypted" }
+                                    span { class: "text-xs text-gray-500",
+                                        "AES-256 encryption. Data is unreadable without your key."
                                     }
                                 }
                             }
-                            Button {
-                                variant: ButtonVariant::Secondary,
-                                size: ButtonSize::Medium,
-                                onclick: move |_| on_browse_directory.call(()),
-                                FolderIcon { class: "w-5 h-5" }
-                                "Browse"
-                            }
-                        }
-                    }
-                } else {
-                    div {
-                        label { class: "block text-sm font-medium text-gray-400 mb-2",
-                            "Bucket Name"
-                        }
-                        TextInput {
-                            value: cloud_bucket(),
-                            on_input: move |v| cloud_bucket.set(v),
-                            size: TextInputSize::Medium,
-                            input_type: TextInputType::Text,
-                            placeholder: "my-music-bucket",
-                        }
-                    }
-                    div {
-                        label { class: "block text-sm font-medium text-gray-400 mb-2",
-                            "Region"
-                        }
-                        TextInput {
-                            value: cloud_region(),
-                            on_input: move |v| cloud_region.set(v),
-                            size: TextInputSize::Medium,
-                            input_type: TextInputType::Text,
-                            placeholder: "us-east-1",
-                        }
-                    }
-
-                    div { class: "flex items-center justify-between",
-                        span { class: "text-sm font-medium text-gray-400", "Credentials" }
-                        Button {
-                            variant: ButtonVariant::Ghost,
-                            size: ButtonSize::Small,
-                            class: Some("text-sm text-indigo-400 hover:text-indigo-300".to_string()),
-                            onclick: move |_| show_secrets.toggle(),
-                            if *show_secrets.read() {
-                                "Hide"
-                            } else {
-                                "Show"
-                            }
-                        }
-                    }
-                    div {
-                        label { class: "block text-sm font-medium text-gray-400 mb-2",
-                            "Access Key ID"
-                        }
-                        TextInput {
-                            value: cloud_access_key.to_string(),
-                            on_input: move |v| cloud_access_key.set(v),
-                            size: TextInputSize::Medium,
-                            input_type: if *show_secrets.read() { TextInputType::Text } else { TextInputType::Password },
-                            placeholder: "AKIAIOSFODNN7EXAMPLE",
-                            monospace: true,
-                        }
-                    }
-                    div {
-                        label { class: "block text-sm font-medium text-gray-400 mb-2",
-                            "Secret Access Key"
-                        }
-                        TextInput {
-                            value: cloud_secret_key.to_string(),
-                            on_input: move |v| cloud_secret_key.set(v),
-                            size: TextInputSize::Medium,
-                            input_type: if *show_secrets.read() { TextInputType::Text } else { TextInputType::Password },
-                            placeholder: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-                            monospace: true,
                         }
                     }
 
                     div {
-                        label { class: "block text-sm font-medium text-gray-400 mb-2",
-                            "Custom Endpoint (optional)"
-                        }
-                        TextInput {
-                            value: cloud_endpoint(),
-                            on_input: move |v| cloud_endpoint.set(v),
-                            size: TextInputSize::Medium,
-                            input_type: TextInputType::Text,
-                            placeholder: "https://s3.example.com",
-                        }
-                        p { class: "text-xs text-gray-500 mt-1", "Leave empty for AWS S3" }
-                    }
-                }
-
-                if *location.read() == StorageLocation::Cloud {
-                    div { class: "space-y-3",
-                        label { class: "flex items-start gap-3 cursor-pointer",
+                        label { class: "flex items-center gap-2 cursor-pointer",
                             input {
                                 r#type: "checkbox",
-                                class: "rounded text-indigo-600 focus:ring-indigo-500 bg-gray-700 border-gray-600 mt-0.5",
-                                checked: *encrypted.read(),
-                                onchange: move |e| encrypted.set(e.checked()),
+                                class: "rounded text-indigo-600 focus:ring-indigo-500 bg-gray-700 border-gray-600",
+                                checked: *is_default.read(),
+                                onchange: move |e| is_default.set(e.checked()),
                             }
-                            div {
-                                span { class: "text-white block", "Encrypted" }
-                                span { class: "text-xs text-gray-500",
-                                    "AES-256 encryption. Data is unreadable without your key."
-                                }
-                            }
+                            span { class: "text-white", "Set as default" }
                         }
                     }
-                }
 
-                div {
-                    label { class: "flex items-center gap-2 cursor-pointer",
-                        input {
-                            r#type: "checkbox",
-                            class: "rounded text-indigo-600 focus:ring-indigo-500 bg-gray-700 border-gray-600",
-                            checked: *is_default.read(),
-                            onchange: move |e| is_default.set(e.checked()),
+                    if let Some(error) = validation_error.read().as_ref() {
+                        div { class: "p-3 bg-red-900/30 border border-red-700 rounded-lg text-sm text-red-300",
+                            "{error}"
                         }
-                        span { class: "text-white", "Set as default" }
                     }
-                }
 
-                if let Some(error) = validation_error.read().as_ref() {
-                    div { class: "p-3 bg-red-900/30 border border-red-700 rounded-lg text-sm text-red-300",
-                        "{error}"
-                    }
-                }
-
-                div { class: "flex gap-3 pt-2",
-                    Button {
-                        variant: ButtonVariant::Primary,
-                        size: ButtonSize::Medium,
-                        onclick: handle_save,
-                        "Save"
-                    }
-                    Button {
-                        variant: ButtonVariant::Secondary,
-                        size: ButtonSize::Medium,
-                        onclick: move |_| on_cancel.call(()),
-                        "Cancel"
+                    div { class: "flex gap-3 pt-2",
+                        Button {
+                            variant: ButtonVariant::Primary,
+                            size: ButtonSize::Medium,
+                            onclick: handle_save,
+                            "Save"
+                        }
+                        Button {
+                            variant: ButtonVariant::Secondary,
+                            size: ButtonSize::Medium,
+                            onclick: move |_| on_cancel.call(()),
+                            "Cancel"
+                        }
                     }
                 }
             }
