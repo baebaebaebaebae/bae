@@ -1,0 +1,15 @@
+{
+  "name": "bae-web",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "dx build --release --platform web",
+    "tailwind:watch": "npx tailwindcss -i tailwind.css -o assets/tailwind.css --watch"
+  },
+  "dependencies": {
+    "@tailwindcss/cli": "^4.1.13"
+  },
+  "devDependencies": {
+    "tailwindcss": "^4.1.18"
+  }
+}

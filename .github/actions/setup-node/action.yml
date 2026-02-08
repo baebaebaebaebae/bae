@@ -19,6 +19,7 @@ runs:
           bae-desktop/package-lock.json
           bae-mocks/package-lock.json
           bae-mocks/e2e/package-lock.json
+          bae-web/package-lock.json
           website/package-lock.json
 
     - name: Install Node dependencies
@@ -27,6 +28,7 @@ runs:
         (cd bae-desktop && npm ci)
         (cd bae-mocks && npm ci)
         (cd bae-mocks/e2e && npm ci)
+        (cd bae-web && npm ci)
         if [[ "${{ inputs.include-website }}" == "true" ]]; then
           (cd website && npm ci)
         fi
