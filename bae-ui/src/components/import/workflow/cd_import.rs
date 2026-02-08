@@ -13,8 +13,8 @@
 //! Pass `ReadStore<ImportState>` down to children. Use lenses where possible.
 
 use super::{
-    CdRipperView, CdTocDisplayView, ConfirmationView, DiscIdLookupErrorView,
-    ImportErrorDisplayView, ManualSearchPanelView, MultipleExactMatchesView, SelectedSourceView,
+    CdRipperView, CdTocDisplayView, ConfirmationView, DiscIdLookupErrorView, ManualSearchPanelView,
+    MultipleExactMatchesView, SelectedSourceView,
 };
 use crate::components::StorageProfile;
 use crate::display_types::{
@@ -415,10 +415,7 @@ fn CdConfirmContent(
                 on_confirm,
                 on_configure_storage,
                 on_view_in_library,
-            }
-            ImportErrorDisplayView {
-                error_message: import_error,
-                on_retry: move |_| on_confirm.call(()),
+                import_error,
             }
         }
     }

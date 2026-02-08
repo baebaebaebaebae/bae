@@ -1,6 +1,7 @@
 //! Confirmation view component
 
 use super::gallery_lightbox::{GalleryItem, GalleryItemContent, GalleryLightbox};
+use super::shared::ImportErrorDisplayView;
 use crate::components::icons::{CheckIcon, ImageIcon, PencilIcon};
 use crate::components::{
     Button, ButtonSize, ButtonVariant, ChromelessButton, Select, SelectOption, StorageProfile,
@@ -45,6 +46,8 @@ pub fn ConfirmationView(
     on_configure_storage: EventHandler<()>,
     /// Called to navigate to the album in the library
     on_view_in_library: EventHandler<String>,
+    /// Import error message (shown between release card and action row)
+    import_error: Option<String>,
 ) -> Element {
     let is_duplicate = candidate.existing_album_id.is_some();
     let mut show_cover_picker = use_signal(|| false);
@@ -189,6 +192,12 @@ pub fn ConfirmationView(
                         "Change"
                     }
                 }
+            }
+
+            // Import error (between release card and action row)
+            ImportErrorDisplayView {
+                error_message: import_error,
+                on_retry: move |_| on_confirm.call(()),
             }
 
             // Bottom action area

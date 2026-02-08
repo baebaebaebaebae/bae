@@ -13,9 +13,9 @@
 //! Pass `ReadStore<ImportState>` down to children. Use lenses where possible.
 
 use super::{
-    ConfirmationView, DiscIdLookupErrorView, ImportErrorDisplayView, ManualSearchPanelView,
-    MetadataDetectionPromptView, MultipleExactMatchesView, SelectedSourceView,
-    TorrentFilesDisplayView, TorrentInfoDisplayView, TorrentTrackerDisplayView, TrackerStatus,
+    ConfirmationView, DiscIdLookupErrorView, ManualSearchPanelView, MetadataDetectionPromptView,
+    MultipleExactMatchesView, SelectedSourceView, TorrentFilesDisplayView, TorrentInfoDisplayView,
+    TorrentTrackerDisplayView, TrackerStatus,
 };
 use crate::components::StorageProfile;
 use crate::display_types::{
@@ -452,10 +452,7 @@ fn TorrentConfirmContent(
                 on_confirm,
                 on_configure_storage,
                 on_view_in_library,
-            }
-            ImportErrorDisplayView {
-                error_message: import_error,
-                on_retry: move |_| on_confirm.call(()),
+                import_error,
             }
         }
     }

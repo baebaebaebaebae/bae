@@ -19,8 +19,8 @@
 //! actually render values.
 
 use super::{
-    ConfirmationView, DiscIdPill, DiscIdSource, ImportErrorDisplayView, LoadingIndicator,
-    ManualSearchPanelView, MultipleExactMatchesView, SmartFileDisplayView,
+    ConfirmationView, DiscIdPill, DiscIdSource, LoadingIndicator, ManualSearchPanelView,
+    MultipleExactMatchesView, SmartFileDisplayView,
 };
 use crate::components::icons::{CloudOffIcon, LoaderIcon};
 use crate::components::StorageProfile;
@@ -438,31 +438,25 @@ fn ConfirmStep(
     };
 
     rsx! {
-        div { class: "space-y-6",
-            ConfirmationView {
-                candidate: candidate.clone(),
-                selected_cover,
-                display_cover_url,
-                artwork_files,
-                remote_cover_url: candidate.cover_url.clone(),
-                storage_profiles,
-                selected_profile_id,
-                is_importing,
-                is_completed,
-                completed_album_id,
-                preparing_step_text,
-                on_select_cover,
-                on_storage_profile_change,
-                on_edit,
-                on_confirm,
-                on_configure_storage,
-                on_view_in_library,
-            }
-
-            ImportErrorDisplayView {
-                error_message: import_error,
-                on_retry: move |_| on_confirm.call(()),
-            }
+        ConfirmationView {
+            candidate: candidate.clone(),
+            selected_cover,
+            display_cover_url,
+            artwork_files,
+            remote_cover_url: candidate.cover_url.clone(),
+            storage_profiles,
+            selected_profile_id,
+            is_importing,
+            is_completed,
+            completed_album_id,
+            preparing_step_text,
+            on_select_cover,
+            on_storage_profile_change,
+            on_edit,
+            on_confirm,
+            on_configure_storage,
+            on_view_in_library,
+            import_error,
         }
     }
 }

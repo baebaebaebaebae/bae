@@ -5,7 +5,7 @@ use super::search_source_selector::SearchSourceSelectorView;
 use super::{DiscIdPill, DiscIdSource, LoadingIndicator};
 use crate::components::button::ButtonVariant;
 use crate::components::segmented_control::{Segment, SegmentedControl};
-use crate::components::{Button, ButtonSize, TextInput, TextInputSize, TextInputType};
+use crate::components::{Button, ButtonSize, ErrorBanner, TextInput, TextInputSize, TextInputType};
 use crate::display_types::{MatchCandidate, SearchSource, SearchTab};
 use crate::floating_ui::Placement;
 use crate::stores::import::{CandidateState, ImportState, ImportStateStoreExt};
@@ -162,8 +162,11 @@ pub fn ManualSearchPanelView(
 
                 // Error message
                 if let Some(ref err) = error {
-                    div { class: "bg-red-500/15 rounded-lg p-3",
-                        p { class: "text-sm text-red-300 select-text", "Error: {err}" }
+                    ErrorBanner {
+                        heading: "Search failed".to_string(),
+                        detail: err.clone(),
+                        button_label: "Retry Search".to_string(),
+                        on_retry: move |_| on_search.call(()),
                     }
                 }
 
