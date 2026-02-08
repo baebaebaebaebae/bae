@@ -56,7 +56,7 @@ pub fn SettingsView(
                 h1 { class: "text-2xl font-bold text-white", "Settings" }
             }
             div { class: "flex flex-1 min-h-0 overflow-clip",
-                nav { class: "w-56 bg-gray-800 border-r border-gray-700 p-4 flex-shrink-0",
+                nav { class: "w-56 border-r border-gray-700 p-4 flex-shrink-0",
                     ul { class: "space-y-1",
                         for tab in SettingsTab::all() {
                             li {
