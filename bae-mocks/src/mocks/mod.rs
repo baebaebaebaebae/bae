@@ -2,6 +2,7 @@
 
 mod album_detail;
 mod button;
+mod error_banner;
 mod folder_import;
 pub mod framework;
 mod library;
@@ -16,6 +17,7 @@ pub mod url_state;
 
 pub use album_detail::AlbumDetailMock;
 pub use button::ButtonMock;
+pub use error_banner::ErrorBannerMock;
 pub use folder_import::FolderImportMock;
 pub use library::LibraryMock;
 pub use menu::MenuMock;

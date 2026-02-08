@@ -2,14 +2,14 @@
 
 use crate::mocks::framework::{MockPage, MockSection};
 use crate::mocks::{
-    AlbumDetailMock, ButtonMock, FolderImportMock, LibraryMock, MenuMock, PillMock,
-    SegmentedControlMock, SettingsMock, TextInputMock, TitleBarMock, TooltipMock,
+    AlbumDetailMock, ButtonMock, ErrorBannerMock, FolderImportMock, LibraryMock, MenuMock,
+    PillMock, SegmentedControlMock, SettingsMock, TextInputMock, TitleBarMock, TooltipMock,
 };
 use crate::ui::LinkCard;
 use crate::Route;
 use bae_ui::{
-    Button, ButtonSize, ButtonVariant, MenuItem, Pill, PillVariant, Segment, SegmentedControl,
-    TextInput, TextInputSize, TextInputType, TooltipBubble,
+    Button, ButtonSize, ButtonVariant, ErrorBanner, MenuItem, Pill, PillVariant, Segment,
+    SegmentedControl, TextInput, TextInputSize, TextInputType, TooltipBubble,
 };
 use dioxus::prelude::*;
 
@@ -55,6 +55,22 @@ pub fn MockIndex() -> Element {
                             size: ButtonSize::Small,
                             onclick: |_| {},
                             "Outline"
+                        }
+                    }
+                }
+
+                // ErrorBanner specimens
+                SpecimenCard {
+                    title: "ErrorBanner",
+                    to: Route::MockErrorBanner {
+                        state: None,
+                    },
+                    div { class: "space-y-1",
+                        ErrorBanner {
+                            heading: "Import failed".to_string(),
+                            detail: "Connection timed out".to_string(),
+                            button_label: "Retry Import".to_string(),
+                            on_retry: |_| {},
                         }
                     }
                 }
@@ -172,6 +188,17 @@ fn SpecimenCard(title: &'static str, to: Route, children: Element) -> Element {
 pub fn MockButton(state: Option<String>) -> Element {
     rsx! {
         ButtonMock { initial_state: state }
+    }
+}
+
+// ============================================================================
+// ErrorBanner page wrapper
+// ============================================================================
+
+#[component]
+pub fn MockErrorBanner(state: Option<String>) -> Element {
+    rsx! {
+        ErrorBannerMock { initial_state: state }
     }
 }
 

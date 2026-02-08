@@ -12,8 +12,9 @@ pub mod ui;
 use dioxus::prelude::*;
 use pages::{
     AlbumDetail, ArtistDetail, DemoLayout, Import, Library, MockAlbumDetail, MockButton,
-    MockDropdownTest, MockFolderImport, MockIndex, MockLibrary, MockMenu, MockPill,
-    MockSegmentedControl, MockSettings, MockTextInput, MockTitleBar, MockTooltip, Settings,
+    MockDropdownTest, MockErrorBanner, MockFolderImport, MockIndex, MockLibrary, MockMenu,
+    MockPill, MockSegmentedControl, MockSettings, MockTextInput, MockTitleBar, MockTooltip,
+    Settings,
 };
 
 pub const FAVICON: Asset = asset!("/assets/favicon.ico");
@@ -44,6 +45,8 @@ pub enum Route {
     // Mock pages with controls
     #[route("/button?:state")]
     MockButton { state: Option<String> },
+    #[route("/error-banner?:state")]
+    MockErrorBanner { state: Option<String> },
     #[route("/menu?:state")]
     MockMenu { state: Option<String> },
     #[route("/pill?:state")]
