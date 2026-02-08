@@ -11,7 +11,8 @@ reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = { workspace = true }
-web-sys-x = { workspace = true, features = ["Window"] }
+wasm-bindgen-x = { workspace = true }
+web-sys-x = { workspace = true, features = ["Window", "HtmlMediaElement", "HtmlAudioElement", "MediaError"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }

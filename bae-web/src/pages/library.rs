@@ -1,8 +1,32 @@
 use crate::api;
+use crate::playback::{TrackInfo, WebPlaybackService};
 use crate::Route;
-use bae_ui::stores::{LibrarySortState, LibrarySortStateStoreExt, LibraryState};
+use bae_ui::stores::{AlbumDetailState, LibrarySortState, LibrarySortStateStoreExt, LibraryState};
 use bae_ui::LibraryView;
 use dioxus::prelude::*;
+
+fn build_track_infos_from_detail(detail: &AlbumDetailState) -> Vec<TrackInfo> {
+    let album = match detail.album.as_ref() {
+        Some(a) => a,
+        None => return vec![],
+    };
+    let artist = detail.artists.first();
+
+    detail
+        .tracks
+        .iter()
+        .map(|track| TrackInfo {
+            track_id: track.id.clone(),
+            track: track.clone(),
+            album_title: album.title.clone(),
+            cover_url: album.cover_url.clone(),
+            artist_name: artist
+                .map(|a| a.name.clone())
+                .unwrap_or_else(|| "Unknown Artist".to_string()),
+            artist_id: artist.map(|a| a.id.clone()),
+        })
+        .collect()
+}
 
 #[component]
 pub fn Library() -> Element {
@@ -32,6 +56,7 @@ pub fn Library() -> Element {
             });
 
             let sort_state = use_store(LibrarySortState::default);
+            let mut service: Signal<WebPlaybackService> = use_context();
 
             rsx! {
                 LibraryView {
@@ -47,8 +72,22 @@ pub fn Library() -> Element {
                         navigator().push(Route::AlbumDetail { album_id });
                     },
                     on_artist_click: |_| {},
-                    on_play_album: |_| {},
-                    on_add_album_to_queue: |_| {},
+                    on_play_album: move |album_id: String| {
+                        spawn(async move {
+                            if let Ok(detail) = api::fetch_album(&album_id).await {
+                                let infos = build_track_infos_from_detail(&detail);
+                                service.write().play_album(infos);
+                            }
+                        });
+                    },
+                    on_add_album_to_queue: move |album_id: String| {
+                        spawn(async move {
+                            if let Ok(detail) = api::fetch_album(&album_id).await {
+                                let infos = build_track_infos_from_detail(&detail);
+                                service.write().add_to_queue_with_info(infos);
+                            }
+                        });
+                    },
                     on_empty_action: |_| {},
                 }
             }
