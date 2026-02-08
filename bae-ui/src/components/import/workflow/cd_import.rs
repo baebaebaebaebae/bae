@@ -352,7 +352,7 @@ fn CdConfirmContent(
             });
             let (importing, completed, album_id, preparing, error) = match &cs.phase {
                 ConfirmPhase::Ready => (false, false, None, None, None),
-                ConfirmPhase::Preparing(msg) => (false, false, None, Some(msg.clone()), None),
+                ConfirmPhase::Preparing(msg) => (true, false, None, Some(msg.clone()), None),
                 ConfirmPhase::Importing => (true, false, None, None, None),
                 ConfirmPhase::Failed(err) => (false, false, None, None, Some(err.clone())),
                 ConfirmPhase::Completed(id) => (false, true, Some(id.clone()), None, None),

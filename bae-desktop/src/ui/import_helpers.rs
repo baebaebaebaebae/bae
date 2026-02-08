@@ -655,9 +655,6 @@ pub async fn confirm_and_start_import(
             .ok_or_else(|| "No candidate selected for import".to_string())?
     };
 
-    // Signal that import is starting
-    import_store.write().dispatch(CandidateEvent::StartImport);
-
     let import_id = uuid::Uuid::new_v4().to_string();
 
     // Get state from store
