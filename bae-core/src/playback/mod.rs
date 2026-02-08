@@ -8,10 +8,11 @@ pub mod sparse_buffer;
 pub mod streaming_source;
 pub mod track_loader;
 
+pub use bae_common::RepeatMode;
 pub use error::PlaybackError;
 pub use pcm_source::PcmSource;
 pub use progress::PlaybackProgress;
-pub use service::{PlaybackHandle, PlaybackService, PlaybackState, RepeatMode};
+pub use service::{PlaybackHandle, PlaybackService, PlaybackState};
 pub use sparse_buffer::SharedSparseBuffer;
 pub use streaming_source::{create_streaming_pair, StreamingPcmSink, StreamingPcmSource};
 

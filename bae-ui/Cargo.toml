@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bae-common = { path = "../bae-common" }
 dioxus = { workspace = true, features = ["signals", "html", "macro", "hooks"] }
 dioxus-virtual-scroll = { path = "../dioxus-virtual-scroll" }
 # These -x crates work on both wasm AND native (via PR #5194)

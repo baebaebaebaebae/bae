@@ -815,6 +815,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "bae-common"
+version = "0.0.0-dev"
+
+[[package]]
 name = "bae-core"
 version = "0.0.0-dev"
 dependencies = [
@@ -824,6 +828,7 @@ dependencies = [
  "aws-credential-types",
  "aws-sdk-s3",
  "axum 0.7.9",
+ "bae-common",
  "bincode",
  "bindgen 0.69.5",
  "cc",
@@ -930,6 +935,7 @@ dependencies = [
 name = "bae-ui"
 version = "0.1.0"
 dependencies = [
+ "bae-common",
  "chrono",
  "dioxus",
  "dioxus-virtual-scroll",
@@ -948,6 +954,7 @@ dependencies = [
 name = "bae-web"
 version = "0.0.0-dev"
 dependencies = [
+ "bae-common",
  "bae-ui",
  "chrono",
  "dioxus",

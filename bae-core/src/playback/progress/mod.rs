@@ -1,5 +1,6 @@
 pub mod handle;
-use crate::playback::service::{PlaybackState, RepeatMode};
+use crate::playback::service::PlaybackState;
+use bae_common::RepeatMode;
 pub use handle::PlaybackProgressHandle;
 use std::time::Duration;
 /// Progress updates during playback

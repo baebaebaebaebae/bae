@@ -29,7 +29,7 @@ use bae_ui::display_types::{QueueItem, TrackImportState};
 use bae_ui::stores::{
     ActiveImport, ActiveImportsUiStateStoreExt, AlbumDetailStateStoreExt, AppState,
     AppStateStoreExt, ArtistDetailStateStoreExt, ConfigStateStoreExt, ImportOperationStatus,
-    LibraryStateStoreExt, PlaybackStatus, PlaybackUiStateStoreExt, PrepareStep, RepeatMode,
+    LibraryStateStoreExt, PlaybackStatus, PlaybackUiStateStoreExt, PrepareStep,
     StorageProfilesStateStoreExt,
 };
 use bae_ui::StorageProfile;
@@ -326,12 +326,7 @@ impl AppService {
                         state.playback().volume().set(volume);
                     }
                     PlaybackProgress::RepeatModeChanged { mode } => {
-                        let ui_mode = match mode {
-                            bae_core::playback::RepeatMode::None => RepeatMode::None,
-                            bae_core::playback::RepeatMode::Track => RepeatMode::Track,
-                            bae_core::playback::RepeatMode::Album => RepeatMode::Album,
-                        };
-                        state.playback().repeat_mode().set(ui_mode);
+                        state.playback().repeat_mode().set(mode);
 
                         #[cfg(target_os = "macos")]
                         crate::ui::window_activation::set_playback_repeat_mode(mode);

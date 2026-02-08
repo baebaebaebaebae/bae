@@ -33,19 +33,12 @@ use crate::playback::progress::{PlaybackProgress, PlaybackProgressHandle};
 use crate::playback::sparse_buffer::{create_sparse_buffer, SharedSparseBuffer};
 use crate::playback::{create_streaming_pair, StreamingPcmSource};
 use crate::storage::create_storage_reader;
+use bae_common::{NextTrack, PlaybackQueue, PreviousAction, RepeatMode};
 use cpal::traits::StreamTrait;
 use std::collections::VecDeque;
 use std::sync::{mpsc, Arc, Mutex};
 use tokio::sync::mpsc as tokio_mpsc;
 use tracing::{error, info, trace};
-/// Repeat mode for playback
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum RepeatMode {
-    #[default]
-    None,
-    Track,
-    Album,
-}
 
 /// Playback commands sent to the service
 #[derive(Debug, Clone)]
@@ -372,8 +365,7 @@ pub struct PlaybackService {
     encryption_service: Option<EncryptionService>,
     command_rx: tokio_mpsc::UnboundedReceiver<PlaybackCommand>,
     progress_tx: tokio_mpsc::UnboundedSender<PlaybackProgress>,
-    queue: VecDeque<String>,
-    previous_track_id: Option<String>,
+    playback_queue: PlaybackQueue,
     current_position_shared: Arc<std::sync::Mutex<Option<std::time::Duration>>>,
     /// Generation counter to invalidate old position listeners after seek
     position_generation: Arc<std::sync::atomic::AtomicU64>,
@@ -387,7 +379,6 @@ pub struct PlaybackService {
     next_prepared: Option<PreparedTrack>,
     /// Preloaded next track streaming source (decoder already started)
     next_streaming_source: Option<Arc<Mutex<StreamingPcmSource>>>,
-    repeat_mode: RepeatMode,
 }
 
 impl PlaybackService {
@@ -575,8 +566,7 @@ impl PlaybackService {
                     encryption_service,
                     command_rx,
                     progress_tx,
-                    queue: VecDeque::new(),
-                    previous_track_id: None,
+                    playback_queue: PlaybackQueue::new(),
                     current_position_shared: Arc::new(std::sync::Mutex::new(None)),
                     position_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
                     audio_output,
@@ -585,7 +575,6 @@ impl PlaybackService {
                     current_streaming_source: None,
                     next_prepared: None,
                     next_streaming_source: None,
-                    repeat_mode: RepeatMode::None,
                 };
                 service.run().await;
             });
@@ -603,10 +592,8 @@ impl PlaybackService {
                     self.audio_output
                         .set_state(crate::playback::cpal_output::AudioState::Stopped);
                     self.clear_next_track_state();
-                    if let Some(id) = self.current_track_id() {
-                        self.previous_track_id = Some(id.to_string());
-                    }
-                    self.queue.clear();
+                    self.playback_queue.set_current(track_id.clone());
+                    self.playback_queue.clear();
                     self.emit_queue_update();
                     if let Ok(Some(track)) = self.library_manager.get_track(&track_id).await {
                         if let Ok(mut release_tracks) =
@@ -630,7 +617,7 @@ impl PlaybackService {
                                     disc_cmp
                                 }
                             });
-                            if self.previous_track_id.is_none() {
+                            if self.playback_queue.previous_track_id().is_none() {
                                 let mut previous_track_id = None;
                                 for release_track in &release_tracks {
                                     if release_track.id == track_id {
@@ -638,30 +625,28 @@ impl PlaybackService {
                                     }
                                     previous_track_id = Some(release_track.id.clone());
                                 }
-                                self.previous_track_id = previous_track_id;
+                                self.playback_queue.set_previous_track_id(previous_track_id);
                             }
                             let mut found_current = false;
+                            let mut remaining = Vec::new();
                             for release_track in release_tracks {
                                 if found_current {
-                                    self.queue.push_back(release_track.id);
+                                    remaining.push(release_track.id);
                                 } else if release_track.id == track_id {
                                     found_current = true;
                                 }
                             }
+                            self.playback_queue.add_to_queue(remaining);
                             self.emit_queue_update();
                         }
                     }
                     self.play_track(&track_id, false, false).await; // Direct selection: skip pregap, start playing
                 }
                 PlaybackCommand::PlayAlbum(track_ids) => {
-                    if let Some(id) = self.current_track_id() {
-                        self.previous_track_id = Some(id.to_string());
-                    }
-                    self.queue.clear();
-                    for track_id in track_ids {
-                        self.queue.push_back(track_id);
-                    }
-                    if let Some(first_track) = self.queue.pop_front() {
+                    self.playback_queue.clear();
+                    self.playback_queue.add_to_queue(track_ids);
+                    if let Some(first_track) = self.playback_queue.pop_front() {
+                        self.playback_queue.set_current(first_track.clone());
                         self.emit_queue_update();
                         self.play_track(&first_track, false, false).await; // Direct selection: skip pregap, start playing
                     } else {
@@ -678,108 +663,113 @@ impl PlaybackService {
                     self.stop().await;
                 }
                 PlaybackCommand::Next => {
-                    info!("Next command received, queue length: {}", self.queue.len());
+                    info!(
+                        "Next command received, queue length: {}",
+                        self.playback_queue.len()
+                    );
+                    // If we have a preloaded track, use it directly
                     if let Some(preloaded_track_id) = self.next_track_id().map(|s| s.to_string()) {
                         if self.next_streaming_source.is_some() {
                             info!("Using preloaded track: {}", preloaded_track_id);
-                            if let Some(id) = self.current_track_id() {
-                                self.previous_track_id = Some(id.to_string());
-                            }
+                            self.playback_queue.set_current(preloaded_track_id.clone());
                             if self
-                                .queue
+                                .playback_queue
                                 .front()
                                 .map(|id| id == &preloaded_track_id)
                                 .unwrap_or(false)
                             {
-                                self.queue.pop_front();
+                                self.playback_queue.pop_front();
                                 self.emit_queue_update();
                             }
                             self.play_preloaded_track(false, true).await; // skip pregap, preserve paused
                         } else {
                             // Preload started but streaming source not ready yet
+                            self.playback_queue.set_current(preloaded_track_id.clone());
                             self.clear_next_track_state();
                             self.play_track(&preloaded_track_id, false, true).await;
-                            // preserve paused
                         }
-                    } else if let Some(next_track) = self.queue.pop_front() {
-                        info!("No preloaded track, playing from queue: {}", next_track);
-                        self.emit_queue_update();
-                        if let Some(id) = self.current_track_id() {
-                            self.previous_track_id = Some(id.to_string());
-                        }
-                        self.play_track(&next_track, false, true).await; // preserve paused
                     } else {
-                        info!("No next track available, stopping");
-                        self.emit_queue_update();
-                        self.stop().await;
+                        // No preloaded track, use PlaybackQueue decision logic
+                        match self.playback_queue.next_track() {
+                            NextTrack::Play(next_track) => {
+                                info!("No preloaded track, playing from queue: {}", next_track);
+                                self.emit_queue_update();
+                                self.play_track(&next_track, false, true).await;
+                                // preserve paused
+                            }
+                            _ => {
+                                info!("No next track available, stopping");
+                                self.emit_queue_update();
+                                self.stop().await;
+                            }
+                        }
                     }
                 }
                 PlaybackCommand::AutoAdvance => {
                     info!(
                         "AutoAdvance command received (natural transition), queue length: {}",
-                        self.queue.len()
+                        self.playback_queue.len()
                     );
-                    if self.repeat_mode == RepeatMode::Track {
-                        if let Some(current_track_id) =
-                            self.current_track_id().map(|s| s.to_string())
-                        {
-                            info!("Repeat mode: track, replaying {}", current_track_id);
 
-                            self.clear_next_track_state();
-                            self.play_track(&current_track_id, true, false).await;
-                        } else {
-                            info!("Repeat mode: track, but no current track");
+                    // If we have a preloaded track (and not in repeat-track mode), use it
+                    if self.playback_queue.repeat_mode() != RepeatMode::Track {
+                        if let Some(preloaded_track_id) =
+                            self.next_track_id().map(|s| s.to_string())
+                        {
+                            if self.next_streaming_source.is_some() {
+                                info!("Using preloaded track: {}", preloaded_track_id);
+                                self.playback_queue.set_current(preloaded_track_id.clone());
+                                if self
+                                    .playback_queue
+                                    .front()
+                                    .map(|id| id == &preloaded_track_id)
+                                    .unwrap_or(false)
+                                {
+                                    self.playback_queue.pop_front();
+                                    self.emit_queue_update();
+                                }
+                                self.play_preloaded_track(true, false).await; // natural transition, start playing
+                            } else {
+                                // Preload started but streaming source not ready yet
+                                self.playback_queue.set_current(preloaded_track_id.clone());
+                                self.clear_next_track_state();
+                                self.play_track(&preloaded_track_id, true, false).await;
+                            }
+                            continue;
                         }
-                        continue;
                     }
 
-                    if let Some(preloaded_track_id) = self.next_track_id().map(|s| s.to_string()) {
-                        if self.next_streaming_source.is_some() {
-                            info!("Using preloaded track: {}", preloaded_track_id);
-                            if let Some(id) = self.current_track_id() {
-                                self.previous_track_id = Some(id.to_string());
-                            }
-                            if self
-                                .queue
-                                .front()
-                                .map(|id| id == &preloaded_track_id)
-                                .unwrap_or(false)
-                            {
-                                self.queue.pop_front();
-                                self.emit_queue_update();
-                            }
-                            self.play_preloaded_track(true, false).await; // natural transition, start playing
-                        } else {
-                            // Preload started but streaming source not ready yet
+                    // No preloaded track (or repeat-track mode), use PlaybackQueue decision logic
+                    match self.playback_queue.next_track() {
+                        NextTrack::RepeatCurrent(track_id) => {
+                            info!("Repeat mode: track, replaying {}", track_id);
                             self.clear_next_track_state();
-                            self.play_track(&preloaded_track_id, true, false).await;
-                            // start playing
+                            self.play_track(&track_id, true, false).await;
                         }
-                    } else if let Some(next_track) = self.queue.pop_front() {
-                        info!("No preloaded track, playing from queue: {}", next_track);
-                        self.emit_queue_update();
-                        if let Some(id) = self.current_track_id() {
-                            self.previous_track_id = Some(id.to_string());
-                        }
-                        self.play_track(&next_track, true, false).await; // start playing
-                    } else if self.repeat_mode == RepeatMode::Album {
-                        if let Some((first_track, rest)) =
-                            self.rebuild_queue_for_repeat_album().await
-                        {
-                            info!("Repeat mode: album, restarting from {}", first_track);
-                            self.queue = rest;
+                        NextTrack::Play(next_track) => {
+                            info!("Playing from queue: {}", next_track);
                             self.emit_queue_update();
-
-                            self.play_track(&first_track, true, false).await;
-                        } else {
-                            info!("Repeat mode: album, but no album tracks found");
+                            self.play_track(&next_track, true, false).await;
+                        }
+                        NextTrack::RepeatAlbumNeeded => {
+                            if let Some((first_track, rest)) =
+                                self.rebuild_queue_for_repeat_album().await
+                            {
+                                info!("Repeat mode: album, restarting from {}", first_track);
+                                self.playback_queue.replace(rest);
+                                self.emit_queue_update();
+                                self.play_track(&first_track, true, false).await;
+                            } else {
+                                info!("Repeat mode: album, but no album tracks found");
+                                self.emit_queue_update();
+                                self.stop().await;
+                            }
+                        }
+                        NextTrack::Stop => {
+                            info!("No next track available, stopping");
                             self.emit_queue_update();
                             self.stop().await;
                         }
-                    } else {
-                        info!("No next track available, stopping");
-                        self.emit_queue_update();
-                        self.stop().await;
                     }
                 }
                 PlaybackCommand::Previous => {
@@ -789,8 +779,10 @@ impl PlaybackService {
                             .lock()
                             .unwrap()
                             .unwrap_or(std::time::Duration::ZERO);
-                        if current_position < std::time::Duration::from_secs(3) {
-                            if let Some(previous_track_id) = self.previous_track_id.clone() {
+                        let position_ms = current_position.as_millis() as u64;
+
+                        match self.playback_queue.previous_action(position_ms) {
+                            PreviousAction::PlayPrevious(previous_track_id) => {
                                 info!("Going to previous track: {}", previous_track_id);
                                 if let Ok(Some(previous_track)) =
                                     self.library_manager.get_track(&previous_track_id).await
@@ -815,33 +807,35 @@ impl PlaybackService {
                                             }
                                             new_previous_track_id = Some(release_track.id.clone());
                                         }
-                                        self.previous_track_id = new_previous_track_id;
-                                        self.queue.clear();
+                                        self.playback_queue
+                                            .set_previous_track_id(new_previous_track_id);
+                                        self.playback_queue.clear();
                                         let mut found_current = false;
+                                        let mut remaining = Vec::new();
                                         for release_track in release_tracks {
                                             if found_current {
-                                                self.queue.push_back(release_track.id);
+                                                remaining.push(release_track.id);
                                             } else if release_track.id == previous_track_id {
                                                 found_current = true;
                                             }
                                         }
+                                        self.playback_queue.add_to_queue(remaining);
                                         self.emit_queue_update();
                                     }
                                 }
                                 self.clear_next_track_state();
                                 self.play_track(&previous_track_id, false, true).await;
-                            // preserve paused
-                            } else {
-                                info!("No previous track, restarting current track");
-                                self.play_track(&current_track_id, false, true).await;
-                                // preserve paused
                             }
-                        } else {
-                            info!("Restarting current track from beginning");
-                            let saved_previous = self.previous_track_id.clone();
-                            self.play_track(&current_track_id, false, true).await; // preserve paused
-                            if saved_previous.is_some() {
-                                self.previous_track_id = saved_previous;
+                            PreviousAction::RestartCurrent => {
+                                info!("Restarting current track from beginning");
+                                let saved_previous = self
+                                    .playback_queue
+                                    .previous_track_id()
+                                    .map(|s| s.to_string());
+                                self.play_track(&current_track_id, false, true).await; // preserve paused
+                                if saved_previous.is_some() {
+                                    self.playback_queue.set_previous_track_id(saved_previous);
+                                }
                             }
                         }
                     }
@@ -856,79 +850,55 @@ impl PlaybackService {
                         .send(PlaybackProgress::VolumeChanged { volume });
                 }
                 PlaybackCommand::AddToQueue(track_ids) => {
-                    for track_id in track_ids {
-                        self.queue.push_back(track_id);
-                    }
+                    self.playback_queue.add_to_queue(track_ids);
                     self.emit_queue_update();
                 }
                 PlaybackCommand::AddNext(track_ids) => {
-                    for track_id in track_ids.into_iter().rev() {
-                        self.queue.push_front(track_id);
-                    }
+                    self.playback_queue.add_next(track_ids);
                     self.emit_queue_update();
                 }
                 PlaybackCommand::RemoveFromQueue(index) => {
-                    if index < self.queue.len() {
-                        if let Some(removed_track_id) = self.queue.remove(index) {
-                            if self
-                                .current_track_id()
-                                .map(|id| id == removed_track_id)
-                                .unwrap_or(false)
-                            {
-                                self.stop().await;
-                            }
+                    if let Some(removed_track_id) = self.playback_queue.remove(index) {
+                        if self
+                            .current_track_id()
+                            .map(|id| id == removed_track_id)
+                            .unwrap_or(false)
+                        {
+                            self.stop().await;
                         }
                         self.emit_queue_update();
                     }
                 }
                 PlaybackCommand::ReorderQueue { from, to } => {
-                    if from < self.queue.len() && to < self.queue.len() && from != to {
-                        if let Some(track_id) = self.queue.remove(from) {
-                            if to > from {
-                                self.queue.insert(to - 1, track_id);
-                            } else {
-                                self.queue.insert(to, track_id);
-                            }
-                            self.emit_queue_update();
-                        }
-                    }
+                    self.playback_queue.reorder(from, to);
+                    self.emit_queue_update();
                 }
                 PlaybackCommand::ClearQueue => {
-                    self.queue.clear();
+                    self.playback_queue.clear();
                     self.emit_queue_update();
                 }
                 PlaybackCommand::GetQueue => {
                     self.emit_queue_update();
                 }
                 PlaybackCommand::SetRepeatMode(mode) => {
-                    if self.repeat_mode != mode {
-                        self.repeat_mode = mode;
+                    if self.playback_queue.repeat_mode() != mode {
+                        self.playback_queue.set_repeat_mode(mode);
                         let _ = self
                             .progress_tx
                             .send(PlaybackProgress::RepeatModeChanged { mode });
                     }
                 }
                 PlaybackCommand::SkipTo(index) => {
-                    if index < self.queue.len() {
-                        // Drain all tracks before the target index
-                        for _ in 0..index {
-                            self.queue.pop_front();
-                        }
+                    if let Some(track_id) = self.playback_queue.skip_to(index) {
+                        info!(
+                            "SkipTo: jumping to queue position {}, track {}",
+                            index, track_id
+                        );
 
-                        // Pop the target track and play it
-                        if let Some(track_id) = self.queue.pop_front() {
-                            info!(
-                                "SkipTo: jumping to queue position {}, track {}",
-                                index, track_id
-                            );
-
-                            self.clear_next_track_state();
-                            self.emit_queue_update();
-                            if let Some(id) = self.current_track_id() {
-                                self.previous_track_id = Some(id.to_string());
-                            }
-                            self.play_track(&track_id, false, false).await;
-                        }
+                        self.clear_next_track_state();
+                        self.emit_queue_update();
+                        self.playback_queue.set_current(track_id.clone());
+                        self.play_track(&track_id, false, false).await;
                     }
                 }
             }
@@ -1061,7 +1031,7 @@ impl PlaybackService {
         info!("Streaming playback started for track: {}", track_id);
 
         // Preload next track
-        if let Some(next_id) = self.queue.front().cloned() {
+        if let Some(next_id) = self.playback_queue.front().cloned() {
             self.preload_next_track(&next_id).await;
         }
     }
@@ -1259,7 +1229,7 @@ impl PlaybackService {
             .send(PlaybackProgress::StateChanged { state });
 
         // Preload next track if available
-        if let Some(next_track_id) = self.queue.front().cloned() {
+        if let Some(next_track_id) = self.playback_queue.front().cloned() {
             self.preload_next_track(&next_track_id).await;
         }
     }
@@ -1493,10 +1463,9 @@ impl PlaybackService {
     }
     /// Emit queue update to all subscribers
     fn emit_queue_update(&self) {
-        let track_ids: Vec<String> = self.queue.iter().cloned().collect();
-        let _ = self
-            .progress_tx
-            .send(PlaybackProgress::QueueUpdated { tracks: track_ids });
+        let _ = self.progress_tx.send(PlaybackProgress::QueueUpdated {
+            tracks: self.playback_queue.tracks(),
+        });
     }
 
     async fn rebuild_queue_for_repeat_album(&mut self) -> Option<(String, VecDeque<String>)> {
@@ -1535,7 +1504,7 @@ impl PlaybackService {
         let mut iter = tracks.into_iter();
         let first_track = iter.next()?.id;
         let rest = iter.map(|track| track.id).collect();
-        self.previous_track_id = None;
+        self.playback_queue.set_previous_track_id(None);
         Some((first_track, rest))
     }
 }
