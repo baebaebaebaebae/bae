@@ -7,7 +7,9 @@ use crate::ui::app_service::use_app;
 use crate::ui::Route;
 #[cfg(target_os = "macos")]
 use bae_core::playback::RepeatMode;
-use bae_ui::stores::{AppStateStoreExt, PlaybackUiStateStoreExt};
+use bae_ui::stores::{
+    AppStateStoreExt, PlaybackUiStateStoreExt, SidebarStateStoreExt, UiStateStoreExt,
+};
 use dioxus::prelude::*;
 use std::sync::OnceLock;
 use tokio::sync::broadcast;
@@ -19,6 +21,7 @@ pub enum NavAction {
     Forward,
     GoTo(NavTarget),
     GoToNowPlaying,
+    ToggleQueueSidebar,
 }
 
 /// Navigation targets for direct routing.
@@ -109,36 +112,47 @@ pub enum PlaybackAction {
 }
 
 /// Check if the platform modifier key is pressed (Cmd on macOS, Ctrl elsewhere).
+#[cfg(not(target_os = "macos"))]
 fn has_platform_modifier(evt: &KeyboardEvent) -> bool {
     let mods = evt.modifiers();
-    #[cfg(target_os = "macos")]
-    {
-        mods.meta() && !mods.ctrl() && !mods.alt() && !mods.shift()
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        mods.ctrl() && !mods.meta() && !mods.alt() && !mods.shift()
-    }
+    mods.ctrl() && !mods.meta() && !mods.alt() && !mods.shift()
+}
+
+/// Check if platform modifier + Shift is pressed (Cmd+Shift on macOS, Ctrl+Shift elsewhere).
+#[cfg(not(target_os = "macos"))]
+fn has_platform_modifier_with_shift(evt: &KeyboardEvent) -> bool {
+    let mods = evt.modifiers();
+    mods.ctrl() && mods.shift() && !mods.meta() && !mods.alt()
 }
 
 /// Try to handle a keyboard event as an app shortcut.
 /// Returns `Some(NavAction)` if the event matches a shortcut, `None` otherwise.
 pub fn handle_shortcut(evt: &KeyboardEvent) -> Option<NavAction> {
-    if !has_platform_modifier(evt) {
-        return None;
-    }
-
-    // On macOS, Cmd+1/2/3, Cmd+L, and Cmd+[/] are handled by the native menu
-    // and won't reach the webview. Only non-menu shortcuts need to go here.
+    // On macOS, all shortcuts are handled by the native menu and won't reach the webview.
+    #[cfg(target_os = "macos")]
+    let _ = evt;
     #[cfg(not(target_os = "macos"))]
-    match evt.key() {
-        Key::Character(c) if c == "1" => return Some(NavAction::GoTo(NavTarget::Library)),
-        Key::Character(c) if c == "2" => return Some(NavAction::GoTo(NavTarget::Import)),
-        Key::Character(c) if c == "3" => return Some(NavAction::GoTo(NavTarget::Settings)),
-        Key::Character(c) if c == "l" => return Some(NavAction::GoToNowPlaying),
-        Key::Character(c) if c == "[" => return Some(NavAction::Back),
-        Key::Character(c) if c == "]" => return Some(NavAction::Forward),
-        _ => {}
+    {
+        if has_platform_modifier_with_shift(evt) {
+            match evt.key() {
+                Key::Character(c) if c == "S" => {
+                    return Some(NavAction::ToggleQueueSidebar);
+                }
+                _ => {}
+            }
+        }
+
+        if has_platform_modifier(evt) {
+            match evt.key() {
+                Key::Character(c) if c == "1" => return Some(NavAction::GoTo(NavTarget::Library)),
+                Key::Character(c) if c == "2" => return Some(NavAction::GoTo(NavTarget::Import)),
+                Key::Character(c) if c == "3" => return Some(NavAction::GoTo(NavTarget::Settings)),
+                Key::Character(c) if c == "l" => return Some(NavAction::GoToNowPlaying),
+                Key::Character(c) if c == "[" => return Some(NavAction::Back),
+                Key::Character(c) if c == "]" => return Some(NavAction::Forward),
+                _ => {}
+            }
+        }
     }
 
     None
@@ -152,7 +166,7 @@ fn execute_nav_action(action: NavAction) {
             let _ = navigator().push(target.to_route());
         }
         // Handled in ShortcutsHandler where we have access to app state
-        NavAction::GoToNowPlaying => {}
+        NavAction::GoToNowPlaying | NavAction::ToggleQueueSidebar => {}
     }
 }
 
@@ -164,6 +178,7 @@ pub fn ShortcutsHandler(children: Element) -> Element {
     use_hook(|| {
         let library_manager = app.library_manager.clone();
         let playback = app.state.playback();
+        let mut sidebar_is_open = app.state.ui().sidebar().is_open();
         let mut rx = subscribe_nav();
         spawn(async move {
             while let Ok(action) = rx.recv().await {
@@ -171,6 +186,10 @@ pub fn ShortcutsHandler(children: Element) -> Element {
                     NavAction::GoToNowPlaying => {
                         let release_id = playback.current_release_id().read().clone();
                         go_to_now_playing(&library_manager, release_id);
+                    }
+                    NavAction::ToggleQueueSidebar => {
+                        let current = *sidebar_is_open.read();
+                        sidebar_is_open.set(!current);
                     }
                     other => execute_nav_action(other),
                 }
@@ -200,6 +219,8 @@ pub fn ShortcutsHandler(children: Element) -> Element {
         dioxus::document::eval(&js);
     });
 
+    let mut sidebar_is_open = app.state.ui().sidebar().is_open();
+
     let onkeydown = move |evt: KeyboardEvent| {
         if let Some(action) = handle_shortcut(&evt) {
             evt.prevent_default();
@@ -207,6 +228,10 @@ pub fn ShortcutsHandler(children: Element) -> Element {
                 NavAction::GoToNowPlaying => {
                     let release_id = app.state.playback().current_release_id().read().clone();
                     go_to_now_playing(&app.library_manager, release_id);
+                }
+                NavAction::ToggleQueueSidebar => {
+                    let current = *sidebar_is_open.read();
+                    sidebar_is_open.set(!current);
                 }
                 other => execute_nav_action(other),
             }
