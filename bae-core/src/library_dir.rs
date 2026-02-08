@@ -4,8 +4,7 @@ use std::path::{Path, PathBuf};
 /// Typed wrapper for a library directory path.
 ///
 /// Centralizes the on-disk layout so callers use methods instead of
-/// ad-hoc `path.join("covers")` etc. Adding a new asset type only
-/// requires adding a method here and updating `asset_dirs()`.
+/// ad-hoc `path.join("covers")` etc.
 #[derive(Clone, Debug)]
 pub struct LibraryDir {
     path: PathBuf,
@@ -31,15 +30,6 @@ impl LibraryDir {
     pub fn artists_dir(&self) -> PathBuf {
         self.path.join("artists")
     }
-
-    pub fn pending_deletions_path(&self) -> PathBuf {
-        self.path.join("pending_deletions.json")
-    }
-
-    /// All asset directories that should be synced/created.
-    pub fn asset_dirs(&self) -> Vec<PathBuf> {
-        vec![self.covers_dir(), self.artists_dir()]
-    }
 }
 
 impl Deref for LibraryDir {
@@ -59,13 +49,5 @@ impl AsRef<Path> for LibraryDir {
 impl From<PathBuf> for LibraryDir {
     fn from(path: PathBuf) -> Self {
         Self { path }
-    }
-}
-
-impl From<&Path> for LibraryDir {
-    fn from(path: &Path) -> Self {
-        Self {
-            path: path.to_path_buf(),
-        }
     }
 }

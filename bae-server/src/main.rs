@@ -113,7 +113,7 @@ async fn main() {
 
     // Download from cloud if library.db is missing or --refresh was passed
     if needs_download {
-        download_from_cloud(&args, &config).await;
+        download_from_cloud(&args, &library_dir, &config).await;
     }
 
     if !db_path.exists() {
@@ -181,7 +181,7 @@ async fn main() {
     }
 }
 
-async fn download_from_cloud(args: &Args, config: &ConfigYaml) {
+async fn download_from_cloud(args: &Args, library_dir: &LibraryDir, config: &ConfigYaml) {
     let recovery_key = args.recovery_key.as_deref().unwrap_or_else(|| {
         error!("--recovery-key is required to download from cloud");
         std::process::exit(1);
@@ -243,7 +243,6 @@ async fn download_from_cloud(args: &Args, config: &ConfigYaml) {
     });
 
     // Download and decrypt database
-    let library_dir = LibraryDir::new(args.library_path.clone());
     let db_path = library_dir.db_path();
     info!("Downloading database...");
     cloud.download_db(&db_path).await.unwrap_or_else(|e| {
