@@ -1,5 +1,6 @@
 pub mod api;
 pub mod pages;
+pub mod playback;
 
 use dioxus::prelude::*;
 use pages::{AlbumDetail, AppLayout, Library};
