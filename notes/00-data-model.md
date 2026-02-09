@@ -21,7 +21,7 @@ All profiles have the full metadata catalog (every release, track, artist — th
 
 ### bae directory (`~/.bae/`)
 
-Used by desktop. Contains all local libraries. `active-library` is the UUID of the currently active library — absent means use the first (or only) library.
+Used by desktop — this is what opens when you launch the app. Contains all local libraries. `active-library` is the UUID of the currently active library — absent means use the first (or only) library.
 
 ```
 ~/.bae/
