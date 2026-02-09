@@ -40,7 +40,7 @@ Why not per-profile keys:
 - "Which key decrypts which album?" — confusing
 - Backup becomes "which keys do I need?"
 - No real security benefit
-- One key, one backup. Simple.
+- One key, one backup.
 
 Each library owns its buckets and directories exclusively — no sharing between libraries.
 
@@ -84,8 +84,6 @@ SHA-256 of the key, truncated. Stored in `manifest.json` (replicated to every pr
 
 - Desktop is the single writer — mutates the library home's DB, replicates metadata to all profiles
 - bae-server and other read-only instances point at any profile and serve from its metadata replica
-- SQLite is perfect for this: single file, writer snapshots and pushes, readers swap in
-- No database server needed
 - Guard needed: prevent two desktops from both writing to the same library (e.g., write lock marker in the DB or replicated metadata)
 
 ## bae-server

@@ -216,4 +216,3 @@ After mutations, desktop replicates metadata (DB, images) to all other profiles.
 
 **Artist image fetch**: during import, fetch artist photo from Discogs/MB → write to `images/.../{artist_id}`, upsert `library_images` row with `type = "artist"`.
 
-In all cases: one file write, one DB write. No dual systems.
