@@ -92,7 +92,7 @@ SHA-256 of the key, truncated. Stored in `manifest.json` (replicated to every pr
 2. bae generates encryption key if one doesn't exist, stores in keyring
 3. Release files can be transferred to the cloud profile, or stay local
 4. Metadata automatically replicates to the cloud profile
-5. The cloud profile is now a full backup — DB, images, and any release files on it
+5. The cloud profile now has the complete library metadata (DB + images), plus whatever release files are transferred to it
 
 Example: library home is `prof-aaa` at `~/.bae/libraries/lib-111/`. User adds a cloud profile:
 
