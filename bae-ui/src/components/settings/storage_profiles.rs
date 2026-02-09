@@ -54,6 +54,8 @@ pub fn StorageProfilesSectionView(
     is_loading: ReadSignal<bool>,
     editing_profile: Option<StorageProfile>,
     is_creating: bool,
+    /// Error message from a failed operation (e.g. delete blocked by linked releases)
+    delete_error: Option<String>,
     /// Whether an encryption key is configured
     encryption_configured: bool,
     /// Key fingerprint (hex string) for display and verification
@@ -130,6 +132,12 @@ pub fn StorageProfilesSectionView(
                                 on_set_default,
                             }
                         }
+                    }
+                }
+
+                if let Some(ref error) = delete_error {
+                    div { class: "mt-3 p-3 bg-red-900/30 border border-red-700 rounded-lg text-sm text-red-300",
+                        "{error}"
                     }
                 }
             }

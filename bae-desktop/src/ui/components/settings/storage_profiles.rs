@@ -32,6 +32,8 @@ pub fn StorageProfilesSection() -> Element {
     // Directory picker state
     let mut browsed_directory = use_signal(|| Option::<String>::None);
 
+    let delete_error = store.error().read().clone();
+
     let display_editing = editing_profile.read().clone();
 
     // Handle save from the view
@@ -70,6 +72,7 @@ pub fn StorageProfilesSection() -> Element {
             is_loading,
             editing_profile: display_editing,
             is_creating: *is_creating.read(),
+            delete_error,
             encryption_configured,
             encryption_key_fingerprint,
             on_copy_key: {
