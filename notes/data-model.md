@@ -1,5 +1,64 @@
 # Data Model: Releases, Files, and Images
 
+## Directory layout
+
+### Library home (`~/.bae/`)
+
+The library home is the first local storage profile, created on first launch. It's where desktop runs day-to-day. It has a `storage_profiles` row like any other profile.
+
+```
+~/.bae/
+  active-library               # pointer file — path to the active library home
+  config.yaml                  # device-specific settings (not replicated)
+  manifest.json                # library identity (replicated to all profiles)
+  library.db                   # SQLite — all metadata
+  covers/<release_id>          # cover art (no extension, content type in DB)
+  artists/<artist_id>          # artist images (no extension)
+  ab/cd/<file_id>              # audio files (no extension, content type in DB)
+  pending_deletions.json       # deferred file deletion manifest
+```
+
+The default library lives at `~/.bae/`. `active-library` is a pointer file — absent or self-referencing means "use `~/.bae/`". Multiple libraries are supported but each owns its own directory; a second library would live at a completely separate path.
+
+**`manifest.json`** — identifies library and profile. Replicated to every profile, always unencrypted. Contains `library_id`, `library_name`, `encryption_key_fingerprint`, `profile_id`, `profile_name`, `replicated_at`. Used by readers to identify both what library and which profile they're looking at, and validate the encryption key before downloading anything large.
+
+**`config.yaml`** — device-specific settings. Not replicated, only at the library home. Contains keyring hint flags (`discogs_key_stored`, `encryption_key_stored`), torrent settings, subsonic settings. Non-secret only — credentials go in the keyring.
+
+### Keyring (OS keyring, namespaced by library_id)
+
+Managed by `KeyService`. On macOS, uses the protected data store with iCloud Keychain sync.
+
+- `encryption_master_key` — one per library, used for all file and metadata encryption
+- `discogs_api_key`
+
+### Storage profile layout
+
+Each profile owns its directory or bucket exclusively — no sharing between libraries.
+
+Every profile stores both audio files and a metadata replica. Files are keyed by DB file ID — no filenames, no extensions:
+
+**Local profile:**
+```
+{location_path}/
+  manifest.json
+  library.db
+  covers/{release_id}
+  artists/{artist_id}
+  ab/cd/{file_id}
+```
+
+**Cloud profile:**
+```
+s3://{bucket}/
+  manifest.json
+  library.db.enc
+  covers/{release_id}
+  artists/{artist_id}
+  ab/cd/{file_id}
+```
+
+Every profile is self-contained — it has all the data needed to restore a full library. See `storage-profiles.md` for details.
+
 ## Two classes of files
 
 bae manages two fundamentally different kinds of files:
@@ -17,7 +76,7 @@ All release files for a given release are stored together. The `files` table tra
 
 ### Metadata images
 
-Images that bae creates and manages. These live in the library directory (`~/.bae/libraries/<id>/`), not with the release files.
+Images that bae creates and manages. These live in the library home directory, not with the release files.
 
 Two kinds:
 - **Release covers** — display art for album grids, detail views, playback. One per release. May originate from a file in the release, or fetched from MusicBrainz/Discogs. bae makes its own copy. Stored at `covers/{release_id}` (no extension — content type is in the DB).
@@ -105,18 +164,9 @@ No extension on disk — content type is in the DB. No `source_path` needed — 
 - `bae://image/{file_id}` → query `files WHERE id = ?` → read from `source_path` → decrypt if needed → serve with correct Content-Type
 - `bae://artist-image/{artist_id}` → query `library_images WHERE id = ? AND type = 'artist'` → read `artists/{artist_id}` → serve with correct Content-Type
 
-## Cloud sync
+## Metadata replication
 
-The library directory syncs to cloud:
-```
-s3://bucket/bae/{library_id}/
-  library.db.enc
-  meta.json
-  covers/           -- metadata images, encrypted individually
-  artists/          -- metadata images, encrypted individually
-```
-
-Release files sync via their storage profile, not via library sync.
+After mutations, desktop replicates metadata (DB, covers, artists) to all other profiles. Each profile's replica lives alongside the audio files at the profile root. See `storage-profiles.md` and `library-and-cloud.md` for the full sync flow.
 
 ## Cover lifecycle
 
