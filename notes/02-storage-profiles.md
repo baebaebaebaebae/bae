@@ -74,7 +74,7 @@ Desktop manages all libraries under `~/.bae/libraries/`. Each library is a direc
     {uuid}/                    # one directory per library
 ```
 
-The library home is created on first launch. It's not special — it has a `storage_profiles` row like any other profile. Its `location_path` in the DB points to `~/.bae/libraries/{uuid}/`.
+The library home is a storage profile — it has a `storage_profiles` row in the DB with `location_path` pointing to `~/.bae/libraries/{uuid}/`. It's created on first launch along with the library.
 
 ```
 ~/.bae/libraries/{uuid}/
