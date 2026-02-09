@@ -46,20 +46,29 @@ Each library owns its buckets and directories exclusively — no sharing between
 
 ## What a Library Is
 
-On first launch, bae creates the library home as the first local storage profile. Everything starts in one place.
+Desktop manages all libraries under `~/.bae/libraries/`. Each library is a directory:
 
-The library home is just a profile — it has a `storage_profiles` row like any other. Two files live at the profile root:
+```
+~/.bae/
+  active-library               # UUID of the active library
+  libraries/
+    {uuid}/                    # one directory per library
+```
 
-- **`manifest.json`** — identifies library and profile (`library_id`, `library_name`, `encryption_key_fingerprint`, `profile_id`, `profile_name`, `replicated_at`). Replicated to every profile. A reader can identify both the library and which profile it's looking at, and validate the key, from this alone.
+On first launch, bae creates the library home as the first local storage profile. The library home is just a profile — it has a `storage_profiles` row in the DB like any other.
+
+Two files at the root of every profile:
+
+- **`manifest.json`** — identifies library and profile (`library_id`, `library_name`, `encryption_key_fingerprint`, `profile_id`, `profile_name`, `replicated_at`). Replicated to every profile. Always unencrypted. A reader can identify the library, validate the key, and match the directory to a DB row from this alone.
 - **`config.yaml`** — device-specific settings (torrent ports, subsonic config, keyring hint flags). Not replicated. Only at the library home.
 
-Every storage profile — local or cloud — stores both audio files and a replica of the library metadata. Adding more profiles means the metadata replicates to all of them. See `storage-profiles.md` for the full layout.
+Every storage profile — local or cloud — stores both release files and a replica of the library metadata. Adding more profiles means the metadata replicates to all of them. See `storage-profiles.md` for the full layout.
 
 | Data | Tier 1 (local) | Tier 2+ (cloud) |
 |------|----------------|-----------------|
 | library.db | Plain SQLite | Plain locally, encrypted snapshot replicated to cloud profiles |
 | Cover art | Plaintext | Encrypted on cloud profiles, replicated to all |
-| Audio files | On their profile | Encrypted on cloud profiles |
+| Release files | On their profile | Encrypted on cloud profiles |
 | Encryption key | N/A | OS keyring (iCloud Keychain) |
 | config.yaml | Local | Local (device-specific, not replicated) |
 
@@ -93,9 +102,18 @@ SHA-256 of the key, truncated. Stored in `manifest.json` (replicated to every pr
 
 1. User creates a cloud profile (provides S3 credentials, bucket must be empty)
 2. bae generates encryption key if one doesn't exist, stores in keyring
-3. Audio files can be transferred to the cloud profile, or stay local
+3. Release files can be transferred to the cloud profile, or stay local
 4. Metadata automatically replicates to the cloud profile
-5. The cloud profile is now a full backup — DB, covers, artists, and any audio on it
+5. The cloud profile is now a full backup — DB, covers, artists, and any release files on it
+
+Example: library home is `prof-aaa` at `~/.bae/libraries/lib-111/`. User adds a cloud profile:
+
+1. Insert `storage_profiles` row: `prof-bbb | cloud | bucket: my-music-bucket`
+2. Metadata sync triggers — desktop writes to the bucket:
+   - `library.db.enc` (encrypted DB snapshot)
+   - `covers/`, `artists/` (encrypted)
+   - `manifest.json` with `profile_id: "prof-bbb"` (unencrypted)
+3. User can now transfer releases from `prof-aaa` to `prof-bbb`, or import new releases directly to `prof-bbb`
 
 ## Metadata Replication
 
@@ -115,12 +133,58 @@ Desktop is the single writer. After mutations, it replicates metadata to all oth
 - Manual "Sync Now" button in settings
 - If a profile is unreachable (drive unmounted, S3 unavailable), sync is skipped and retried next time
 
-### First-Run Restore
+### First-Run: New Library
 
-On first run (no `~/.bae/active-library` pointer file), `main.rs` detects this BEFORE `Config::load()`. Launches a minimal welcome screen with two choices:
+On first run (no `~/.bae/active-library`), desktop shows a welcome screen. User picks "Create new library":
 
-- **Create new library**: creates the library home as a local profile, writes pointer file, re-execs binary
-- **Restore from profile**: user provides a profile location (local path or S3 bucket + creds) and encryption key → reads `manifest.json` to get library_id and validate key fingerprint → downloads DB + covers + artists → creates library home + config + keyring entries → re-execs binary
+1. Generate a library UUID (e.g., `lib-111`) and a profile UUID (e.g., `prof-aaa`)
+2. Create `~/.bae/libraries/lib-111/`
+3. Create empty `library.db`, insert `storage_profiles` row:
+   | profile_id | location | location_path |
+   |---|---|---|
+   | `prof-aaa` | local | `~/.bae/libraries/lib-111/` |
+4. Write `manifest.json`:
+   ```json
+   {
+     "library_id": "lib-111",
+     "library_name": "My Music",
+     "encryption_key_fingerprint": null,
+     "profile_id": "prof-aaa",
+     "profile_name": "Local",
+     "replicated_at": null
+   }
+   ```
+5. Write `config.yaml`, write `~/.bae/active-library` → `lib-111`
+6. Re-exec binary — desktop launches normally
+
+The library home is now a storage profile. `storage/` is empty — user imports their first album, files go into `storage/ab/cd/{file_id}`.
+
+### First-Run: Restore from Profile
+
+User picks "Restore from profile" and provides an S3 bucket + creds + encryption key:
+
+1. Read `manifest.json` from the bucket:
+   ```json
+   {
+     "library_id": "lib-111",
+     "encryption_key_fingerprint": "abc123",
+     "profile_id": "prof-bbb",
+     ...
+   }
+   ```
+2. Validate the encryption key's fingerprint against `"abc123"` ✓
+3. Download + decrypt `library.db.enc` — now we have the full DB with all `storage_profiles` rows
+4. Generate a new profile UUID (`prof-ccc`), create `~/.bae/libraries/lib-111/`
+5. Insert a new `storage_profiles` row:
+   | profile_id | location | location_path |
+   |---|---|---|
+   | `prof-ccc` | local | `~/.bae/libraries/lib-111/` |
+6. Write `manifest.json` with `profile_id: "prof-ccc"`
+7. Write `config.yaml`, keyring entries, `~/.bae/active-library` → `lib-111`
+8. Download covers + artists from the bucket
+9. Re-exec binary
+
+The new library home is `prof-ccc`. Its `storage/` is empty — release files still live on the cloud profile (`prof-bbb`) and the original machine's local profile (`prof-aaa`, unreachable from here). The user can stream from the cloud or transfer releases to `prof-ccc`.
 
 ## What's Not Built Yet
 

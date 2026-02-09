@@ -26,7 +26,7 @@ Encryption is per-file using XChaCha20-Poly1305 (libsodium `crypto_secretstream`
 
 Each profile owns its directory or bucket exclusively — no sharing between libraries. The "must be empty on creation" constraint enforces this.
 
-Every profile stores two things: audio files and a replica of the library metadata.
+Every profile stores two things: release files and a replica of the library metadata.
 
 **Local profile:**
 ```
@@ -35,7 +35,7 @@ Every profile stores two things: audio files and a replica of the library metada
   library.db
   covers/{release_id}
   artists/{artist_id}
-  ab/cd/{file_id}
+  storage/ab/cd/{file_id}
 ```
 
 **Cloud profile:**
@@ -45,7 +45,7 @@ s3://{bucket}/
   library.db.enc
   covers/{release_id}         # individually encrypted
   artists/{artist_id}         # individually encrypted
-  ab/cd/{file_id}             # encrypted
+  storage/ab/cd/{file_id}     # encrypted
 ```
 
 `manifest.json` identifies both the library and the profile. Always unencrypted so a reader can identify what it's looking at and validate the encryption key before downloading anything large. Present on every profile, written during sync.
@@ -61,31 +61,37 @@ s3://{bucket}/
 }
 ```
 
-Audio files use an opaque hash-based layout. `prefix` = first 2 chars of the file ID, `subprefix` = next 2 chars. No filenames, no extensions — original filenames and content types live in the DB. The path is deterministic from the file ID alone.
+Release files live under `storage/` in an opaque hash-based layout. `prefix` = first 2 chars of the file ID, `subprefix` = next 2 chars. No filenames, no extensions — original filenames and content types live in the DB. The path is deterministic from the file ID alone: `storage/{prefix}/{subprefix}/{file_id}`.
 
 Every profile is self-contained — it has all the data needed to restore a full library.
 
 ## Library home
 
-The library home is the first local profile, created on first launch. Desktop runs against it. It's not special — it has a `storage_profiles` row like any other profile.
-
-The default location is `~/.bae/`.
+Desktop manages all libraries under `~/.bae/libraries/`. Each library is a directory:
 
 ```
 ~/.bae/
-  active-library        # pointer to active library (absent = use ~/.bae/)
+  active-library               # UUID of the active library
+  libraries/
+    {uuid}/                    # one directory per library
+```
+
+The library home is created on first launch. It's not special — it has a `storage_profiles` row like any other profile. Its `location_path` in the DB points to `~/.bae/libraries/{uuid}/`.
+
+```
+~/.bae/libraries/{uuid}/
   config.yaml           # device-specific settings, not replicated
-  manifest.json         # library identity, replicated to all profiles
+  manifest.json         # library + profile identity, replicated
   library.db
   covers/...
   artists/...
-  ab/cd/...
+  storage/...
 ```
 
-Multiple libraries are supported but each owns its own directory. A second library would live at a completely separate path (e.g., `~/other-music/`).
+bae-server doesn't use `~/.bae/` — it points directly at any profile directory or S3 bucket and serves from it.
 
-Two files at the root:
-- **`manifest.json`** — identifies library and profile (`library_id`, `library_name`, `encryption_key_fingerprint`, `profile_id`, `profile_name`, `replicated_at`). Replicated to every profile. Not secret.
+Two files at the profile root:
+- **`manifest.json`** — identifies both the library and this specific profile. Contains `library_id`, `library_name`, `encryption_key_fingerprint`, `profile_id`, `profile_name`, `replicated_at`. The `profile_id` matches a `storage_profiles` row in the DB — this is how bae matches a directory to its DB record when paths change (different machine, different mount point). During metadata sync, desktop writes a manifest to each target profile with that profile's own `profile_id`.
 - **`config.yaml`** — device-specific settings (torrent ports, subsonic config, keyring hint flags). Not replicated. Only exists at the library home.
 
 ## Metadata sync
@@ -106,7 +112,7 @@ Starts with the naive-but-correct approach: full DB snapshot + all covers/artist
 
 ## Readers
 
-bae-server and other read-only instances point at any profile and have everything they need — the DB replica and the audio files. They don't need to know about other profiles or the library home.
+bae-server and other read-only instances point at any profile directory or S3 bucket and have everything they need — the DB replica and the release files. They read `manifest.json` to identify the library, validate the encryption key, and match the profile to a DB row. They don't need `~/.bae/` or the library home.
 
 A local profile on an external drive works the same way. Plug it into another machine, point bae-server at it, and you have a full library.
 

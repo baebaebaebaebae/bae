@@ -2,25 +2,48 @@
 
 ## Directory layout
 
-### Library home (`~/.bae/`)
-
-The library home is the first local storage profile, created on first launch. It's where desktop runs day-to-day. It has a `storage_profiles` row like any other profile.
+### bae directory (`~/.bae/`)
 
 ```
 ~/.bae/
-  active-library               # pointer file — path to the active library home
+  active-library               # UUID of the active library
+  libraries/
+    {uuid}/                    # one directory per library
+```
+
+`active-library` contains the UUID of the active library. Absent means use the first (or only) library. Desktop manages all libraries here. bae-server doesn't use `~/.bae/` — it points directly at a profile directory or S3 bucket.
+
+### Library layout
+
+Each library is a directory at `~/.bae/libraries/{uuid}/`:
+
+```
+~/.bae/libraries/{uuid}/
   config.yaml                  # device-specific settings (not replicated)
-  manifest.json                # library identity (replicated to all profiles)
+  manifest.json                # library + profile identity (replicated)
   library.db                   # SQLite — all metadata
-  covers/<release_id>          # cover art (no extension, content type in DB)
-  artists/<artist_id>          # artist images (no extension)
-  ab/cd/<file_id>              # audio files (no extension, content type in DB)
+  covers/{release_id}          # cover art (no extension, content type in DB)
+  artists/{artist_id}          # artist images (no extension)
+  storage/ab/cd/{file_id}      # release files (no extension, content type in DB)
   pending_deletions.json       # deferred file deletion manifest
 ```
 
-The default library lives at `~/.bae/`. `active-library` is a pointer file — absent or self-referencing means "use `~/.bae/`". Multiple libraries are supported but each owns its own directory; a second library would live at a completely separate path.
+The library home is itself a storage profile — it has a `storage_profiles` row in the DB like any other profile.
 
-**`manifest.json`** — identifies library and profile. Replicated to every profile, always unencrypted. Contains `library_id`, `library_name`, `encryption_key_fingerprint`, `profile_id`, `profile_name`, `replicated_at`. Used by readers to identify both what library and which profile they're looking at, and validate the encryption key before downloading anything large.
+**`manifest.json`** — identifies both the library and the profile that owns this directory. Present on every profile (library home, external drives, S3 buckets). Always unencrypted.
+
+```json
+{
+  "library_id": "...",
+  "library_name": "My Music",
+  "encryption_key_fingerprint": "a1b2c3d4...",
+  "profile_id": "...",
+  "profile_name": "MacBook Local",
+  "replicated_at": "2026-02-08T..."
+}
+```
+
+`profile_id` matches a row in the `storage_profiles` DB table. This is how bae matches a directory to its DB record — paths change (different machine, different mount point), but `profile_id` is stable. During metadata sync, desktop writes a manifest to each target profile with that profile's own `profile_id`.
 
 **`config.yaml`** — device-specific settings. Not replicated, only at the library home. Contains keyring hint flags (`discogs_key_stored`, `encryption_key_stored`), torrent settings, subsonic settings. Non-secret only — credentials go in the keyring.
 
@@ -35,7 +58,7 @@ Managed by `KeyService`. On macOS, uses the protected data store with iCloud Key
 
 Each profile owns its directory or bucket exclusively — no sharing between libraries.
 
-Every profile stores both audio files and a metadata replica. Files are keyed by DB file ID — no filenames, no extensions:
+Every profile stores both release files and a metadata replica. Files are keyed by DB file ID — no filenames, no extensions:
 
 **Local profile:**
 ```
@@ -44,7 +67,7 @@ Every profile stores both audio files and a metadata replica. Files are keyed by
   library.db
   covers/{release_id}
   artists/{artist_id}
-  ab/cd/{file_id}
+  storage/ab/cd/{file_id}
 ```
 
 **Cloud profile:**
@@ -54,10 +77,10 @@ s3://{bucket}/
   library.db.enc
   covers/{release_id}
   artists/{artist_id}
-  ab/cd/{file_id}
+  storage/ab/cd/{file_id}
 ```
 
-Every profile is self-contained — it has all the data needed to restore a full library. See `storage-profiles.md` for details.
+The library home uses the same layout — `{location_path}` is `~/.bae/libraries/{uuid}/`. Other local profiles can be anywhere (external drives, other directories). Every profile is self-contained — it has all the data needed to restore a full library. See `storage-profiles.md` for details.
 
 ## Two classes of files
 
