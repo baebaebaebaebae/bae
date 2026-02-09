@@ -206,7 +206,7 @@ After mutations, desktop replicates metadata (DB, images) to all other profiles.
 
 ## Cover lifecycle
 
-**Import with local cover**: user's release has cover.jpg → bae copies the bytes to `images/.../{release_id}`, inserts `library_images` row with `type = "cover"`, `source = "local"`, `source_url = "release://cover.jpg"`. The original image stays untouched in the release files. The cover is a copy — bae can crop, resize, or optimize it without affecting the original. This is the same flow as a remotely fetched cover, just with a local source.
+**Import with local cover**: user selects a cover from among the release's image files → bae copies the bytes to `images/.../{release_id}`, inserts `library_images` row with `type = "cover"`, `source = "local"`, `source_url = "release://cover.jpg"`. The original image stays untouched in the release files. The cover is a copy — bae can crop, resize, or optimize it without affecting the original. This is the same flow as a remotely fetched cover, just with a local source.
 
 **Import with remote cover**: user selects MB/Discogs cover → bae downloads, writes to `images/.../{release_id}`, inserts `library_images` row with source_url pointing back to the external source.
 
