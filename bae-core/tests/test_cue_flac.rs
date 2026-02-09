@@ -10,6 +10,7 @@
 //! is independent of storage configuration).
 mod support;
 use crate::support::{test_encryption_service, tracing_init};
+use bae_core::content_type::ContentType;
 use bae_core::db::{Database, ImportStatus};
 use bae_core::discogs::models::{DiscogsRelease, DiscogsTrack};
 use bae_core::encryption::EncryptionService;
@@ -150,7 +151,7 @@ async fn test_cue_flac_records_track_positions() {
             track.title,
         );
         let af = audio_format.unwrap();
-        assert_eq!(af.format, "flac", "Should be FLAC format");
+        assert_eq!(af.content_type, ContentType::Flac, "Should be FLAC format");
         assert!(
             af.flac_headers.is_some(),
             "Should have FLAC headers for seeking"

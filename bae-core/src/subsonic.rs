@@ -334,7 +334,7 @@ async fn get_cover_art(
                 .await
                 .ok()
                 .flatten()
-                .map(|img| img.content_type)
+                .map(|img| img.content_type.as_str().to_string())
                 .unwrap_or_else(|| "image/jpeg".to_string());
 
             (
@@ -524,7 +524,7 @@ async fn load_album_with_songs(
             genre: None,
             cover_art: song_cover_art,
             size: None,
-            content_type: "audio/flac".to_string(),
+            content_type: crate::content_type::ContentType::Flac.as_str().to_string(),
             suffix: "flac".to_string(),
             duration: track.duration_ms.map(|ms| (ms / 1000) as i32),
             bit_rate: None,
@@ -594,10 +594,7 @@ async fn stream_track_audio(
 
     let audio_file = files
         .iter()
-        .find(|f| {
-            let ext = f.format.to_lowercase();
-            ext == "flac"
-        })
+        .find(|f| f.content_type == crate::content_type::ContentType::Flac)
         .ok_or_else(|| format!("No audio file found for track {}", track_id))?;
 
     // Read file data

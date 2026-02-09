@@ -42,10 +42,7 @@ pub async fn load_track_audio(
     // For one-file-per-track: find the file that matches this track
     let audio_file = files
         .iter()
-        .find(|f| {
-            let ext = f.format.to_lowercase();
-            ext == "flac"
-        })
+        .find(|f| f.content_type == crate::content_type::ContentType::Flac)
         .ok_or_else(|| PlaybackError::not_found("Audio file", track_id))?;
 
     // Read the file data

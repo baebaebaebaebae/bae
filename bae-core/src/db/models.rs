@@ -1,3 +1,4 @@
+use crate::content_type::ContentType;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
@@ -217,7 +218,7 @@ pub struct DbFile {
     pub release_id: String,
     pub original_filename: String,
     pub file_size: i64,
-    pub format: String,
+    pub content_type: ContentType,
     /// Absolute path to the source file on disk.
     /// Set when release has no storage profile (bae doesn't manage storage).
     /// For local imports: user's original file path.
@@ -243,7 +244,7 @@ pub struct DbFile {
 pub struct DbAudioFormat {
     pub id: String,
     pub track_id: String,
-    pub format: String,
+    pub content_type: ContentType,
     pub flac_headers: Option<Vec<u8>>,
     pub needs_headers: bool,
     /// Start byte offset within the source file (for CUE/FLAC tracks).
@@ -510,13 +511,18 @@ impl DbFile {
     ///
     /// Files are linked to releases. Used for reconstructing original file structure
     /// during export or BitTorrent seeding.
-    pub fn new(release_id: &str, original_filename: &str, file_size: i64, format: &str) -> Self {
+    pub fn new(
+        release_id: &str,
+        original_filename: &str,
+        file_size: i64,
+        content_type: ContentType,
+    ) -> Self {
         DbFile {
             id: Uuid::new_v4().to_string(),
             release_id: release_id.to_string(),
             original_filename: original_filename.to_string(),
             file_size,
-            format: format.to_string(),
+            content_type,
             source_path: None,
             encryption_nonce: None,
             created_at: Utc::now(),
@@ -540,7 +546,7 @@ impl DbFile {
 impl DbAudioFormat {
     pub fn new(
         track_id: &str,
-        format: &str,
+        content_type: ContentType,
         flac_headers: Option<Vec<u8>>,
         needs_headers: bool,
         sample_rate: i64,
@@ -550,7 +556,7 @@ impl DbAudioFormat {
     ) -> Self {
         Self::new_full(
             track_id,
-            format,
+            content_type,
             flac_headers,
             needs_headers,
             None,
@@ -568,7 +574,7 @@ impl DbAudioFormat {
 
     pub fn new_with_byte_offsets(
         track_id: &str,
-        format: &str,
+        content_type: ContentType,
         flac_headers: Option<Vec<u8>>,
         needs_headers: bool,
         start_byte_offset: i64,
@@ -583,7 +589,7 @@ impl DbAudioFormat {
     ) -> Self {
         Self::new_full(
             track_id,
-            format,
+            content_type,
             flac_headers,
             needs_headers,
             Some(start_byte_offset),
@@ -607,7 +613,7 @@ impl DbAudioFormat {
 
     fn new_full(
         track_id: &str,
-        format: &str,
+        content_type: ContentType,
         flac_headers: Option<Vec<u8>>,
         needs_headers: bool,
         start_byte_offset: Option<i64>,
@@ -624,7 +630,7 @@ impl DbAudioFormat {
         DbAudioFormat {
             id: Uuid::new_v4().to_string(),
             track_id: track_id.to_string(),
-            format: format.to_string(),
+            content_type,
             flac_headers,
             needs_headers,
             start_byte_offset,
@@ -813,7 +819,7 @@ pub struct DbLibraryImage {
     /// release_id for covers, artist_id for artist images
     pub id: String,
     pub image_type: LibraryImageType,
-    pub content_type: String,
+    pub content_type: ContentType,
     pub file_size: i64,
     pub width: Option<i32>,
     pub height: Option<i32>,

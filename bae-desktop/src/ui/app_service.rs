@@ -1371,13 +1371,7 @@ async fn load_album_detail(
     {
         let images = db_files
             .iter()
-            .filter(|f| {
-                f.format.starts_with("image/")
-                    || matches!(
-                        f.format.as_str(),
-                        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff"
-                    )
-            })
+            .filter(|f| f.content_type.is_image())
             .map(|f| bae_ui::Image {
                 id: f.id.clone(),
                 filename: f.original_filename.clone(),
@@ -1492,11 +1486,7 @@ async fn change_cover_async(
             let bytes =
                 std::fs::read(source_path).map_err(|e| format!("Failed to read file: {}", e))?;
 
-            let content_type = if file.format.contains('/') {
-                file.format.clone()
-            } else {
-                bae_core::util::content_type_for_extension(&file.format).to_string()
-            };
+            let content_type = file.content_type.clone();
 
             // Write to covers/{release_id}
             let cover_path = library_dir.cover_path(release_id);

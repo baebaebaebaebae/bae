@@ -53,7 +53,7 @@ pub fn file_from_db_ref(db: &DbFile) -> File {
         id: db.id.clone(),
         filename: db.original_filename.clone(),
         file_size: db.file_size,
-        format: db.format.clone(),
+        format: db.content_type.display_name().to_string(),
     }
 }
 

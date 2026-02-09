@@ -1,5 +1,6 @@
 //! Storage trait and implementation
 use crate::cloud_storage::{CloudStorage, S3CloudStorage};
+use crate::content_type::ContentType;
 use crate::db::{Database, DbFile, DbStorageProfile, StorageLocation};
 use crate::encryption::EncryptionService;
 use async_trait::async_trait;
@@ -183,13 +184,18 @@ impl ReleaseStorage for ReleaseStorageImpl {
         };
 
         if let Some(db) = &self.database {
-            let format = std::path::Path::new(filename)
+            let ext = std::path::Path::new(filename)
                 .extension()
                 .and_then(|e| e.to_str())
                 .unwrap_or("bin")
                 .to_lowercase();
 
-            let mut db_file = DbFile::new(release_id, filename, data.len() as i64, &format);
+            let mut db_file = DbFile::new(
+                release_id,
+                filename,
+                data.len() as i64,
+                ContentType::from_extension(&ext),
+            );
             db_file.source_path = Some(storage_path);
 
             // Extract and store encryption nonce for efficient range requests

@@ -1,3 +1,4 @@
+use crate::content_type::ContentType;
 use crate::discogs::client::DiscogsClient;
 use crate::musicbrainz::{ExternalUrls, MbRelease};
 use crate::network::upgrade_to_https;
@@ -127,7 +128,9 @@ pub async fn fetch_cover_art_for_mb_release(
 }
 
 /// Download cover art from a URL and return the raw bytes and content type.
-pub async fn download_cover_art_bytes(cover_art_url: &str) -> Result<(Vec<u8>, String), String> {
+pub async fn download_cover_art_bytes(
+    cover_art_url: &str,
+) -> Result<(Vec<u8>, ContentType), String> {
     info!("Downloading cover art from {}", cover_art_url);
 
     let client = reqwest::Client::builder()
@@ -153,7 +156,7 @@ pub async fn download_cover_art_bytes(cover_art_url: &str) -> Result<(Vec<u8>, S
         .and_then(|ct| {
             let mime = ct.split(';').next().unwrap_or(ct).trim();
             if mime.starts_with("image/") {
-                Some(mime.to_string())
+                Some(ContentType::from_mime(mime))
             } else {
                 None
             }
@@ -164,7 +167,7 @@ pub async fn download_cover_art_bytes(cover_art_url: &str) -> Result<(Vec<u8>, S
                 .ok()
                 .and_then(|parsed| parsed.path().rsplit('.').next().map(|e| e.to_lowercase()))
                 .unwrap_or_default();
-            crate::util::content_type_for_extension(&ext).to_string()
+            ContentType::from_extension(&ext)
         });
 
     let bytes = response
