@@ -112,7 +112,7 @@ Where they live depends on the storage profile:
 - **Local storage profile**: bae copies files to the profile's local directory.
 - **Cloud storage profile**: bae encrypts and uploads to S3.
 
-All release files for a given release are stored together. The `files` table tracks each one with `source_path` pointing to the actual location (local path or S3 key).
+All release files for a given release are stored together. The `release_files` table tracks each one with `source_path` pointing to the actual location (local path or S3 key).
 
 ### Metadata images
 
@@ -124,12 +124,12 @@ Two kinds:
 
 ## DB tables
 
-### `files` — release files (audio + images + metadata)
+### `release_files` — release files (audio + images + metadata)
 
 Tracks every file in a release. These travel with the release.
 
 ```
-files
+release_files
   id                TEXT PK
   release_id        TEXT FK → releases
   original_filename TEXT NOT NULL    -- "01 - Track.flac", "cover.jpg", "disc.cue"
@@ -148,7 +148,7 @@ Stores everything needed to play a track: codec info, FLAC headers for CUE/FLAC 
 
 For one-file-per-track FLAC: `start_byte_offset`/`end_byte_offset` are NULL, `needs_headers` is false. For CUE/FLAC: both offsets point into the shared FLAC file, `needs_headers` is true.
 
-`file_id` links to the `files` row containing this track's audio data.
+`file_id` links to the `release_files` row containing this track's audio data.
 
 ```
 audio_formats
@@ -166,7 +166,7 @@ audio_formats
   bits_per_sample     INTEGER NOT NULL
   seektable_json      TEXT NOT NULL    -- dense frame-level seektable
   audio_data_start    INTEGER NOT NULL -- byte offset where audio data begins
-  file_id             TEXT FK → files
+  file_id             TEXT FK → release_files
   created_at          TEXT NOT NULL
 ```
 
@@ -201,7 +201,7 @@ No extension on disk — content type is in the DB. No `source_path` needed — 
 ## Protocol serving
 
 - `bae://cover/{release_id}` → query `library_images WHERE id = ? AND type = 'cover'` → read `covers/{release_id}` → serve with correct Content-Type
-- `bae://image/{file_id}` → query `files WHERE id = ?` → read from `source_path` → decrypt if needed → serve with correct Content-Type
+- `bae://image/{file_id}` → query `release_files WHERE id = ?` → read from `source_path` → decrypt if needed → serve with correct Content-Type
 - `bae://artist-image/{artist_id}` → query `library_images WHERE id = ? AND type = 'artist'` → read `artists/{artist_id}` → serve with correct Content-Type
 
 ## Metadata replication

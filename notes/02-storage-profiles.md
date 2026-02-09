@@ -8,7 +8,7 @@ Every release is in exactly one of these modes:
 
 ### Unmanaged (no profile)
 
-Files stay wherever the user has them. bae records each file's location in `files.source_path` but doesn't copy, move, or touch anything. Deleting a release from the library removes DB records but leaves files on disk.
+Files stay wherever the user has them. bae records each file's location in `release_files.source_path` but doesn't copy, move, or touch anything. Deleting a release from the library removes DB records but leaves files on disk.
 
 Modeled as: no `release_storage` row for the release. `storage_profile_id` is `None` during import.
 
@@ -20,7 +20,7 @@ bae copies files into the profile's directory. Each file's `source_path` points 
 
 bae encrypts and uploads files to S3. Each file's `source_path` stores the full S3 URI. Always encrypted.
 
-Encryption is per-file using XChaCha20-Poly1305 (libsodium `crypto_secretstream`), chunked at 64KB for random-access decryption. The nonce is stored in `files.encryption_nonce`. The encryption key comes from `KeyService` (OS keyring), not from the profile — one key per library, not per profile.
+Encryption is per-file using XChaCha20-Poly1305 (libsodium `crypto_secretstream`), chunked at 64KB for random-access decryption. The nonce is stored in `release_files.encryption_nonce`. The encryption key comes from `KeyService` (OS keyring), not from the profile — one key per library, not per profile.
 
 ## Profile layout
 
@@ -164,7 +164,7 @@ Cloud profiles are always encrypted. Local profiles are not encrypted.
 The encryption key is per-library, stored in OS keyring via `KeyService`. The algorithm is XChaCha20-Poly1305 via libsodium:
 
 - 64KB plaintext chunks, each independently encrypted
-- Random nonce per file, stored in `files.encryption_nonce`
+- Random nonce per file, stored in `release_files.encryption_nonce`
 - Random-access: can decrypt any chunk without reading the whole file
 - Range decryption for cloud streaming: calculate which chunks overlap the byte range, download just those chunks, decrypt individually
 
