@@ -1,5 +1,22 @@
 # Data Model: Releases, Files, and Images
 
+## Libraries and profiles
+
+A **library** is the logical entity — a music collection. It has an identity (`library_id`), a name, and an encryption key. It exists across multiple physical locations.
+
+A **profile** is a physical location where data lives. Each profile stores a full replica of the library metadata (DB, covers, artists, `manifest.json`) plus whatever release files have been placed on it. A library has one or more profiles.
+
+One profile is the **library home** — where desktop runs, where the authoritative DB lives, where `config.yaml` lives. The rest are replicas that receive metadata via sync.
+
+```
+Library "My Music" (lib-111)
+  ├── prof-aaa  (library home, ~/.bae/libraries/lib-111/)  ← desktop writes here
+  ├── prof-bbb  (cloud, s3://my-music-bucket/)             ← replica
+  └── prof-ccc  (local, /Volumes/ExternalSSD/)             ← replica
+```
+
+All profiles have the full catalog. Release files are distributed — each release lives on exactly one profile (or is unmanaged). bae-server can point at any profile and serve the full library from it.
+
 ## Directory layout
 
 ### bae directory (`~/.bae/`)
