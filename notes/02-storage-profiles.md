@@ -40,10 +40,10 @@ Every profile stores a full replica of the library metadata (DB + images). It ma
 **Cloud profile:**
 ```
 s3://{bucket}/
-  manifest.json               # encrypted
+  manifest.json.enc
   library.db.enc
-  images/ab/cd/{id}           # encrypted
-  storage/ab/cd/{file_id}     # encrypted
+  images/ab/cd/{id}
+  storage/ab/cd/{file_id}
 ```
 
 `manifest.json` identifies both the library and the profile. Plaintext on local profiles, encrypted on cloud profiles. Present on every profile, written during sync.
@@ -98,7 +98,7 @@ Desktop is the single writer. It mutates the library home's DB directly. After m
 1. `VACUUM INTO` creates an atomic DB snapshot
 2. For each profile (except the library home):
    - Local: copy snapshot + images + manifest to `{location_path}/`
-   - Cloud: encrypt snapshot, upload to `s3://{bucket}/library.db.enc`, encrypt and upload images and `manifest.json`
+   - Cloud: encrypt and upload snapshot, images, and manifest
 3. Clean up the snapshot
 
 Sync triggers after `LibraryEvent::AlbumsChanged` with debounce. Also available as a manual "Sync Now" button.

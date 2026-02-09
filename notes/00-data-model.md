@@ -88,7 +88,7 @@ Every profile stores both release files and a metadata replica. Files are keyed 
 **Cloud profile:**
 ```
 s3://{bucket}/
-  manifest.json
+  manifest.json.enc
   library.db.enc
   images/ab/cd/{id}
   storage/ab/cd/{file_id}

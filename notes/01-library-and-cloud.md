@@ -112,7 +112,7 @@ Desktop is the single writer. After mutations, it replicates metadata to all oth
 1. `VACUUM INTO` creates a point-in-time snapshot of the DB. This is a SQLite feature that copies the entire database to a new file without locking or closing the connection pool — safe to run while the app is reading/writing. Also compacts the DB (removes deleted pages), so replicas are smaller.
 2. For each profile (except the library home):
    - **Local profile:** copy snapshot + images + manifest to `{location_path}/`
-   - **Cloud profile:** encrypt snapshot, upload to `s3://{bucket}/library.db.enc`, encrypt and upload images and `manifest.json`
+   - **Cloud profile:** encrypt and upload snapshot, images, and manifest
 3. Clean up the snapshot file.
 
 ### Sync Triggers
