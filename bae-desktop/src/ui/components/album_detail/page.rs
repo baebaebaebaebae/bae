@@ -168,6 +168,7 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
     // Delete release callback
     let on_delete_release = EventHandler::new({
         let library_manager = library_manager.clone();
+        let library_dir = app.config.library_dir.clone();
         let playback = playback.clone();
         move |release_id: String| {
             // Stop playback if current track belongs to the release being deleted
@@ -181,8 +182,13 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
             }
 
             let library_manager = library_manager.clone();
+            let library_dir = library_dir.clone();
             spawn(async move {
-                if let Err(e) = library_manager.get().delete_release(&release_id).await {
+                if let Err(e) = library_manager
+                    .get()
+                    .delete_release(&release_id, &library_dir)
+                    .await
+                {
                     error!("Failed to delete release: {}", e);
                 }
             });
@@ -200,6 +206,7 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
     // Delete album callback
     let on_delete_album = EventHandler::new({
         let library_manager = library_manager.clone();
+        let library_dir = app.config.library_dir.clone();
         let playback = playback.clone();
         move |album_id: String| {
             // Stop playback if current track belongs to the album being deleted
@@ -214,8 +221,13 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
             }
 
             let library_manager = library_manager.clone();
+            let library_dir = library_dir.clone();
             spawn(async move {
-                if let Err(e) = library_manager.get().delete_album(&album_id).await {
+                if let Err(e) = library_manager
+                    .get()
+                    .delete_album(&album_id, &library_dir)
+                    .await
+                {
                     error!("Failed to delete album: {}", e);
                 }
             });
