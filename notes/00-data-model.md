@@ -21,6 +21,8 @@ All profiles have the full metadata catalog (every release, track, artist — th
 
 ### bae directory (`~/.bae/`)
 
+Used by desktop. Contains all local libraries. `active-library` is the UUID of the currently active library — absent means use the first (or only) library.
+
 ```
 ~/.bae/
   active-library               # UUID of the active library
@@ -28,7 +30,7 @@ All profiles have the full metadata catalog (every release, track, artist — th
     {uuid}/                    # one directory per library
 ```
 
-`active-library` contains the UUID of the active library. Absent means use the first (or only) library. Desktop manages all libraries here. bae-server doesn't use `~/.bae/` — it points directly at a profile directory or S3 bucket.
+bae-server doesn't use `~/.bae/` — it points directly at any profile (local directory or S3 bucket).
 
 ### Library layout
 
