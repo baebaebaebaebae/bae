@@ -171,7 +171,7 @@ Metadata replicas on cloud profiles are encrypted (DB as a blob, images individu
 
 Two tables:
 
-**`storage_profiles`** — profile configuration. `location` is "local" or "cloud". Local profiles have `location_path`. Cloud profiles have `cloud_bucket`, `cloud_region`, `cloud_endpoint`, `cloud_access_key`, `cloud_secret_key`. `encrypted` flag (always false for local, always true for cloud). `is_default` marks the profile pre-selected in import.
+**`storage_profiles`** — profile configuration. `location` is "local" or "cloud". Local profiles have `location_path`. Cloud profiles have `cloud_bucket`, `cloud_region`, `cloud_endpoint`. S3 credentials (access key, secret key) are stored in the OS keyring per profile ID, not in the DB — see `00-data-model.md` keyring section. `encrypted` flag (always false for local, always true for cloud). `is_default` marks the profile pre-selected in import.
 
 **`release_storage`** — links a release to a profile. One row per release-profile pair, FK to both `releases` and `storage_profiles`. A release can be on multiple profiles. A release with no `release_storage` rows is unmanaged.
 

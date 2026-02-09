@@ -6,6 +6,7 @@ use bae_core::db::{Database, DbStorageProfile};
 use bae_core::discogs::models::{DiscogsArtist, DiscogsRelease, DiscogsTrack};
 use bae_core::encryption::EncryptionService;
 use bae_core::import::ImportRequest;
+use bae_core::keys::KeyService;
 use bae_core::library::{LibraryManager, SharedLibraryManager};
 use bae_core::playback::{PlaybackProgress, PlaybackState};
 use std::sync::Arc;
@@ -99,6 +100,7 @@ impl PlaybackTestFixture {
         let playback_handle = bae_core::playback::PlaybackService::start(
             library_manager_arc.as_ref().clone(),
             encryption_service,
+            KeyService::new(true, "test".to_string()),
             runtime_handle,
         );
         playback_handle.set_volume(0.0);
@@ -413,6 +415,7 @@ impl CueFlacTestFixture {
         let playback_handle = bae_core::playback::PlaybackService::start(
             library_manager_arc.as_ref().clone(),
             encryption_service,
+            KeyService::new(true, "test".to_string()),
             runtime_handle,
         );
         playback_handle.set_volume(0.0);
@@ -2055,6 +2058,7 @@ impl HighSampleRateTestFixture {
         let playback_handle = bae_core::playback::PlaybackService::start(
             library_manager_arc.as_ref().clone(),
             encryption_service,
+            KeyService::new(true, "test".to_string()),
             runtime_handle,
         );
         playback_handle.set_volume(0.0);
@@ -2459,6 +2463,7 @@ async fn test_real_library_cpu_usage() {
     let playback_handle = bae_core::playback::PlaybackService::start(
         library_manager.clone(),
         encryption_service,
+        KeyService::new(true, "test".to_string()),
         runtime_handle,
     );
     let mut progress_rx = playback_handle.subscribe_progress();
@@ -2632,6 +2637,7 @@ async fn test_pause_seek_cue_flac() {
     let playback_handle = bae_core::playback::PlaybackService::start(
         library_manager.clone(),
         encryption_service,
+        KeyService::new(true, "test".to_string()),
         runtime_handle,
     );
     playback_handle.set_volume(0.0); // Mute for test
@@ -2855,6 +2861,7 @@ async fn test_playing_seek_cue_flac() {
     let playback_handle = bae_core::playback::PlaybackService::start(
         library_manager.clone(),
         encryption_service,
+        KeyService::new(true, "test".to_string()),
         runtime_handle,
     );
     playback_handle.set_volume(0.0);

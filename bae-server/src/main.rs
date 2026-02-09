@@ -2,6 +2,7 @@ use bae_core::cloud_sync::CloudSyncService;
 use bae_core::config::ConfigYaml;
 use bae_core::db::Database;
 use bae_core::encryption::EncryptionService;
+use bae_core::keys::KeyService;
 use bae_core::library::{LibraryManager, SharedLibraryManager};
 use bae_core::library_dir::LibraryDir;
 use bae_core::subsonic::create_router;
@@ -149,8 +150,26 @@ async fn main() {
     let library_manager =
         SharedLibraryManager::new(LibraryManager::new(database, encryption_service.clone()));
 
+    // Expose CLI-provided S3 credentials as the env vars that KeyService reads in dev mode.
+    // KeyService falls back to BAE_S3_ACCESS_KEY / BAE_S3_SECRET_KEY when no per-profile var exists.
+    if let Some(ak) = &args.cloud_access_key {
+        std::env::set_var("BAE_S3_ACCESS_KEY", ak);
+    }
+    if let Some(sk) = &args.cloud_secret_key {
+        std::env::set_var("BAE_S3_SECRET_KEY", sk);
+    }
+
+    // Create a dev-mode KeyService backed by env vars.
+    // bae-server is headless, so we use dev mode + env vars instead of OS keyring.
+    let key_service = KeyService::new(true, config.library_id.clone());
+
     // Build the API router
-    let api_router = create_router(library_manager, encryption_service, library_dir);
+    let api_router = create_router(
+        library_manager,
+        encryption_service,
+        library_dir,
+        key_service,
+    );
 
     // If --web-dir is provided, serve static files with SPA fallback
     let app = if let Some(ref web_dir) = args.web_dir {

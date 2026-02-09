@@ -523,6 +523,7 @@ impl LibraryManager {
         release_id: &str,
         target_dir: &Path,
         cache: &CacheManager,
+        key_service: &crate::keys::KeyService,
     ) -> Result<(), LibraryError> {
         ExportService::export_release(
             release_id,
@@ -530,6 +531,7 @@ impl LibraryManager {
             self,
             cache,
             self.encryption_service.as_ref(),
+            key_service,
         )
         .await
         .map_err(LibraryError::Import)
@@ -543,6 +545,7 @@ impl LibraryManager {
         track_id: &str,
         output_path: &Path,
         cache: &CacheManager,
+        key_service: &crate::keys::KeyService,
     ) -> Result<(), LibraryError> {
         // Get storage profile for track's release
         let track = self
@@ -554,7 +557,7 @@ impl LibraryManager {
             .get_storage_profile_for_release(&track.release_id)
             .await?
             .ok_or_else(|| LibraryError::Import("No storage profile for release".to_string()))?;
-        let storage = crate::storage::create_storage_reader(&storage_profile)
+        let storage = crate::storage::create_storage_reader(&storage_profile, key_service)
             .await
             .map_err(LibraryError::CloudStorage)?;
 

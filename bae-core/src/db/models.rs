@@ -868,10 +868,6 @@ pub struct DbStorageProfile {
     pub cloud_region: Option<String>,
     /// Custom endpoint URL for S3-compatible services (MinIO, etc.)
     pub cloud_endpoint: Option<String>,
-    /// Access key ID
-    pub cloud_access_key: Option<String>,
-    /// Secret access key
-    pub cloud_secret_key: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -889,8 +885,6 @@ impl DbStorageProfile {
             cloud_bucket: None,
             cloud_region: None,
             cloud_endpoint: None,
-            cloud_access_key: None,
-            cloud_secret_key: None,
             created_at: now,
             updated_at: now,
         }
@@ -901,8 +895,6 @@ impl DbStorageProfile {
         bucket: &str,
         region: &str,
         endpoint: Option<&str>,
-        access_key: &str,
-        secret_key: &str,
         encrypted: bool,
     ) -> Self {
         let now = Utc::now();
@@ -916,8 +908,6 @@ impl DbStorageProfile {
             cloud_bucket: Some(bucket.to_string()),
             cloud_region: Some(region.to_string()),
             cloud_endpoint: endpoint.map(|s| s.to_string()),
-            cloud_access_key: Some(access_key.to_string()),
-            cloud_secret_key: Some(secret_key.to_string()),
             created_at: now,
             updated_at: now,
         }
@@ -925,21 +915,6 @@ impl DbStorageProfile {
     pub fn with_default(mut self, is_default: bool) -> Self {
         self.is_default = is_default;
         self
-    }
-
-    /// Convert cloud storage fields to S3Config for creating a client.
-    /// Returns None if this is not a cloud profile or credentials are missing.
-    pub fn to_s3_config(&self) -> Option<crate::cloud_storage::S3Config> {
-        if self.location != StorageLocation::Cloud {
-            return None;
-        }
-        Some(crate::cloud_storage::S3Config {
-            bucket_name: self.cloud_bucket.clone()?,
-            region: self.cloud_region.clone()?,
-            access_key_id: self.cloud_access_key.clone()?,
-            secret_access_key: self.cloud_secret_key.clone()?,
-            endpoint_url: self.cloud_endpoint.clone(),
-        })
     }
 }
 /// Links a release to its storage profile

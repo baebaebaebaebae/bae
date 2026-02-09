@@ -1,6 +1,7 @@
 use crate::cache::CacheManager;
 use crate::cloud_storage::CloudStorage;
 use crate::encryption::EncryptionService;
+use crate::keys::KeyService;
 use crate::library::LibraryManager;
 use crate::playback::track_loader::load_track_audio;
 use crate::storage::create_storage_reader;
@@ -22,6 +23,7 @@ impl ExportService {
         library_manager: &LibraryManager,
         _cache: &CacheManager,
         encryption_service: Option<&EncryptionService>,
+        key_service: &KeyService,
     ) -> Result<(), String> {
         info!(
             "Exporting release {} to {}",
@@ -36,7 +38,7 @@ impl ExportService {
             .map_err(|e| format!("Failed to get storage profile: {}", e))?
             .ok_or_else(|| "No storage profile found for release".to_string())?;
 
-        let storage = create_storage_reader(&storage_profile)
+        let storage = create_storage_reader(&storage_profile, key_service)
             .await
             .map_err(|e| format!("Failed to create storage reader: {}", e))?;
 

@@ -69,6 +69,8 @@ Managed by `KeyService`. On macOS, uses the protected data store with iCloud Key
 
 - `encryption_master_key` — one per library, used for all file and metadata encryption
 - `discogs_api_key`
+- `s3_access_key:{profile_id}` — per-profile S3 access key (cloud profiles only)
+- `s3_secret_key:{profile_id}` — per-profile S3 secret key (cloud profiles only)
 
 ### Storage profile layout
 

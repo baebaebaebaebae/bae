@@ -7,6 +7,7 @@
 //! - The profile's credentials would be used (verified via mock)
 
 use bae_core::db::{Database, DbAlbum, DbRelease, DbStorageProfile, ImportStatus};
+use bae_core::keys::KeyService;
 use bae_core::storage::create_storage_reader;
 use chrono::Utc;
 use tempfile::TempDir;
@@ -19,6 +20,10 @@ fn tracing_init() {
         .with_target(false)
         .with_file(true)
         .try_init();
+}
+
+fn test_key_service() -> KeyService {
+    KeyService::new(true, "test".to_string())
 }
 
 /// Test that create_storage_reader uses the profile's credentials
@@ -38,7 +43,9 @@ async fn test_storage_reader_uses_profile_credentials() {
     );
 
     // Create storage reader from profile
-    let storage = create_storage_reader(&profile).await.unwrap();
+    let storage = create_storage_reader(&profile, &test_key_service())
+        .await
+        .unwrap();
 
     // Write and read a test file to verify it works
     let test_data = b"test file data";
@@ -68,14 +75,12 @@ async fn test_release_storage_profile_linkage() {
 
     let database = Database::new(db_path.to_str().unwrap()).await.unwrap();
 
-    // Create a storage profile with specific credentials
+    // Create a cloud storage profile (credentials stored in keyring, not DB)
     let profile = DbStorageProfile::new_cloud(
         "My S3 Profile",
         "my-bucket",
         "us-west-2",
         Some("https://s3.example.com"),
-        "AKIAIOSFODNN7EXAMPLE",
-        "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
         true, // encrypted
     );
     let profile_id = profile.id.clone();
@@ -120,20 +125,20 @@ async fn test_release_storage_profile_linkage() {
         retrieved_profile.cloud_endpoint,
         Some("https://s3.example.com".to_string())
     );
-    assert_eq!(
-        retrieved_profile.cloud_access_key,
-        Some("AKIAIOSFODNN7EXAMPLE".to_string())
-    );
-    assert_eq!(
-        retrieved_profile.cloud_secret_key,
-        Some("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string())
-    );
     assert!(retrieved_profile.encrypted);
 
-    // Verify to_s3_config returns the correct config
-    let s3_config = retrieved_profile
-        .to_s3_config()
-        .expect("Cloud profile should have S3 config");
+    // Verify s3_config_from_profile reads credentials from keyring
+    let key_service = test_key_service();
+    key_service
+        .set_profile_access_key(&profile_id, "AKIAIOSFODNN7EXAMPLE")
+        .unwrap();
+    key_service
+        .set_profile_secret_key(&profile_id, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+        .unwrap();
+
+    let s3_config =
+        bae_core::cloud_storage::s3_config_from_profile(&retrieved_profile, &key_service)
+            .expect("Cloud profile should have S3 config");
     assert_eq!(s3_config.bucket_name, "my-bucket");
     assert_eq!(s3_config.region, "us-west-2");
     assert_eq!(
@@ -158,15 +163,8 @@ async fn test_multiple_releases_different_profiles() {
     let database = Database::new(db_path.to_str().unwrap()).await.unwrap();
 
     // Create two different storage profiles
-    let profile_a = DbStorageProfile::new_cloud(
-        "Profile A - Bucket 1",
-        "bucket-a",
-        "us-east-1",
-        None,
-        "KEY_A",
-        "SECRET_A",
-        true,
-    );
+    let profile_a =
+        DbStorageProfile::new_cloud("Profile A - Bucket 1", "bucket-a", "us-east-1", None, true);
     let profile_a_id = profile_a.id.clone();
 
     let profile_b = DbStorageProfile::new_cloud(
@@ -174,8 +172,6 @@ async fn test_multiple_releases_different_profiles() {
         "bucket-b",
         "eu-west-1",
         Some("https://minio.local:9000"),
-        "KEY_B",
-        "SECRET_B",
         false,
     );
     let profile_b_id = profile_b.id.clone();
@@ -225,7 +221,6 @@ async fn test_multiple_releases_different_profiles() {
     assert_eq!(retrieved_1.id, profile_a_id);
     assert_eq!(retrieved_1.cloud_bucket, Some("bucket-a".to_string()));
     assert_eq!(retrieved_1.cloud_region, Some("us-east-1".to_string()));
-    assert_eq!(retrieved_1.cloud_access_key, Some("KEY_A".to_string()));
     assert!(retrieved_1.encrypted);
 
     // Release 2 should use Profile B
@@ -236,11 +231,7 @@ async fn test_multiple_releases_different_profiles() {
         retrieved_2.cloud_endpoint,
         Some("https://minio.local:9000".to_string())
     );
-    assert_eq!(retrieved_2.cloud_access_key, Some("KEY_B".to_string()));
     assert!(!retrieved_2.encrypted);
-
-    println!("✓ Release 1 correctly uses Profile A (bucket-a, us-east-1)");
-    println!("✓ Release 2 correctly uses Profile B (bucket-b, eu-west-1, minio endpoint)");
 }
 
 /// Test that deleting a storage profile fails when releases are linked,

@@ -1,8 +1,9 @@
 //! Storage trait and implementation
-use crate::cloud_storage::{CloudStorage, S3CloudStorage};
+use crate::cloud_storage::{s3_config_from_profile, CloudStorage, S3CloudStorage};
 use crate::content_type::ContentType;
 use crate::db::{Database, DbFile, DbStorageProfile, StorageLocation};
 use crate::encryption::EncryptionService;
+use crate::keys::KeyService;
 use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -55,16 +56,16 @@ pub struct ReleaseStorageImpl {
 }
 
 impl ReleaseStorageImpl {
-    /// Create storage from a profile, creating S3 client from profile credentials if needed.
+    /// Create storage from a profile, reading S3 credentials from the keyring if needed.
     pub async fn from_profile(
         profile: DbStorageProfile,
         encryption: Option<EncryptionService>,
         database: Arc<Database>,
+        key_service: &KeyService,
     ) -> Result<Self, StorageError> {
         let cloud: Option<Arc<dyn CloudStorage>> = if profile.location == StorageLocation::Cloud {
-            let s3_config = profile
-                .to_s3_config()
-                .ok_or_else(|| StorageError::Cloud("Missing S3 credentials in profile".into()))?;
+            let s3_config = s3_config_from_profile(&profile, key_service)
+                .ok_or_else(|| StorageError::Cloud("Missing S3 credentials for profile".into()))?;
             let client = S3CloudStorage::new(s3_config)
                 .await
                 .map_err(|e| StorageError::Cloud(e.to_string()))?;

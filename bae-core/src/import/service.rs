@@ -70,6 +70,8 @@ pub struct ImportService {
     torrent_manager: LazyTorrentManager,
     /// Database for storage operations
     database: Arc<Database>,
+    /// Key service for reading S3 credentials from the OS keyring
+    key_service: KeyService,
     /// Library directory (for cover art cache)
     library_dir: LibraryDir,
     /// Optional pre-built cloud storage (for testing with MockCloudStorage)
@@ -135,6 +137,7 @@ impl ImportService {
         let library_manager_for_worker = library_manager.clone();
         let database_for_handle = database.clone();
         let library_dir_for_handle = library_dir.clone();
+        let key_service_for_worker = key_service.clone();
 
         ImportService::start_scan_worker(&runtime_handle, scan_rx, scan_events_tx.clone());
 
@@ -148,6 +151,7 @@ impl ImportService {
                     encryption_service,
                     torrent_manager,
                     database,
+                    key_service: key_service_for_worker,
                     library_dir,
                     #[cfg(feature = "test-utils")]
                     injected_cloud: None,
@@ -200,6 +204,7 @@ impl ImportService {
         let library_manager_for_worker = library_manager.clone();
         let database_for_handle = database.clone();
         let library_dir_for_handle = library_dir.clone();
+        let key_service_for_worker = key_service.clone();
 
         ImportService::start_scan_worker(&runtime_handle, scan_rx, scan_events_tx.clone());
 
@@ -212,6 +217,7 @@ impl ImportService {
                     library_manager: library_manager_for_worker,
                     encryption_service,
                     database,
+                    key_service: key_service_for_worker,
                     library_dir,
                     #[cfg(feature = "test-utils")]
                     injected_cloud: None,
@@ -278,6 +284,7 @@ impl ImportService {
                     encryption_service,
                     torrent_manager,
                     database,
+                    key_service: KeyService::new(true, "test".to_string()),
                     library_dir: LibraryDir::new(std::env::temp_dir().join("bae-test-covers")),
                     injected_cloud: Some(cloud),
                 };
@@ -342,6 +349,7 @@ impl ImportService {
                     library_manager: library_manager_for_worker,
                     encryption_service,
                     database,
+                    key_service: KeyService::new(true, "test".to_string()),
                     library_dir: LibraryDir::new(std::env::temp_dir().join("bae-test-covers")),
                     injected_cloud: Some(cloud),
                 };
@@ -563,6 +571,7 @@ impl ImportService {
             profile,
             self.encryption_service.clone(),
             self.database.clone(),
+            &self.key_service,
         )
         .await
         .map_err(|e| format!("Failed to create storage: {}", e))

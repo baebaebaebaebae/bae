@@ -23,6 +23,7 @@
 use crate::cloud_storage::CloudStorage;
 use crate::db::DbTrack;
 use crate::encryption::EncryptionService;
+use crate::keys::KeyService;
 use crate::library::LibraryManager;
 use crate::playback::cpal_output::AudioOutput;
 use crate::playback::data_source::{
@@ -209,6 +210,7 @@ struct PreparedTrack {
 async fn prepare_track(
     library_manager: &LibraryManager,
     encryption_service: Option<&EncryptionService>,
+    key_service: &KeyService,
     track_id: &str,
 ) -> Result<PreparedTrack, PlaybackError> {
     let track = library_manager
@@ -306,7 +308,7 @@ async fn prepare_track(
                 )
             }
             Some(profile) => {
-                let storage = create_storage_reader(profile)
+                let storage = create_storage_reader(profile, key_service)
                     .await
                     .map_err(PlaybackError::cloud)?;
                 let encrypted = profile.encrypted;
@@ -363,6 +365,7 @@ async fn prepare_track(
 pub struct PlaybackService {
     library_manager: LibraryManager,
     encryption_service: Option<EncryptionService>,
+    key_service: KeyService,
     command_rx: tokio_mpsc::UnboundedReceiver<PlaybackCommand>,
     progress_tx: tokio_mpsc::UnboundedSender<PlaybackProgress>,
     playback_queue: PlaybackQueue,
@@ -528,6 +531,7 @@ impl PlaybackService {
     pub fn start(
         library_manager: LibraryManager,
         encryption_service: Option<EncryptionService>,
+        key_service: KeyService,
         runtime_handle: tokio::runtime::Handle,
     ) -> PlaybackHandle {
         let (command_tx, command_rx) = tokio_mpsc::unbounded_channel();
@@ -564,6 +568,7 @@ impl PlaybackService {
                 let mut service = PlaybackService {
                     library_manager,
                     encryption_service,
+                    key_service,
                     command_rx,
                     progress_tx,
                     playback_queue: PlaybackQueue::new(),
@@ -929,6 +934,7 @@ impl PlaybackService {
         let prepared = match prepare_track(
             &self.library_manager,
             self.encryption_service.as_ref(),
+            &self.key_service,
             track_id,
         )
         .await
@@ -1042,6 +1048,7 @@ impl PlaybackService {
         let prepared = match prepare_track(
             &self.library_manager,
             self.encryption_service.as_ref(),
+            &self.key_service,
             track_id,
         )
         .await
