@@ -40,13 +40,13 @@ Every profile stores a full replica of the library metadata (DB + images). It ma
 **Cloud profile:**
 ```
 s3://{bucket}/
-  manifest.json               # unencrypted
+  manifest.json               # encrypted
   library.db.enc
   images/ab/cd/{id}           # individually encrypted
   storage/ab/cd/{file_id}     # encrypted
 ```
 
-`manifest.json` identifies both the library and the profile. Always unencrypted so a reader can identify what it's looking at and validate the encryption key before downloading anything large. Present on every profile, written during sync.
+`manifest.json` identifies both the library and the profile. Plaintext on local profiles, encrypted on cloud profiles. Present on every profile, written during sync.
 
 ```json
 {
@@ -98,7 +98,7 @@ Desktop is the single writer. It mutates the library home's DB directly. After m
 1. `VACUUM INTO` creates an atomic DB snapshot
 2. For each profile (except the library home):
    - Local: copy snapshot + images + manifest to `{location_path}/`
-   - Cloud: encrypt snapshot, upload to `s3://{bucket}/library.db.enc`, encrypt and upload images individually, upload `manifest.json` (unencrypted)
+   - Cloud: encrypt snapshot, upload to `s3://{bucket}/library.db.enc`, encrypt and upload images and `manifest.json`
 3. Clean up the snapshot
 
 Sync triggers after `LibraryEvent::AlbumsChanged` with debounce. Also available as a manual "Sync Now" button.
@@ -109,7 +109,7 @@ Starts with the naive-but-correct approach: full DB snapshot + all images every 
 
 ## Readers
 
-bae-server and other read-only instances point at a profile directory or S3 bucket and have the full metadata replica. They read `manifest.json` to identify the library, validate the encryption key, and match the profile to a DB row. They don't need `~/.bae/` or the library home.
+bae-server and other read-only instances point at a profile directory or S3 bucket and have the full metadata replica. They read `manifest.json` (decrypting if on a cloud profile) to identify the library and match the profile to a DB row. They don't need `~/.bae/` or the library home.
 
 A local profile on an external drive works the same way. Plug it into another machine, point bae-server at it, and you have a full library.
 

@@ -53,7 +53,7 @@ On first launch, bae creates the library home as the first local storage profile
 
 Two files at the root of every profile:
 
-- **`manifest.json`** — identifies library and profile (`library_id`, `library_name`, `encryption_key_fingerprint`, `profile_id`, `profile_name`, `replicated_at`). Replicated to every profile. Always unencrypted. A reader can identify the library, validate the key, and match the directory to a DB row from this alone.
+- **`manifest.json`** — identifies library and profile (`library_id`, `library_name`, `encryption_key_fingerprint`, `profile_id`, `profile_name`, `replicated_at`). Replicated to every profile. Plaintext on local profiles, encrypted on cloud profiles.
 - **`config.yaml`** — device-specific settings (torrent ports, subsonic config, keyring hint flags). Not replicated. Only at the library home.
 
 Every storage profile — local or cloud — stores a full replica of the library metadata (DB + images). Release files are separate — a release's files can be replicated to some or all profiles, and a profile may have all, some, or none of the library's release files. See `02-storage-profiles.md` for the full layout.
@@ -100,7 +100,7 @@ Example: library home is `prof-aaa` at `~/.bae/libraries/lib-111/`. User adds a 
 2. Metadata sync triggers — desktop writes to the bucket:
    - `library.db.enc` (encrypted DB snapshot)
    - `images/` (encrypted)
-   - `manifest.json` with `profile_id: "prof-bbb"` (unencrypted)
+   - `manifest.json` with `profile_id: "prof-bbb"` (encrypted)
 3. User can now transfer releases from `prof-aaa` to `prof-bbb`, or import new releases directly to `prof-bbb`
 
 ## Metadata Replication
@@ -112,7 +112,7 @@ Desktop is the single writer. After mutations, it replicates metadata to all oth
 1. `VACUUM INTO` creates a point-in-time snapshot of the DB. This is a SQLite feature that copies the entire database to a new file without locking or closing the connection pool — safe to run while the app is reading/writing. Also compacts the DB (removes deleted pages), so replicas are smaller.
 2. For each profile (except the library home):
    - **Local profile:** copy snapshot + images + manifest to `{location_path}/`
-   - **Cloud profile:** encrypt snapshot, upload to `s3://{bucket}/library.db.enc`, encrypt and upload images individually, upload `manifest.json` (unencrypted)
+   - **Cloud profile:** encrypt snapshot, upload to `s3://{bucket}/library.db.enc`, encrypt and upload images and `manifest.json`
 3. Clean up the snapshot file.
 
 ### Sync Triggers
@@ -151,7 +151,7 @@ The library home is now a storage profile. `storage/` is empty — user imports 
 
 User picks "Restore from profile" and provides an S3 bucket + creds + encryption key:
 
-1. Read `manifest.json` from the bucket:
+1. Download + decrypt `manifest.json` from the bucket (validates the key — if decryption fails, wrong key):
    ```json
    {
      "library_id": "lib-111",
@@ -160,7 +160,7 @@ User picks "Restore from profile" and provides an S3 bucket + creds + encryption
      ...
    }
    ```
-2. Validate the encryption key's fingerprint against `"abc123"` ✓
+2. Verify the key's fingerprint against `"abc123"` as an extra check
 3. Download + decrypt `library.db.enc` — now we have the full DB with all `storage_profiles` rows
 4. Generate a new profile UUID (`prof-ccc`), create `~/.bae/libraries/lib-111/`
 5. Insert a new `storage_profiles` row:

@@ -46,7 +46,7 @@ The library home is a storage profile — same layout as any other profile. What
   pending_deletions.json       # deferred file deletion manifest
 ```
 
-**`manifest.json`** — identifies both the library and the profile that owns this directory. Present on every profile (library home, external drives, S3 buckets). Always unencrypted.
+**`manifest.json`** — identifies both the library and the profile that owns this directory. Present on every profile (library home, external drives, S3 buckets). Plaintext on local profiles, encrypted on cloud profiles.
 
 ```json
 {
