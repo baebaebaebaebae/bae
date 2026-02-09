@@ -15,7 +15,7 @@ Library "My Music" (lib-111)
   └── prof-ccc  (local, /Volumes/ExternalSSD/)             ← replica
 ```
 
-All profiles have the full catalog. Release files are distributed — each release lives on exactly one profile (or is unmanaged). bae-server can point at any profile and serve the full library from it.
+All profiles have the full metadata catalog (every release, track, artist — the complete DB). Release files are separate — each release's files live on one profile (or are unmanaged). Not every profile has every release's files. bae-server can point at any profile and serve the full catalog from it, but can only play releases whose files are on that profile.
 
 ## Directory layout
 
