@@ -11,6 +11,7 @@ type ProtocolResponse = HttpResponse<Cow<'static, [u8]>>;
 pub struct ImageServices {
     pub library_manager: SharedLibraryManager,
     pub library_dir: LibraryDir,
+    pub runtime_handle: tokio::runtime::Handle,
 }
 
 pub fn handle_protocol_request(uri: &str, services: &ImageServices) -> ProtocolResponse {
@@ -39,25 +40,17 @@ fn handle_cover(release_id: &str, services: &ImageServices) -> ProtocolResponse 
 
     match std::fs::read(&cover_path) {
         Ok(data) => {
-            // Get content type from DB, fall back to jpeg
-            let content_type = std::thread::spawn({
-                let lm = services.library_manager.clone();
-                let rid = release_id.to_string();
-                move || {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    rt.block_on(async {
-                        lm.get()
-                            .get_library_image(&rid, &bae_core::db::LibraryImageType::Cover)
-                            .await
-                            .ok()
-                            .flatten()
-                            .map(|img| img.content_type.to_string())
-                            .unwrap_or_else(|| "image/jpeg".to_string())
-                    })
-                }
-            })
-            .join()
-            .unwrap_or_else(|_| "image/jpeg".to_string());
+            let content_type = services.runtime_handle.block_on(async {
+                services
+                    .library_manager
+                    .get()
+                    .get_library_image(release_id, &bae_core::db::LibraryImageType::Cover)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|img| img.content_type.to_string())
+                    .unwrap_or_else(|| "image/jpeg".to_string())
+            });
 
             HttpResponse::builder()
                 .status(200)
@@ -82,24 +75,17 @@ fn handle_artist_image(artist_id: &str, services: &ImageServices) -> ProtocolRes
 
     match std::fs::read(&image_path) {
         Ok(data) => {
-            let content_type = std::thread::spawn({
-                let lm = services.library_manager.clone();
-                let aid = artist_id.to_string();
-                move || {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    rt.block_on(async {
-                        lm.get()
-                            .get_library_image(&aid, &bae_core::db::LibraryImageType::Artist)
-                            .await
-                            .ok()
-                            .flatten()
-                            .map(|img| img.content_type.to_string())
-                            .unwrap_or_else(|| "image/jpeg".to_string())
-                    })
-                }
-            })
-            .join()
-            .unwrap_or_else(|_| "image/jpeg".to_string());
+            let content_type = services.runtime_handle.block_on(async {
+                services
+                    .library_manager
+                    .get()
+                    .get_library_image(artist_id, &bae_core::db::LibraryImageType::Artist)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|img| img.content_type.to_string())
+                    .unwrap_or_else(|| "image/jpeg".to_string())
+            });
 
             HttpResponse::builder()
                 .status(200)
@@ -161,15 +147,9 @@ fn handle_image(image_id: &str, services: &ImageServices) -> ProtocolResponse {
             .unwrap();
     }
 
-    let services_clone = services.clone();
-    let image_id_owned = image_id.to_string();
-
-    let result = std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(serve_image(&image_id_owned, &services_clone))
-    })
-    .join()
-    .unwrap_or_else(|_| Err("Thread panicked".to_string()));
+    let result = services
+        .runtime_handle
+        .block_on(serve_image(image_id, services));
 
     match result {
         Ok((data, mime_type)) => HttpResponse::builder()

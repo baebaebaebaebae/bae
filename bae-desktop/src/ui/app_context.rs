@@ -51,4 +51,5 @@ pub struct AppContext {
     #[cfg(feature = "torrent")]
     pub torrent_manager: torrent::LazyTorrentManager,
     pub key_service: KeyService,
+    pub runtime_handle: tokio::runtime::Handle,
 }

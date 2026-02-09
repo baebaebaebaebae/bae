@@ -242,6 +242,7 @@ fn main() {
         torrent_manager,
         cache: cache_manager.clone(),
         key_service,
+        runtime_handle: runtime_handle.clone(),
     };
 
     if config.subsonic_enabled {
