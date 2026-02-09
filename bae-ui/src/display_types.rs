@@ -144,8 +144,6 @@ pub struct File {
 pub struct Image {
     pub id: String,
     pub filename: String,
-    pub is_cover: bool,
-    pub source: String,
     pub url: String,
 }
 
