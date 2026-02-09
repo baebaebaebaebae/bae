@@ -4,7 +4,7 @@ How bae manages where release files and library metadata live.
 
 ## Three storage modes
 
-Every release is in exactly one of these modes:
+A release's files can exist on one or more profiles, or be unmanaged. Each copy is in one of these modes:
 
 ### Unmanaged (no profile)
 
@@ -26,7 +26,7 @@ Encryption is per-file using XChaCha20-Poly1305 (libsodium `crypto_secretstream`
 
 Each profile owns its directory or bucket exclusively — no sharing between libraries. The "must be empty on creation" constraint enforces this.
 
-Every profile stores two things: release files and a replica of the library metadata.
+Every profile stores a full replica of the library metadata (DB + images). It may also have some or all of the library's release files.
 
 **Local profile:**
 ```
@@ -61,7 +61,7 @@ s3://{bucket}/
 
 Release files live under `storage/` in an opaque hash-based layout. `prefix` = first 2 chars of the file ID, `subprefix` = next 2 chars. No filenames, no extensions — original filenames and content types live in the DB. The path is deterministic from the file ID alone: `storage/{prefix}/{subprefix}/{file_id}`.
 
-Every profile is self-contained — it has all the data needed to restore a full library.
+Every profile has the full metadata needed to restore a library's catalog. Release files may need to be fetched from other profiles.
 
 ## Library home
 
@@ -109,7 +109,7 @@ Starts with the naive-but-correct approach: full DB snapshot + all images every 
 
 ## Readers
 
-bae-server and other read-only instances point at any profile directory or S3 bucket and have everything they need — the DB replica and the release files. They read `manifest.json` to identify the library, validate the encryption key, and match the profile to a DB row. They don't need `~/.bae/` or the library home.
+bae-server and other read-only instances point at a profile directory or S3 bucket and have the full metadata replica. They read `manifest.json` to identify the library, validate the encryption key, and match the profile to a DB row. They don't need `~/.bae/` or the library home.
 
 A local profile on an external drive works the same way. Plug it into another machine, point bae-server at it, and you have a full library.
 
@@ -173,6 +173,6 @@ Two tables:
 
 **`storage_profiles`** — profile configuration. `location` is "local" or "cloud". Local profiles have `location_path`. Cloud profiles have `cloud_bucket`, `cloud_region`, `cloud_endpoint`, `cloud_access_key`, `cloud_secret_key`. `encrypted` flag (always false for local, always true for cloud). `is_default` marks the profile pre-selected in import.
 
-**`release_storage`** — links a release to its profile. One row per release, FK to both `releases` and `storage_profiles`. A release with no `release_storage` row is unmanaged.
+**`release_storage`** — links a release to a profile. One row per release-profile pair, FK to both `releases` and `storage_profiles`. A release can be on multiple profiles. A release with no `release_storage` rows is unmanaged.
 
 Rust types: `DbStorageProfile`, `DbReleaseStorage`, `StorageLocation` enum (Local, Cloud).
