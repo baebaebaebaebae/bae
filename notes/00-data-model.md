@@ -80,7 +80,7 @@ s3://{bucket}/
   storage/ab/cd/{file_id}
 ```
 
-The library home uses the same layout — `{location_path}` is `~/.bae/libraries/{uuid}/`. Other local profiles can be anywhere (external drives, other directories). Every profile is self-contained — it has all the data needed to restore a full library. See `storage-profiles.md` for details.
+The library home uses the same layout — `{location_path}` is `~/.bae/libraries/{uuid}/`. Other local profiles can be anywhere (external drives, other directories). Every profile is self-contained — it has all the data needed to restore a full library. See `02-storage-profiles.md` for details.
 
 ## Two classes of files
 
@@ -189,7 +189,7 @@ No extension on disk — content type is in the DB. No `source_path` needed — 
 
 ## Metadata replication
 
-After mutations, desktop replicates metadata (DB, covers, artists) to all other profiles. Each profile's replica lives alongside the audio files at the profile root. See `storage-profiles.md` and `library-and-cloud.md` for the full sync flow.
+After mutations, desktop replicates metadata (DB, covers, artists) to all other profiles. Each profile's replica lives alongside the audio files at the profile root. See `02-storage-profiles.md` and `01-library-and-cloud.md` for the full sync flow.
 
 ## Cover lifecycle
 
