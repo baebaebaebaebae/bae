@@ -1502,6 +1502,12 @@ impl Database {
         &self,
         profile: &DbStorageProfile,
     ) -> Result<(), sqlx::Error> {
+        if profile.is_default {
+            sqlx::query("UPDATE storage_profiles SET is_default = FALSE WHERE is_default = TRUE")
+                .execute(&self.pool)
+                .await?;
+        }
+
         sqlx::query(
             r#"
             INSERT INTO storage_profiles (
@@ -1563,10 +1569,16 @@ impl Database {
         &self,
         profile: &DbStorageProfile,
     ) -> Result<(), sqlx::Error> {
+        if profile.is_default {
+            sqlx::query("UPDATE storage_profiles SET is_default = FALSE WHERE is_default = TRUE")
+                .execute(&self.pool)
+                .await?;
+        }
+
         sqlx::query(
             r#"
             UPDATE storage_profiles SET
-                name = ?, location = ?, location_path = ?, encrypted = ?, 
+                name = ?, location = ?, location_path = ?, encrypted = ?,
                 is_default = ?,
                 cloud_bucket = ?, cloud_region = ?, cloud_endpoint = ?,
                 cloud_access_key = ?, cloud_secret_key = ?,
