@@ -14,6 +14,25 @@ pub struct ImageServices {
     pub runtime_handle: tokio::runtime::Handle,
 }
 
+impl ImageServices {
+    /// Run an async operation on the tokio runtime from a sync context.
+    ///
+    /// Wry's protocol handler runs on a thread with a tokio runtime context,
+    /// so we can't use `Handle::block_on` (it panics). Instead, spawn the
+    /// future onto the runtime and wait for the result via a channel.
+    fn run_async<F, T>(&self, f: F) -> T
+    where
+        F: std::future::Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        self.runtime_handle.spawn(async move {
+            let _ = tx.send(f.await);
+        });
+        rx.recv().expect("async task dropped without sending")
+    }
+}
+
 pub fn handle_protocol_request(uri: &str, services: &ImageServices) -> ProtocolResponse {
     tracing::trace!("bae:// protocol request: {:?}", uri);
 
@@ -40,11 +59,11 @@ fn handle_cover(release_id: &str, services: &ImageServices) -> ProtocolResponse 
 
     match std::fs::read(&cover_path) {
         Ok(data) => {
-            let content_type = services.runtime_handle.block_on(async {
-                services
-                    .library_manager
-                    .get()
-                    .get_library_image(release_id, &bae_core::db::LibraryImageType::Cover)
+            let lm = services.library_manager.clone();
+            let rid = release_id.to_string();
+            let content_type = services.run_async(async move {
+                lm.get()
+                    .get_library_image(&rid, &bae_core::db::LibraryImageType::Cover)
                     .await
                     .ok()
                     .flatten()
@@ -75,11 +94,11 @@ fn handle_artist_image(artist_id: &str, services: &ImageServices) -> ProtocolRes
 
     match std::fs::read(&image_path) {
         Ok(data) => {
-            let content_type = services.runtime_handle.block_on(async {
-                services
-                    .library_manager
-                    .get()
-                    .get_library_image(artist_id, &bae_core::db::LibraryImageType::Artist)
+            let lm = services.library_manager.clone();
+            let aid = artist_id.to_string();
+            let content_type = services.run_async(async move {
+                lm.get()
+                    .get_library_image(&aid, &bae_core::db::LibraryImageType::Artist)
                     .await
                     .ok()
                     .flatten()
@@ -147,9 +166,30 @@ fn handle_image(image_id: &str, services: &ImageServices) -> ProtocolResponse {
             .unwrap();
     }
 
-    let result = services
-        .runtime_handle
-        .block_on(serve_image(image_id, services));
+    let lm = services.library_manager.clone();
+    let id = image_id.to_string();
+
+    let result = services.run_async(async move {
+        debug!("Serving image: {}", id);
+
+        let file = lm
+            .get()
+            .get_file_by_id(&id)
+            .await
+            .map_err(|e| format!("Database error: {}", e))?
+            .ok_or_else(|| format!("File not found: {}", id))?;
+
+        let source_path = file
+            .source_path
+            .as_ref()
+            .ok_or_else(|| "File has no source_path".to_string())?
+            .clone();
+
+        let data =
+            std::fs::read(&source_path).map_err(|e| format!("Failed to read file: {}", e))?;
+
+        Ok::<_, String>((data, file.content_type.to_string()))
+    });
 
     match result {
         Ok((data, mime_type)) => HttpResponse::builder()
@@ -165,28 +205,4 @@ fn handle_image(image_id: &str, services: &ImageServices) -> ProtocolResponse {
                 .unwrap()
         }
     }
-}
-
-async fn serve_image(
-    image_id: &str,
-    services: &ImageServices,
-) -> Result<(Vec<u8>, String), String> {
-    debug!("Serving image: {}", image_id);
-
-    let file = services
-        .library_manager
-        .get()
-        .get_file_by_id(image_id)
-        .await
-        .map_err(|e| format!("Database error: {}", e))?
-        .ok_or_else(|| format!("File not found: {}", image_id))?;
-
-    let source_path = file
-        .source_path
-        .as_ref()
-        .ok_or_else(|| "File has no source_path".to_string())?;
-
-    let data = std::fs::read(source_path).map_err(|e| format!("Failed to read file: {}", e))?;
-
-    Ok((data, file.content_type.to_string()))
 }
