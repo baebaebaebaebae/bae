@@ -56,7 +56,7 @@ Two files at the root of every profile:
 - **`manifest.json`** — identifies library and profile (`library_id`, `library_name`, `encryption_key_fingerprint`, `profile_id`, `profile_name`, `replicated_at`). Replicated to every profile. Always unencrypted. A reader can identify the library, validate the key, and match the directory to a DB row from this alone.
 - **`config.yaml`** — device-specific settings (torrent ports, subsonic config, keyring hint flags). Not replicated. Only at the library home.
 
-Every storage profile — local or cloud — stores a full replica of the library metadata (DB + images). Release files are separate — each release's files live on one profile, not all of them. See `02-storage-profiles.md` for the full layout.
+Every storage profile — local or cloud — stores a full replica of the library metadata (DB + images). Release files are separate — each release's files live on whichever profile they were assigned to. A profile may have all, some, or none of the library's release files. See `02-storage-profiles.md` for the full layout.
 
 | Data | Tier 1 (local) | Tier 2+ (cloud) |
 |------|----------------|-----------------|
