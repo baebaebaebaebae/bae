@@ -1375,8 +1375,6 @@ async fn load_album_detail(
             .map(|f| bae_ui::Image {
                 id: f.id.clone(),
                 filename: f.original_filename.clone(),
-                is_cover: false,
-                source: "local".to_string(),
                 url: format!("bae://image/{}", f.id),
             })
             .collect();

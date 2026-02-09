@@ -34,6 +34,7 @@ pub fn make_config(context: &AppContext) -> DioxusConfig {
     let services = ImageServices {
         library_manager: context.library_manager.clone(),
         library_dir: context.config.library_dir.clone(),
+        runtime_handle: context.runtime_handle.clone(),
     };
 
     DioxusConfig::default()

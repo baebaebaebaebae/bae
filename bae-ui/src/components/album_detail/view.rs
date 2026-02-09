@@ -594,8 +594,7 @@ fn GalleryLightboxWrapper(state: ReadStore<AlbumDetailState>, show: Signal<bool>
         })
         .collect();
 
-    // Start on the cover image if there is one
-    let initial_index = images.iter().position(|img| img.is_cover).unwrap_or(0);
+    let initial_index = 0;
 
     // Always render — visibility controlled by signal (see gallery_lightbox module docs)
     let is_open: ReadSignal<bool> = show.into();
