@@ -33,8 +33,7 @@ Every profile stores two things: release files and a replica of the library meta
 {location_path}/
   manifest.json
   library.db
-  covers/{release_id}
-  artists/{artist_id}
+  images/ab/cd/{id}
   storage/ab/cd/{file_id}
 ```
 
@@ -43,8 +42,7 @@ Every profile stores two things: release files and a replica of the library meta
 s3://{bucket}/
   manifest.json               # unencrypted
   library.db.enc
-  covers/{release_id}         # individually encrypted
-  artists/{artist_id}         # individually encrypted
+  images/ab/cd/{id}           # individually encrypted
   storage/ab/cd/{file_id}     # encrypted
 ```
 
@@ -83,8 +81,7 @@ The library home is created on first launch. It's not special — it has a `stor
   config.yaml           # device-specific settings, not replicated
   manifest.json         # library + profile identity, replicated
   library.db
-  covers/...
-  artists/...
+  images/...
   storage/...
 ```
 
@@ -100,15 +97,15 @@ Desktop is the single writer. It mutates the library home's DB directly. After m
 
 1. `VACUUM INTO` creates an atomic DB snapshot
 2. For each profile (except the library home):
-   - Local: copy snapshot + covers + artists + manifest to `{location_path}/`
-   - Cloud: encrypt snapshot, upload to `s3://{bucket}/library.db.enc`, encrypt and upload covers + artists, upload `manifest.json` (unencrypted)
+   - Local: copy snapshot + images + manifest to `{location_path}/`
+   - Cloud: encrypt snapshot, upload to `s3://{bucket}/library.db.enc`, encrypt and upload images individually, upload `manifest.json` (unencrypted)
 3. Clean up the snapshot
 
 Sync triggers after `LibraryEvent::AlbumsChanged` with debounce. Also available as a manual "Sync Now" button.
 
 If a profile is unreachable (external drive unmounted, S3 unavailable), sync is skipped and retried next time.
 
-Starts with the naive-but-correct approach: full DB snapshot + all covers/artists every time. Incremental sync (only changed images) is an optimization for later.
+Starts with the naive-but-correct approach: full DB snapshot + all images every time. Incremental sync (only changed images) is an optimization for later.
 
 ## Readers
 
@@ -168,7 +165,7 @@ The encryption key is per-library, stored in OS keyring via `KeyService`. The al
 - Random-access: can decrypt any chunk without reading the whole file
 - Range decryption for cloud streaming: calculate which chunks overlap the byte range, download just those chunks, decrypt individually
 
-Metadata replicas on cloud profiles are encrypted (DB as a blob, covers and artists individually). Metadata replicas on local profiles are plaintext.
+Metadata replicas on cloud profiles are encrypted (DB as a blob, images individually). Metadata replicas on local profiles are plaintext.
 
 ## DB schema
 

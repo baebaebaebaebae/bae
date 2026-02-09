@@ -20,7 +20,7 @@ bae starts simple and gets more capable as you need it to. You shouldn't have to
 - bae asks for S3 credentials
 - bae generates an encryption key and stores it in the OS keyring
   - On macOS, iCloud Keychain syncs it to other devices automatically
-- Files encrypt on upload, covers encrypt, DB encrypted as a snapshot for replication
+- Files encrypt on upload, images encrypt, DB encrypted as a snapshot for replication
 - The only decision was "I want cloud." Encryption followed automatically.
 - The user never typed an encryption key. They might not even know they have one.
 
@@ -104,14 +104,14 @@ SHA-256 of the key, truncated. Stored in `manifest.json` (replicated to every pr
 2. bae generates encryption key if one doesn't exist, stores in keyring
 3. Release files can be transferred to the cloud profile, or stay local
 4. Metadata automatically replicates to the cloud profile
-5. The cloud profile is now a full backup — DB, covers, artists, and any release files on it
+5. The cloud profile is now a full backup — DB, images, and any release files on it
 
 Example: library home is `prof-aaa` at `~/.bae/libraries/lib-111/`. User adds a cloud profile:
 
 1. Insert `storage_profiles` row: `prof-bbb | cloud | bucket: my-music-bucket`
 2. Metadata sync triggers — desktop writes to the bucket:
    - `library.db.enc` (encrypted DB snapshot)
-   - `covers/`, `artists/` (encrypted)
+   - `images/` (encrypted)
    - `manifest.json` with `profile_id: "prof-bbb"` (unencrypted)
 3. User can now transfer releases from `prof-aaa` to `prof-bbb`, or import new releases directly to `prof-bbb`
 
@@ -123,8 +123,8 @@ Desktop is the single writer. After mutations, it replicates metadata to all oth
 
 1. `VACUUM INTO` creates a point-in-time snapshot of the DB. This is a SQLite feature that copies the entire database to a new file without locking or closing the connection pool — safe to run while the app is reading/writing. Also compacts the DB (removes deleted pages), so replicas are smaller.
 2. For each profile (except the library home):
-   - **Local profile:** copy snapshot + covers + artists + manifest to `{location_path}/`
-   - **Cloud profile:** encrypt snapshot, upload to `s3://{bucket}/library.db.enc`, encrypt and upload covers + artists individually, upload `manifest.json` (unencrypted)
+   - **Local profile:** copy snapshot + images + manifest to `{location_path}/`
+   - **Cloud profile:** encrypt snapshot, upload to `s3://{bucket}/library.db.enc`, encrypt and upload images individually, upload `manifest.json` (unencrypted)
 3. Clean up the snapshot file.
 
 ### Sync Triggers
@@ -181,7 +181,7 @@ User picks "Restore from profile" and provides an S3 bucket + creds + encryption
    | `prof-ccc` | local | `~/.bae/libraries/lib-111/` |
 6. Write `manifest.json` with `profile_id: "prof-ccc"`
 7. Write `config.yaml`, keyring entries, `~/.bae/active-library` → `lib-111`
-8. Download covers + artists from the bucket
+8. Download images from the bucket
 9. Re-exec binary
 
 The new library home is `prof-ccc`. Its `storage/` is empty — release files still live on the cloud profile (`prof-bbb`) and the original machine's local profile (`prof-aaa`, unreachable from here). The user can stream from the cloud or transfer releases to `prof-ccc`.

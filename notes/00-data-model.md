@@ -4,7 +4,7 @@
 
 A **library** is the logical entity — a music collection. It has an identity (`library_id`), a name, and an encryption key. It exists across multiple physical locations.
 
-A **profile** is a physical location where data lives. Each profile stores a full replica of the library metadata (DB, covers, artists, `manifest.json`) plus whatever release files have been placed on it. A library has one or more profiles.
+A **profile** is a physical location where data lives. Each profile stores a full replica of the library metadata (DB, images, `manifest.json`) plus whatever release files have been placed on it. A library has one or more profiles.
 
 One profile is the **library home** — where desktop runs, where the authoritative DB lives, where `config.yaml` lives. The rest are replicas that receive metadata via sync.
 
@@ -15,7 +15,7 @@ Library "My Music" (lib-111)
   └── prof-ccc  (local, /Volumes/ExternalSSD/)             ← replica
 ```
 
-All profiles have the full metadata catalog (every release, track, artist — the complete DB, plus all cover art and artist images). Release files are separate — each release's files live on one profile (or are unmanaged). Not every profile has every release's files. bae-server can point at any profile and serve the full catalog from it, but can only play releases whose files are on that profile or on cloud profiles it can access.
+All profiles have the full metadata catalog (every release, track, artist — the complete DB, plus all library images). Release files are separate — each release's files live on one profile (or are unmanaged). Not every profile has every release's files. bae-server can point at any profile and serve the full catalog from it, but can only play releases whose files are on that profile or on cloud profiles it can access.
 
 ## Directory layout
 
@@ -41,8 +41,7 @@ The library home is a storage profile — same layout as any other profile. What
   config.yaml                  # device-specific settings (not replicated)
   manifest.json                # library + profile identity (replicated)
   library.db                   # SQLite — all metadata
-  covers/{release_id}          # cover art (no extension, content type in DB)
-  artists/{artist_id}          # artist images (no extension)
+  images/ab/cd/{id}            # library images (covers, artist photos — no extension, content type in DB)
   storage/ab/cd/{file_id}      # release files (no extension, content type in DB)
   pending_deletions.json       # deferred file deletion manifest
 ```
@@ -82,8 +81,7 @@ Every profile stores both release files and a metadata replica. Files are keyed 
 {location_path}/
   manifest.json
   library.db
-  covers/{release_id}
-  artists/{artist_id}
+  images/ab/cd/{id}
   storage/ab/cd/{file_id}
 ```
 
@@ -92,8 +90,7 @@ Every profile stores both release files and a metadata replica. Files are keyed 
 s3://{bucket}/
   manifest.json
   library.db.enc
-  covers/{release_id}
-  artists/{artist_id}
+  images/ab/cd/{id}
   storage/ab/cd/{file_id}
 ```
 
@@ -119,8 +116,10 @@ All release files for a given release are stored together. The `release_files` t
 Images that bae creates and manages. These live in the library home directory, not with the release files. They are replicated in full to every storage profile as part of metadata sync — even if that profile doesn't have the associated release's or artist's files.
 
 Two kinds:
-- **Release covers** — display art for album grids, detail views, playback. One per release. May originate from a file in the release, or fetched from MusicBrainz/Discogs. bae makes its own copy. Stored at `covers/{release_id}` (no extension — content type is in the DB).
-- **Artist images** — fetched from external sources. Stored at `artists/{artist_id}` (no extension).
+- **Release covers** — display art for album grids, detail views, playback. One per release. May originate from a file in the release, or fetched from MusicBrainz/Discogs. bae makes its own copy.
+- **Artist images** — fetched from external sources.
+
+All library images are stored under `images/` using the same hash-based prefixing as release files: `images/{prefix}/{subprefix}/{id}`. No extension on disk — content type is in the DB.
 
 ## DB tables
 
@@ -187,11 +186,7 @@ library_images
   created_at    TEXT NOT NULL
 ```
 
-File location is deterministic from type + id:
-- `type = "cover"` → `covers/{id}`
-- `type = "artist"` → `artists/{id}`
-
-No extension on disk — content type is in the DB. No `source_path` needed — the path is derived.
+File location is deterministic from the id: `images/{prefix}/{subprefix}/{id}` (same hash-based layout as `storage/`). No extension on disk — content type is in the DB. No `source_path` needed — the path is derived.
 
 `source_url` values:
 - MusicBrainz: CAA numeric image ID (e.g., `"12345678901"`)
@@ -200,24 +195,23 @@ No extension on disk — content type is in the DB. No `source_path` needed — 
 
 ## Protocol serving
 
-- `bae://cover/{release_id}` → query `library_images WHERE id = ? AND type = 'cover'` → read `covers/{release_id}` → serve with correct Content-Type
-- `bae://image/{file_id}` → query `release_files WHERE id = ?` → read from `source_path` → decrypt if needed → serve with correct Content-Type
-- `bae://artist-image/{artist_id}` → query `library_images WHERE id = ? AND type = 'artist'` → read `artists/{artist_id}` → serve with correct Content-Type
+- `bae://image/{id}` → query `library_images WHERE id = ?` → read `images/.../{id}` → serve with correct Content-Type
+- `bae://file/{file_id}` → query `release_files WHERE id = ?` → read from `source_path` → decrypt if needed → serve with correct Content-Type
 
 ## Metadata replication
 
-After mutations, desktop replicates metadata (DB, covers, artists) to all other profiles. Each profile's replica lives alongside the audio files at the profile root. See `02-storage-profiles.md` and `01-library-and-cloud.md` for the full sync flow.
+After mutations, desktop replicates metadata (DB, images) to all other profiles. Each profile's replica lives alongside the audio files at the profile root. See `02-storage-profiles.md` and `01-library-and-cloud.md` for the full sync flow.
 
 ## Cover lifecycle
 
-**Import with local cover**: user's release has cover.jpg → bae copies the bytes to `covers/{release_id}`, inserts `library_images` row with `type = "cover"`, `source = "local"`, `source_url = "release://cover.jpg"`. The original image stays untouched in the release files. The cover is a copy — bae can crop, resize, or optimize it without affecting the original. This is the same flow as a remotely fetched cover, just with a local source.
+**Import with local cover**: user's release has cover.jpg → bae copies the bytes to `images/.../{release_id}`, inserts `library_images` row with `type = "cover"`, `source = "local"`, `source_url = "release://cover.jpg"`. The original image stays untouched in the release files. The cover is a copy — bae can crop, resize, or optimize it without affecting the original. This is the same flow as a remotely fetched cover, just with a local source.
 
-**Import with remote cover**: user selects MB/Discogs cover → bae downloads, writes to `covers/{release_id}`, inserts `library_images` row with source_url pointing back to the external source.
+**Import with remote cover**: user selects MB/Discogs cover → bae downloads, writes to `images/.../{release_id}`, inserts `library_images` row with source_url pointing back to the external source.
 
-**Cover picker — change to existing release image**: user picks a different image from the release's files → bae reads from `source_path`, writes to `covers/{release_id}`, upserts `library_images` row.
+**Cover picker — change to existing release image**: user picks a different image from the release's files → bae reads from `source_path`, writes to `images/.../{release_id}`, upserts `library_images` row.
 
-**Cover picker — download new cover**: user picks from MB/Discogs → download, write to `covers/{release_id}`, upsert `library_images` row.
+**Cover picker — download new cover**: user picks from MB/Discogs → download, write to `images/.../{release_id}`, upsert `library_images` row.
 
-**Artist image fetch**: during import, fetch artist photo from Discogs/MB → write to `artists/{artist_id}`, upsert `library_images` row with `type = "artist"`.
+**Artist image fetch**: during import, fetch artist photo from Discogs/MB → write to `images/.../{artist_id}`, upsert `library_images` row with `type = "artist"`.
 
 In all cases: one file write, one DB write. No dual systems.
