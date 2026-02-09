@@ -1602,8 +1602,21 @@ impl Database {
         .await?;
         Ok(())
     }
-    /// Delete a storage profile
+    /// Delete a storage profile. Fails if any releases are linked to it.
     pub async fn delete_storage_profile(&self, profile_id: &str) -> Result<(), sqlx::Error> {
+        let count: i32 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM release_storage WHERE storage_profile_id = ?")
+                .bind(profile_id)
+                .fetch_one(&self.pool)
+                .await?;
+
+        if count > 0 {
+            return Err(sqlx::Error::Protocol(format!(
+                "Cannot delete storage profile: {} release(s) are still linked to it",
+                count
+            )));
+        }
+
         sqlx::query("DELETE FROM storage_profiles WHERE id = ?")
             .bind(profile_id)
             .execute(&self.pool)

@@ -34,6 +34,7 @@ pub fn Settings() -> Element {
                         is_loading: false,
                         editing_profile: None,
                         is_creating: false,
+                        delete_error: None,
                         encryption_configured: true,
                         encryption_key_fingerprint: "a1b2c3d4e5f6g7h8".to_string(),
                         on_copy_key: |_| {},

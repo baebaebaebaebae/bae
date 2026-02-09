@@ -243,6 +243,59 @@ async fn test_multiple_releases_different_profiles() {
     println!("✓ Release 2 correctly uses Profile B (bucket-b, eu-west-1, minio endpoint)");
 }
 
+/// Test that deleting a storage profile fails when releases are linked,
+/// and succeeds after unlinking.
+#[tokio::test]
+async fn test_delete_storage_profile_blocked_by_linked_releases() {
+    tracing_init();
+
+    let temp_dir = TempDir::new().unwrap();
+    let db_path = temp_dir.path().join("test.db");
+    let database = Database::new(db_path.to_str().unwrap()).await.unwrap();
+
+    // Create a storage profile
+    let profile = DbStorageProfile::new_local("Deletable Profile", "/tmp/storage", false);
+    let profile_id = profile.id.clone();
+    database.insert_storage_profile(&profile).await.unwrap();
+
+    // Create an album and release
+    let album = create_test_album("Test Album");
+    database.insert_album(&album).await.unwrap();
+    let release = create_test_release(&album.id);
+    let release_id = release.id.clone();
+    database.insert_release(&release).await.unwrap();
+
+    // Link release to profile
+    let release_storage = bae_core::db::DbReleaseStorage::new(&release_id, &profile_id);
+    database
+        .insert_release_storage(&release_storage)
+        .await
+        .unwrap();
+
+    // Try to delete the profile -- should fail because a release is linked
+    let result = database.delete_storage_profile(&profile_id).await;
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("release(s) are still linked"),
+        "Expected error about linked releases, got: {}",
+        err_msg
+    );
+
+    // Unlink the release
+    database.delete_release_storage(&release_id).await.unwrap();
+
+    // Now deleting should succeed
+    database.delete_storage_profile(&profile_id).await.unwrap();
+
+    // Verify it's actually gone
+    let profiles = database.get_all_storage_profiles().await.unwrap();
+    assert!(
+        profiles.iter().all(|p| p.id != profile_id),
+        "Profile should have been deleted"
+    );
+}
+
 // Helper functions to create test data
 
 fn create_test_album(title: &str) -> DbAlbum {

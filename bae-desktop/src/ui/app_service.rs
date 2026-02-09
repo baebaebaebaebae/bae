@@ -1149,6 +1149,8 @@ impl AppService {
         let profile_id = profile_id.to_string();
 
         spawn(async move {
+            state.storage_profiles().error().set(None);
+
             match library_manager.delete_storage_profile(&profile_id).await {
                 Ok(()) => {
                     tracing::info!("Deleted storage profile: {}", profile_id);
@@ -1160,10 +1162,17 @@ impl AppService {
                 }
                 Err(e) => {
                     tracing::error!("Failed to delete storage profile: {}", e);
-                    state
-                        .storage_profiles()
-                        .error()
-                        .set(Some(format!("Failed to delete: {}", e)));
+
+                    // Extract a clean user-facing message. The inner sqlx::Error::Protocol
+                    // wrapping adds confusing "server backend" framing, so we pull out
+                    // our business-logic message when present.
+                    let full = e.to_string();
+                    let user_msg = if let Some(pos) = full.find("Cannot delete") {
+                        full[pos..].to_string()
+                    } else {
+                        format!("Failed to delete storage profile: {}", e)
+                    };
+                    state.storage_profiles().error().set(Some(user_msg));
                 }
             }
         });
