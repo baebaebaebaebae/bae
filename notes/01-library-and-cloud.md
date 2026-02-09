@@ -36,12 +36,6 @@ bae starts simple and gets more capable as you need it to. You shouldn't have to
 
 The key belongs to the library, not to individual storage profiles. Everything that goes to cloud gets encrypted with it.
 
-Why not per-profile keys:
-- "Which key decrypts which album?" — confusing
-- Backup becomes "which keys do I need?"
-- No real security benefit
-- One key, one backup.
-
 Each library owns its buckets and directories exclusively — no sharing between libraries.
 
 ## What a Library Is
@@ -62,7 +56,7 @@ Two files at the root of every profile:
 - **`manifest.json`** — identifies library and profile (`library_id`, `library_name`, `encryption_key_fingerprint`, `profile_id`, `profile_name`, `replicated_at`). Replicated to every profile. Always unencrypted. A reader can identify the library, validate the key, and match the directory to a DB row from this alone.
 - **`config.yaml`** — device-specific settings (torrent ports, subsonic config, keyring hint flags). Not replicated. Only at the library home.
 
-Every storage profile — local or cloud — stores both release files and a replica of the library metadata. Adding more profiles means the metadata replicates to all of them. See `02-storage-profiles.md` for the full layout.
+Every storage profile — local or cloud — stores a full replica of the library metadata (DB + images). Release files are separate — each release's files live on one profile, not all of them. See `02-storage-profiles.md` for the full layout.
 
 | Data | Tier 1 (local) | Tier 2+ (cloud) |
 |------|----------------|-----------------|
