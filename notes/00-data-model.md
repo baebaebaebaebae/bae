@@ -32,9 +32,9 @@ Used by desktop — this is what opens when you launch the app. Contains all loc
 
 bae-server doesn't use `~/.bae/` — it points directly at a profile (local directory or S3 bucket).
 
-### Library layout
+### Library home
 
-Each library is a directory at `~/.bae/libraries/{uuid}/`:
+The library home is a storage profile — same layout as any other profile. What makes it special: `config.yaml` lives here (device-specific settings), and desktop writes the authoritative DB here (other profiles get replicas).
 
 ```
 ~/.bae/libraries/{uuid}/
@@ -46,8 +46,6 @@ Each library is a directory at `~/.bae/libraries/{uuid}/`:
   storage/ab/cd/{file_id}      # release files (no extension, content type in DB)
   pending_deletions.json       # deferred file deletion manifest
 ```
-
-The library home is itself a storage profile — it has a `storage_profiles` row in the DB like any other profile.
 
 **`manifest.json`** — identifies both the library and the profile that owns this directory. Present on every profile (library home, external drives, S3 buckets). Always unencrypted.
 
