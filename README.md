@@ -17,7 +17,7 @@ A desktop music library app. Album-oriented, metadata-first: you pick releases f
 
 **Storage**
 - Local filesystem or S3-compatible cloud (AWS, Backblaze B2, etc.)
-- Optional XChaCha20-Poly1305 encryption
+- XChaCha20-Poly1305 encryption at rest
 - Storage profiles for different destinations
 
 **Metadata**
