@@ -66,10 +66,6 @@ Every storage profile — local or cloud — stores a full replica of the librar
 | Encryption key | N/A | OS keyring (iCloud Keychain) |
 | config.yaml | Local | Local (device-specific, not replicated) |
 
-## SQLCipher (future)
-
-SQLCipher encrypts the SQLite DB at the page level. Not yet implemented — the DB is plain SQLite locally, encrypted as a blob for replication to cloud profiles. SQLCipher would mean the local DB is always encrypted at rest, and cloud replication becomes trivial (just upload the file). Worth revisiting once the core storage model is solid.
-
 ## Key Fingerprint
 
 SHA-256 of the key, truncated. Stored in `manifest.json` (replicated to every profile). Lets us detect the wrong key immediately instead of silently producing garbage.
@@ -180,7 +176,6 @@ The new library home is `prof-ccc`. Its `storage/` is empty — release files st
 
 ## What's Not Built Yet
 
-- SQLCipher (DB is plain SQLite locally, encrypted only for replication)
 - Bidirectional sync / conflict resolution
 - Periodic auto-upload
 - Incremental metadata sync (image diffing, etc.)
