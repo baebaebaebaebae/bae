@@ -808,7 +808,7 @@ pub fn StorageProfileEditorView(
                             div {
                                 span { class: "text-white block", "Encrypted" }
                                 span { class: "text-xs text-gray-500",
-                                    "AES-256 encryption. Data is unreadable without your key."
+                                    "Encrypted at rest. Data is unreadable without your key."
                                 }
                             }
                         }
