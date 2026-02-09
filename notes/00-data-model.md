@@ -116,7 +116,7 @@ All release files for a given release are stored together. The `files` table tra
 
 ### Metadata images
 
-Images that bae creates and manages. These live in the library home directory, not with the release files.
+Images that bae creates and manages. These live in the library home directory, not with the release files. They are replicated in full to every storage profile as part of metadata sync — even if that profile doesn't have the associated release's or artist's files.
 
 Two kinds:
 - **Release covers** — display art for album grids, detail views, playback. One per release. May originate from a file in the release, or fetched from MusicBrainz/Discogs. bae makes its own copy. Stored at `covers/{release_id}` (no extension — content type is in the DB).
