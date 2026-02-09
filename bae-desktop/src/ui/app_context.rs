@@ -35,6 +35,8 @@ pub struct AppServices {
     pub torrent_manager: torrent::LazyTorrentManager,
     /// Key service for secret management
     pub key_service: KeyService,
+    /// Hostname the image server is listening on
+    pub image_server_host: String,
     /// Port the image server is listening on
     pub image_server_port: u16,
 }
@@ -49,5 +51,6 @@ pub struct AppContext {
     #[cfg(feature = "torrent")]
     pub torrent_manager: torrent::LazyTorrentManager,
     pub key_service: KeyService,
+    pub image_server_host: String,
     pub image_server_port: u16,
 }

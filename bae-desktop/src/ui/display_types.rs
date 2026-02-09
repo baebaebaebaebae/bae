@@ -6,11 +6,11 @@ use bae_core::image_server::{artist_image_url, cover_url};
 // Re-export bae-ui types so existing code continues to work
 pub use bae_ui::{Album, Artist, File, Release, Track, TrackImportState};
 
-pub fn album_from_db_ref(db: &DbAlbum, port: u16) -> Album {
+pub fn album_from_db_ref(db: &DbAlbum, host: &str, port: u16) -> Album {
     let cover = db
         .cover_release_id
         .as_ref()
-        .map(|release_id| cover_url(port, release_id))
+        .map(|release_id| cover_url(host, port, release_id))
         .or_else(|| db.cover_art_url.clone());
 
     Album {
@@ -23,11 +23,11 @@ pub fn album_from_db_ref(db: &DbAlbum, port: u16) -> Album {
     }
 }
 
-pub fn artist_from_db_ref(db: &DbArtist, port: u16) -> Artist {
+pub fn artist_from_db_ref(db: &DbArtist, host: &str, port: u16) -> Artist {
     Artist {
         id: db.id.clone(),
         name: db.name.clone(),
-        image_url: Some(artist_image_url(port, &db.id)),
+        image_url: Some(artist_image_url(host, port, &db.id)),
     }
 }
 

@@ -13,6 +13,7 @@ use tracing::{error, info, trace};
 pub fn setup_media_controls(
     playback_handle: PlaybackHandle,
     library_manager: SharedLibraryManager,
+    image_server_host: String,
     image_server_port: u16,
     runtime_handle: tokio::runtime::Handle,
 ) -> Result<Arc<Mutex<MediaControls>>, souvlaki::Error> {
@@ -106,6 +107,7 @@ pub fn setup_media_controls(
     let controls_shared = Arc::new(Mutex::new(controls));
     {
         let controls_shared = controls_shared.clone();
+        let host = image_server_host;
         let port = image_server_port;
         runtime_handle.spawn(async move {
             let mut progress_rx = playback_handle_for_progress.subscribe_progress();
@@ -156,6 +158,7 @@ pub fn setup_media_controls(
                                 update_media_metadata(
                                     &controls_shared,
                                     &library_manager,
+                                    &host,
                                     port,
                                     track,
                                     duration,
@@ -219,6 +222,7 @@ fn update_playback_position(
 async fn update_media_metadata(
     controls: &Arc<Mutex<MediaControls>>,
     library_manager: &SharedLibraryManager,
+    image_server_host: &str,
     image_server_port: u16,
     track: &bae_core::db::DbTrack,
     duration: Option<std::time::Duration>,
@@ -278,7 +282,7 @@ async fn update_media_metadata(
     };
 
     let cover_url = cover_release_id
-        .map(|rid| image_server::cover_url(image_server_port, &rid))
+        .map(|rid| image_server::cover_url(image_server_host, image_server_port, &rid))
         .or(cover_art_url);
     let title = track.title.clone();
     let artist_str = artist_name.as_deref();
