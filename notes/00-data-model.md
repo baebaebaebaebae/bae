@@ -195,7 +195,7 @@ File location is deterministic from the id: `images/{prefix}/{subprefix}/{id}` (
 
 ## Image server
 
-Desktop runs a localhost HTTP image server (axum, OS-assigned port, HMAC-signed URLs). Two endpoints:
+Desktop and bae-server run a localhost HTTP image server (axum, OS-assigned port, HMAC-signed URLs). Two endpoints:
 
 - `/image/{id}` — serves library images (covers, artist photos). Looks up `library_images WHERE id = ?`, reads `images/.../{id}`, serves with correct Content-Type.
 - `/file/{file_id}` — serves release files. Looks up `release_files WHERE id = ?`, reads from `source_path`, decrypts if needed, serves with correct Content-Type.
