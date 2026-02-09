@@ -1075,12 +1075,10 @@ impl AppService {
         spawn(async move {
             let result = if is_new {
                 let location = storage_location_from_display(profile.location);
+                // Cloud profiles must always be encrypted; local profiles are never encrypted
+                let encrypted = location == StorageLocation::Cloud;
                 let db_profile = if location == StorageLocation::Local {
-                    DbStorageProfile::new_local(
-                        &profile.name,
-                        &profile.location_path,
-                        profile.encrypted,
-                    )
+                    DbStorageProfile::new_local(&profile.name, &profile.location_path, encrypted)
                 } else {
                     DbStorageProfile::new_cloud(
                         &profile.name,
@@ -1089,18 +1087,21 @@ impl AppService {
                         profile.cloud_endpoint.as_deref(),
                         profile.cloud_access_key.as_deref().unwrap_or(""),
                         profile.cloud_secret_key.as_deref().unwrap_or(""),
-                        profile.encrypted,
+                        encrypted,
                     )
                 }
                 .with_default(profile.is_default);
                 library_manager.insert_storage_profile(&db_profile).await
             } else {
+                let location = storage_location_from_display(profile.location);
+                // Cloud profiles must always be encrypted; local profiles are never encrypted
+                let encrypted = location == StorageLocation::Cloud;
                 let mut db_profile = DbStorageProfile {
                     id: profile.id.clone(),
                     name: profile.name.clone(),
-                    location: storage_location_from_display(profile.location),
+                    location,
                     location_path: profile.location_path.clone(),
-                    encrypted: profile.encrypted,
+                    encrypted,
                     is_default: profile.is_default,
                     cloud_bucket: profile.cloud_bucket.clone(),
                     cloud_region: profile.cloud_region.clone(),

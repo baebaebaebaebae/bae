@@ -540,7 +540,6 @@ pub fn StorageProfileEditorView(
             .unwrap_or_default()
     });
     let mut show_secrets = use_signal(|| false);
-    let mut encrypted = use_signal(|| profile.as_ref().map(|p| p.encrypted).unwrap_or(false));
     let mut is_default = use_signal(|| profile.as_ref().map(|p| p.is_default).unwrap_or(true));
     let mut validation_error = use_signal(|| Option::<String>::None);
 
@@ -564,7 +563,6 @@ pub fn StorageProfileEditorView(
         let new_cloud_endpoint = cloud_endpoint.read().clone();
         let new_cloud_access_key = cloud_access_key.read().clone();
         let new_cloud_secret_key = cloud_secret_key.read().clone();
-        let new_encrypted = *encrypted.read();
         let new_is_default = *is_default.read();
 
         // Validation
@@ -606,7 +604,7 @@ pub fn StorageProfileEditorView(
             } else {
                 String::new()
             },
-            encrypted: new_encrypted,
+            encrypted: new_location == StorageLocation::Cloud,
             is_default: new_is_default,
             cloud_bucket: if new_location == StorageLocation::Cloud {
                 Some(new_cloud_bucket)
@@ -670,10 +668,7 @@ pub fn StorageProfileEditorView(
                                 name: "location",
                                 class: "text-indigo-600 focus:ring-indigo-500",
                                 checked: *location.read() == StorageLocation::Local,
-                                onchange: move |_| {
-                                    location.set(StorageLocation::Local);
-                                    encrypted.set(false);
-                                },
+                                onchange: move |_| location.set(StorageLocation::Local),
                             }
                             span { class: "text-white", "Local Filesystem" }
                         }
@@ -797,21 +792,9 @@ pub fn StorageProfileEditorView(
                 }
 
                 if *location.read() == StorageLocation::Cloud {
-                    div { class: "space-y-3",
-                        label { class: "flex items-start gap-3 cursor-pointer",
-                            input {
-                                r#type: "checkbox",
-                                class: "rounded text-indigo-600 focus:ring-indigo-500 bg-gray-700 border-gray-600 mt-0.5",
-                                checked: *encrypted.read(),
-                                onchange: move |e| encrypted.set(e.checked()),
-                            }
-                            div {
-                                span { class: "text-white block", "Encrypted" }
-                                span { class: "text-xs text-gray-500",
-                                    "Encrypted at rest. Data is unreadable without your key."
-                                }
-                            }
-                        }
+                    div { class: "flex items-center gap-2 px-3 py-2 bg-green-900/30 border border-green-800 rounded-lg",
+                        KeyIcon { class: "w-4 h-4 text-green-400 flex-shrink-0" }
+                        span { class: "text-sm text-green-300", "Cloud profiles are always encrypted." }
                     }
                 }
 
