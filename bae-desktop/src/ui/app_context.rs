@@ -6,6 +6,7 @@
 
 use bae_core::cache;
 use bae_core::config;
+use bae_core::image_server::ImageServerHandle;
 use bae_core::import;
 use bae_core::keys::KeyService;
 use bae_core::library::SharedLibraryManager;
@@ -35,10 +36,8 @@ pub struct AppServices {
     pub torrent_manager: torrent::LazyTorrentManager,
     /// Key service for secret management
     pub key_service: KeyService,
-    /// Hostname the image server is listening on
-    pub image_server_host: String,
-    /// Port the image server is listening on
-    pub image_server_port: u16,
+    /// Image server connection handle
+    pub image_server: ImageServerHandle,
 }
 
 #[derive(Clone)]
@@ -51,6 +50,5 @@ pub struct AppContext {
     #[cfg(feature = "torrent")]
     pub torrent_manager: torrent::LazyTorrentManager,
     pub key_service: KeyService,
-    pub image_server_host: String,
-    pub image_server_port: u16,
+    pub image_server: ImageServerHandle,
 }

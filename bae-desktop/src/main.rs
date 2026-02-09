@@ -211,18 +211,16 @@ fn main() {
     );
 
     // Start image server (always on, OS-assigned port)
-    let image_server_host = "127.0.0.1".to_string();
-    let image_server_port = runtime_handle.block_on(image_server::start_image_server(
+    let image_server = runtime_handle.block_on(image_server::start_image_server(
         library_manager.clone(),
         config.library_dir.clone(),
-        &image_server_host,
+        "127.0.0.1",
     ));
 
     let media_controls = match media_controls::setup_media_controls(
         playback_handle.clone(),
         library_manager.clone(),
-        image_server_host.clone(),
-        image_server_port,
+        image_server.clone(),
         runtime_handle.clone(),
     ) {
         Ok(controls) => {
@@ -252,8 +250,7 @@ fn main() {
         torrent_manager,
         cache: cache_manager.clone(),
         key_service,
-        image_server_host,
-        image_server_port,
+        image_server,
     };
 
     if config.subsonic_enabled {
