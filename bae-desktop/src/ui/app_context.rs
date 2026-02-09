@@ -35,11 +35,9 @@ pub struct AppServices {
     pub torrent_manager: torrent::LazyTorrentManager,
     /// Key service for secret management
     pub key_service: KeyService,
+    /// Port the image server is listening on
+    pub image_server_port: u16,
 }
-
-// =============================================================================
-// Legacy: AppContext for launch_app backwards compatibility
-// =============================================================================
 
 #[derive(Clone)]
 pub struct AppContext {
@@ -51,5 +49,5 @@ pub struct AppContext {
     #[cfg(feature = "torrent")]
     pub torrent_manager: torrent::LazyTorrentManager,
     pub key_service: KeyService,
-    pub runtime_handle: tokio::runtime::Handle,
+    pub image_server_port: u16,
 }

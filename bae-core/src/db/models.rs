@@ -127,7 +127,7 @@ pub struct DbAlbum {
     pub bandcamp_album_id: Option<String>,
     /// Release ID whose cover art is used for this album
     pub cover_release_id: Option<String>,
-    /// Cover art URL for immediate display (remote URL or bae://local/... for local files)
+    /// Cover art URL for immediate display (remote URL)
     /// Used before import completes and cover_release_id is set
     pub cover_art_url: Option<String>,
     /// True for "Various Artists" compilation albums

@@ -150,8 +150,9 @@ pub enum DiscIdLookupResult {
 /// Detect local metadata and files for a candidate before it is shown in the UI.
 pub fn detect_candidate_locally(
     candidate: &CoreDetectedCandidate,
+    port: u16,
 ) -> Result<(CategorizedFileInfo, DisplayFolderMetadata), String> {
-    let files = categorized_files_from_scanned(&candidate.files);
+    let files = categorized_files_from_scanned(&candidate.files, port);
 
     info!(
         "Detecting metadata for candidate: {} ({:?})",
@@ -862,16 +863,17 @@ pub async fn consume_scan_events(app: AppService, mut rx: broadcast::Receiver<Sc
                         continue;
                     }
 
-                    let (files, metadata) = match detect_candidate_locally(&candidate) {
-                        Ok(result) => result,
-                        Err(e) => {
-                            warn!(
-                                "Skipping candidate {} due to detection failure: {}",
-                                candidate.name, e
-                            );
-                            continue;
-                        }
-                    };
+                    let (files, metadata) =
+                        match detect_candidate_locally(&candidate, app.image_server_port) {
+                            Ok(result) => result,
+                            Err(e) => {
+                                warn!(
+                                    "Skipping candidate {} due to detection failure: {}",
+                                    candidate.name, e
+                                );
+                                continue;
+                            }
+                        };
 
                     // Convert to display type
                     let display_candidate = bae_ui::display_types::DetectedCandidate {
@@ -945,6 +947,7 @@ pub fn has_unclean_state(app: &AppService) -> bool {
 /// Convert scanned file to display FileInfo
 fn scanned_to_file_info(
     f: &bae_core::import::folder_scanner::ScannedFile,
+    port: u16,
 ) -> bae_ui::display_types::FileInfo {
     let ext_lower = f
         .path
@@ -960,7 +963,7 @@ fn scanned_to_file_info(
         .unwrap_or("")
         .to_string();
     let path = f.path.to_string_lossy().to_string();
-    let display_url = crate::ui::local_file_url::local_file_url(&f.path);
+    let display_url = bae_core::image_server::local_file_url(port, &f.path);
 
     bae_ui::display_types::FileInfo {
         name,
@@ -974,6 +977,7 @@ fn scanned_to_file_info(
 /// Convert CategorizedFiles from core to display type
 pub fn categorized_files_from_scanned(
     files: &bae_core::import::CategorizedFiles,
+    port: u16,
 ) -> CategorizedFileInfo {
     use bae_core::import::folder_scanner::AudioContent;
     use bae_ui::display_types::{CueFlacPairInfo, FileInfo};
@@ -1005,17 +1009,27 @@ pub fn categorized_files_from_scanned(
             AudioContentInfo::CueFlacPairs(display_pairs)
         }
         AudioContent::TrackFiles(tracks) => {
-            let mut display_tracks: Vec<FileInfo> =
-                tracks.iter().map(scanned_to_file_info).collect();
+            let mut display_tracks: Vec<FileInfo> = tracks
+                .iter()
+                .map(|t| scanned_to_file_info(t, port))
+                .collect();
             display_tracks.sort_by(|a, b| a.name.cmp(&b.name));
             AudioContentInfo::TrackFiles(display_tracks)
         }
     };
 
-    let mut artwork: Vec<FileInfo> = files.artwork.iter().map(scanned_to_file_info).collect();
+    let mut artwork: Vec<FileInfo> = files
+        .artwork
+        .iter()
+        .map(|f| scanned_to_file_info(f, port))
+        .collect();
     artwork.sort_by(|a, b| a.name.cmp(&b.name));
 
-    let mut documents: Vec<FileInfo> = files.documents.iter().map(scanned_to_file_info).collect();
+    let mut documents: Vec<FileInfo> = files
+        .documents
+        .iter()
+        .map(|f| scanned_to_file_info(f, port))
+        .collect();
     documents.sort_by(|a, b| a.name.cmp(&b.name));
 
     CategorizedFileInfo {

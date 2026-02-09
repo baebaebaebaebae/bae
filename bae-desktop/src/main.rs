@@ -1,4 +1,5 @@
 use bae_core::db::Database;
+use bae_core::image_server;
 use bae_core::keys::KeyService;
 use bae_core::library::SharedLibraryManager;
 use bae_core::subsonic::create_router;
@@ -209,10 +210,16 @@ fn main() {
         runtime_handle.clone(),
     );
 
+    // Start image server (always on, OS-assigned port)
+    let image_server_port = runtime_handle.block_on(image_server::start_image_server(
+        library_manager.clone(),
+        config.library_dir.clone(),
+    ));
+
     let media_controls = match media_controls::setup_media_controls(
         playback_handle.clone(),
         library_manager.clone(),
-        config.library_dir.clone(),
+        image_server_port,
         runtime_handle.clone(),
     ) {
         Ok(controls) => {
@@ -242,7 +249,7 @@ fn main() {
         torrent_manager,
         cache: cache_manager.clone(),
         key_service,
-        runtime_handle: runtime_handle.clone(),
+        image_server_port,
     };
 
     if config.subsonic_enabled {
