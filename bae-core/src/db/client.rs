@@ -9,7 +9,10 @@ pub struct Database {
     pool: SqlitePool,
 }
 impl Database {
-    /// Initialize database connection and run migrations
+    /// Initialize database connection and run migrations.
+    ///
+    /// Note: sqlx enables `PRAGMA foreign_keys = ON` by default (since v0.4),
+    /// so FK constraints in the schema are enforced on every connection.
     pub async fn new(database_path: &str) -> Result<Self, sqlx::Error> {
         let database_url = format!("sqlite://{}?mode=rwc", database_path);
         info!("Connecting to {}", database_url);
