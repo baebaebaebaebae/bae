@@ -30,7 +30,7 @@ Used by desktop — this is what opens when you launch the app. Contains all loc
     {uuid}/                    # one directory per library
 ```
 
-bae-server doesn't use `~/.bae/` — it points directly at any profile (local directory or S3 bucket).
+bae-server doesn't use `~/.bae/` — it points directly at a profile (local directory or S3 bucket).
 
 ### Library layout
 
