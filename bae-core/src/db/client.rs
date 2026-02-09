@@ -1,7 +1,9 @@
 use crate::content_type::ContentType;
 use crate::db::models::*;
 use chrono::{DateTime, Utc};
+use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Row, SqlitePool};
+use std::str::FromStr;
 use tracing::info;
 use uuid::Uuid;
 #[derive(Debug, Clone)]
@@ -13,7 +15,10 @@ impl Database {
     pub async fn new(database_path: &str) -> Result<Self, sqlx::Error> {
         let database_url = format!("sqlite://{}?mode=rwc", database_path);
         info!("Connecting to {}", database_url);
-        let pool = SqlitePool::connect(&database_url).await?;
+
+        let options = SqliteConnectOptions::from_str(&database_url)?.pragma("foreign_keys", "ON");
+        let pool = SqlitePool::connect_with(options).await?;
+
         sqlx::migrate!().run(&pool).await.map_err(|e| {
             tracing::error!("Migration failed: {}", e);
             sqlx::Error::Protocol(format!("Migration failed: {}", e))
@@ -25,7 +30,10 @@ impl Database {
     pub async fn open_read_only(database_path: &str) -> Result<Self, sqlx::Error> {
         let database_url = format!("sqlite://{}?mode=ro", database_path);
         info!("Connecting read-only to {}", database_url);
-        let pool = SqlitePool::connect(&database_url).await?;
+
+        let options = SqliteConnectOptions::from_str(&database_url)?.pragma("foreign_keys", "ON");
+        let pool = SqlitePool::connect_with(options).await?;
+
         Ok(Database { pool })
     }
     /// Create a consistent snapshot of the database at the given path.

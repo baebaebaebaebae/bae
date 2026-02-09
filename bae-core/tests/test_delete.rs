@@ -69,6 +69,49 @@ fn create_test_track(release_id: &str, track_number: i32) -> DbTrack {
 }
 
 #[tokio::test]
+async fn test_foreign_keys_reject_invalid_references() {
+    let (_library_manager, database, _temp_dir) = setup_test_environment().await;
+
+    // Inserting a release that references a nonexistent album should fail
+    let release = create_test_release("nonexistent-album-id");
+    let result = database.insert_release(&release).await;
+    assert!(
+        result.is_err(),
+        "FK constraint should reject release with nonexistent album_id"
+    );
+
+    // Inserting a track that references a nonexistent release should fail
+    let track = create_test_track("nonexistent-release-id", 1);
+    let result = database.insert_track(&track).await;
+    assert!(
+        result.is_err(),
+        "FK constraint should reject track with nonexistent release_id"
+    );
+}
+
+#[tokio::test]
+async fn test_cascade_delete_at_database_level() {
+    let (_library_manager, database, _temp_dir) = setup_test_environment().await;
+    let album = create_test_album();
+    let release = create_test_release(&album.id);
+    let track = create_test_track(&release.id, 1);
+
+    database.insert_album(&album).await.unwrap();
+    database.insert_release(&release).await.unwrap();
+    database.insert_track(&track).await.unwrap();
+
+    // Delete the album directly via Database (not LibraryManager)
+    // With foreign_keys=ON, this cascades to releases and tracks
+    database.delete_album(&album.id).await.unwrap();
+
+    let releases = database.get_releases_for_album(&album.id).await.unwrap();
+    assert!(releases.is_empty(), "Releases should be cascade-deleted");
+
+    let tracks = database.get_tracks_for_release(&release.id).await.unwrap();
+    assert!(tracks.is_empty(), "Tracks should be cascade-deleted");
+}
+
+#[tokio::test]
 async fn test_delete_album_integration() {
     let (library_manager, database, _temp_dir) = setup_test_environment().await;
     let album = create_test_album();
