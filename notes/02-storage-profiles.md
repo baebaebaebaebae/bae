@@ -42,7 +42,7 @@ Every profile stores a full replica of the library metadata (DB + images). It ma
 s3://{bucket}/
   manifest.json               # encrypted
   library.db.enc
-  images/ab/cd/{id}           # individually encrypted
+  images/ab/cd/{id}           # encrypted
   storage/ab/cd/{file_id}     # encrypted
 ```
 
