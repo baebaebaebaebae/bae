@@ -310,7 +310,7 @@ async fn test_storageless_delete_preserves_files() {
     info!("Deleting release {}", release_id);
     shared_library_manager
         .get()
-        .delete_release(&release_id)
+        .delete_release(&release_id, &db_dir)
         .await
         .expect("delete release");
 

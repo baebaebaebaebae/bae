@@ -3,10 +3,11 @@ use crate::cloud_storage::CloudStorageError;
 use crate::db::{
     Database, DbAlbum, DbAlbumArtist, DbArtist, DbAudioFormat, DbFile, DbImport, DbLibraryImage,
     DbRelease, DbStorageProfile, DbTorrent, DbTrack, DbTrackArtist, ImportOperationStatus,
-    ImportStatus, LibraryImageType, LibrarySearchResults,
+    ImportStatus, LibraryImageType, LibrarySearchResults, StorageLocation,
 };
 use crate::encryption::EncryptionService;
 use crate::library::export::ExportService;
+use crate::storage::cleanup::{append_pending_deletions, PendingDeletion};
 use std::path::Path;
 use thiserror::Error;
 use tokio::sync::broadcast;
@@ -407,35 +408,72 @@ impl LibraryManager {
             .await?;
         Ok(())
     }
-    /// Delete a release and its associated data
-    ///
-    /// This will:
-    /// 1. Delete files from storage (errors are logged but don't stop deletion)
-    /// 2. Delete the release from database (cascades to tracks, files, etc.)
-    /// 3. If this was the last release for the album, also delete the album
-    pub async fn delete_release(&self, release_id: &str) -> Result<(), LibraryError> {
-        let album_id = self.get_album_id_for_release(release_id).await?;
 
-        // Try to get storage reader for file cleanup
-        if let Ok(Some(profile)) = self
+    /// Queue all files for a release into the pending deletions manifest.
+    ///
+    /// Only queues files that have a storage profile (bae-managed storage).
+    /// Self-managed files (no profile) are left untouched.
+    async fn queue_release_files_for_deletion(&self, release_id: &str, library_path: &Path) {
+        let profile = match self
             .database
             .get_storage_profile_for_release(release_id)
             .await
         {
-            if let Ok(storage) = crate::storage::create_storage_reader(&profile).await {
-                let files = self.get_files_for_release(release_id).await?;
-                for file in &files {
-                    if let Some(ref source_path) = file.source_path {
-                        if let Err(e) = storage.delete(source_path).await {
-                            warn!(
-                                "Failed to delete file {} from storage: {}. Continuing with database deletion.",
-                                file.id, e
-                            );
-                        }
-                    }
+            Ok(Some(profile)) => profile,
+            _ => return,
+        };
+
+        let files = match self.get_files_for_release(release_id).await {
+            Ok(files) => files,
+            Err(e) => {
+                warn!("Failed to get files for release {}: {}", release_id, e);
+                return;
+            }
+        };
+
+        let pending: Vec<PendingDeletion> = files
+            .iter()
+            .filter_map(|f| {
+                let source_path = f.source_path.as_ref()?;
+                if profile.location == StorageLocation::Cloud {
+                    Some(PendingDeletion::Cloud {
+                        profile_id: profile.id.clone(),
+                        key: source_path.clone(),
+                    })
+                } else {
+                    Some(PendingDeletion::Local {
+                        path: source_path.clone(),
+                    })
                 }
+            })
+            .collect();
+
+        if !pending.is_empty() {
+            if let Err(e) = append_pending_deletions(library_path, &pending).await {
+                warn!("Failed to queue deferred deletions: {}", e);
             }
         }
+    }
+
+    /// Delete a release and its associated data
+    ///
+    /// This will:
+    /// 1. Queue files for deferred deletion via the pending deletions manifest
+    /// 2. Delete the release from database (cascades to tracks, files, etc.)
+    /// 3. If this was the last release for the album, also delete the album
+    ///
+    /// File cleanup happens asynchronously via the cleanup service, which retries
+    /// on failure. This prevents orphaned cloud objects when deletion fails.
+    pub async fn delete_release(
+        &self,
+        release_id: &str,
+        library_path: &Path,
+    ) -> Result<(), LibraryError> {
+        let album_id = self.get_album_id_for_release(release_id).await?;
+
+        // Queue files for deferred deletion before removing DB records
+        self.queue_release_files_for_deletion(release_id, library_path)
+            .await;
 
         self.database.delete_release(release_id).await?;
         let remaining_releases = self.get_releases_for_album(&album_id).await?;
@@ -453,32 +491,22 @@ impl LibraryManager {
     ///
     /// This will:
     /// 1. Get all releases for the album
-    /// 2. For each release, delete files from storage
+    /// 2. Queue files for deferred deletion via the pending deletions manifest
     /// 3. Delete the album from database (cascades to releases and all related data)
-    pub async fn delete_album(&self, album_id: &str) -> Result<(), LibraryError> {
+    ///
+    /// File cleanup happens asynchronously via the cleanup service, which retries
+    /// on failure. This prevents orphaned cloud objects when deletion fails.
+    pub async fn delete_album(
+        &self,
+        album_id: &str,
+        library_path: &Path,
+    ) -> Result<(), LibraryError> {
         let releases = self.get_releases_for_album(album_id).await?;
         for release in &releases {
-            // Try to get storage reader for file cleanup
-            if let Ok(Some(profile)) = self
-                .database
-                .get_storage_profile_for_release(&release.id)
-                .await
-            {
-                if let Ok(storage) = crate::storage::create_storage_reader(&profile).await {
-                    let files = self.get_files_for_release(&release.id).await?;
-                    for file in &files {
-                        if let Some(ref source_path) = file.source_path {
-                            if let Err(e) = storage.delete(source_path).await {
-                                warn!(
-                                    "Failed to delete file {} from storage: {}. Continuing with database deletion.",
-                                    file.id, e
-                                );
-                            }
-                        }
-                    }
-                }
-            }
+            self.queue_release_files_for_deletion(&release.id, library_path)
+                .await;
         }
+
         self.database.delete_album(album_id).await?;
 
         // Notify UI that library has changed
@@ -727,14 +755,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_release_with_single_release_deletes_album() {
-        let (manager, _temp_dir) = setup_test_manager().await;
+        let (manager, temp_dir) = setup_test_manager().await;
         let album = create_test_album();
         let release = create_test_release(&album.id);
 
         manager.database.insert_album(&album).await.unwrap();
         manager.database.insert_release(&release).await.unwrap();
 
-        manager.delete_release(&release.id).await.unwrap();
+        manager
+            .delete_release(&release.id, temp_dir.path())
+            .await
+            .unwrap();
 
         let album_result = manager.database.get_album_by_id(&album.id).await.unwrap();
         assert!(album_result.is_none());
@@ -748,7 +779,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_release_with_multiple_releases_preserves_album() {
-        let (manager, _temp_dir) = setup_test_manager().await;
+        let (manager, temp_dir) = setup_test_manager().await;
         let album = create_test_album();
         let release1 = create_test_release(&album.id);
         let release2 = create_test_release(&album.id);
@@ -757,7 +788,10 @@ mod tests {
         manager.database.insert_release(&release1).await.unwrap();
         manager.database.insert_release(&release2).await.unwrap();
 
-        manager.delete_release(&release1.id).await.unwrap();
+        manager
+            .delete_release(&release1.id, temp_dir.path())
+            .await
+            .unwrap();
 
         let album_result = manager.database.get_album_by_id(&album.id).await.unwrap();
         assert!(album_result.is_some());
@@ -772,7 +806,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_album_deletes_all_releases() {
-        let (manager, _temp_dir) = setup_test_manager().await;
+        let (manager, temp_dir) = setup_test_manager().await;
         let album = create_test_album();
         let release1 = create_test_release(&album.id);
         let release2 = create_test_release(&album.id);
@@ -781,7 +815,10 @@ mod tests {
         manager.database.insert_release(&release1).await.unwrap();
         manager.database.insert_release(&release2).await.unwrap();
 
-        manager.delete_album(&album.id).await.unwrap();
+        manager
+            .delete_album(&album.id, temp_dir.path())
+            .await
+            .unwrap();
 
         let album_result = manager.database.get_album_by_id(&album.id).await.unwrap();
         assert!(album_result.is_none());

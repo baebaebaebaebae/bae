@@ -81,7 +81,11 @@ async fn test_delete_album_integration() {
     database.insert_track(&track1).await.unwrap();
     database.insert_track(&track2).await.unwrap();
 
-    library_manager.get().delete_album(&album.id).await.unwrap();
+    library_manager
+        .get()
+        .delete_album(&album.id, _temp_dir.path())
+        .await
+        .unwrap();
 
     let album_result = library_manager
         .get()
@@ -118,7 +122,7 @@ async fn test_delete_release_integration() {
 
     library_manager
         .get()
-        .delete_release(&release1.id)
+        .delete_release(&release1.id, _temp_dir.path())
         .await
         .unwrap();
 
@@ -163,7 +167,7 @@ async fn test_delete_last_release_deletes_album() {
 
     library_manager
         .get()
-        .delete_release(&release.id)
+        .delete_release(&release.id, _temp_dir.path())
         .await
         .unwrap();
 
