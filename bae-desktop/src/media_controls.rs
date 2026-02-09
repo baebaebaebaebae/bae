@@ -1,18 +1,19 @@
+use bae_core::image_server::ImageServerHandle;
 use bae_core::library::SharedLibraryManager;
-use bae_core::library_dir::LibraryDir;
 use bae_core::playback::{PlaybackHandle, PlaybackProgress, PlaybackState};
 use souvlaki::{
     MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig,
 };
 use std::sync::{Arc, Mutex};
 use tracing::{error, info, trace};
+
 /// Initialize media controls for macOS
 /// This handles system media key events (play/pause FN key)
 /// Returns the MediaControls handle which must be kept alive for the app lifetime
 pub fn setup_media_controls(
     playback_handle: PlaybackHandle,
     library_manager: SharedLibraryManager,
-    library_dir: LibraryDir,
+    image_server: ImageServerHandle,
     runtime_handle: tokio::runtime::Handle,
 ) -> Result<Arc<Mutex<MediaControls>>, souvlaki::Error> {
     let current_state = Arc::new(Mutex::new(PlaybackState::Stopped));
@@ -105,11 +106,11 @@ pub fn setup_media_controls(
     let controls_shared = Arc::new(Mutex::new(controls));
     {
         let controls_shared = controls_shared.clone();
+        let imgs = image_server;
         runtime_handle.spawn(async move {
             let mut progress_rx = playback_handle_for_progress.subscribe_progress();
             let current_state = current_state_for_progress;
             let library_manager = library_manager_for_metadata;
-            let library_dir = library_dir;
             while let Some(progress) = progress_rx.recv().await {
                 match progress {
                     PlaybackProgress::StateChanged { state } => {
@@ -155,7 +156,7 @@ pub fn setup_media_controls(
                                 update_media_metadata(
                                     &controls_shared,
                                     &library_manager,
-                                    &library_dir,
+                                    &imgs,
                                     track,
                                     duration,
                                 )
@@ -183,6 +184,7 @@ pub fn setup_media_controls(
     info!("Media controls initialized");
     Ok(controls_shared)
 }
+
 /// Update playback position in macOS media controls
 fn update_playback_position(
     controls_shared: &Arc<Mutex<MediaControls>>,
@@ -212,11 +214,12 @@ fn update_playback_position(
         );
     }
 }
+
 /// Update media metadata in system media controls
 async fn update_media_metadata(
     controls: &Arc<Mutex<MediaControls>>,
     library_manager: &SharedLibraryManager,
-    library_path: &std::path::Path,
+    imgs: &ImageServerHandle,
     track: &bae_core::db::DbTrack,
     duration: Option<std::time::Duration>,
 ) {
@@ -241,6 +244,7 @@ async fn update_media_metadata(
             None
         }
     };
+
     let (album_name, cover_release_id, cover_art_url) = match library_manager
         .get()
         .get_album_id_for_release(&track.release_id)
@@ -273,7 +277,9 @@ async fn update_media_metadata(
         }
     };
 
-    let cover_url = resolve_cover_file_url(library_path, cover_release_id).or(cover_art_url);
+    let cover_url = cover_release_id
+        .map(|rid| imgs.cover_url(&rid))
+        .or(cover_art_url);
     let title = track.title.clone();
     let artist_str = artist_name.as_deref();
     let album_str = album_name.as_deref();
@@ -296,20 +302,5 @@ async fn update_media_metadata(
             album_name,
             cover_url
         );
-    }
-}
-
-/// Resolve cover art to a file:// URL for macOS media controls.
-/// Looks up the cover in the library's covers directory.
-fn resolve_cover_file_url(
-    library_path: &std::path::Path,
-    cover_release_id: Option<String>,
-) -> Option<String> {
-    let release_id = cover_release_id?;
-    let cover_path = library_path.join("covers").join(&release_id);
-    if cover_path.exists() {
-        Some(format!("file://{}", cover_path.display()))
-    } else {
-        None
     }
 }

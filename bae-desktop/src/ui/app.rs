@@ -1,9 +1,7 @@
 use crate::ui::components::import::ImportWorkflowManager;
 use crate::ui::components::*;
-use crate::ui::protocol_handler::{handle_protocol_request, ImageServices};
 #[cfg(target_os = "macos")]
 use crate::ui::window_activation::setup_macos_window_activation;
-use crate::ui::AppContext;
 
 use dioxus::desktop::{Config as DioxusConfig, WindowBuilder};
 use dioxus::prelude::*;
@@ -30,21 +28,11 @@ pub enum Route {
     Settings {},
 }
 
-pub fn make_config(context: &AppContext) -> DioxusConfig {
-    let services = ImageServices {
-        library_manager: context.library_manager.clone(),
-        library_dir: context.config.library_dir.clone(),
-        runtime_handle: context.runtime_handle.clone(),
-    };
-
+pub fn make_config() -> DioxusConfig {
     DioxusConfig::default()
         .with_window(make_window())
         .with_background_color((0x0f, 0x11, 0x16, 0xff))
         .with_disable_drag_drop_handler(false)
-        .with_custom_protocol("bae", move |_webview_id, request| {
-            let uri = request.uri().to_string();
-            handle_protocol_request(&uri, &services)
-        })
 }
 
 fn make_window() -> WindowBuilder {
@@ -58,7 +46,7 @@ fn make_window() -> WindowBuilder {
         .with_background_color((0x0f, 0x11, 0x16, 0xff))
 }
 
-pub fn launch_app(context: AppContext) {
+pub fn launch_app(context: super::app_context::AppContext) {
     #[cfg(target_os = "macos")]
     {
         use crate::ui::window_activation::{setup_app_menu, setup_transparent_titlebar};
@@ -77,6 +65,7 @@ pub fn launch_app(context: AppContext) {
         cache: context.cache.clone(),
         torrent_manager: context.torrent_manager.clone(),
         key_service: context.key_service.clone(),
+        image_server: context.image_server.clone(),
     };
     #[cfg(not(feature = "torrent"))]
     let services = super::app_context::AppServices {
@@ -86,10 +75,11 @@ pub fn launch_app(context: AppContext) {
         playback_handle: context.playback_handle.clone(),
         cache: context.cache.clone(),
         key_service: context.key_service.clone(),
+        image_server: context.image_server.clone(),
     };
 
     LaunchBuilder::desktop()
-        .with_cfg(make_config(&context))
+        .with_cfg(make_config())
         // Provide AppServices (Send-safe) - App struct is created inside component
         .with_context_provider(move || Box::new(services.clone()))
         .launch(App);

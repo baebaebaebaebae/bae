@@ -10,7 +10,6 @@
 //! - Read state reactively from `app.state`
 //! - Call action methods like `app.play_album()`
 
-use crate::ui::cover_url;
 use crate::ui::display_types::{
     album_from_db_ref, artist_from_db_ref, file_from_db_ref, release_from_db_ref, track_from_db_ref,
 };
@@ -18,6 +17,7 @@ use crate::ui::import_helpers::consume_scan_events;
 use bae_core::cache;
 use bae_core::config;
 use bae_core::db::{DbStorageProfile, ImportStatus, StorageLocation};
+use bae_core::image_server::ImageServerHandle;
 use bae_core::import::{self, ImportProgress};
 use bae_core::keys::KeyService;
 use bae_core::library::{LibraryEvent, SharedLibraryManager};
@@ -61,6 +61,8 @@ pub struct AppService {
     pub torrent_manager: torrent::LazyTorrentManager,
     /// Key service for secret management
     pub key_service: KeyService,
+    /// Image server connection handle
+    pub image_server: ImageServerHandle,
 }
 
 impl AppService {
@@ -77,6 +79,7 @@ impl AppService {
                 cache: services.cache.clone(),
                 torrent_manager: services.torrent_manager.clone(),
                 key_service: services.key_service.clone(),
+                image_server: services.image_server.clone(),
             }
         }
         #[cfg(not(feature = "torrent"))]
@@ -89,6 +92,7 @@ impl AppService {
                 playback_handle: services.playback_handle.clone(),
                 cache: services.cache.clone(),
                 key_service: services.key_service.clone(),
+                image_server: services.image_server.clone(),
             }
         }
     }
@@ -117,6 +121,7 @@ impl AppService {
         let state = self.state;
         let playback_handle = self.playback_handle.clone();
         let library_manager = self.library_manager.clone();
+        let imgs = self.image_server.clone();
 
         spawn(async move {
             let mut progress_rx = playback_handle.subscribe_progress();
@@ -205,7 +210,7 @@ impl AppService {
                                                 let cover = album
                                                     .cover_release_id
                                                     .as_ref()
-                                                    .map(|release_id| cover_url(release_id))
+                                                    .map(|rid| imgs.cover_url(rid))
                                                     .or(album.cover_art_url.clone());
                                                 (album.title, cover)
                                             } else {
@@ -302,7 +307,7 @@ impl AppService {
                                         let cover = album
                                             .cover_release_id
                                             .as_ref()
-                                            .map(|release_id| cover_url(release_id))
+                                            .map(|rid| imgs.cover_url(rid))
                                             .or(album.cover_art_url.clone());
                                         (album.title, cover)
                                     } else {
@@ -369,6 +374,7 @@ impl AppService {
         let state = self.state;
         let import_handle = self.import_handle.clone();
         let library_manager = self.library_manager.clone();
+        let imgs = self.image_server.clone();
 
         spawn(async move {
             let mut progress_rx = import_handle.subscribe_all_imports();
@@ -379,7 +385,7 @@ impl AppService {
                 handle_import_progress(&state, event);
 
                 if should_reload {
-                    load_library(&state, &library_manager).await;
+                    load_library(&state, &library_manager, &imgs).await;
                 }
             }
         });
@@ -389,13 +395,14 @@ impl AppService {
     fn subscribe_library_events(&self) {
         let state = self.state;
         let library_manager = self.library_manager.clone();
+        let imgs = self.image_server.clone();
 
         spawn(async move {
             let mut rx = library_manager.get().subscribe_events();
             while let Ok(event) = rx.recv().await {
                 match event {
                     LibraryEvent::AlbumsChanged => {
-                        load_library(&state, &library_manager).await;
+                        load_library(&state, &library_manager, &imgs).await;
                     }
                 }
             }
@@ -599,9 +606,10 @@ impl AppService {
     fn load_library(&self) {
         let state = self.state;
         let library_manager = self.library_manager.clone();
+        let imgs = self.image_server.clone();
 
         spawn(async move {
-            load_library(&state, &library_manager).await;
+            load_library(&state, &library_manager, &imgs).await;
         });
     }
 
@@ -615,9 +623,17 @@ impl AppService {
         let library_manager = self.library_manager.clone();
         let album_id = album_id.to_string();
         let release_id = release_id.map(|s| s.to_string());
+        let imgs = self.image_server.clone();
 
         spawn(async move {
-            load_album_detail(&state, &library_manager, &album_id, release_id.as_deref()).await;
+            load_album_detail(
+                &state,
+                &library_manager,
+                &album_id,
+                release_id.as_deref(),
+                &imgs,
+            )
+            .await;
         });
     }
 
@@ -664,6 +680,7 @@ impl AppService {
         let config = self.config.clone();
         let album_id = album_id.to_string();
         let release_id = release_id.to_string();
+        let imgs = self.image_server.clone();
 
         spawn(async move {
             let result = change_cover_async(
@@ -681,14 +698,21 @@ impl AppService {
             }
 
             // Reload album detail to reflect updated cover
-            load_album_detail(&state, &library_manager, &album_id, Some(&release_id)).await;
+            load_album_detail(
+                &state,
+                &library_manager,
+                &album_id,
+                Some(&release_id),
+                &imgs,
+            )
+            .await;
 
             // Update album cover_url in library grid with cache-busted URL
             let timestamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            let busted_url = format!("{}?t={}", cover_url(&release_id), timestamp);
+            let busted_url = format!("{}&t={}", imgs.cover_url(&release_id), timestamp);
             let mut albums_lens = state.library().albums();
             let mut albums = albums_lens.write();
             if let Some(album) = albums.iter_mut().find(|a| a.id == album_id) {
@@ -704,6 +728,7 @@ impl AppService {
         let config = self.config.clone();
         let release_id = release_id.to_string();
         let target_profile_id = target_profile_id.to_string();
+        let imgs = self.image_server.clone();
 
         spawn(async move {
             // Look up the target profile
@@ -789,6 +814,7 @@ impl AppService {
                                 &library_manager,
                                 &album_id,
                                 Some(&release_id),
+                                &imgs,
                             )
                             .await;
                         }
@@ -814,6 +840,7 @@ impl AppService {
         let library_manager = self.library_manager.clone();
         let config = self.config.clone();
         let release_id = release_id.to_string();
+        let imgs = self.image_server.clone();
 
         spawn(async move {
             // Show folder picker
@@ -886,6 +913,7 @@ impl AppService {
                                 &library_manager,
                                 &album_id,
                                 Some(&release_id),
+                                &imgs,
                             )
                             .await;
                         }
@@ -914,9 +942,10 @@ impl AppService {
         let state = self.state;
         let library_manager = self.library_manager.clone();
         let artist_id = artist_id.to_string();
+        let imgs = self.image_server.clone();
 
         spawn(async move {
-            load_artist_detail(&state, &library_manager, &artist_id).await;
+            load_artist_detail(&state, &library_manager, &artist_id, &imgs).await;
         });
     }
 
@@ -1209,7 +1238,11 @@ fn storage_location_from_display(loc: bae_ui::StorageLocation) -> StorageLocatio
 }
 
 /// Load library albums and artists into the Store
-async fn load_library(state: &Store<AppState>, library_manager: &SharedLibraryManager) {
+async fn load_library(
+    state: &Store<AppState>,
+    library_manager: &SharedLibraryManager,
+    imgs: &ImageServerHandle,
+) {
     state.library().loading().set(true);
     state.library().error().set(None);
 
@@ -1219,11 +1252,17 @@ async fn load_library(state: &Store<AppState>, library_manager: &SharedLibraryMa
             for album in &album_list {
                 if let Ok(db_artists) = library_manager.get().get_artists_for_album(&album.id).await
                 {
-                    let artists = db_artists.iter().map(artist_from_db_ref).collect();
+                    let artists = db_artists
+                        .iter()
+                        .map(|a| artist_from_db_ref(a, imgs))
+                        .collect();
                     artists_map.insert(album.id.clone(), artists);
                 }
             }
-            let display_albums = album_list.iter().map(album_from_db_ref).collect();
+            let display_albums = album_list
+                .iter()
+                .map(|a| album_from_db_ref(a, imgs))
+                .collect();
 
             state.library().albums().set(display_albums);
             state.library().artists_by_album().set(artists_map);
@@ -1245,13 +1284,14 @@ async fn load_album_detail(
     library_manager: &SharedLibraryManager,
     album_id: &str,
     release_id_param: Option<&str>,
+    imgs: &ImageServerHandle,
 ) {
     state.album_detail().loading().set(true);
     state.album_detail().error().set(None);
 
     // Load album
     let album = match library_manager.get().get_album_by_id(album_id).await {
-        Ok(Some(db_album)) => Some(album_from_db_ref(&db_album)),
+        Ok(Some(db_album)) => Some(album_from_db_ref(&db_album, imgs)),
         Ok(None) => {
             state
                 .album_detail()
@@ -1321,7 +1361,10 @@ async fn load_album_detail(
 
     // Load artists
     if let Ok(db_artists) = library_manager.get().get_artists_for_album(album_id).await {
-        let artists = db_artists.iter().map(artist_from_db_ref).collect();
+        let artists = db_artists
+            .iter()
+            .map(|a| artist_from_db_ref(a, imgs))
+            .collect();
         state.album_detail().artists().set(artists);
     }
 
@@ -1375,7 +1418,7 @@ async fn load_album_detail(
             .map(|f| bae_ui::Image {
                 id: f.id.clone(),
                 filename: f.original_filename.clone(),
-                url: format!("bae://image/{}", f.id),
+                url: imgs.file_url(&f.id),
             })
             .collect();
         state.album_detail().images().set(images);
@@ -1572,6 +1615,7 @@ async fn load_artist_detail(
     state: &Store<AppState>,
     library_manager: &SharedLibraryManager,
     artist_id: &str,
+    imgs: &ImageServerHandle,
 ) {
     state.artist_detail().loading().set(true);
     state.artist_detail().error().set(None);
@@ -1582,7 +1626,7 @@ async fn load_artist_detail(
             state
                 .artist_detail()
                 .artist()
-                .set(Some(artist_from_db_ref(&db_artist)));
+                .set(Some(artist_from_db_ref(&db_artist, imgs)));
         }
         Ok(None) => {
             state
@@ -1609,11 +1653,17 @@ async fn load_artist_detail(
             for album in &db_albums {
                 if let Ok(db_artists) = library_manager.get().get_artists_for_album(&album.id).await
                 {
-                    let artists = db_artists.iter().map(artist_from_db_ref).collect();
+                    let artists = db_artists
+                        .iter()
+                        .map(|a| artist_from_db_ref(a, imgs))
+                        .collect();
                     artists_map.insert(album.id.clone(), artists);
                 }
             }
-            let display_albums = db_albums.iter().map(album_from_db_ref).collect();
+            let display_albums = db_albums
+                .iter()
+                .map(|a| album_from_db_ref(a, imgs))
+                .collect();
 
             state.artist_detail().albums().set(display_albums);
             state.artist_detail().artists_by_album().set(artists_map);

@@ -11,6 +11,7 @@ pub mod cue_flac;
 pub mod db;
 pub mod discogs;
 pub mod encryption;
+pub mod image_server;
 pub mod import;
 pub mod keys;
 pub mod library;
