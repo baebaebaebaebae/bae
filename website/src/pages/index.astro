@@ -77,17 +77,17 @@ import { Image } from 'astro:assets';
 		<section class="concepts">
 			<div class="concept">
 				<h2>Your music, your storage</h2>
-				<p>Your library lives on your machine by default. No cloud required, no account, no subscription. When you're ready to scale, add S3-compatible storage — keep everyday listening on fast local storage and archive deep cuts on cheap cloud like Backblaze B2. Same library, multiple storage locations, all end-to-end encrypted.</p>
+				<p>Your library lives on your machine by default. No cloud required, no account, no subscription. When you're ready to scale, add S3-compatible storage — keep everyday listening on fast local storage and archive deep cuts on cheap cloud like Backblaze B2. Same library, multiple storage locations, cloud storage always end-to-end encrypted.</p>
 			</div>
 
 			<div class="concept">
 				<h2>Sync across devices</h2>
-				<p>Point bae at any S3-compatible bucket and your library metadata syncs across all your devices — encrypted before it leaves your machine. Changes merge automatically, and everything works offline. Your catalog is the same on every machine.</p>
+				<p>Point bae at any S3-compatible bucket and your library metadata syncs across all your devices — encrypted before it leaves your machine. Changes merge automatically, and your library works offline. Your catalog is the same on every machine.</p>
 			</div>
 
 			<div class="concept">
 				<h2>Share your library</h2>
-				<p>Invite friends or family to a shared library — everyone contributes, everyone listens. Or share individual albums across libraries using derived encryption keys, no need to merge collections. Revoke access anytime by rotating credentials.</p>
+				<p>Invite friends or family to a shared library — everyone contributes, everyone listens. Or share individual albums across libraries using derived encryption keys, no need to merge collections. Control who has access with key rotation and expiring grants.</p>
 			</div>
 
 			<div class="concept">
@@ -102,7 +102,7 @@ import { Image } from 'astro:assets';
 
 			<div class="concept">
 				<h2>Stream anywhere</h2>
-				<p>bae exposes a Subsonic-compatible API, so any Subsonic client can stream your library. Run bae-server headless on a VPS or NAS — it syncs from your cloud bucket automatically, no need to keep your desktop on.</p>
+				<p>bae exposes a Subsonic-compatible API, so any Subsonic client can stream your library. Run bae-server headless on a VPS or NAS — it reads from your sync bucket, no need to keep your desktop on.</p>
 			</div>
 
 			<div class="concept">
