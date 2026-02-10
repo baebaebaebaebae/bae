@@ -7,6 +7,7 @@ pub mod pull;
 #[cfg(test)]
 mod pull_tests;
 pub mod push;
+pub mod s3_bucket;
 pub mod service;
 pub mod session;
 pub mod session_ext;
