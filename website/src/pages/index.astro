@@ -6,8 +6,8 @@ import { Image } from 'astro:assets';
 <head>
 	<meta charset="UTF-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-	<meta name="description" content="bae - Your music as easy as streaming. Metadata-driven import from MusicBrainz and Discogs, pregap-accurate playback, encrypted storage." />
-	<title>bae - Your music as easy as streaming</title>
+	<meta name="description" content="bae - Your music easy as streaming. Metadata-driven import from MusicBrainz and Discogs, pregap-accurate playback, encrypted storage." />
+	<title>bae - Your music easy as streaming</title>
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
@@ -26,7 +26,7 @@ import { Image } from 'astro:assets';
 	<main>
 		<section class="hero">
 			<div class="hero-content">
-				<h1>Your music<br/><span class="accent">as easy as streaming</span></h1>
+				<h1>Your music<br/><span class="accent">easy as streaming</span></h1>
 				<p class="tagline">Scale your collection effortlessly and listen anywhere — without handing your music to someone else.</p>
 				<div class="cta-group">
 					<a href="https://github.com/bae-fm/bae/releases/latest/download/bae.dmg" class="btn primary">
@@ -77,7 +77,17 @@ import { Image } from 'astro:assets';
 		<section class="concepts">
 			<div class="concept">
 				<h2>Your music, your storage</h2>
-				<p>Your library lives on your machine by default. No cloud required, no account, no subscription. When you're ready to scale, bae supports S3-compatible storage (AWS, Backblaze B2, etc.) with encryption — files are encrypted before they leave your machine.</p>
+				<p>Your library lives on your machine by default. No cloud required, no account, no subscription. When you're ready to scale, add S3-compatible storage — keep everyday listening on fast local storage and archive deep cuts on cheap cloud like Backblaze B2. Same library, multiple storage locations, cloud storage always end-to-end encrypted.</p>
+			</div>
+
+			<div class="concept">
+				<h2>Sync across devices</h2>
+				<p>Point bae at any S3-compatible bucket and your library metadata syncs across all your devices — encrypted before it leaves your machine. Changes merge automatically, and your library works offline. Your catalog is the same on every machine.</p>
+			</div>
+
+			<div class="concept">
+				<h2>Share your library</h2>
+				<p>Invite friends or family to a shared library — everyone contributes, everyone listens. Or share individual albums across libraries using derived encryption keys, no need to merge collections. Control who has access with key rotation and expiring grants.</p>
 			</div>
 
 			<div class="concept">
@@ -87,13 +97,12 @@ import { Image } from 'astro:assets';
 
 			<div class="concept">
 				<h2>Authentic playback</h2>
-				<p>Albums play back the way they were meant to be heard. CUE/FLAC pregaps are preserved — the silence, the hidden intro, the crossfade the artist intended. Single-file albums stream as individual tracks without being split.</p>
-				<p class="coming-soon">Coming soon: LP mode pauses at side breaks so you can "flip the record" and continue.</p>
+				<p>Albums play back the way they were meant to be heard. CUE/FLAC pregaps are preserved — the silence, the hidden intro, the crossfade the artist intended. Single-file albums stream as individual tracks without being split. LP mode pauses at side breaks so you can flip the record.</p>
 			</div>
 
 			<div class="concept">
 				<h2>Stream anywhere</h2>
-				<p>bae runs a Subsonic API server on your machine. Connect any Subsonic-compatible client to stream your library wherever you are.</p>
+				<p>bae exposes a Subsonic-compatible API, so any Subsonic client can stream your library. Run bae-server headless on a VPS or NAS — it reads from your sync bucket, no need to keep your desktop on.</p>
 			</div>
 
 			<div class="concept">
@@ -445,12 +454,6 @@ import { Image } from 'astro:assets';
 
 	.concept a:hover {
 		text-decoration: underline;
-	}
-
-	.coming-soon {
-		font-size: 0.9rem !important;
-		opacity: 0.7;
-		font-style: italic;
 	}
 
 	/* Download CTA */
