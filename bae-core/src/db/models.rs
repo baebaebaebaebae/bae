@@ -1034,6 +1034,24 @@ pub struct DbShareGrant {
 }
 
 // ============================================================================
+// Attestations
+// ============================================================================
+
+/// A stored attestation linking a MusicBrainz release ID to a BitTorrent infohash.
+#[derive(Debug, Clone)]
+pub struct DbAttestation {
+    pub id: String,
+    pub mbid: String,
+    pub infohash: String,
+    pub content_hash: String,
+    pub format: String,
+    pub author_pubkey: String,
+    pub timestamp: String,
+    pub signature: String,
+    pub created_at: String,
+}
+
+// ============================================================================
 // Library Search Result Types
 // ============================================================================
 
