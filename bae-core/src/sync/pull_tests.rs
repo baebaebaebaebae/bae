@@ -55,7 +55,7 @@ async fn pull_no_new_changesets() {
         let bucket = MockBucket::new();
         let cursors = HashMap::new();
 
-        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors)
+        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
             .await
             .expect("pull");
 
@@ -87,7 +87,7 @@ async fn pull_cursors_up_to_date() {
         let mut cursors = HashMap::new();
         cursors.insert("dev-remote".to_string(), 3);
 
-        let (_, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors)
+        let (_, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
             .await
             .expect("pull");
 
@@ -126,7 +126,7 @@ async fn pull_new_changesets_from_one_device() {
         bucket.store_changeset("dev-remote", 2, &cs2, SCHEMA_VERSION);
 
         let cursors = HashMap::new();
-        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors)
+        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
             .await
             .expect("pull");
 
@@ -174,7 +174,7 @@ async fn pull_new_changesets_from_multiple_devices() {
         bucket.store_changeset("dev-b", 1, &cs_b, SCHEMA_VERSION);
 
         let cursors = HashMap::new();
-        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors)
+        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
             .await
             .expect("pull");
 
@@ -213,7 +213,7 @@ async fn pull_skips_own_device() {
         bucket.store_changeset("dev-local", 1, &cs, SCHEMA_VERSION);
 
         let cursors = HashMap::new();
-        let (_, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors)
+        let (_, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
             .await
             .expect("pull");
 
@@ -245,7 +245,7 @@ async fn pull_skips_newer_schema_version() {
         bucket.store_changeset("dev-remote", 1, &cs, SCHEMA_VERSION + 1);
 
         let cursors = HashMap::new();
-        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors)
+        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
             .await
             .expect("pull");
 
@@ -290,7 +290,7 @@ async fn pull_applies_current_schema_skips_future() {
         bucket.store_changeset("dev-remote", 2, &cs2, SCHEMA_VERSION + 1);
 
         let cursors = HashMap::new();
-        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors)
+        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
             .await
             .expect("pull");
 
@@ -333,14 +333,14 @@ async fn pull_cursor_advancement_is_incremental() {
 
         // First pull: from 0, gets all 3.
         let cursors = HashMap::new();
-        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors)
+        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
             .await
             .expect("pull");
         assert_eq!(result.changesets_applied, 3);
         assert_eq!(updated.get("dev-remote"), Some(&3));
 
         // Second pull with updated cursors: nothing new.
-        let (_, result2) = pull::pull_changes(db, &bucket, "dev-local", &updated)
+        let (_, result2) = pull::pull_changes(db, &bucket, "dev-local", &updated, None)
             .await
             .expect("pull2");
         assert_eq!(result2.changesets_applied, 0);
@@ -366,7 +366,7 @@ async fn pull_refuses_when_local_version_below_min() {
             .unwrap();
 
         let cursors = HashMap::new();
-        let result = pull::pull_changes(db, &bucket, "dev-local", &cursors).await;
+        let result = pull::pull_changes(db, &bucket, "dev-local", &cursors, None).await;
 
         match result {
             Err(pull::PullError::SchemaVersionTooOld {
@@ -404,7 +404,7 @@ async fn pull_works_when_local_version_equals_min() {
         bucket.store_changeset("dev-remote", 1, &cs, SCHEMA_VERSION);
 
         let cursors = HashMap::new();
-        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors)
+        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
             .await
             .expect("pull should succeed when local version equals min");
 
@@ -430,7 +430,7 @@ async fn pull_works_when_local_version_above_min() {
         bucket.set_min_schema_version(1).await.unwrap();
 
         let cursors = HashMap::new();
-        let (_, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors)
+        let (_, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
             .await
             .expect("pull should succeed when local version is above min");
 
@@ -460,7 +460,7 @@ async fn pull_works_when_no_min_schema_version_set() {
         bucket.store_changeset("dev-remote", 1, &cs, SCHEMA_VERSION);
 
         let cursors = HashMap::new();
-        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors)
+        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
             .await
             .expect("pull should succeed when no min_schema_version is set");
 
@@ -506,6 +506,7 @@ async fn sync_cycle_push_then_pull() {
                 "2026-02-10T00:00:00Z",
                 "Imported Kind of Blue",
                 &keypair,
+                None,
             )
             .await
             .expect("sync");
@@ -524,7 +525,7 @@ async fn sync_cycle_push_then_pull() {
 
         // Device 2: pull.
         let cursors2 = HashMap::new();
-        let (updated2, pull_result) = pull::pull_changes(db2, &bucket, "dev-2", &cursors2)
+        let (updated2, pull_result) = pull::pull_changes(db2, &bucket, "dev-2", &cursors2, None)
             .await
             .expect("pull");
 
@@ -566,7 +567,7 @@ async fn sync_cycle_bidirectional() {
         bucket.store_changeset("dev-2", 1, &cs2_bytes, SCHEMA_VERSION);
 
         // Device 1 pulls (gets a2 from dev-2).
-        let (cursors1, r1) = pull::pull_changes(db1, &bucket, "dev-1", &HashMap::new())
+        let (cursors1, r1) = pull::pull_changes(db1, &bucket, "dev-1", &HashMap::new(), None)
             .await
             .expect("pull1");
         assert_eq!(r1.changesets_applied, 1);
@@ -574,7 +575,7 @@ async fn sync_cycle_bidirectional() {
         assert_eq!(name_on_1, "From Dev2");
 
         // Device 2 pulls (gets a1 from dev-1).
-        let (cursors2, r2) = pull::pull_changes(db2, &bucket, "dev-2", &HashMap::new())
+        let (cursors2, r2) = pull::pull_changes(db2, &bucket, "dev-2", &HashMap::new(), None)
             .await
             .expect("pull2");
         assert_eq!(r2.changesets_applied, 1);
@@ -618,6 +619,7 @@ async fn sync_cycle_no_local_changes_returns_none() {
                 "2026-02-10T00:00:00Z",
                 "",
                 &keypair,
+                None,
             )
             .await
             .expect("sync");
@@ -657,6 +659,7 @@ async fn sync_service_outgoing_has_correct_envelope() {
                 "2026-02-10T12:00:00Z",
                 "Added Test artist",
                 &keypair,
+                None,
             )
             .await
             .expect("sync");
@@ -679,5 +682,242 @@ async fn sync_service_outgoing_has_correct_envelope() {
         assert!(envelope::verify_changeset_signature(&env, &cs_bytes));
 
         ffi::sqlite3_close(db);
+    }
+}
+
+// ---- Membership validation on pull (Phase 2e) ----
+
+use crate::sodium_ffi;
+use crate::sync::membership::{
+    sign_membership_entry, MemberRole, MembershipAction, MembershipChain, MembershipEntry,
+};
+
+/// Generate a keypair directly (bypasses KeyService env-var issues).
+fn gen_keypair() -> crate::keys::UserKeypair {
+    crate::encryption::ensure_sodium_init();
+    let mut pk = [0u8; sodium_ffi::SIGN_PUBLICKEYBYTES];
+    let mut sk = [0u8; sodium_ffi::SIGN_SECRETKEYBYTES];
+    let ret = unsafe { sodium_ffi::crypto_sign_ed25519_keypair(pk.as_mut_ptr(), sk.as_mut_ptr()) };
+    assert_eq!(ret, 0);
+    crate::keys::UserKeypair {
+        signing_key: sk,
+        public_key: pk,
+    }
+}
+
+fn pubkey_hex(kp: &crate::keys::UserKeypair) -> String {
+    hex::encode(kp.public_key)
+}
+
+/// Build a membership chain with a single owner and optional additional members.
+fn build_chain(
+    owner: &crate::keys::UserKeypair,
+    members: &[(&crate::keys::UserKeypair, MemberRole)],
+) -> MembershipChain {
+    let pk_hex = pubkey_hex(owner);
+    let mut founder = MembershipEntry {
+        action: MembershipAction::Add,
+        user_pubkey: pk_hex.clone(),
+        role: MemberRole::Owner,
+        timestamp: "0000000001000-0000-dev1".to_string(),
+        author_pubkey: pk_hex,
+        signature: String::new(),
+    };
+    sign_membership_entry(&mut founder, owner);
+
+    let mut chain = MembershipChain::new();
+    chain.add_entry(founder).unwrap();
+
+    for (i, (member_kp, role)) in members.iter().enumerate() {
+        let ts = format!("000000000{}000-0000-dev1", i + 2);
+        let mut entry = MembershipEntry {
+            action: MembershipAction::Add,
+            user_pubkey: pubkey_hex(member_kp),
+            role: role.clone(),
+            timestamp: ts,
+            author_pubkey: pubkey_hex(owner),
+            signature: String::new(),
+        };
+        sign_membership_entry(&mut entry, owner);
+        chain.add_entry(entry).unwrap();
+    }
+
+    chain
+}
+
+#[tokio::test]
+async fn pull_rejects_changeset_from_non_member() {
+    unsafe {
+        let db = open_memory_db();
+        create_synced_schema(db);
+
+        let owner = gen_keypair();
+        let outsider = gen_keypair();
+        let chain = build_chain(&owner, &[]);
+
+        let remote_db = open_memory_db();
+        create_synced_schema(remote_db);
+        let cs = capture_changeset(
+            remote_db,
+            &["artists"],
+            &["INSERT INTO artists (id, name, _updated_at, created_at) VALUES ('a1', 'Intruder', '0000000005000-0000-dev-r', '2026-01-01')"],
+        );
+
+        let bucket = MockBucket::new();
+        // Outsider signs a changeset -- they are not in the chain.
+        bucket.store_signed_changeset(
+            "dev-outsider",
+            1,
+            &cs,
+            SCHEMA_VERSION,
+            "0000000005000-0000-dev-r",
+            &outsider,
+        );
+
+        let cursors = HashMap::new();
+        let (updated, result) =
+            pull::pull_changes(db, &bucket, "dev-local", &cursors, Some(&chain))
+                .await
+                .expect("pull");
+
+        // Should be skipped -- not applied.
+        assert_eq!(result.changesets_applied, 0);
+        assert!(!row_exists(db, "SELECT 1 FROM artists WHERE id = 'a1'"));
+        // Cursor still advances past the skipped changeset.
+        assert_eq!(updated.get("dev-outsider"), Some(&1));
+
+        ffi::sqlite3_close(db);
+        ffi::sqlite3_close(remote_db);
+    }
+}
+
+#[tokio::test]
+async fn pull_accepts_changeset_from_valid_member() {
+    unsafe {
+        let db = open_memory_db();
+        create_synced_schema(db);
+
+        let owner = gen_keypair();
+        let member = gen_keypair();
+        let chain = build_chain(&owner, &[(&member, MemberRole::Member)]);
+
+        let remote_db = open_memory_db();
+        create_synced_schema(remote_db);
+        let cs = capture_changeset(
+            remote_db,
+            &["artists"],
+            &["INSERT INTO artists (id, name, _updated_at, created_at) VALUES ('a1', 'Valid', '0000000005000-0000-dev-r', '2026-01-01')"],
+        );
+
+        let bucket = MockBucket::new();
+        bucket.store_signed_changeset(
+            "dev-member",
+            1,
+            &cs,
+            SCHEMA_VERSION,
+            "0000000005000-0000-dev-r",
+            &member,
+        );
+
+        let cursors = HashMap::new();
+        let (updated, result) =
+            pull::pull_changes(db, &bucket, "dev-local", &cursors, Some(&chain))
+                .await
+                .expect("pull");
+
+        assert_eq!(result.changesets_applied, 1);
+        assert!(row_exists(db, "SELECT 1 FROM artists WHERE id = 'a1'"));
+        assert_eq!(updated.get("dev-member"), Some(&1));
+
+        ffi::sqlite3_close(db);
+        ffi::sqlite3_close(remote_db);
+    }
+}
+
+#[tokio::test]
+async fn pull_rejects_unsigned_changeset_after_chain_creation() {
+    unsafe {
+        let db = open_memory_db();
+        create_synced_schema(db);
+
+        let owner = gen_keypair();
+        let chain = build_chain(&owner, &[]);
+        // Chain was created at timestamp "0000000001000-0000-dev1".
+
+        let remote_db = open_memory_db();
+        create_synced_schema(remote_db);
+        let cs = capture_changeset(
+            remote_db,
+            &["artists"],
+            &["INSERT INTO artists (id, name, _updated_at, created_at) VALUES ('a1', 'Unsigned', '0000000005000-0000-dev-r', '2026-01-01')"],
+        );
+
+        let bucket = MockBucket::new();
+        // Store an unsigned changeset with a timestamp AFTER the chain was created.
+        bucket.store_changeset_with_timestamp(
+            "dev-anonymous",
+            1,
+            &cs,
+            SCHEMA_VERSION,
+            "0000000005000-0000-dev-r",
+        );
+
+        let cursors = HashMap::new();
+        let (updated, result) =
+            pull::pull_changes(db, &bucket, "dev-local", &cursors, Some(&chain))
+                .await
+                .expect("pull");
+
+        // Should be skipped -- unsigned after chain creation.
+        assert_eq!(result.changesets_applied, 0);
+        assert!(!row_exists(db, "SELECT 1 FROM artists WHERE id = 'a1'"));
+        assert_eq!(updated.get("dev-anonymous"), Some(&1));
+
+        ffi::sqlite3_close(db);
+        ffi::sqlite3_close(remote_db);
+    }
+}
+
+#[tokio::test]
+async fn pull_accepts_unsigned_changeset_before_chain_creation() {
+    unsafe {
+        let db = open_memory_db();
+        create_synced_schema(db);
+
+        let owner = gen_keypair();
+        let chain = build_chain(&owner, &[]);
+        // Chain was created at timestamp "0000000001000-0000-dev1".
+
+        let remote_db = open_memory_db();
+        create_synced_schema(remote_db);
+        let cs = capture_changeset(
+            remote_db,
+            &["artists"],
+            &["INSERT INTO artists (id, name, _updated_at, created_at) VALUES ('a1', 'Legacy', '0000000000500-0000-dev-r', '2026-01-01')"],
+        );
+
+        let bucket = MockBucket::new();
+        // Store an unsigned changeset with a timestamp BEFORE the chain was created (grandfathered).
+        bucket.store_changeset_with_timestamp(
+            "dev-legacy",
+            1,
+            &cs,
+            SCHEMA_VERSION,
+            "0000000000500-0000-dev-r",
+        );
+
+        let cursors = HashMap::new();
+        let (updated, result) =
+            pull::pull_changes(db, &bucket, "dev-local", &cursors, Some(&chain))
+                .await
+                .expect("pull");
+
+        // Should be accepted -- predates the chain.
+        assert_eq!(result.changesets_applied, 1);
+        assert!(row_exists(db, "SELECT 1 FROM artists WHERE id = 'a1'"));
+        assert_eq!(updated.get("dev-legacy"), Some(&1));
+
+        ffi::sqlite3_close(db);
+        ffi::sqlite3_close(remote_db);
     }
 }

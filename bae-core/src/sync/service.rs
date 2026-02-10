@@ -19,6 +19,7 @@ use crate::keys::UserKeypair;
 
 use super::bucket::SyncBucketClient;
 use super::envelope::{self, sign_envelope, ChangesetEnvelope};
+use super::membership::MembershipChain;
 use super::pull::{self, PullResult};
 use super::push::{OutgoingChangeset, SCHEMA_VERSION};
 use super::session::SyncSession;
@@ -72,6 +73,7 @@ impl SyncService {
         timestamp: &str,
         message: &str,
         keypair: &UserKeypair,
+        membership_chain: Option<&MembershipChain>,
     ) -> Result<SyncResult, SyncCycleError> {
         // Step 1: grab outgoing changeset from the session.
         let outgoing_cs = session.changeset().map_err(SyncCycleError::Session)?;
@@ -104,7 +106,7 @@ impl SyncService {
 
         // Step 4 + 5: pull incoming changesets (no session active).
         let (updated_cursors, pull_result) =
-            pull::pull_changes(db, bucket, &self.device_id, cursors)
+            pull::pull_changes(db, bucket, &self.device_id, cursors, membership_chain)
                 .await
                 .map_err(SyncCycleError::Pull)?;
 

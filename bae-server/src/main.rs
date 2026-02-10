@@ -256,7 +256,7 @@ async fn apply_changesets(
         // match any real device so pull_changes doesn't skip any heads.
         let server_device_id = "__bae-server__";
 
-        let result = match pull_changes(db, bucket, server_device_id, &cursors).await {
+        let result = match pull_changes(db, bucket, server_device_id, &cursors, None).await {
             Ok((_updated_cursors, pull_result)) => pull_result.changesets_applied,
             Err(e) => {
                 warn!("Failed to pull changesets: {e}");
