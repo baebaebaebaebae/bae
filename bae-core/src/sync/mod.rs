@@ -1,4 +1,5 @@
 pub mod apply;
+pub mod attribution;
 pub mod bucket;
 pub mod conflict;
 pub mod envelope;
