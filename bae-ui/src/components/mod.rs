@@ -75,6 +75,7 @@ pub use settings::{
     AboutSectionView, BitTorrentSectionView, BitTorrentSettings, DiscogsSectionView, LibraryInfo,
     LibrarySectionView, SettingsCard, SettingsSection, SettingsTab, SettingsView, StorageLocation,
     StorageProfile, StorageProfileEditorView, StorageProfilesSectionView, SubsonicSectionView,
+    SyncSectionView,
 };
 pub use text_input::{TextInput, TextInputSize, TextInputType};
 pub use text_link::TextLink;

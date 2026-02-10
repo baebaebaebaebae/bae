@@ -8,6 +8,7 @@ use dioxus::prelude::*;
 pub enum SettingsTab {
     Library,
     Storage,
+    Sync,
     Discogs,
     BitTorrent,
     Subsonic,
@@ -19,6 +20,7 @@ impl SettingsTab {
         match self {
             SettingsTab::Library => "Library",
             SettingsTab::Storage => "Storage",
+            SettingsTab::Sync => "Sync",
             SettingsTab::Discogs => "Discogs",
             SettingsTab::BitTorrent => "BitTorrent",
             SettingsTab::Subsonic => "Subsonic",
@@ -30,6 +32,7 @@ impl SettingsTab {
         &[
             SettingsTab::Library,
             SettingsTab::Storage,
+            SettingsTab::Sync,
             SettingsTab::Discogs,
             #[cfg(feature = "torrent")]
             SettingsTab::BitTorrent,

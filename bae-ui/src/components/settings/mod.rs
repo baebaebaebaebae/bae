@@ -9,6 +9,7 @@ mod discogs;
 mod library;
 mod storage_profiles;
 mod subsonic;
+mod sync;
 mod view;
 
 pub use about::AboutSectionView;
@@ -20,4 +21,5 @@ pub use storage_profiles::{
     StorageLocation, StorageProfile, StorageProfileEditorView, StorageProfilesSectionView,
 };
 pub use subsonic::SubsonicSectionView;
+pub use sync::SyncSectionView;
 pub use view::{SettingsTab, SettingsView};

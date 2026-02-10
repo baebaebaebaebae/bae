@@ -1,9 +1,10 @@
 //! Settings page
 
+use bae_ui::stores::DeviceActivityInfo;
 use bae_ui::{
     AboutSectionView, BitTorrentSectionView, BitTorrentSettings, DiscogsSectionView, LibraryInfo,
     LibrarySectionView, SettingsTab, SettingsView, StorageLocation, StorageProfile,
-    StorageProfilesSectionView, SubsonicSectionView,
+    StorageProfilesSectionView, SubsonicSectionView, SyncSectionView,
 };
 use dioxus::prelude::*;
 
@@ -46,6 +47,20 @@ pub fn Settings() -> Element {
                         on_cancel_edit: |_| {},
                         on_browse_directory: |_| {},
                         browsed_directory: None,
+                    }
+                },
+                SettingsTab::Sync => rsx! {
+                    SyncSectionView {
+                        last_sync_time: Some("2026-02-10T12:00:00Z".to_string()),
+                        other_devices: vec![
+                            DeviceActivityInfo {
+                                device_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890".to_string(),
+                                last_seq: 42,
+                                last_sync: Some("2026-02-10T11:55:00Z".to_string()),
+                            },
+                        ],
+                        syncing: false,
+                        error: None,
                     }
                 },
                 SettingsTab::Discogs => rsx! {
