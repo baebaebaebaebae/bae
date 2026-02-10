@@ -70,9 +70,9 @@ impl UserKeypair {
     }
 
     /// Derive the X25519 public key from this Ed25519 public key.
-    pub fn to_x25519_public_key(&self) -> [u8; sodium_ffi::SIGN_PUBLICKEYBYTES] {
+    pub fn to_x25519_public_key(&self) -> [u8; sodium_ffi::CURVE25519_PUBLICKEYBYTES] {
         crate::encryption::ensure_sodium_init();
-        let mut curve_pk = [0u8; sodium_ffi::SIGN_PUBLICKEYBYTES];
+        let mut curve_pk = [0u8; sodium_ffi::CURVE25519_PUBLICKEYBYTES];
         let ret = unsafe {
             sodium_ffi::crypto_sign_ed25519_pk_to_curve25519(
                 curve_pk.as_mut_ptr(),
@@ -106,7 +106,7 @@ pub fn verify_signature(
 /// The sender is anonymous -- only the recipient can decrypt.
 pub fn seal_box_encrypt(
     message: &[u8],
-    recipient_x25519_pk: &[u8; sodium_ffi::SIGN_PUBLICKEYBYTES],
+    recipient_x25519_pk: &[u8; sodium_ffi::CURVE25519_PUBLICKEYBYTES],
 ) -> Vec<u8> {
     crate::encryption::ensure_sodium_init();
     let mut ciphertext = vec![0u8; message.len() + sodium_ffi::SEALBYTES];
@@ -125,7 +125,7 @@ pub fn seal_box_encrypt(
 /// Decrypt a sealed box using the recipient's X25519 keypair.
 pub fn seal_box_decrypt(
     ciphertext: &[u8],
-    recipient_x25519_pk: &[u8; sodium_ffi::SIGN_PUBLICKEYBYTES],
+    recipient_x25519_pk: &[u8; sodium_ffi::CURVE25519_PUBLICKEYBYTES],
     recipient_x25519_sk: &[u8; sodium_ffi::CURVE25519_SECRETKEYBYTES],
 ) -> Result<Vec<u8>, KeyError> {
     crate::encryption::ensure_sodium_init();

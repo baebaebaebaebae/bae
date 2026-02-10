@@ -16,6 +16,7 @@ pub const SIGN_SECRETKEYBYTES: usize = 64;
 pub const SIGN_BYTES: usize = 64;
 
 // X25519 / sealed box constants
+pub const CURVE25519_PUBLICKEYBYTES: usize = 32;
 pub const CURVE25519_SECRETKEYBYTES: usize = 32;
 pub const SEALBYTES: usize = 48; // crypto_box_PUBLICKEYBYTES + crypto_box_MACBYTES = 32 + 16
 
