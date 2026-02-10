@@ -111,12 +111,7 @@ fn parse_mb_release_from_json(
                     created_at: chrono::Utc::now(),
                     updated_at: chrono::Utc::now(),
                 };
-                let album_artist = DbAlbumArtist {
-                    id: Uuid::new_v4().to_string(),
-                    album_id: album.id.clone(),
-                    artist_id: artist.id.clone(),
-                    position: position as i32,
-                };
+                let album_artist = DbAlbumArtist::new(&album.id, &artist.id, position as i32);
                 artists.push(artist);
                 album_artists.push(album_artist);
             }
@@ -134,12 +129,7 @@ fn parse_mb_release_from_json(
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
-        let album_artist = DbAlbumArtist {
-            id: Uuid::new_v4().to_string(),
-            album_id: album.id.clone(),
-            artist_id: artist.id.clone(),
-            position: 0,
-        };
+        let album_artist = DbAlbumArtist::new(&album.id, &artist.id, 0);
         artists.push(artist);
         album_artists.push(album_artist);
     }
@@ -161,6 +151,7 @@ fn parse_mb_release_from_json(
                             .and_then(|v| v.as_i64())
                             .map(|p| p as i32);
                         let track_number = position.or_else(|| Some(track_index + 1));
+                        let now = chrono::Utc::now();
                         let track = DbTrack {
                             id: Uuid::new_v4().to_string(),
                             release_id: db_release.id.clone(),
@@ -170,7 +161,8 @@ fn parse_mb_release_from_json(
                             duration_ms: None,
                             discogs_position: position.map(|p| p.to_string()),
                             import_status: crate::db::ImportStatus::Queued,
-                            created_at: chrono::Utc::now(),
+                            updated_at: now,
+                            created_at: now,
                         };
                         tracks.push(track);
                         track_index += 1;

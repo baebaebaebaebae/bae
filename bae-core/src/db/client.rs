@@ -15,6 +15,9 @@ fn row_to_library_image(row: sqlx::sqlite::SqliteRow) -> DbLibraryImage {
         height: row.get("height"),
         source: row.get("source"),
         source_url: row.get("source_url"),
+        updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
+            .unwrap()
+            .with_timezone(&Utc),
         created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
             .unwrap()
             .with_timezone(&Utc),
@@ -68,7 +71,7 @@ impl Database {
             created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                 .unwrap()
                 .with_timezone(&Utc),
-            updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                 .unwrap()
                 .with_timezone(&Utc),
         }
@@ -81,7 +84,7 @@ impl Database {
             INSERT INTO artists (
                 id, name, sort_name, discogs_artist_id,
                 bandcamp_artist_id, musicbrainz_artist_id,
-                created_at, updated_at
+                _updated_at, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
@@ -91,8 +94,8 @@ impl Database {
         .bind(&artist.discogs_artist_id)
         .bind(&artist.bandcamp_artist_id)
         .bind(&artist.musicbrainz_artist_id)
-        .bind(artist.created_at.to_rfc3339())
         .bind(artist.updated_at.to_rfc3339())
+        .bind(artist.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -142,7 +145,7 @@ impl Database {
                 discogs_artist_id = COALESCE(discogs_artist_id, ?),
                 musicbrainz_artist_id = COALESCE(musicbrainz_artist_id, ?),
                 sort_name = COALESCE(sort_name, ?),
-                updated_at = ?
+                _updated_at = ?
             WHERE id = ?
             "#,
         )
@@ -163,14 +166,16 @@ impl Database {
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
-            INSERT INTO album_artists (id, album_id, artist_id, position)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO album_artists (id, album_id, artist_id, position, _updated_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&album_artist.id)
         .bind(&album_artist.album_id)
         .bind(&album_artist.artist_id)
         .bind(album_artist.position)
+        .bind(album_artist.updated_at.to_rfc3339())
+        .bind(album_artist.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -182,8 +187,8 @@ impl Database {
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
-            INSERT INTO track_artists (id, track_id, artist_id, position, role)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO track_artists (id, track_id, artist_id, position, role, _updated_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&track_artist.id)
@@ -191,6 +196,8 @@ impl Database {
         .bind(&track_artist.artist_id)
         .bind(track_artist.position)
         .bind(&track_artist.role)
+        .bind(track_artist.updated_at.to_rfc3339())
+        .bind(track_artist.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -248,7 +255,7 @@ impl Database {
             r#"
             SELECT
                 a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
-                a.is_compilation, a.created_at, a.updated_at,
+                a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
             FROM albums a
@@ -290,10 +297,10 @@ impl Database {
                 cover_release_id: row.get("cover_release_id"),
                 cover_art_url: row.get("cover_art_url"),
                 is_compilation: row.get("is_compilation"),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
                     .with_timezone(&Utc),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
             });
@@ -410,7 +417,7 @@ impl Database {
         sqlx::query(
                 r#"
             INSERT INTO albums (
-                id, title, year, bandcamp_album_id, cover_release_id, cover_art_url, is_compilation, created_at, updated_at
+                id, title, year, bandcamp_album_id, cover_release_id, cover_art_url, is_compilation, _updated_at, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             )
@@ -421,37 +428,43 @@ impl Database {
             .bind(&album.cover_release_id)
             .bind(&album.cover_art_url)
             .bind(album.is_compilation)
-            .bind(album.created_at.to_rfc3339())
             .bind(album.updated_at.to_rfc3339())
+            .bind(album.created_at.to_rfc3339())
             .execute(&mut *tx)
             .await?;
         if let Some(discogs_release) = &album.discogs_release {
+            let now = Utc::now().to_rfc3339();
             sqlx::query(
                 r#"
                 INSERT INTO album_discogs (
-                    id, album_id, discogs_master_id, discogs_release_id
-                ) VALUES (?, ?, ?, ?)
+                    id, album_id, discogs_master_id, discogs_release_id, _updated_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(Uuid::new_v4().to_string())
             .bind(&album.id)
             .bind(&discogs_release.master_id)
             .bind(&discogs_release.release_id)
+            .bind(&now)
+            .bind(&now)
             .execute(&mut *tx)
             .await?;
         }
         if let Some(mb_release) = &album.musicbrainz_release {
+            let now = Utc::now().to_rfc3339();
             sqlx::query(
                 r#"
                 INSERT INTO album_musicbrainz (
-                    id, album_id, musicbrainz_release_group_id, musicbrainz_release_id
-                ) VALUES (?, ?, ?, ?)
+                    id, album_id, musicbrainz_release_group_id, musicbrainz_release_id, _updated_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(Uuid::new_v4().to_string())
             .bind(&album.id)
             .bind(&mb_release.release_group_id)
             .bind(&mb_release.release_id)
+            .bind(&now)
+            .bind(&now)
             .execute(&mut *tx)
             .await?;
         }
@@ -465,7 +478,7 @@ impl Database {
             INSERT INTO releases (
                 id, album_id, release_name, year, discogs_release_id,
                 bandcamp_release_id, format, label, catalog_number, country, barcode,
-                import_status, created_at, updated_at
+                import_status, _updated_at, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
@@ -481,8 +494,8 @@ impl Database {
         .bind(&release.country)
         .bind(&release.barcode)
         .bind(release.import_status)
-        .bind(release.created_at.to_rfc3339())
         .bind(release.updated_at.to_rfc3339())
+        .bind(release.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -492,9 +505,9 @@ impl Database {
         sqlx::query(
             r#"
             INSERT INTO tracks (
-                id, release_id, title, disc_number, track_number, duration_ms, 
-                discogs_position, import_status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, release_id, title, disc_number, track_number, duration_ms,
+                discogs_position, import_status, _updated_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&track.id)
@@ -505,6 +518,7 @@ impl Database {
         .bind(track.duration_ms)
         .bind(&track.discogs_position)
         .bind(track.import_status)
+        .bind(track.updated_at.to_rfc3339())
         .bind(track.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
@@ -522,7 +536,7 @@ impl Database {
         sqlx::query(
                 r#"
             INSERT INTO albums (
-                id, title, year, bandcamp_album_id, cover_release_id, cover_art_url, is_compilation, created_at, updated_at
+                id, title, year, bandcamp_album_id, cover_release_id, cover_art_url, is_compilation, _updated_at, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             )
@@ -533,37 +547,43 @@ impl Database {
             .bind(&album.cover_release_id)
             .bind(&album.cover_art_url)
             .bind(album.is_compilation)
-            .bind(album.created_at.to_rfc3339())
             .bind(album.updated_at.to_rfc3339())
+            .bind(album.created_at.to_rfc3339())
             .execute(&mut *tx)
             .await?;
         if let Some(discogs_release) = &album.discogs_release {
+            let now = Utc::now().to_rfc3339();
             sqlx::query(
                 r#"
                 INSERT INTO album_discogs (
-                    id, album_id, discogs_master_id, discogs_release_id
-                ) VALUES (?, ?, ?, ?)
+                    id, album_id, discogs_master_id, discogs_release_id, _updated_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(Uuid::new_v4().to_string())
             .bind(&album.id)
             .bind(&discogs_release.master_id)
             .bind(&discogs_release.release_id)
+            .bind(&now)
+            .bind(&now)
             .execute(&mut *tx)
             .await?;
         }
         if let Some(mb_release) = &album.musicbrainz_release {
+            let now = Utc::now().to_rfc3339();
             sqlx::query(
                 r#"
                 INSERT INTO album_musicbrainz (
-                    id, album_id, musicbrainz_release_group_id, musicbrainz_release_id
-                ) VALUES (?, ?, ?, ?)
+                    id, album_id, musicbrainz_release_group_id, musicbrainz_release_id, _updated_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(Uuid::new_v4().to_string())
             .bind(&album.id)
             .bind(&mb_release.release_group_id)
             .bind(&mb_release.release_id)
+            .bind(&now)
+            .bind(&now)
             .execute(&mut *tx)
             .await?;
         }
@@ -572,7 +592,7 @@ impl Database {
             INSERT INTO releases (
                 id, album_id, release_name, year, discogs_release_id,
                 bandcamp_release_id, format, label, catalog_number, country, barcode,
-                import_status, created_at, updated_at
+                import_status, _updated_at, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
@@ -588,17 +608,17 @@ impl Database {
         .bind(&release.country)
         .bind(&release.barcode)
         .bind(release.import_status)
-        .bind(release.created_at.to_rfc3339())
         .bind(release.updated_at.to_rfc3339())
+        .bind(release.created_at.to_rfc3339())
         .execute(&mut *tx)
         .await?;
         for track in tracks {
             sqlx::query(
                 r#"
                 INSERT INTO tracks (
-                    id, release_id, title, disc_number, track_number, duration_ms, 
-                    discogs_position, import_status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    id, release_id, title, disc_number, track_number, duration_ms,
+                    discogs_position, import_status, _updated_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&track.id)
@@ -609,6 +629,7 @@ impl Database {
             .bind(track.duration_ms)
             .bind(&track.discogs_position)
             .bind(track.import_status)
+            .bind(track.updated_at.to_rfc3339())
             .bind(track.created_at.to_rfc3339())
             .execute(&mut *tx)
             .await?;
@@ -622,8 +643,9 @@ impl Database {
         track_id: &str,
         status: ImportStatus,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE tracks SET import_status = ? WHERE id = ?")
+        sqlx::query("UPDATE tracks SET import_status = ?, _updated_at = ? WHERE id = ?")
             .bind(status)
+            .bind(Utc::now().to_rfc3339())
             .bind(track_id)
             .execute(&self.pool)
             .await?;
@@ -635,8 +657,9 @@ impl Database {
         track_id: &str,
         duration_ms: Option<i64>,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE tracks SET duration_ms = ? WHERE id = ?")
+        sqlx::query("UPDATE tracks SET duration_ms = ?, _updated_at = ? WHERE id = ?")
             .bind(duration_ms)
+            .bind(Utc::now().to_rfc3339())
             .bind(track_id)
             .execute(&self.pool)
             .await?;
@@ -648,7 +671,7 @@ impl Database {
         release_id: &str,
         status: ImportStatus,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE releases SET import_status = ?, updated_at = ? WHERE id = ?")
+        sqlx::query("UPDATE releases SET import_status = ?, _updated_at = ? WHERE id = ?")
             .bind(status)
             .bind(Utc::now().to_rfc3339())
             .bind(release_id)
@@ -662,7 +685,7 @@ impl Database {
             r#"
             SELECT 
                 a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
-                a.is_compilation, a.created_at, a.updated_at,
+                a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
             FROM albums a
@@ -701,10 +724,10 @@ impl Database {
                 cover_release_id: row.get("cover_release_id"),
                 cover_art_url: row.get("cover_art_url"),
                 is_compilation: row.get("is_compilation"),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
                     .with_timezone(&Utc),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
             });
@@ -717,7 +740,7 @@ impl Database {
             r#"
             SELECT 
                 a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
-                a.is_compilation, a.created_at, a.updated_at,
+                a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
             FROM albums a
@@ -756,10 +779,10 @@ impl Database {
                 cover_release_id: row.get("cover_release_id"),
                 cover_art_url: row.get("cover_art_url"),
                 is_compilation: row.get("is_compilation"),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
                     .with_timezone(&Utc),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
             }
@@ -789,10 +812,10 @@ impl Database {
                 country: row.get("country"),
                 barcode: row.get("barcode"),
                 import_status: row.get("import_status"),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
                     .with_timezone(&Utc),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
             });
@@ -815,6 +838,9 @@ impl Database {
                 duration_ms: row.get("duration_ms"),
                 discogs_position: row.get("discogs_position"),
                 import_status: row.get("import_status"),
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
+                    .unwrap()
+                    .with_timezone(&Utc),
                 created_at: row.get("created_at"),
             }))
         } else {
@@ -854,6 +880,9 @@ impl Database {
                 duration_ms: row.get("duration_ms"),
                 discogs_position: row.get("discogs_position"),
                 import_status: row.get("import_status"),
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
+                    .unwrap()
+                    .with_timezone(&Utc),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
@@ -866,8 +895,8 @@ impl Database {
         sqlx::query(
             r#"
             INSERT INTO release_files (
-                id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, _updated_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&file.id)
@@ -877,6 +906,7 @@ impl Database {
         .bind(file.content_type.as_str())
         .bind(&file.source_path)
         .bind(&file.encryption_nonce)
+        .bind(file.updated_at.to_rfc3339())
         .bind(file.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
@@ -901,6 +931,9 @@ impl Database {
                 content_type: ContentType::from_mime(&row.get::<String, _>("content_type")),
                 source_path: row.get("source_path"),
                 encryption_nonce: row.get("encryption_nonce"),
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
+                    .unwrap()
+                    .with_timezone(&Utc),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
@@ -923,6 +956,9 @@ impl Database {
                 content_type: ContentType::from_mime(&row.get::<String, _>("content_type")),
                 source_path: row.get("source_path"),
                 encryption_nonce: row.get("encryption_nonce"),
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
+                    .unwrap()
+                    .with_timezone(&Utc),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
@@ -939,8 +975,8 @@ impl Database {
         sqlx::query(
             r#"
             INSERT INTO audio_formats (
-                id, track_id, content_type, flac_headers, needs_headers, start_byte_offset, end_byte_offset, pregap_ms, frame_offset_samples, exact_sample_count, sample_rate, bits_per_sample, seektable_json, audio_data_start, file_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, track_id, content_type, flac_headers, needs_headers, start_byte_offset, end_byte_offset, pregap_ms, frame_offset_samples, exact_sample_count, sample_rate, bits_per_sample, seektable_json, audio_data_start, file_id, _updated_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&audio_format.id)
@@ -958,6 +994,7 @@ impl Database {
         .bind(&audio_format.seektable_json)
         .bind(audio_format.audio_data_start)
         .bind(&audio_format.file_id)
+        .bind(audio_format.updated_at.to_rfc3339())
         .bind(audio_format.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
@@ -989,6 +1026,9 @@ impl Database {
                 seektable_json: row.get("seektable_json"),
                 audio_data_start: row.get("audio_data_start"),
                 file_id: row.get("file_id"),
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
+                    .unwrap()
+                    .with_timezone(&Utc),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
@@ -1050,7 +1090,7 @@ impl Database {
             r#"
             SELECT 
                 a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
-                a.is_compilation, a.created_at, a.updated_at,
+                a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
             FROM albums a
@@ -1063,7 +1103,7 @@ impl Database {
             r#"
             SELECT 
                 a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
-                a.is_compilation, a.created_at, a.updated_at,
+                a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
             FROM albums a
@@ -1076,7 +1116,7 @@ impl Database {
             r#"
             SELECT 
                 a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
-                a.is_compilation, a.created_at, a.updated_at,
+                a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
             FROM albums a
@@ -1137,10 +1177,10 @@ impl Database {
                 cover_release_id: row.get("cover_release_id"),
                 cover_art_url: row.get("cover_art_url"),
                 is_compilation: row.get("is_compilation"),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
                     .with_timezone(&Utc),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
             }
@@ -1159,7 +1199,7 @@ impl Database {
             r#"
             SELECT 
                 a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
-                a.is_compilation, a.created_at, a.updated_at,
+                a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
             FROM albums a
@@ -1172,7 +1212,7 @@ impl Database {
             r#"
             SELECT 
                 a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
-                a.is_compilation, a.created_at, a.updated_at,
+                a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
             FROM albums a
@@ -1185,7 +1225,7 @@ impl Database {
             r#"
             SELECT 
                 a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
-                a.is_compilation, a.created_at, a.updated_at,
+                a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
             FROM albums a
@@ -1246,10 +1286,10 @@ impl Database {
                 cover_release_id: row.get("cover_release_id"),
                 cover_art_url: row.get("cover_art_url"),
                 is_compilation: row.get("is_compilation"),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
                     .with_timezone(&Utc),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
             }
@@ -1438,8 +1478,8 @@ impl Database {
     pub async fn upsert_library_image(&self, image: &DbLibraryImage) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
-            INSERT INTO library_images (id, type, content_type, file_size, width, height, source, source_url, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO library_images (id, type, content_type, file_size, width, height, source, source_url, _updated_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 type = excluded.type,
                 content_type = excluded.content_type,
@@ -1447,7 +1487,8 @@ impl Database {
                 width = excluded.width,
                 height = excluded.height,
                 source = excluded.source,
-                source_url = excluded.source_url
+                source_url = excluded.source_url,
+                _updated_at = excluded._updated_at
             "#,
         )
         .bind(&image.id)
@@ -1458,6 +1499,7 @@ impl Database {
         .bind(image.height)
         .bind(&image.source)
         .bind(&image.source_url)
+        .bind(image.updated_at.to_rfc3339())
         .bind(image.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
@@ -1510,8 +1552,9 @@ impl Database {
         album_id: &str,
         cover_release_id: &str,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE albums SET cover_release_id = ? WHERE id = ?")
+        sqlx::query("UPDATE albums SET cover_release_id = ?, _updated_at = ? WHERE id = ?")
             .bind(cover_release_id)
+            .bind(Utc::now().to_rfc3339())
             .bind(album_id)
             .execute(&self.pool)
             .await?;

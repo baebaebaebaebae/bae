@@ -167,16 +167,20 @@ mod tests {
     use chrono::Utc;
     fn create_test_tracks(count: usize) -> Vec<DbTrack> {
         (0..count)
-            .map(|i| DbTrack {
-                id: format!("track-{}", i),
-                release_id: "release-1".to_string(),
-                title: format!("Track {}", i + 1),
-                disc_number: None,
-                track_number: Some((i + 1) as i32),
-                duration_ms: None,
-                discogs_position: Some((i + 1).to_string()),
-                import_status: ImportStatus::Queued,
-                created_at: Utc::now(),
+            .map(|i| {
+                let now = Utc::now();
+                DbTrack {
+                    id: format!("track-{}", i),
+                    release_id: "release-1".to_string(),
+                    title: format!("Track {}", i + 1),
+                    disc_number: None,
+                    track_number: Some((i + 1) as i32),
+                    duration_ms: None,
+                    discogs_position: Some((i + 1).to_string()),
+                    import_status: ImportStatus::Queued,
+                    updated_at: now,
+                    created_at: now,
+                }
             })
             .collect()
     }

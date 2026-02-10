@@ -41,12 +41,7 @@ pub fn parse_discogs_release(
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
-        let album_artist = DbAlbumArtist {
-            id: Uuid::new_v4().to_string(),
-            album_id: album.id.clone(),
-            artist_id: artist.id.clone(),
-            position: 0,
-        };
+        let album_artist = DbAlbumArtist::new(&album.id, &artist.id, 0);
         artists.push(artist);
         album_artists.push(album_artist);
     } else {
@@ -62,12 +57,7 @@ pub fn parse_discogs_release(
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
             };
-            let album_artist = DbAlbumArtist {
-                id: Uuid::new_v4().to_string(),
-                album_id: album.id.clone(),
-                artist_id: artist.id.clone(),
-                position: position as i32,
-            };
+            let album_artist = DbAlbumArtist::new(&album.id, &artist.id, position as i32);
             artists.push(artist);
             album_artists.push(album_artist);
         }

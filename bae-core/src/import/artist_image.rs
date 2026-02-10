@@ -126,6 +126,7 @@ pub async fn fetch_and_save_artist_image(
         height: None,
         source: "discogs".to_string(),
         source_url: Some(image_url),
+        updated_at: chrono::Utc::now(),
         created_at: chrono::Utc::now(),
     };
 

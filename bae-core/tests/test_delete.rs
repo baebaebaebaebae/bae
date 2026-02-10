@@ -55,6 +55,7 @@ fn create_test_release(album_id: &str) -> DbRelease {
 }
 
 fn create_test_track(release_id: &str, track_number: i32) -> DbTrack {
+    let now = Utc::now();
     DbTrack {
         id: Uuid::new_v4().to_string(),
         release_id: release_id.to_string(),
@@ -64,7 +65,8 @@ fn create_test_track(release_id: &str, track_number: i32) -> DbTrack {
         duration_ms: Some(180000),
         discogs_position: None,
         import_status: ImportStatus::Complete,
-        created_at: Utc::now(),
+        updated_at: now,
+        created_at: now,
     }
 }
 
