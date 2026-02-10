@@ -1,6 +1,6 @@
 # Storage Profiles Roadmap
 
-Specs: `notes/data-model.md`, `notes/library-and-cloud.md`, `notes/storage-profiles.md`
+Specs: `notes/00-data-model.md`, `notes/01-sync-and-storage.md`, `notes/02-storage-profiles.md`
 
 ## Architecture decisions
 
@@ -55,37 +55,6 @@ Same change needed for cloud: `s3://bucket/{ab}/{cd}/{file_id}` instead of curre
 
 Touches: `ReleaseStorageImpl`, `S3CloudStorage::object_key()`, `source_path` values in DB
 
-## Phase 2 — Metadata replication to profiles
+## Phases 2-5 — Superseded
 
-The big one. Spec says every profile carries its own `library.db`, `covers/`, `artists/`, `manifest.json`.
-
-Currently: NO metadata replication to profiles. No `manifest.json` anywhere. Cloud sync is a separate library-level backup, not per-profile.
-
-Needs:
-- `manifest.json` struct (encryption fingerprint, library_id, created_at, last_synced_at)
-- Metadata sync engine — subscribe to changes, VACUUM INTO, replicate to each profile
-- Library home as a storage profile row
-- Remove `CloudSyncService` (replaced by profile-based replication per Q2)
-
-## Phase 3 — Reader instances
-
-Mostly free after Phase 2 — bae-server already accepts `--library-path`.
-
-Needs:
-- Fall back to `manifest.json` when `config.yaml` absent
-- Verify subsonic paths work with profile directories
-- Cloud profile download support
-
-## Phase 4 — Layout polish
-
-- Pointer file rename (`library` → `active-library`) with migration (per Q5)
-- `manifest.json` in library home
-
-## Phase 5 — Explicitly deferred
-
-- SQLCipher (DB encrypted at rest)
-- Bidirectional sync / conflict resolution
-- Periodic auto-upload
-- Incremental sync
-- Key export/import UX
-- Web audio playback
+Phases 2-5 of this roadmap have been superseded by `plans/sync-and-network/roadmap.md`. The per-profile metadata replication model (MetadataReplicator, manifest.json) was replaced by the sync bucket architecture. Storage profiles now hold release files only.

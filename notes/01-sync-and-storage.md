@@ -1,8 +1,70 @@
-# Sync, Collaboration & Discovery Network
+# Sync & Storage
 
-How bae evolves from single-device sync to a decentralized music network.
+bae starts local, scales to cloud, then to collaboration and a decentralized network. Progressive complexity -- each layer is independently useful, and you never pay for capabilities you don't use.
 
-## Layers
+## Tiers
+
+### Tier 1: Local (no setup)
+
+- Install bae, import music from folders/CDs
+- Files stored locally, plain SQLite DB, no encryption, no key
+- Library lives at `~/.bae/`
+
+### Tier 2: Cloud (two decisions)
+
+Two independent capabilities -- they can be enabled separately or together:
+
+**Sync (multi-device):** User configures a sync bucket (S3 credentials + bucket). bae generates an encryption key and stores it in the OS keyring. The sync bucket gets changesets, snapshots, and images -- everything needed for another device to join.
+
+**Cloud file storage:** User creates a cloud storage profile (S3 credentials + bucket). Release files can be transferred there. This is separate from sync -- it's just a place to put files. The sync bucket itself can also serve as file storage (simplest setup: one bucket for everything).
+
+- On macOS, iCloud Keychain syncs the encryption key to other devices automatically
+- Files encrypt on upload, images encrypt in the sync bucket, DB snapshots encrypted for bootstrap
+- The only decisions were "I want sync" and/or "I want cloud storage." Encryption followed automatically.
+- The user never typed an encryption key. They might not even know they have one.
+
+### Tier 3: Power user
+
+- Multiple file storage profiles (different buckets, local + cloud mix)
+  - e.g., fast S3 bucket for music you listen to often, cheap archival storage (S3 Glacier, Backblaze B2) for stuff you rarely access
+- Export/import encryption key manually
+- Run bae-server pointing at the sync bucket
+- Key fingerprint visible in settings for verification
+
+## What a Library Is
+
+Desktop manages all libraries under `~/.bae/libraries/`. Each library is a directory:
+
+```
+~/.bae/
+  active-library               # UUID of the active library
+  libraries/
+    {uuid}/                    # one directory per library
+```
+
+On first launch, bae creates the library home. The library home has a `storage_profiles` row in the DB (for file storage -- it holds release files like any other profile).
+
+**`config.yaml`** -- device-specific settings (torrent ports, subsonic config, keyring hint flags, sync bucket configuration, device_id). Not synced. Only at the library home.
+
+| Data | Tier 1 (local) | Tier 2+ (cloud) |
+|------|----------------|-----------------|
+| library.db | Plain SQLite | Plain locally, encrypted snapshot in sync bucket |
+| Cover art | Plaintext | Encrypted in sync bucket |
+| Release files | On their profile | Encrypted on cloud profiles |
+| Encryption key | N/A | OS keyring (iCloud Keychain) |
+| config.yaml | Local | Local (device-specific, not synced) |
+
+Each library owns its buckets and directories exclusively -- no sharing between libraries.
+
+## Encryption
+
+One key per library. The key belongs to the library, not to individual storage profiles or the sync bucket. Everything that goes to cloud gets encrypted with it.
+
+**Key fingerprint:** SHA-256 of the key, truncated. Stored in `config.yaml`. Lets us detect the wrong key immediately instead of silently producing garbage.
+
+You shouldn't have to think about encryption, keys, or cloud storage until the moment you want cloud. And when you do, encryption just happens -- it's not a feature you configure, it's a consequence of going cloud.
+
+## Sync
 
 The design has four layers, each building on the previous:
 
@@ -13,15 +75,7 @@ The design has four layers, each building on the previous:
 
 Each layer is independently useful. A solo user benefits from layer 1. Friends sharing a library use layers 1-2. Sharing a single album uses layer 3. The public network is layer 4.
 
----
-
-## Layer 1: Changeset sync
-
-### The problem
-
-The current sync model pushes a full DB snapshot + all images to every profile on every mutation. This doesn't scale -- a single track rename re-uploads the entire library.
-
-### The model
+### Changeset sync (layer 1)
 
 Use the SQLite session extension to capture exactly what changed, push the binary changeset to the sync bucket, pull and apply on other devices with a conflict handler. No coordination server. The sync bucket is a library-level concept -- one S3 bucket per library, configured in `config.yaml`, separate from storage profiles (which just hold release files).
 
@@ -42,7 +96,7 @@ s3://sync-bucket/
 
 **Polling is cheap** -- listing `heads/` is one S3 LIST call. If all seqs match your cursors, nothing to do. Check on app open + periodic timer.
 
-### Why the session extension
+#### Why the session extension
 
 We considered and rejected several alternatives:
 
@@ -53,13 +107,13 @@ We considered and rejected several alternatives:
 
 The session extension is built into SQLite. It tracks all changes (INSERT/UPDATE/DELETE) automatically at the C level. No triggers, no method wrapping, no column enumeration. The app writes normally. SQLite records what changed. We grab the binary changeset and push it.
 
-### Changesets, not operations
+#### Changesets, not operations
 
 The session extension produces a compact binary changeset that represents the diff between the database before and after. A changeset contains only the rows and columns that actually changed.
 
 For an import that creates an album + release + 12 tracks + 12 files, a JSON op log approach would generate ~50 operations. The session extension produces a single binary changeset blob. Smaller, faster, and no custom serialization.
 
-### Conflict resolution: row-level LWW
+#### Conflict resolution: row-level LWW
 
 When two devices change the same row, the later `_updated_at` timestamp wins. Every synced table has an `_updated_at` column maintained by a Hybrid Logical Clock (HLC).
 
@@ -90,7 +144,7 @@ Result: rel-123 is deleted (delete wins)
 
 For a music library this is fine -- conflicts are rare and low-stakes. Worst case someone re-edits a field.
 
-### The sync protocol
+#### The sync protocol
 
 ```
 1. Start session (attach synced tables)
@@ -106,11 +160,17 @@ For a music library this is fine -- conflicts are rare and low-stakes. Worst cas
 
 **Key rule:** Never apply someone else's changeset while your session is recording. Otherwise your next outgoing changeset contains their changes as duplicates.
 
-### Database architecture
+#### Sync triggers
+
+- After `LibraryEvent::AlbumsChanged` (import, delete) with debounce
+- Manual "Sync Now" button in settings
+- If the sync bucket is unreachable, sync is skipped and retried next time
+
+#### Database architecture
 
 The session extension attaches to a single connection and only captures changes made through that connection. The `Database` struct is refactored to use a dedicated write connection (with session attached) and a read pool. Write methods use the dedicated connection; read methods use the pool. This matches SQLite's single-writer-multiple-reader architecture.
 
-### Schema evolution
+#### Schema evolution
 
 The SQLite session extension identifies columns by index, not by name. This constrains how the schema can change once changeset sync is live.
 
@@ -118,9 +178,9 @@ The SQLite session extension identifies columns by index, not by name. This cons
 
 **Breaking changes require coordination.** Deleting, reordering, or renaming columns shifts column indices and corrupts changeset application. These changes bump a `min_schema_version` marker in the sync bucket, splitting the changeset history into **epochs**. Within an epoch, all changesets are schema-compatible. Across epochs, no replay -- devices pull a fresh snapshot to jump forward. This means any schema change is possible (the snapshot IS the migrated state), but all devices must upgrade before syncing resumes.
 
-Every changeset envelope carries a `schema_version` integer so receivers know what schema produced it. In practice, schema changes for a music library are almost always additive (new fields), making breaking migrations rare. See the roadmap (1h) for the full protocol.
+Every changeset envelope carries a `schema_version` integer so receivers know what schema produced it. In practice, schema changes for a music library are almost always additive (new fields), making breaking migrations rare. See `plans/sync-and-network/roadmap.md` for the full protocol.
 
-### Snapshots
+#### Snapshots
 
 The changeset log grows forever without intervention. Periodically, any device writes a snapshot -- a full DB `VACUUM INTO`:
 
@@ -130,23 +190,19 @@ snapshot.db.enc   # overwritten each time
 
 New devices start from the snapshot, then replay only changesets after it. Old changesets can be garbage collected after a grace period (30 days).
 
-### What this replaces
+#### What this replaces
 
-The current `MetadataReplicator` -- which pushes a full `VACUUM INTO` snapshot plus all images to every non-home profile on every mutation -- is eliminated entirely. It is not reduced to local-only; it is removed. Sync goes through the single sync bucket. Storage profiles (including external drives) hold release files only -- no DB, no images, no manifest.
+The `MetadataReplicator` -- which pushed a full `VACUUM INTO` snapshot plus all images to every non-home profile on every mutation -- is eliminated entirely. It is not reduced to local-only; it is removed. Sync goes through the single sync bucket. Storage profiles (including external drives) hold release files only -- no DB, no images, no manifest.
 
----
-
-## Layer 2: Shared libraries
-
-### The problem
+### Shared libraries (layer 2)
 
 Currently a library has one writer (desktop). Adding users -- multiple people reading and writing the same library -- requires identity, authorization, and a trust model.
 
-### Identity = a keypair
+#### Identity = a keypair
 
 Each user generates a keypair locally (Ed25519 for signing, X25519 for encryption). No accounts, no server, no signup. Your public key is your identity. The keypair is global (not per-library) so attestations in layer 4 accumulate under one identity.
 
-### Bucket layout with users
+#### Bucket layout with users
 
 ```
 s3://sync-bucket/
@@ -161,7 +217,7 @@ s3://sync-bucket/
 
 Changesets stay keyed by device_id (a user may have multiple devices). Authorship is established cryptographically: each changeset envelope includes `author_pubkey` and a signature over the changeset bytes.
 
-### Membership chain
+#### Membership chain
 
 An append-only log of membership changes, stored as individual files to avoid S3 overwrite races. Each entry is signed by an owner.
 
@@ -172,7 +228,7 @@ An append-only log of membership changes, stored as individual files to avoid S3
 
 On read, clients download all membership entries, order by timestamp, and validate the chain.
 
-### Invitation flow
+#### Invitation flow
 
 ```
 Owner invites Alice:
@@ -189,30 +245,26 @@ Alice's first sync:
   4. Can now push her own signed changesets
 ```
 
-### Changeset validation on pull
+#### Changeset validation on pull
 
 Before applying any changeset:
 1. Verify the signature against `author_pubkey`
 2. Was the author a valid member at that time?
 3. If either fails -> discard
 
-### Revocation
+#### Revocation
 
 Owner writes a Remove membership entry, generates a new encryption key, re-wraps to remaining members. Old data: Bob had the old key, accept it pragmatically. New data is protected.
 
-### Attribution
+#### Attribution
 
 Every changeset envelope carries `author_pubkey`. "Alice added this release," "Bob changed the cover." Free audit trail.
 
----
-
-## Layer 3: Cross-library sharing
-
-### The problem
+### Cross-library sharing (layer 3)
 
 Libraries are islands. If Alice wants to share one album with Bob (who isn't in her library), she'd have to give him the entire library encryption key. All or nothing.
 
-### Derived keys
+#### Derived keys
 
 Replace the flat encryption model with a key hierarchy:
 
@@ -224,7 +276,7 @@ master_key (per library, in keyring)
 
 HKDF-SHA256 with the release ID as context. Each release effectively has its own key, derived from the master. Library members have the master key and can derive any release key. A single release key can be shared without exposing the master.
 
-### Sharing a release
+#### Sharing a release
 
 ```
 Alice wants to share "Kind of Blue" with Bob (not in her library):
@@ -243,7 +295,7 @@ Bob's client:
 
 No server in the loop. Bob reads directly from Alice's S3 bucket with just enough key material for one release.
 
-### Aggregated view
+#### Aggregated view
 
 A user's client aggregates all their access into one view:
 
@@ -257,11 +309,7 @@ You (keypair)
 
 Your music, shared libraries, individual grants -- resolved at play time from different buckets.
 
----
-
-## Layer 4: Public discovery network
-
-### The idea
+### Discovery network (layer 4)
 
 Every bae user who imports a release and matches it to a MusicBrainz ID creates a mapping:
 
@@ -273,7 +321,7 @@ Content hash / infohash (universal -- "the actual bytes")
 
 This mapping is valuable. It's curation -- someone verified that these bytes are this release. Sharing it publicly enables decentralized music discovery without a central authority.
 
-### Three-layer lookup
+#### Three-layer lookup
 
 ```
 MBID                -> content hashes (the curation mapping)
@@ -281,7 +329,7 @@ Content hash        -> peers who have it (the DHT)
 Peer                -> actual bytes (BitTorrent)
 ```
 
-### The DHT as rendezvous
+#### The DHT as rendezvous
 
 The BitTorrent Mainline DHT is used for peer discovery, not as a database. For each MBID, derive a rendezvous key:
 
@@ -291,7 +339,7 @@ rendezvous = hash("bae:mbid:" + MBID_X)
 
 Every bae client that has a release matched to MBID X announces on that rendezvous key (standard DHT announce).
 
-### Forward lookup: "I want Kind of Blue"
+#### Forward lookup: "I want Kind of Blue"
 
 ```
 User knows MBID X (from MusicBrainz search)
@@ -308,7 +356,7 @@ User knows MBID X (from MusicBrainz search)
   -> pick one, use standard BitTorrent to download
 ```
 
-### Reverse lookup: "I have these files, what are they?"
+#### Reverse lookup: "I have these files, what are they?"
 
 ```
 User has files with infohash ABC
@@ -318,7 +366,7 @@ User has files with infohash ABC
   -> now the user has proper metadata without manual tagging
 ```
 
-### Why not a blockchain?
+#### Why not a blockchain?
 
 The attestation model doesn't need proof of work or consensus:
 
@@ -327,7 +375,7 @@ The attestation model doesn't need proof of work or consensus:
 - **Confidence = attestation count** -- more independent signers = higher trust
 - **Bad mappings die naturally** -- zero corroboration, ignored
 
-### Attestation properties
+#### Attestation properties
 
 - **Signed**: every attestation is cryptographically signed by the author
 - **Cached**: clients cache attestations locally, re-share to future queries -- knowledge spreads epidemically
@@ -335,13 +383,79 @@ The attestation model doesn't need proof of work or consensus:
 - **No single writer**: no one controls the mapping, no one can censor it
 - **Permissionless**: any bae client can participate
 
-### Participation controls
+#### Participation controls
 
 Off by default. Enable in settings. Per-release opt-out. Attestation-only mode or full participation (attestations + seeding).
 
----
+## Storage Profiles
 
-## How the layers compose
+How release files are stored and managed across local and cloud locations. See `02-storage-profiles.md` for the full design.
+
+## bae-server
+
+`bae-server` -- a headless, read-only Subsonic API server.
+
+- Given sync bucket URL + encryption key: downloads `snapshot.db.enc`, applies changesets, caches DB + images locally
+- Streams audio from whatever storage location files are on, decrypting on the fly
+- Optional `--web-dir` serves the bae-web frontend alongside the API
+- `--recovery-key` for encrypted libraries, `--refresh` to re-pull from sync bucket
+- Stateless -- no writes, no migrations, ephemeral cache rebuilt from the sync bucket
+
+## First-Run Flows
+
+### New library
+
+On first run (no `~/.bae/active-library`), desktop shows a welcome screen. User picks "Create new library":
+
+1. Generate a library UUID (e.g., `lib-111`) and a profile UUID (e.g., `prof-aaa`)
+2. Create `~/.bae/libraries/lib-111/`
+3. Create empty `library.db`, insert `storage_profiles` row:
+   | profile_id | location | location_path |
+   |---|---|---|
+   | `prof-aaa` | local | `~/.bae/libraries/lib-111/` |
+4. Write `config.yaml`, write `~/.bae/active-library` -> `lib-111`
+5. Re-exec binary -- desktop launches normally
+
+The library home is now a storage profile. `storage/` is empty -- user imports their first album, files go into `storage/ab/cd/{file_id}`.
+
+### Restore from sync bucket
+
+User picks "Restore from sync bucket" and provides an S3 bucket + creds + encryption key:
+
+1. Download + decrypt `snapshot.db.enc` from the bucket (validates the key -- if decryption fails, wrong key)
+2. Generate a new profile UUID (`prof-ccc`), create `~/.bae/libraries/{library_id}/`
+3. Insert a new `storage_profiles` row:
+   | profile_id | location | location_path |
+   |---|---|---|
+   | `prof-ccc` | local | `~/.bae/libraries/{library_id}/` |
+4. Write `config.yaml` (with sync bucket config), keyring entries, `~/.bae/active-library` -> `{library_id}`
+5. Download images from the bucket
+6. Pull and apply any changesets newer than the snapshot
+7. Re-exec binary
+
+The new library home is `prof-ccc`. Its `storage/` is empty -- release files still live on their original storage profiles. The user can stream from cloud profiles or transfer releases to `prof-ccc`.
+
+### Going from local to cloud
+
+Sync and file storage are independent. Either can be enabled first.
+
+**Enabling sync:**
+1. User provides S3 credentials for a sync bucket (bucket must be empty)
+2. bae generates encryption key if one doesn't exist, stores in keyring
+3. bae pushes a full snapshot + all images to the sync bucket
+4. Subsequent mutations push incremental changesets
+5. Another device can now join from the sync bucket
+
+**Adding cloud file storage:**
+1. User creates a cloud storage profile (provides S3 credentials, bucket must be empty)
+2. Release files can be transferred to the cloud profile
+3. No metadata is replicated to the storage profile -- it just holds files
+
+**Simplest setup: one bucket for everything.** The sync bucket can also serve as a file storage location. Release files go under `storage/` in the same bucket alongside the sync data. One bucket, one set of credentials. For many users, this is all they need.
+
+**Separate buckets.** Power users can have the sync bucket on fast storage and file storage on cheap archival buckets. Or file storage on an external drive. The sync bucket only holds changesets, snapshots, and images -- it stays small.
+
+## How the Layers Compose
 
 **Solo user, local only** (today):
 - Layer 1 replaces full-snapshot sync with incremental changesets to the sync bucket
@@ -364,3 +478,15 @@ Off by default. Enable in settings. Per-release opt-out. Attestation-only mode o
 - Participate by announcing your releases, benefit by discovering metadata
 
 Each layer is opt-in. A user who never wants collaboration still benefits from incremental sync. A user who never wants public participation still benefits from shared libraries and private sharing.
+
+## What's Not Built Yet
+
+- Bidirectional sync / conflict resolution (Phase 1 of roadmap)
+- Periodic auto-upload
+- Write lock to prevent two desktops writing to the same library
+
+## Open Questions
+
+- Managed storage (we host S3) or always BYO-bucket?
+- Second-device setup when iCloud Keychain is off -- QR code? Paste key?
+- Key rotation -- probably YAGNI for now

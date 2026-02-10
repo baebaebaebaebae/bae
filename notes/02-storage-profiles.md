@@ -1,6 +1,6 @@
 # Storage Profiles
 
-How bae manages where release files live. Storage profiles are file storage locations -- they hold encrypted release files and nothing else. Metadata sync is handled separately by the sync bucket (see `01-library-and-cloud.md` and `plans/sync-and-network/roadmap.md`).
+How bae manages where release files live. Storage profiles are file storage locations -- they hold release files and nothing else. Metadata sync is handled separately by the sync bucket (see `01-sync-and-storage.md` and `plans/sync-and-network/roadmap.md`).
 
 ## Storage modes
 
@@ -53,7 +53,7 @@ s3://sync-bucket/
   storage/ab/cd/{file_id}            # release files
 ```
 
-This is the simplest setup: one bucket for everything. The sync bucket has a `storage_profiles` row in the DB like any other cloud profile, so the import and transfer flows work identically.
+This is the simplest setup: one bucket for everything. The sync bucket configuration itself lives in `config.yaml`, but when it doubles as file storage, it also gets a `storage_profiles` row so that import and transfer flows work identically to any other cloud profile.
 
 ## Library home
 
