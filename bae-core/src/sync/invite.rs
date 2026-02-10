@@ -1,7 +1,9 @@
-/// Invitation flow: orchestrates adding new members to a shared library.
+/// Invitation and revocation flow for shared library membership.
 ///
 /// `create_invitation()` is called by the library owner to invite a new member.
 /// `accept_invitation()` is called by the invitee to unwrap the library key.
+/// `revoke_member()` is called by the library owner to remove a member and rotate the key.
+use crate::encryption;
 use crate::keys::{self, KeyError, UserKeypair};
 use crate::sodium_ffi;
 
@@ -21,6 +23,53 @@ pub enum InviteError {
     Membership(#[from] MembershipError),
     #[error("Crypto error: {0}")]
     Crypto(String),
+    #[error("User {0} is not a current member")]
+    NotAMember(String),
+}
+
+/// Determine the next seq for an author's membership entries in the bucket.
+async fn next_membership_seq(
+    bucket: &dyn SyncBucketClient,
+    author_pubkey_hex: &str,
+) -> Result<u64, InviteError> {
+    let existing_entries = bucket.list_membership_entries().await?;
+    Ok(existing_entries
+        .iter()
+        .filter(|(author, _)| author == author_pubkey_hex)
+        .map(|(_, seq)| seq)
+        .max()
+        .map_or(1, |max| max + 1))
+}
+
+/// Decode and convert an Ed25519 hex pubkey to X25519 for sealed box encryption.
+fn ed25519_hex_to_x25519(
+    ed25519_pubkey_hex: &str,
+) -> Result<[u8; sodium_ffi::CURVE25519_PUBLICKEYBYTES], InviteError> {
+    let pk_bytes: [u8; sodium_ffi::SIGN_PUBLICKEYBYTES] = hex::decode(ed25519_pubkey_hex)
+        .map_err(|e| InviteError::Crypto(format!("invalid pubkey hex: {e}")))?
+        .try_into()
+        .map_err(|_| InviteError::Crypto("pubkey wrong length".to_string()))?;
+    Ok(keys::ed25519_to_x25519_public_key(&pk_bytes))
+}
+
+/// Sign a membership entry and upload it to the bucket.
+async fn sign_and_upload_entry(
+    bucket: &dyn SyncBucketClient,
+    entry: &mut MembershipEntry,
+    keypair: &UserKeypair,
+) -> Result<(), InviteError> {
+    sign_membership_entry(entry, keypair);
+
+    let author_pubkey_hex = hex::encode(keypair.public_key);
+    let next_seq = next_membership_seq(bucket, &author_pubkey_hex).await?;
+
+    let entry_bytes =
+        serde_json::to_vec(&entry).map_err(|e| InviteError::Crypto(format!("serialize: {e}")))?;
+    bucket
+        .put_membership_entry(&author_pubkey_hex, next_seq, entry_bytes)
+        .await?;
+
+    Ok(())
 }
 
 /// Create an invitation for a new member.
@@ -37,15 +86,8 @@ pub async fn create_invitation(
     encryption_key: &[u8; 32],
     timestamp: &str,
 ) -> Result<(), InviteError> {
-    // Decode the invitee's Ed25519 public key from hex.
-    let invitee_pk_bytes: [u8; sodium_ffi::SIGN_PUBLICKEYBYTES] =
-        hex::decode(invitee_ed25519_pubkey)
-            .map_err(|e| InviteError::Crypto(format!("invalid invitee pubkey hex: {e}")))?
-            .try_into()
-            .map_err(|_| InviteError::Crypto("invitee pubkey wrong length".to_string()))?;
-
     // Convert Ed25519 -> X25519 for sealed box encryption.
-    let invitee_x25519_pk = keys::ed25519_to_x25519_public_key(&invitee_pk_bytes);
+    let invitee_x25519_pk = ed25519_hex_to_x25519(invitee_ed25519_pubkey)?;
 
     // Wrap the library encryption key.
     let wrapped_key = keys::seal_box_encrypt(encryption_key, &invitee_x25519_pk);
@@ -55,7 +97,7 @@ pub async fn create_invitation(
         .put_wrapped_key(invitee_ed25519_pubkey, wrapped_key)
         .await?;
 
-    // Create and sign a membership entry.
+    // Create, sign, and upload a membership entry.
     let mut entry = MembershipEntry {
         action: MembershipAction::Add,
         user_pubkey: invitee_ed25519_pubkey.to_string(),
@@ -64,24 +106,7 @@ pub async fn create_invitation(
         author_pubkey: String::new(),
         signature: String::new(),
     };
-    sign_membership_entry(&mut entry, owner_keypair);
-
-    // Determine the next seq for this author in the bucket.
-    let author_pubkey_hex = hex::encode(owner_keypair.public_key);
-    let existing_entries = bucket.list_membership_entries().await?;
-    let next_seq = existing_entries
-        .iter()
-        .filter(|(author, _)| author == &author_pubkey_hex)
-        .map(|(_, seq)| seq)
-        .max()
-        .map_or(1, |max| max + 1);
-
-    // Upload membership entry.
-    let entry_bytes =
-        serde_json::to_vec(&entry).map_err(|e| InviteError::Crypto(format!("serialize: {e}")))?;
-    bucket
-        .put_membership_entry(&author_pubkey_hex, next_seq, entry_bytes)
-        .await?;
+    sign_and_upload_entry(bucket, &mut entry, owner_keypair).await?;
 
     // Add to the local chain (validates signature and author ownership).
     chain.add_entry(entry)?;
@@ -113,6 +138,58 @@ pub async fn accept_invitation(
         .map_err(|_| InviteError::Crypto("unwrapped key is not 32 bytes".to_string()))?;
 
     Ok(encryption_key)
+}
+
+/// Revoke a member from the library. This:
+/// 1. Creates a Remove membership entry signed by the owner
+/// 2. Generates a new library encryption key
+/// 3. Re-wraps the new key to all remaining members
+/// 4. Deletes the revoked member's wrapped key
+/// 5. Uploads updated entries and keys
+///
+/// Returns the new encryption key (caller must persist it and start using it).
+pub async fn revoke_member(
+    bucket: &dyn SyncBucketClient,
+    chain: &mut MembershipChain,
+    owner_keypair: &UserKeypair,
+    revokee_pubkey: &str,
+    timestamp: &str,
+) -> Result<[u8; 32], InviteError> {
+    // Verify the revokee is a current member before doing anything.
+    let members = chain.current_members();
+    if !members.iter().any(|(pk, _)| pk == revokee_pubkey) {
+        return Err(InviteError::NotAMember(revokee_pubkey.to_string()));
+    }
+
+    // Create, sign, and upload a Remove entry.
+    let mut entry = MembershipEntry {
+        action: MembershipAction::Remove,
+        user_pubkey: revokee_pubkey.to_string(),
+        role: MemberRole::Member, // role field is not meaningful for Remove, but required
+        timestamp: timestamp.to_string(),
+        author_pubkey: String::new(),
+        signature: String::new(),
+    };
+    sign_and_upload_entry(bucket, &mut entry, owner_keypair).await?;
+
+    // Add to the local chain (validates signature and author ownership).
+    chain.add_entry(entry)?;
+
+    // Generate a new random encryption key.
+    let new_key = encryption::generate_random_key();
+
+    // Re-wrap the new key to all remaining members.
+    let remaining_members = chain.current_members();
+    for (member_pubkey, _) in &remaining_members {
+        let x25519_pk = ed25519_hex_to_x25519(member_pubkey)?;
+        let wrapped = keys::seal_box_encrypt(&new_key, &x25519_pk);
+        bucket.put_wrapped_key(member_pubkey, wrapped).await?;
+    }
+
+    // Delete the revoked member's wrapped key.
+    bucket.delete_wrapped_key(revokee_pubkey).await?;
+
+    Ok(new_key)
 }
 
 #[cfg(test)]
@@ -312,5 +389,149 @@ mod tests {
         // Verify the wrapped key was uploaded.
         let wrapped = bucket.get_wrapped_key(&pubkey_hex(&invitee)).await.unwrap();
         assert!(!wrapped.is_empty());
+    }
+
+    #[tokio::test]
+    async fn revoke_member_roundtrip() {
+        let owner = gen_keypair();
+        let member = gen_keypair();
+        let old_key: [u8; 32] = [42u8; 32];
+
+        let bucket = MockBucket::new();
+        let mut chain = bootstrap_chain(&owner);
+
+        // Owner invites the member.
+        create_invitation(
+            &bucket,
+            &mut chain,
+            &owner,
+            &pubkey_hex(&member),
+            MemberRole::Member,
+            &old_key,
+            "0000000002000-0000-dev1",
+        )
+        .await
+        .unwrap();
+
+        // Member can unwrap the key.
+        let unwrapped = accept_invitation(&bucket, &member).await.unwrap();
+        assert_eq!(unwrapped, old_key);
+
+        // Owner revokes the member.
+        let new_key = revoke_member(
+            &bucket,
+            &mut chain,
+            &owner,
+            &pubkey_hex(&member),
+            "0000000003000-0000-dev1",
+        )
+        .await
+        .unwrap();
+
+        // New key should be different from old key.
+        assert_ne!(new_key, old_key);
+
+        // Member is no longer in the chain.
+        let members = chain.current_members();
+        assert!(!members.iter().any(|(pk, _)| pk == &pubkey_hex(&member)));
+        assert!(members.iter().any(|(pk, _)| pk == &pubkey_hex(&owner)));
+
+        // Chain should still validate.
+        chain.validate().unwrap();
+
+        // Revoked member's wrapped key was deleted from the bucket.
+        let result = bucket.get_wrapped_key(&pubkey_hex(&member)).await;
+        assert!(result.is_err());
+
+        // Owner can still unwrap the new key.
+        let owner_unwrapped = accept_invitation(&bucket, &owner).await.unwrap();
+        assert_eq!(owner_unwrapped, new_key);
+
+        // The Remove entry was uploaded to the bucket.
+        let entries = bucket.list_membership_entries().await.unwrap();
+        let owner_entries: Vec<_> = entries
+            .iter()
+            .filter(|(author, _)| author == &pubkey_hex(&owner))
+            .collect();
+        // 1 for invite + 1 for revoke = 2
+        assert_eq!(owner_entries.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn revoke_member_with_multiple_remaining() {
+        let owner = gen_keypair();
+        let member1 = gen_keypair();
+        let member2 = gen_keypair();
+        let old_key: [u8; 32] = [10u8; 32];
+
+        let bucket = MockBucket::new();
+        let mut chain = bootstrap_chain(&owner);
+
+        // Invite two members.
+        create_invitation(
+            &bucket,
+            &mut chain,
+            &owner,
+            &pubkey_hex(&member1),
+            MemberRole::Member,
+            &old_key,
+            "0000000002000-0000-dev1",
+        )
+        .await
+        .unwrap();
+
+        create_invitation(
+            &bucket,
+            &mut chain,
+            &owner,
+            &pubkey_hex(&member2),
+            MemberRole::Member,
+            &old_key,
+            "0000000003000-0000-dev1",
+        )
+        .await
+        .unwrap();
+
+        // Revoke member1.
+        let new_key = revoke_member(
+            &bucket,
+            &mut chain,
+            &owner,
+            &pubkey_hex(&member1),
+            "0000000004000-0000-dev1",
+        )
+        .await
+        .unwrap();
+
+        // Both remaining members (owner + member2) can unwrap the new key.
+        let owner_key = accept_invitation(&bucket, &owner).await.unwrap();
+        assert_eq!(owner_key, new_key);
+
+        let member2_key = accept_invitation(&bucket, &member2).await.unwrap();
+        assert_eq!(member2_key, new_key);
+
+        // member1 cannot get a wrapped key.
+        let result = bucket.get_wrapped_key(&pubkey_hex(&member1)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn revoke_non_member_fails() {
+        let owner = gen_keypair();
+        let outsider = gen_keypair();
+
+        let bucket = MockBucket::new();
+        let mut chain = bootstrap_chain(&owner);
+
+        let result = revoke_member(
+            &bucket,
+            &mut chain,
+            &owner,
+            &pubkey_hex(&outsider),
+            "0000000002000-0000-dev1",
+        )
+        .await;
+
+        assert!(matches!(result, Err(InviteError::NotAMember(_))));
     }
 }
