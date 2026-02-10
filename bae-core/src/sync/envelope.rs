@@ -32,6 +32,10 @@ pub fn pack(envelope: &ChangesetEnvelope, changeset: &[u8]) -> Vec<u8> {
 ///
 /// Returns `None` if the format is invalid (no null separator or bad JSON).
 pub fn unpack(data: &[u8]) -> Option<(ChangesetEnvelope, Vec<u8>)> {
+    // Splitting on the first null byte is safe because the envelope is valid
+    // JSON, and JSON cannot contain raw 0x00 bytes -- any null characters in
+    // JSON strings must be escaped as \u0000. So the first 0x00 in the packed
+    // blob is always our separator, not part of the envelope JSON.
     let separator = data.iter().position(|&b| b == 0)?;
     let json_bytes = &data[..separator];
     let changeset_bytes = &data[separator + 1..];

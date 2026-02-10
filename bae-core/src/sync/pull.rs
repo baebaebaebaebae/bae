@@ -7,8 +7,9 @@
 /// 4. Unpack envelope, check schema_version, apply with LWW.
 /// 5. Update sync_cursors for that device.
 ///
-/// The bucket client handles encryption/decryption, so pull works with
-/// plaintext envelopes.
+/// After all changesets are applied, any that had FK constraint violations
+/// are retried once -- the parent rows should now exist from other devices'
+/// changesets applied in the same batch.
 use std::collections::HashMap;
 
 use tracing::{info, warn};
@@ -16,10 +17,8 @@ use tracing::{info, warn};
 use super::apply::apply_changeset_lww;
 use super::bucket::SyncBucketClient;
 use super::envelope;
+use super::push::SCHEMA_VERSION;
 use super::session_ext::Changeset;
-
-/// Current schema version. Changesets with a higher version are skipped.
-pub const SCHEMA_VERSION: u32 = 2;
 
 /// Summary of a pull operation.
 #[derive(Debug)]
@@ -30,6 +29,13 @@ pub struct PullResult {
     pub devices_pulled: u64,
     /// Changesets skipped due to schema version being newer than ours.
     pub skipped_schema: u64,
+}
+
+/// A changeset that had FK violations on first apply and needs retry.
+struct DeferredChangeset {
+    device_id: String,
+    seq: u64,
+    changeset: Changeset,
 }
 
 /// Pull and apply all new changesets from the sync bucket.
@@ -58,6 +64,7 @@ pub async unsafe fn pull_changes(
         devices_pulled: 0,
         skipped_schema: 0,
     };
+    let mut deferred: Vec<DeferredChangeset> = Vec::new();
 
     for head in &heads {
         // Skip our own device.
@@ -80,7 +87,9 @@ pub async unsafe fn pull_changes(
         let mut pulled_any = false;
 
         for seq in (local_seq + 1)..=head.seq {
-            let decrypted = match bucket.get_changeset(&head.device_id, seq).await {
+            // The bucket client returns already-decrypted bytes per its trait
+            // contract. Implementations handle download + decryption internally.
+            let envelope_bytes = match bucket.get_changeset(&head.device_id, seq).await {
                 Ok(data) => data,
                 Err(e) => {
                     warn!(
@@ -94,7 +103,19 @@ pub async unsafe fn pull_changes(
             };
 
             let (env, changeset_bytes) =
-                envelope::unpack(&decrypted).ok_or(PullError::InvalidEnvelope)?;
+                envelope::unpack(&envelope_bytes).ok_or(PullError::InvalidEnvelope)?;
+
+            // Validate that changeset_size in the envelope matches the actual
+            // bytes. A mismatch indicates corruption or a buggy encoder.
+            if env.changeset_size != changeset_bytes.len() {
+                warn!(
+                    device_id = %head.device_id,
+                    seq,
+                    expected = env.changeset_size,
+                    actual = changeset_bytes.len(),
+                    "changeset_size mismatch in envelope"
+                );
+            }
 
             // Schema version check: skip changesets from a newer schema.
             if env.schema_version > SCHEMA_VERSION {
@@ -118,7 +139,18 @@ pub async unsafe fn pull_changes(
             }
 
             let cs = Changeset::from_bytes(&changeset_bytes);
-            apply_changeset_lww(db, &cs).map_err(PullError::Apply)?;
+            let apply_result = apply_changeset_lww(db, &cs).map_err(PullError::Apply)?;
+
+            // TODO: Image sync is deferred -- downloaded images will be fetched
+            // here in a follow-up.
+
+            if apply_result.had_fk_violations {
+                deferred.push(DeferredChangeset {
+                    device_id: head.device_id.clone(),
+                    seq,
+                    changeset: Changeset::from_bytes(&changeset_bytes),
+                });
+            }
 
             result.changesets_applied += 1;
             pulled_any = true;
@@ -127,6 +159,27 @@ pub async unsafe fn pull_changes(
 
         if pulled_any {
             result.devices_pulled += 1;
+        }
+    }
+
+    // Retry changesets that had FK constraint violations. After applying all
+    // changesets from all devices, the parent rows should now exist.
+    if !deferred.is_empty() {
+        info!(
+            count = deferred.len(),
+            "retrying changesets with FK violations"
+        );
+
+        for d in &deferred {
+            let retry_result = apply_changeset_lww(db, &d.changeset).map_err(PullError::Apply)?;
+
+            if retry_result.had_fk_violations {
+                warn!(
+                    device_id = %d.device_id,
+                    seq = d.seq,
+                    "changeset still has FK violations after retry, skipping"
+                );
+            }
         }
     }
 

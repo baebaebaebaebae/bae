@@ -1,109 +1,19 @@
 /// Tests for the pull service and full sync cycle.
 ///
-/// Uses an in-memory mock bucket client to simulate the sync bucket,
-/// and raw sqlite3 connections for the database.
+/// Uses the shared MockBucket from test_helpers and raw sqlite3 connections
+/// for the database.
 use std::collections::HashMap;
-use std::sync::Mutex;
 
-use async_trait::async_trait;
 use libsqlite3_sys as ffi;
 
-use crate::sync::bucket::{BucketError, DeviceHead, SyncBucketClient};
-use crate::sync::envelope::{self, ChangesetEnvelope};
-use crate::sync::pull::{self, SCHEMA_VERSION};
+use crate::sync::bucket::SyncBucketClient;
+use crate::sync::envelope;
+use crate::sync::pull;
+use crate::sync::push::SCHEMA_VERSION;
 use crate::sync::service::SyncService;
 use crate::sync::session::SyncSession;
 use crate::sync::session_ext::Session;
 use crate::sync::test_helpers::*;
-
-// ---- Mock bucket client ----
-
-/// In-memory mock of SyncBucketClient for tests.
-/// Stores changesets as plaintext (no encryption in tests).
-struct MockBucket {
-    /// Changesets: key = "changes/{device_id}/{seq}" -> packed envelope bytes.
-    objects: Mutex<HashMap<String, Vec<u8>>>,
-    /// Heads: device_id -> seq.
-    heads: Mutex<HashMap<String, u64>>,
-}
-
-impl MockBucket {
-    fn new() -> Self {
-        MockBucket {
-            objects: Mutex::new(HashMap::new()),
-            heads: Mutex::new(HashMap::new()),
-        }
-    }
-
-    /// Store a changeset in the mock bucket (simulates what push would do).
-    fn store_changeset(
-        &self,
-        device_id: &str,
-        seq: u64,
-        changeset_bytes: &[u8],
-        schema_version: u32,
-    ) {
-        let env = ChangesetEnvelope {
-            device_id: device_id.to_string(),
-            seq,
-            schema_version,
-            message: String::new(),
-            timestamp: "2026-02-10T00:00:00Z".to_string(),
-            changeset_size: changeset_bytes.len(),
-        };
-        let packed = envelope::pack(&env, changeset_bytes);
-
-        let key = format!("changes/{device_id}/{seq}");
-        self.objects.lock().unwrap().insert(key, packed);
-        self.heads
-            .lock()
-            .unwrap()
-            .insert(device_id.to_string(), seq);
-    }
-}
-
-#[async_trait]
-impl SyncBucketClient for MockBucket {
-    async fn list_heads(&self) -> Result<Vec<DeviceHead>, BucketError> {
-        let heads = self.heads.lock().unwrap();
-        Ok(heads
-            .iter()
-            .map(|(id, &seq)| DeviceHead {
-                device_id: id.clone(),
-                seq,
-            })
-            .collect())
-    }
-
-    async fn get_changeset(&self, device_id: &str, seq: u64) -> Result<Vec<u8>, BucketError> {
-        let key = format!("changes/{device_id}/{seq}");
-        let objects = self.objects.lock().unwrap();
-        objects.get(&key).cloned().ok_or(BucketError::NotFound(key))
-    }
-
-    async fn put_changeset(
-        &self,
-        device_id: &str,
-        seq: u64,
-        data: Vec<u8>,
-    ) -> Result<(), BucketError> {
-        let key = format!("changes/{device_id}/{seq}");
-        self.objects.lock().unwrap().insert(key, data);
-        Ok(())
-    }
-
-    async fn put_head(&self, device_id: &str, seq: u64) -> Result<(), BucketError> {
-        self.heads
-            .lock()
-            .unwrap()
-            .insert(device_id.to_string(), seq);
-        Ok(())
-    }
-
-    async fn upload_image(&self, _id: &str, _data: Vec<u8>) -> Result<(), BucketError> {
-        Ok(())
-    }
-}
 
 /// Helper: capture a changeset from a raw db using a session on specific tables.
 unsafe fn capture_changeset(db: *mut ffi::sqlite3, tables: &[&str], sql: &[&str]) -> Vec<u8> {
@@ -468,6 +378,7 @@ async fn sync_cycle_push_then_pull() {
                 &HashMap::new(),
                 &bucket,
                 "2026-02-10T00:00:00Z",
+                "Imported Kind of Blue",
             )
             .await
             .expect("sync");
@@ -480,7 +391,7 @@ async fn sync_cycle_push_then_pull() {
             .await
             .expect("put");
         bucket
-            .put_head("dev-1", outgoing.seq)
+            .put_head("dev-1", outgoing.seq, None)
             .await
             .expect("put head");
 
@@ -575,6 +486,7 @@ async fn sync_cycle_no_local_changes_returns_none() {
                 &HashMap::new(),
                 &bucket,
                 "2026-02-10T00:00:00Z",
+                "",
             )
             .await
             .expect("sync");
@@ -609,6 +521,7 @@ async fn sync_service_outgoing_has_correct_envelope() {
                 &HashMap::new(),
                 &bucket,
                 "2026-02-10T12:00:00Z",
+                "Added Test artist",
             )
             .await
             .expect("sync");
@@ -622,6 +535,7 @@ async fn sync_service_outgoing_has_correct_envelope() {
         assert_eq!(env.seq, 6);
         assert_eq!(env.schema_version, SCHEMA_VERSION);
         assert_eq!(env.timestamp, "2026-02-10T12:00:00Z");
+        assert_eq!(env.message, "Added Test artist");
         assert!(!cs_bytes.is_empty());
 
         ffi::sqlite3_close(db);

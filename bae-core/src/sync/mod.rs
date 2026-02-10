@@ -10,6 +10,7 @@ pub mod push;
 pub mod service;
 pub mod session;
 pub mod session_ext;
+pub mod snapshot;
 #[cfg(test)]
 mod test_helpers;
 #[cfg(test)]

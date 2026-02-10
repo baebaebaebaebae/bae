@@ -1,9 +1,16 @@
 /// Shared test helpers for sync module tests.
 ///
 /// These operate on raw sqlite3 connections via libsqlite3-sys.
-use libsqlite3_sys as ffi;
+use std::collections::HashMap;
 use std::ffi::{c_char, c_int, CStr, CString};
 use std::ptr;
+use std::sync::Mutex;
+
+use async_trait::async_trait;
+use libsqlite3_sys as ffi;
+
+use crate::sync::bucket::{BucketError, DeviceHead, SyncBucketClient};
+use crate::sync::envelope::{self, ChangesetEnvelope};
 
 /// Open an in-memory sqlite3 database via libsqlite3-sys directly.
 pub unsafe fn open_memory_db() -> *mut ffi::sqlite3 {
@@ -263,4 +270,117 @@ pub unsafe fn create_synced_schema(db: *mut ffi::sqlite3) {
             FOREIGN KEY (storage_profile_id) REFERENCES storage_profiles (id)
         )",
     );
+}
+
+/// In-memory mock of SyncBucketClient for tests.
+/// Stores changesets as plaintext (no encryption in tests).
+pub struct MockBucket {
+    /// Changesets: key = "changes/{device_id}/{seq}" -> packed envelope bytes.
+    objects: Mutex<HashMap<String, Vec<u8>>>,
+    /// Heads: device_id -> seq.
+    heads: Mutex<HashMap<String, u64>>,
+}
+
+impl MockBucket {
+    pub fn new() -> Self {
+        MockBucket {
+            objects: Mutex::new(HashMap::new()),
+            heads: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Store a changeset in the mock bucket (simulates what push would do).
+    pub fn store_changeset(
+        &self,
+        device_id: &str,
+        seq: u64,
+        changeset_bytes: &[u8],
+        schema_version: u32,
+    ) {
+        let env = ChangesetEnvelope {
+            device_id: device_id.to_string(),
+            seq,
+            schema_version,
+            message: String::new(),
+            timestamp: "2026-02-10T00:00:00Z".to_string(),
+            changeset_size: changeset_bytes.len(),
+        };
+        let packed = envelope::pack(&env, changeset_bytes);
+
+        let key = format!("changes/{device_id}/{seq}");
+        self.objects.lock().unwrap().insert(key, packed);
+        self.heads
+            .lock()
+            .unwrap()
+            .insert(device_id.to_string(), seq);
+    }
+}
+
+#[async_trait]
+impl SyncBucketClient for MockBucket {
+    async fn list_heads(&self) -> Result<Vec<DeviceHead>, BucketError> {
+        let heads = self.heads.lock().unwrap();
+        Ok(heads
+            .iter()
+            .map(|(id, &seq)| DeviceHead {
+                device_id: id.clone(),
+                seq,
+                snapshot_seq: None,
+            })
+            .collect())
+    }
+
+    async fn get_changeset(&self, device_id: &str, seq: u64) -> Result<Vec<u8>, BucketError> {
+        let key = format!("changes/{device_id}/{seq}");
+        let objects = self.objects.lock().unwrap();
+        objects.get(&key).cloned().ok_or(BucketError::NotFound(key))
+    }
+
+    async fn put_changeset(
+        &self,
+        device_id: &str,
+        seq: u64,
+        data: Vec<u8>,
+    ) -> Result<(), BucketError> {
+        let key = format!("changes/{device_id}/{seq}");
+        self.objects.lock().unwrap().insert(key, data);
+        Ok(())
+    }
+
+    async fn put_head(
+        &self,
+        device_id: &str,
+        seq: u64,
+        _snapshot_seq: Option<u64>,
+    ) -> Result<(), BucketError> {
+        self.heads
+            .lock()
+            .unwrap()
+            .insert(device_id.to_string(), seq);
+        Ok(())
+    }
+
+    async fn upload_image(&self, _id: &str, _data: Vec<u8>) -> Result<(), BucketError> {
+        Ok(())
+    }
+
+    async fn download_image(&self, id: &str) -> Result<Vec<u8>, BucketError> {
+        Err(BucketError::NotFound(format!("images/{id}")))
+    }
+
+    async fn put_snapshot(&self, _data: Vec<u8>) -> Result<(), BucketError> {
+        Ok(())
+    }
+
+    async fn get_snapshot(&self) -> Result<Vec<u8>, BucketError> {
+        Err(BucketError::NotFound("snapshot.db.enc".into()))
+    }
+
+    async fn delete_changeset(&self, _device_id: &str, _seq: u64) -> Result<(), BucketError> {
+        Ok(())
+    }
+
+    async fn list_changesets(&self, _device_id: &str) -> Result<Vec<u64>, BucketError> {
+        Ok(vec![])
+    }
 }

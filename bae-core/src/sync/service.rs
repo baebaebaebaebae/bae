@@ -18,6 +18,7 @@ use tracing::info;
 use super::bucket::SyncBucketClient;
 use super::envelope::{self, ChangesetEnvelope};
 use super::pull::{self, PullResult};
+use super::push::{OutgoingChangeset, SCHEMA_VERSION};
 use super::session::SyncSession;
 
 /// Configuration for a sync service.
@@ -36,14 +37,6 @@ pub struct SyncResult {
     pub updated_cursors: HashMap<String, u64>,
 }
 
-/// An outgoing changeset ready to be pushed to the sync bucket.
-pub struct OutgoingChangeset {
-    /// The packed envelope + changeset bytes (plaintext, ready for encryption).
-    pub packed: Vec<u8>,
-    /// The sequence number for this changeset.
-    pub seq: u64,
-}
-
 impl SyncService {
     pub fn new(device_id: String) -> Self {
         SyncService { device_id }
@@ -54,6 +47,10 @@ impl SyncService {
     /// This takes the current session, grabs its changeset, drops the session,
     /// pulls remote changes, and returns what the caller needs to push and
     /// to start a new session.
+    ///
+    /// The `message` parameter is a human-readable description of what changed
+    /// (e.g., "Imported Kind of Blue"). Callers derive this from the app event
+    /// that triggered the sync.
     ///
     /// The caller should:
     /// 1. Push `outgoing` to the bucket (if Some).
@@ -71,6 +68,7 @@ impl SyncService {
         cursors: &HashMap<String, u64>,
         bucket: &dyn SyncBucketClient,
         timestamp: &str,
+        message: &str,
     ) -> Result<SyncResult, SyncCycleError> {
         // Step 1: grab outgoing changeset from the session.
         let outgoing_cs = session.changeset().map_err(SyncCycleError::Session)?;
@@ -79,13 +77,15 @@ impl SyncService {
         drop(session);
 
         // Step 3: prepare outgoing for push (caller will actually upload).
+        // TODO: Image sync is deferred -- outgoing images will be pushed here
+        // in a follow-up.
         let outgoing = outgoing_cs.map(|cs| {
             let next_seq = local_seq + 1;
             let env = ChangesetEnvelope {
                 device_id: self.device_id.clone(),
                 seq: next_seq,
-                schema_version: pull::SCHEMA_VERSION,
-                message: String::new(),
+                schema_version: SCHEMA_VERSION,
+                message: message.to_string(),
                 timestamp: timestamp.to_string(),
                 changeset_size: cs.len(),
             };
