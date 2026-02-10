@@ -326,9 +326,9 @@ async fn get_cover_art(
         }
     };
 
-    let cover_path = state.library_dir.cover_path(&release_id);
+    let image_path = state.library_dir.image_path(&release_id);
 
-    match tokio::fs::read(&cover_path).await {
+    match tokio::fs::read(&image_path).await {
         Ok(data) => {
             let content_type = state
                 .library_manager
@@ -600,24 +600,35 @@ async fn stream_track_audio(
         .find(|f| f.content_type == crate::content_type::ContentType::Flac)
         .ok_or_else(|| format!("No audio file found for track {}", track_id))?;
 
-    // Read file data
-    let file_data = if let Some(ref source_path) = audio_file.source_path {
+    // Read file data from source_path
+    let source_path = audio_file
+        .source_path
+        .as_ref()
+        .ok_or("No source_path for audio file")?;
+
+    let file_data = if let Some(ref profile) = storage_profile {
+        if profile.location == crate::db::StorageLocation::Cloud {
+            let storage = create_storage_reader(profile, &state.key_service)
+                .await
+                .map_err(|e| format!("Failed to create storage reader: {}", e))?;
+
+            debug!("Downloading from storage: {}", source_path);
+            storage
+                .download(source_path)
+                .await
+                .map_err(|e| format!("Failed to download file: {}", e))?
+        } else {
+            debug!("Reading from local file: {}", source_path);
+            tokio::fs::read(source_path)
+                .await
+                .map_err(|e| format!("Failed to read file: {}", e))?
+        }
+    } else {
+        // Self-managed: read from original location
         debug!("Reading from local file: {}", source_path);
         tokio::fs::read(source_path)
             .await
             .map_err(|e| format!("Failed to read file: {}", e))?
-    } else if let Some(ref profile) = storage_profile {
-        let storage = create_storage_reader(profile, &state.key_service)
-            .await
-            .map_err(|e| format!("Failed to create storage reader: {}", e))?;
-        let key = format!("{}/{}", track.release_id, audio_file.original_filename);
-        debug!("Downloading from storage: {}", key);
-        storage
-            .download(&key)
-            .await
-            .map_err(|e| format!("Failed to download file: {}", e))?
-    } else {
-        return Err("No storage location for track".into());
     };
 
     // Decrypt if needed

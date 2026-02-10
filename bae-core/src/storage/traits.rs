@@ -4,6 +4,7 @@ use crate::content_type::ContentType;
 use crate::db::{Database, DbFile, DbStorageProfile, StorageLocation};
 use crate::encryption::EncryptionService;
 use crate::keys::KeyService;
+use crate::storage::storage_path;
 use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -33,7 +34,8 @@ pub type ProgressCallback = Box<dyn Fn(usize, usize) + Send + Sync>;
 pub trait ReleaseStorage: Send + Sync {
     /// Write a file to storage with progress reporting.
     ///
-    /// Streams write in 1MB batches for progress reporting.
+    /// Creates the DbFile record first (to generate its UUID), then uses the
+    /// file_id for the hash-based storage path: `storage/ab/cd/{file_id}`.
     async fn write_file(
         &self,
         release_id: &str,
@@ -45,8 +47,8 @@ pub trait ReleaseStorage: Send + Sync {
 
 /// Storage implementation that applies transforms based on StorageProfile flags
 ///
-/// Handles combinations of (local/cloud) × (encrypted/plain).
-/// Transforms are applied in sequence: encrypt → store.
+/// Handles combinations of (local/cloud) x (encrypted/plain).
+/// Transforms are applied in sequence: encrypt -> store.
 #[derive(Clone)]
 pub struct ReleaseStorageImpl {
     profile: DbStorageProfile,
@@ -69,6 +71,7 @@ impl ReleaseStorageImpl {
             let client = S3CloudStorage::new(s3_config)
                 .await
                 .map_err(|e| StorageError::Cloud(e.to_string()))?;
+
             info!("Created S3 client for profile: {}", profile.name);
             Some(Arc::new(client))
         } else {
@@ -99,16 +102,6 @@ impl ReleaseStorageImpl {
         }
     }
 
-    /// Get the local path for a release's files
-    fn release_path(&self, release_id: &str) -> PathBuf {
-        PathBuf::from(&self.profile.location_path).join(release_id)
-    }
-
-    /// Get the full path for a specific file
-    fn file_path(&self, release_id: &str, filename: &str) -> PathBuf {
-        self.release_path(release_id).join(filename)
-    }
-
     /// Encrypt data if encryption is enabled
     fn encrypt_if_needed(&self, data: &[u8]) -> Result<Vec<u8>, StorageError> {
         if !self.profile.encrypted {
@@ -119,11 +112,6 @@ impl ReleaseStorageImpl {
             .as_ref()
             .ok_or(StorageError::NotConfigured)?;
         Ok(encryption.encrypt(data))
-    }
-
-    /// Generate a storage key for cloud storage
-    fn cloud_key(&self, release_id: &str, filename: &str) -> String {
-        format!("{}/{}", release_id, filename)
     }
 }
 
@@ -141,11 +129,32 @@ impl ReleaseStorage for ReleaseStorageImpl {
         let total_bytes = data.len();
         on_progress(0, total_bytes);
 
+        let ext = std::path::Path::new(filename)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("bin")
+            .to_lowercase();
+
+        // Create DbFile first to get its UUID for the storage path
+        let mut db_file = DbFile::new(
+            release_id,
+            filename,
+            data.len() as i64,
+            ContentType::from_extension(&ext),
+        );
+
         let data_to_store = self.encrypt_if_needed(data)?;
 
-        let storage_path = match self.profile.location {
+        // Extract and store encryption nonce for efficient range requests
+        if self.profile.encrypted && data_to_store.len() >= 24 {
+            db_file.encryption_nonce = Some(data_to_store[..24].to_vec());
+        }
+
+        let rel_path = storage_path(&db_file.id);
+
+        let source_path = match self.profile.location {
             StorageLocation::Local => {
-                let path = self.file_path(release_id, filename);
+                let path = PathBuf::from(&self.profile.location_path).join(&rel_path);
                 if let Some(parent) = path.parent() {
                     tokio::fs::create_dir_all(parent).await?;
                 }
@@ -174,9 +183,8 @@ impl ReleaseStorage for ReleaseStorageImpl {
             }
             StorageLocation::Cloud => {
                 let cloud = self.cloud.as_ref().ok_or(StorageError::NotConfigured)?;
-                let key = self.cloud_key(release_id, filename);
                 let storage_location = cloud
-                    .upload(&key, &data_to_store)
+                    .upload(&rel_path, &data_to_store)
                     .await
                     .map_err(|e| StorageError::Cloud(e.to_string()))?;
                 on_progress(total_bytes, total_bytes);
@@ -184,26 +192,9 @@ impl ReleaseStorage for ReleaseStorageImpl {
             }
         };
 
+        db_file.source_path = Some(source_path);
+
         if let Some(db) = &self.database {
-            let ext = std::path::Path::new(filename)
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("bin")
-                .to_lowercase();
-
-            let mut db_file = DbFile::new(
-                release_id,
-                filename,
-                data.len() as i64,
-                ContentType::from_extension(&ext),
-            );
-            db_file.source_path = Some(storage_path);
-
-            // Extract and store encryption nonce for efficient range requests
-            if self.profile.encrypted && data_to_store.len() >= 24 {
-                db_file.encryption_nonce = Some(data_to_store[..24].to_vec());
-            }
-
             db.insert_file(&db_file)
                 .await
                 .map_err(|e| StorageError::Database(e.to_string()))?;

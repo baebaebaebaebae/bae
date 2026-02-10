@@ -32,14 +32,9 @@ pub struct ImageServerHandle {
 }
 
 impl ImageServerHandle {
-    pub fn cover_url(&self, release_id: &str) -> String {
-        let path = format!("/cover/{}", release_id);
-        let sig = sign(&self.secret, &path);
-        format!("http://{}:{}{path}?sig={sig}", self.host, self.port)
-    }
-
-    pub fn artist_image_url(&self, artist_id: &str) -> String {
-        let path = format!("/artist-image/{}", artist_id);
+    /// URL for a library image (cover or artist photo) by its id.
+    pub fn image_url(&self, id: &str) -> String {
+        let path = format!("/image/{}", id);
         let sig = sign(&self.secret, &path);
         format!("http://{}:{}{path}?sig={sig}", self.host, self.port)
     }
@@ -83,8 +78,7 @@ pub async fn start_image_server(
     };
 
     let app = Router::new()
-        .route("/cover/:release_id", get(handle_cover))
-        .route("/artist-image/:artist_id", get(handle_artist_image))
+        .route("/image/:id", get(handle_image))
         .route("/file/:file_id", get(handle_file))
         .route("/local/*path", get(handle_local_file))
         .layer(middleware::from_fn_with_state(state.clone(), verify_sig))
@@ -145,62 +139,27 @@ async fn verify_sig(
 // Handlers
 // =============================================================================
 
-async fn handle_cover(
+/// Unified handler for all library images (covers and artist photos).
+/// Looks up the `library_images` row by id and serves from `images/ab/cd/{id}`.
+async fn handle_image(
     State(state): State<ImageServerState>,
-    Path(release_id): Path<String>,
+    Path(id): Path<String>,
 ) -> impl IntoResponse {
-    let cover_path = state.library_dir.cover_path(&release_id);
+    let image_path = state.library_dir.image_path(&id);
 
     let content_type = match state
         .library_manager
         .get()
-        .get_library_image(&release_id, &crate::db::LibraryImageType::Cover)
+        .get_library_image_by_id(&id)
         .await
     {
         Ok(Some(img)) => img.content_type.to_string(),
         Ok(None) => {
-            warn!("No library_image row for cover {}", release_id);
+            warn!("No library_image row for id {}", id);
             return StatusCode::NOT_FOUND.into_response();
         }
         Err(e) => {
-            warn!("DB error looking up cover {}: {}", release_id, e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
-
-    match tokio::fs::read(&cover_path).await {
-        Ok(data) => (
-            StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, content_type)],
-            data,
-        )
-            .into_response(),
-        Err(_) => {
-            warn!("Cover not found for release {}", release_id);
-            StatusCode::NOT_FOUND.into_response()
-        }
-    }
-}
-
-async fn handle_artist_image(
-    State(state): State<ImageServerState>,
-    Path(artist_id): Path<String>,
-) -> impl IntoResponse {
-    let image_path = state.library_dir.artist_image_path(&artist_id);
-
-    let content_type = match state
-        .library_manager
-        .get()
-        .get_library_image(&artist_id, &crate::db::LibraryImageType::Artist)
-        .await
-    {
-        Ok(Some(img)) => img.content_type.to_string(),
-        Ok(None) => {
-            warn!("No library_image row for artist {}", artist_id);
-            return StatusCode::NOT_FOUND.into_response();
-        }
-        Err(e) => {
-            warn!("DB error looking up artist image {}: {}", artist_id, e);
+            warn!("DB error looking up image {}: {}", id, e);
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
@@ -213,7 +172,7 @@ async fn handle_artist_image(
         )
             .into_response(),
         Err(_) => {
-            warn!("Artist image not found for {}", artist_id);
+            warn!("Image not found for id {}", id);
             StatusCode::NOT_FOUND.into_response()
         }
     }
@@ -316,18 +275,11 @@ mod tests {
     }
 
     #[test]
-    fn cover_url_has_sig() {
+    fn image_url_has_sig() {
         let h = test_handle();
-        let url = h.cover_url("abc");
-        assert!(url.starts_with("http://127.0.0.1:8080/cover/abc?sig="));
+        let url = h.image_url("abc");
+        assert!(url.starts_with("http://127.0.0.1:8080/image/abc?sig="));
         assert_eq!(url.split("sig=").count(), 2);
-    }
-
-    #[test]
-    fn artist_image_url_has_sig() {
-        let h = test_handle();
-        let url = h.artist_image_url("xyz");
-        assert!(url.starts_with("http://127.0.0.1:8080/artist-image/xyz?sig="));
     }
 
     #[test]
@@ -361,7 +313,7 @@ mod tests {
     #[test]
     fn sign_verify_roundtrip() {
         let secret = [0x42; 32];
-        let path = "/cover/abc";
+        let path = "/image/abc";
         let sig = sign(&secret, path);
         assert!(verify(&secret, path, &sig));
     }
@@ -369,21 +321,21 @@ mod tests {
     #[test]
     fn verify_rejects_wrong_sig() {
         let secret = [0x42; 32];
-        assert!(!verify(&secret, "/cover/abc", "deadbeef"));
+        assert!(!verify(&secret, "/image/abc", "deadbeef"));
     }
 
     #[test]
     fn verify_rejects_wrong_path() {
         let secret = [0x42; 32];
-        let sig = sign(&secret, "/cover/abc");
-        assert!(!verify(&secret, "/cover/xyz", &sig));
+        let sig = sign(&secret, "/image/abc");
+        assert!(!verify(&secret, "/image/xyz", &sig));
     }
 
     #[test]
     fn verify_rejects_wrong_secret() {
         let secret_a = [0x42; 32];
         let secret_b = [0x99; 32];
-        let sig = sign(&secret_a, "/cover/abc");
-        assert!(!verify(&secret_b, "/cover/abc", &sig));
+        let sig = sign(&secret_a, "/image/abc");
+        assert!(!verify(&secret_b, "/image/abc", &sig));
     }
 }

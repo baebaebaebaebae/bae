@@ -10,7 +10,7 @@ pub fn album_from_db_ref(db: &DbAlbum, imgs: &ImageServerHandle) -> Album {
     let cover = db
         .cover_release_id
         .as_ref()
-        .map(|release_id| imgs.cover_url(release_id))
+        .map(|release_id| imgs.image_url(release_id))
         .or_else(|| db.cover_art_url.clone());
 
     Album {
@@ -27,7 +27,7 @@ pub fn artist_from_db_ref(db: &DbArtist, imgs: &ImageServerHandle) -> Artist {
     Artist {
         id: db.id.clone(),
         name: db.name.clone(),
-        image_url: Some(imgs.artist_image_url(&db.id)),
+        image_url: Some(imgs.image_url(&db.id)),
     }
 }
 

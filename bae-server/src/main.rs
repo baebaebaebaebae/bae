@@ -269,14 +269,14 @@ async fn download_from_cloud(args: &Args, library_dir: &LibraryDir, config: &Con
         std::process::exit(1);
     });
 
-    // Download and decrypt covers
-    let covers_path = library_dir.covers_dir();
-    info!("Downloading covers...");
+    // Download and decrypt library images
+    let images_path = library_dir.images_dir();
+    info!("Downloading images...");
     cloud
-        .download_covers(&covers_path)
+        .download_images(&images_path)
         .await
         .unwrap_or_else(|e| {
-            error!("Failed to download covers: {e}");
+            error!("Failed to download images: {e}");
             std::process::exit(1);
         });
 

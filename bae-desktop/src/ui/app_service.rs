@@ -210,7 +210,7 @@ impl AppService {
                                                 let cover = album
                                                     .cover_release_id
                                                     .as_ref()
-                                                    .map(|rid| imgs.cover_url(rid))
+                                                    .map(|rid| imgs.image_url(rid))
                                                     .or(album.cover_art_url.clone());
                                                 (album.title, cover)
                                             } else {
@@ -307,7 +307,7 @@ impl AppService {
                                         let cover = album
                                             .cover_release_id
                                             .as_ref()
-                                            .map(|rid| imgs.cover_url(rid))
+                                            .map(|rid| imgs.image_url(rid))
                                             .or(album.cover_art_url.clone());
                                         (album.title, cover)
                                     } else {
@@ -721,7 +721,7 @@ impl AppService {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            let busted_url = format!("{}&t={}", imgs.cover_url(&release_id), timestamp);
+            let busted_url = format!("{}&t={}", imgs.image_url(&release_id), timestamp);
             let mut albums_lens = state.library().albums();
             let mut albums = albums_lens.write();
             if let Some(album) = albums.iter_mut().find(|a| a.id == album_id) {
@@ -1609,11 +1609,11 @@ async fn change_cover_async(
 
             let content_type = file.content_type.clone();
 
-            // Write to covers/{release_id}
-            let cover_path = library_dir.cover_path(release_id);
+            // Write to images/{prefix}/{subprefix}/{release_id}
+            let cover_path = library_dir.image_path(release_id);
             if let Some(parent) = cover_path.parent() {
                 std::fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create covers dir: {}", e))?;
+                    .map_err(|e| format!("Failed to create images dir: {}", e))?;
             }
             std::fs::write(&cover_path, &bytes)
                 .map_err(|e| format!("Failed to write cover: {}", e))?;
@@ -1651,11 +1651,11 @@ async fn change_cover_async(
                 .await
                 .map_err(|e| format!("Failed to download cover: {}", e))?;
 
-            // Write to covers/{release_id}
-            let cover_path = library_dir.cover_path(release_id);
+            // Write to images/{prefix}/{subprefix}/{release_id}
+            let cover_path = library_dir.image_path(release_id);
             if let Some(parent) = cover_path.parent() {
                 std::fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create covers dir: {}", e))?;
+                    .map_err(|e| format!("Failed to create images dir: {}", e))?;
             }
             std::fs::write(&cover_path, &bytes)
                 .map_err(|e| format!("Failed to write cover: {}", e))?;
@@ -1959,11 +1959,8 @@ pub(crate) async fn cloud_sync_upload(
     // Upload DB + covers + artist images
     let timestamp = sync_service.upload_db(&db_path).await?;
 
-    let covers_dir = config.library_dir.covers_dir();
-    sync_service.upload_covers(&covers_dir).await?;
-
-    let artists_dir = config.library_dir.artists_dir();
-    sync_service.upload_artists(&artists_dir).await?;
+    let images_dir = config.library_dir.images_dir();
+    sync_service.upload_images(&images_dir).await?;
 
     Ok(timestamp)
 }

@@ -310,12 +310,9 @@ async fn do_restore(
     let db_path = library_dir.db_path();
     sync_service.download_db(&db_path).await?;
 
-    // Download covers + artist images
-    let covers_dir = library_dir.covers_dir();
-    sync_service.download_covers(&covers_dir).await?;
-
-    let artists_dir = library_dir.artists_dir();
-    sync_service.download_artists(&artists_dir).await?;
+    // Download library images (covers + artist photos)
+    let images_dir = library_dir.images_dir();
+    sync_service.download_images(&images_dir).await?;
 
     // Write config.yaml with cloud sync settings already populated
     let config = bae_core::config::Config {

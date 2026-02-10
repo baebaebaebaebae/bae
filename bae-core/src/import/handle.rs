@@ -311,15 +311,15 @@ impl ImportServiceHandle {
         insert_album_artists(library_manager, &album_artists, &artist_id_map).await?;
         // Write remote cover and create library_images record
         let remote_cover_set = if let Some(((bytes, content_type), url)) = remote_cover_data {
-            let cover_path = self.library_dir.cover_path(&db_release.id);
-            if let Some(parent) = cover_path.parent() {
+            let image_path = self.library_dir.image_path(&db_release.id);
+            if let Some(parent) = image_path.parent() {
                 std::fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create covers directory: {}", e))?;
+                    .map_err(|e| format!("Failed to create images directory: {}", e))?;
             }
-            std::fs::write(&cover_path, &bytes)
+            std::fs::write(&image_path, &bytes)
                 .map_err(|e| format!("Failed to write cover: {}", e))?;
 
-            info!("Wrote remote cover art to {}", cover_path.display());
+            info!("Wrote remote cover art to {}", image_path.display());
             let source = if url.contains("musicbrainz") || url.contains("coverartarchive") {
                 "musicbrainz"
             } else {
@@ -353,13 +353,12 @@ impl ImportServiceHandle {
 
         // Fetch artist images (best-effort, non-blocking)
         if let Some(ref discogs_client) = get_discogs_client(&self.key_service) {
-            let artists_dir = self.library_dir.artists_dir();
             fetch_artist_images(
                 library_manager,
                 discogs_client,
                 &artists,
                 &artist_id_map,
-                &artists_dir,
+                &self.library_dir,
             )
             .await;
         }
@@ -461,13 +460,12 @@ impl ImportServiceHandle {
 
         // Fetch artist images (best-effort, non-blocking)
         if let Some(ref discogs_client) = get_discogs_client(&self.key_service) {
-            let artists_dir = self.library_dir.artists_dir();
             fetch_artist_images(
                 library_manager,
                 discogs_client,
                 &artists,
                 &artist_id_map,
-                &artists_dir,
+                &self.library_dir,
             )
             .await;
         }
@@ -560,13 +558,12 @@ impl ImportServiceHandle {
 
         // Fetch artist images (best-effort, non-blocking)
         if let Some(ref discogs_client) = get_discogs_client(&self.key_service) {
-            let artists_dir = self.library_dir.artists_dir();
             fetch_artist_images(
                 library_manager,
                 discogs_client,
                 &artists,
                 &artist_id_map,
-                &artists_dir,
+                &self.library_dir,
             )
             .await;
         }
@@ -851,7 +848,7 @@ async fn fetch_artist_images(
     discogs_client: &DiscogsClient,
     parsed_artists: &[crate::db::DbArtist],
     artist_id_map: &HashMap<String, String>,
-    artists_dir: &std::path::Path,
+    library_dir: &crate::library_dir::LibraryDir,
 ) {
     for parsed_artist in parsed_artists {
         let actual_id = match artist_id_map.get(&parsed_artist.id) {
@@ -877,7 +874,7 @@ async fn fetch_artist_images(
             actual_id,
             &discogs_artist_id,
             discogs_client,
-            artists_dir,
+            library_dir,
             library_manager,
         )
         .await;
