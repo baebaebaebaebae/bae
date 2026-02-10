@@ -9,8 +9,9 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use libsqlite3_sys as ffi;
 
+use crate::keys::UserKeypair;
 use crate::sync::bucket::{BucketError, DeviceHead, SyncBucketClient};
-use crate::sync::envelope::{self, ChangesetEnvelope};
+use crate::sync::envelope::{self, sign_envelope, ChangesetEnvelope};
 
 /// Open an in-memory sqlite3 database via libsqlite3-sys directly.
 pub unsafe fn open_memory_db() -> *mut ffi::sqlite3 {
@@ -320,6 +321,66 @@ impl MockBucket {
             .unwrap()
             .insert(device_id.to_string(), seq);
     }
+
+    /// Store a signed changeset (with author_pubkey and signature).
+    pub fn store_signed_changeset(
+        &self,
+        device_id: &str,
+        seq: u64,
+        changeset_bytes: &[u8],
+        schema_version: u32,
+        timestamp: &str,
+        keypair: &UserKeypair,
+    ) {
+        let mut env = ChangesetEnvelope {
+            device_id: device_id.to_string(),
+            seq,
+            schema_version,
+            message: String::new(),
+            timestamp: timestamp.to_string(),
+            changeset_size: changeset_bytes.len(),
+            author_pubkey: None,
+            signature: None,
+        };
+        sign_envelope(&mut env, keypair, changeset_bytes);
+        let packed = envelope::pack(&env, changeset_bytes);
+
+        let key = format!("changes/{device_id}/{seq}");
+        self.objects.lock().unwrap().insert(key, packed);
+        self.heads
+            .lock()
+            .unwrap()
+            .insert(device_id.to_string(), seq);
+    }
+
+    /// Store a changeset with a custom timestamp (unsigned).
+    pub fn store_changeset_with_timestamp(
+        &self,
+        device_id: &str,
+        seq: u64,
+        changeset_bytes: &[u8],
+        schema_version: u32,
+        timestamp: &str,
+    ) {
+        let env = ChangesetEnvelope {
+            device_id: device_id.to_string(),
+            seq,
+            schema_version,
+            message: String::new(),
+            timestamp: timestamp.to_string(),
+            changeset_size: changeset_bytes.len(),
+            author_pubkey: None,
+            signature: None,
+        };
+        let packed = envelope::pack(&env, changeset_bytes);
+
+        let key = format!("changes/{device_id}/{seq}");
+        self.objects.lock().unwrap().insert(key, packed);
+        self.heads
+            .lock()
+            .unwrap()
+            .insert(device_id.to_string(), seq);
+    }
 }
 
 #[async_trait]
@@ -398,6 +459,63 @@ impl SyncBucketClient for MockBucket {
 
     async fn set_min_schema_version(&self, version: u32) -> Result<(), BucketError> {
         *self.min_schema_version.lock().unwrap() = Some(version);
+        Ok(())
+    }
+
+    async fn put_membership_entry(
+        &self,
+        author_pubkey: &str,
+        seq: u64,
+        data: Vec<u8>,
+    ) -> Result<(), BucketError> {
+        let key = format!("membership/{author_pubkey}/{seq}");
+        self.objects.lock().unwrap().insert(key, data);
+        Ok(())
+    }
+
+    async fn get_membership_entry(
+        &self,
+        author_pubkey: &str,
+        seq: u64,
+    ) -> Result<Vec<u8>, BucketError> {
+        let key = format!("membership/{author_pubkey}/{seq}");
+        let objects = self.objects.lock().unwrap();
+        objects.get(&key).cloned().ok_or(BucketError::NotFound(key))
+    }
+
+    async fn list_membership_entries(&self) -> Result<Vec<(String, u64)>, BucketError> {
+        let objects = self.objects.lock().unwrap();
+        let mut entries = Vec::new();
+
+        for key in objects.keys() {
+            if let Some(rest) = key.strip_prefix("membership/") {
+                if let Some(slash_pos) = rest.rfind('/') {
+                    let author = &rest[..slash_pos];
+                    if let Ok(seq) = rest[slash_pos + 1..].parse::<u64>() {
+                        entries.push((author.to_string(), seq));
+                    }
+                }
+            }
+        }
+
+        Ok(entries)
+    }
+
+    async fn put_wrapped_key(&self, user_pubkey: &str, data: Vec<u8>) -> Result<(), BucketError> {
+        let key = format!("keys/{user_pubkey}");
+        self.objects.lock().unwrap().insert(key, data);
+        Ok(())
+    }
+
+    async fn get_wrapped_key(&self, user_pubkey: &str) -> Result<Vec<u8>, BucketError> {
+        let key = format!("keys/{user_pubkey}");
+        let objects = self.objects.lock().unwrap();
+        objects.get(&key).cloned().ok_or(BucketError::NotFound(key))
+    }
+
+    async fn delete_wrapped_key(&self, user_pubkey: &str) -> Result<(), BucketError> {
+        let key = format!("keys/{user_pubkey}");
+        self.objects.lock().unwrap().remove(&key);
         Ok(())
     }
 }

@@ -2,10 +2,12 @@
 ///
 /// Layout:
 /// ```text
-/// changes/{device_id}/{seq}.enc   -- encrypted changeset envelopes
-/// heads/{device_id}.json.enc      -- encrypted head pointers
-/// images/{ab}/{cd}/{id}           -- encrypted library images
-/// snapshot.db.enc                 -- full DB snapshot for bootstrapping
+/// changes/{device_id}/{seq}.enc          -- encrypted changeset envelopes
+/// heads/{device_id}.json.enc             -- encrypted head pointers
+/// images/{ab}/{cd}/{id}                  -- encrypted library images
+/// snapshot.db.enc                        -- full DB snapshot for bootstrapping
+/// membership/{author_pubkey}/{seq}.enc   -- encrypted membership entries
+/// keys/{user_pubkey}.enc                 -- wrapped library keys per member
 /// ```
 ///
 /// All data is encrypted before upload and decrypted after download.
@@ -106,4 +108,37 @@ pub trait SyncBucketClient: Send + Sync {
     /// Writes to `min_schema_version.json.enc`. Used when a breaking migration
     /// bumps the schema and all devices must upgrade before syncing.
     async fn set_min_schema_version(&self, version: u32) -> Result<(), BucketError>;
+
+    /// Upload a membership entry.
+    /// Writes to `membership/{author_pubkey_hex}/{seq}.enc`.
+    async fn put_membership_entry(
+        &self,
+        author_pubkey: &str,
+        seq: u64,
+        data: Vec<u8>,
+    ) -> Result<(), BucketError>;
+
+    /// Download a membership entry.
+    /// Reads from `membership/{author_pubkey_hex}/{seq}.enc`.
+    async fn get_membership_entry(
+        &self,
+        author_pubkey: &str,
+        seq: u64,
+    ) -> Result<Vec<u8>, BucketError>;
+
+    /// List all membership entry keys.
+    /// Returns tuples of (author_pubkey, seq).
+    async fn list_membership_entries(&self) -> Result<Vec<(String, u64)>, BucketError>;
+
+    /// Upload a wrapped library key for a member.
+    /// Writes to `keys/{user_pubkey_hex}.enc`.
+    async fn put_wrapped_key(&self, user_pubkey: &str, data: Vec<u8>) -> Result<(), BucketError>;
+
+    /// Download a wrapped library key for a member.
+    /// Reads from `keys/{user_pubkey_hex}.enc`.
+    async fn get_wrapped_key(&self, user_pubkey: &str) -> Result<Vec<u8>, BucketError>;
+
+    /// Delete a wrapped library key.
+    /// Removes `keys/{user_pubkey_hex}.enc`.
+    async fn delete_wrapped_key(&self, user_pubkey: &str) -> Result<(), BucketError>;
 }

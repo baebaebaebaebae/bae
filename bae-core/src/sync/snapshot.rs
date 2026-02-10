@@ -405,6 +405,45 @@ mod tests {
             *self.min_schema_version.lock().unwrap() = Some(version);
             Ok(())
         }
+
+        async fn put_membership_entry(
+            &self,
+            _author_pubkey: &str,
+            _seq: u64,
+            _data: Vec<u8>,
+        ) -> Result<(), BucketError> {
+            Ok(())
+        }
+
+        async fn get_membership_entry(
+            &self,
+            author_pubkey: &str,
+            seq: u64,
+        ) -> Result<Vec<u8>, BucketError> {
+            Err(BucketError::NotFound(format!(
+                "membership/{author_pubkey}/{seq}"
+            )))
+        }
+
+        async fn list_membership_entries(&self) -> Result<Vec<(String, u64)>, BucketError> {
+            Ok(vec![])
+        }
+
+        async fn put_wrapped_key(
+            &self,
+            _user_pubkey: &str,
+            _data: Vec<u8>,
+        ) -> Result<(), BucketError> {
+            Ok(())
+        }
+
+        async fn get_wrapped_key(&self, user_pubkey: &str) -> Result<Vec<u8>, BucketError> {
+            Err(BucketError::NotFound(format!("keys/{user_pubkey}")))
+        }
+
+        async fn delete_wrapped_key(&self, _user_pubkey: &str) -> Result<(), BucketError> {
+            Ok(())
+        }
     }
 
     fn test_encryption() -> EncryptionService {

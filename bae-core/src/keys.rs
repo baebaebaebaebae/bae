@@ -151,6 +151,23 @@ pub fn seal_box_decrypt(
     Ok(plaintext)
 }
 
+/// Convert an Ed25519 public key to an X25519 public key.
+///
+/// This is used when we only have a remote user's Ed25519 public key (hex string)
+/// and need to encrypt something to them via sealed box. The `UserKeypair` methods
+/// handle the local case; this handles the remote case.
+pub fn ed25519_to_x25519_public_key(
+    ed25519_pk: &[u8; sodium_ffi::SIGN_PUBLICKEYBYTES],
+) -> [u8; sodium_ffi::CURVE25519_PUBLICKEYBYTES] {
+    crate::encryption::ensure_sodium_init();
+    let mut curve_pk = [0u8; sodium_ffi::CURVE25519_PUBLICKEYBYTES];
+    let ret = unsafe {
+        sodium_ffi::crypto_sign_ed25519_pk_to_curve25519(curve_pk.as_mut_ptr(), ed25519_pk.as_ptr())
+    };
+    assert_eq!(ret, 0, "crypto_sign_ed25519_pk_to_curve25519 failed");
+    curve_pk
+}
+
 /// Manages secret keys (Discogs API key, encryption key) with lazy reads.
 ///
 /// In dev mode, reads from environment variables.

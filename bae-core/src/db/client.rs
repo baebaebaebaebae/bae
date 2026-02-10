@@ -2093,4 +2093,35 @@ impl Database {
         .await?;
         Ok(())
     }
+
+    // ---- Attribution names ----
+
+    /// Load all pubkey -> display name pairs.
+    pub async fn get_attribution_names(
+        &self,
+    ) -> Result<std::collections::HashMap<String, String>, sqlx::Error> {
+        let rows: Vec<(String, String)> =
+            sqlx::query_as("SELECT pubkey_hex, display_name FROM attribution_names")
+                .fetch_all(&self.inner.read_pool)
+                .await?;
+        Ok(rows.into_iter().collect())
+    }
+
+    /// Upsert a display name for a public key.
+    pub async fn set_attribution_name(
+        &self,
+        pubkey_hex: &str,
+        name: &str,
+    ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
+        sqlx::query(
+            "INSERT INTO attribution_names (pubkey_hex, display_name) VALUES (?, ?)
+             ON CONFLICT(pubkey_hex) DO UPDATE SET display_name = excluded.display_name",
+        )
+        .bind(pubkey_hex)
+        .bind(name)
+        .execute(&mut *conn)
+        .await?;
+        Ok(())
+    }
 }

@@ -1,8 +1,11 @@
 pub mod apply;
+pub mod attribution;
 pub mod bucket;
 pub mod conflict;
 pub mod envelope;
 pub mod hlc;
+pub mod invite;
+pub mod membership;
 pub mod pull;
 #[cfg(test)]
 mod pull_tests;

@@ -17,6 +17,7 @@ use tracing::{info, warn};
 use super::apply::apply_changeset_lww;
 use super::bucket::{DeviceHead, SyncBucketClient};
 use super::envelope::{self, verify_changeset_signature};
+use super::membership::MembershipChain;
 use super::push::SCHEMA_VERSION;
 use super::session_ext::Changeset;
 
@@ -58,6 +59,7 @@ pub async unsafe fn pull_changes(
     bucket: &dyn SyncBucketClient,
     our_device_id: &str,
     cursors: &HashMap<String, u64>,
+    membership_chain: Option<&MembershipChain>,
 ) -> Result<(HashMap<String, u64>, PullResult), PullError> {
     // Check min_schema_version before processing any changesets.
     // If the bucket has a minimum that's higher than ours, refuse to sync.
@@ -152,14 +154,47 @@ pub async unsafe fn pull_changes(
                 continue;
             }
 
-            // Signature check: log a warning if present but invalid.
-            // Full rejection comes in Phase 2e (changeset validation on pull).
+            // Signature check: reject changesets with invalid signatures.
             if !verify_changeset_signature(&env, &changeset_bytes) {
                 warn!(
                     device_id = %head.device_id,
                     seq,
-                    "changeset has invalid signature"
+                    "changeset has invalid signature, skipping"
                 );
+                updated_cursors.insert(head.device_id.clone(), seq);
+                continue;
+            }
+
+            // Membership validation: if a chain exists, verify the author
+            // was a member at the time the changeset was created.
+            if let Some(chain) = membership_chain {
+                if let Some(ref pk) = env.author_pubkey {
+                    if !chain.is_member_at(pk, &env.timestamp) {
+                        warn!(
+                            device_id = %head.device_id,
+                            seq,
+                            author = %pk,
+                            "changeset author not a member at timestamp, skipping"
+                        );
+                        updated_cursors.insert(head.device_id.clone(), seq);
+                        continue;
+                    }
+                }
+
+                // Unsigned changesets in a chain-enabled library: skip them
+                // unless they predate the chain's first entry (grandfathered).
+                if env.author_pubkey.is_none() {
+                    let first_entry_ts = chain.entries().first().map(|e| e.timestamp.as_str());
+                    if first_entry_ts.is_some_and(|ts| env.timestamp.as_str() >= ts) {
+                        warn!(
+                            device_id = %head.device_id,
+                            seq,
+                            "unsigned changeset after membership chain created, skipping"
+                        );
+                        updated_cursors.insert(head.device_id.clone(), seq);
+                        continue;
+                    }
+                }
             }
 
             if changeset_bytes.is_empty() {

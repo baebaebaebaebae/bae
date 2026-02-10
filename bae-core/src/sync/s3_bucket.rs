@@ -315,6 +315,74 @@ impl SyncBucketClient for S3SyncBucketClient {
         self.put_object("min_schema_version.json.enc", encrypted)
             .await
     }
+
+    async fn put_membership_entry(
+        &self,
+        author_pubkey: &str,
+        seq: u64,
+        data: Vec<u8>,
+    ) -> Result<(), BucketError> {
+        let key = format!("membership/{author_pubkey}/{seq}.enc");
+        let encrypted = self.encryption.encrypt(&data);
+        self.put_object(&key, encrypted).await
+    }
+
+    async fn get_membership_entry(
+        &self,
+        author_pubkey: &str,
+        seq: u64,
+    ) -> Result<Vec<u8>, BucketError> {
+        let key = format!("membership/{author_pubkey}/{seq}.enc");
+        let encrypted = self.get_object(&key).await?;
+        self.encryption
+            .decrypt(&encrypted)
+            .map_err(|e| BucketError::Decryption(format!("membership {author_pubkey}/{seq}: {e}")))
+    }
+
+    async fn list_membership_entries(&self) -> Result<Vec<(String, u64)>, BucketError> {
+        let keys = self.list_keys("membership/").await?;
+        let mut entries = Vec::new();
+
+        for key in &keys {
+            // key = "membership/{author_pubkey}/{seq}.enc"
+            let rest = match key.strip_prefix("membership/") {
+                Some(r) => r,
+                None => continue,
+            };
+            let rest = match rest.strip_suffix(".enc") {
+                Some(r) => r,
+                None => continue,
+            };
+
+            // Split into author_pubkey and seq. The pubkey is hex (no slashes),
+            // so the last '/' separates pubkey from seq.
+            if let Some(slash_pos) = rest.rfind('/') {
+                let author = &rest[..slash_pos];
+                if let Ok(seq) = rest[slash_pos + 1..].parse::<u64>() {
+                    entries.push((author.to_string(), seq));
+                }
+            }
+        }
+
+        Ok(entries)
+    }
+
+    async fn put_wrapped_key(&self, user_pubkey: &str, data: Vec<u8>) -> Result<(), BucketError> {
+        let key = format!("keys/{user_pubkey}.enc");
+        // Wrapped keys are already encrypted (sealed box), store as-is.
+        self.put_object(&key, data).await
+    }
+
+    async fn get_wrapped_key(&self, user_pubkey: &str) -> Result<Vec<u8>, BucketError> {
+        let key = format!("keys/{user_pubkey}.enc");
+        // Wrapped keys are already encrypted (sealed box), return as-is.
+        self.get_object(&key).await
+    }
+
+    async fn delete_wrapped_key(&self, user_pubkey: &str) -> Result<(), BucketError> {
+        let key = format!("keys/{user_pubkey}.enc");
+        self.delete_object(&key).await
+    }
 }
 
 /// List all image keys in the sync bucket.
