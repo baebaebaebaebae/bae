@@ -29,10 +29,19 @@ pub fn LibrarySection() -> Element {
     let on_switch = {
         let app = app.clone();
         move |path: String| {
+            let library_path = PathBuf::from(&path);
+            let target_id = match Config::read_library_id(&library_path) {
+                Ok(id) => id,
+                Err(e) => {
+                    error!("Failed to read library ID at {path}: {e}");
+                    return;
+                }
+            };
+
             let mut config = app.config.clone();
-            config.library_dir = bae_core::library_dir::LibraryDir::new(PathBuf::from(&path));
-            if let Err(e) = config.save_library_path() {
-                error!("Failed to save library path: {e}");
+            config.library_id = target_id;
+            if let Err(e) = config.save_active_library() {
+                error!("Failed to save active library: {e}");
                 return;
             }
 
@@ -53,8 +62,8 @@ pub fn LibrarySection() -> Element {
                 }
             };
 
-            if let Err(e) = config.save_library_path() {
-                error!("Failed to save library pointer: {e}");
+            if let Err(e) = config.save_active_library() {
+                error!("Failed to save active library: {e}");
                 return;
             }
 
@@ -90,11 +99,19 @@ pub fn LibrarySection() -> Element {
                     return;
                 }
 
-                // Switch to the added library
+                // Read the added library's UUID and switch to it
+                let target_id = match Config::read_library_id(&path) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        error!("Failed to read library ID: {e}");
+                        return;
+                    }
+                };
+
                 let mut config = config;
-                config.library_dir = bae_core::library_dir::LibraryDir::new(path);
-                if let Err(e) = config.save_library_path() {
-                    error!("Failed to save library path: {e}");
+                config.library_id = target_id;
+                if let Err(e) = config.save_active_library() {
+                    error!("Failed to save active library: {e}");
                     return;
                 }
 
