@@ -1,4 +1,6 @@
 use crate::sodium_ffi;
+use hkdf::Hkdf;
+use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 use std::ptr;
 use std::sync::Once;
@@ -431,6 +433,47 @@ impl EncryptionService {
         }
 
         Ok(plaintext[offset_in_first_chunk..end].to_vec())
+    }
+
+    /// Derive a per-release encryption key using HKDF-SHA256.
+    ///
+    /// The derivation is deterministic: same master key + same release_id always
+    /// produces the same derived key. Different release_ids produce different keys.
+    ///
+    /// - Salt: `HMAC-SHA256(master_key, "bae-hkdf-salt-v1")`
+    /// - Info: `"bae-release-v1:" + release_id`
+    pub fn derive_release_key(&self, release_id: &str) -> [u8; 32] {
+        // Derive a deterministic salt from the master key
+        let mut mac =
+            Hmac::<Sha256>::new_from_slice(&self.key).expect("HMAC accepts any key length");
+        mac.update(b"bae-hkdf-salt-v1");
+        let salt = mac.finalize().into_bytes();
+
+        let info = format!("bae-release-v1:{}", release_id);
+
+        let hk = Hkdf::<Sha256>::new(Some(&salt), &self.key);
+        let mut okm = [0u8; 32];
+        hk.expand(info.as_bytes(), &mut okm)
+            .expect("32 bytes is a valid HKDF output length");
+        okm
+    }
+
+    /// Encrypt data using a per-release derived key (chunked XChaCha20-Poly1305).
+    pub fn encrypt_for_release(&self, release_id: &str, plaintext: &[u8]) -> Vec<u8> {
+        let derived_key = self.derive_release_key(release_id);
+        let derived_service = EncryptionService { key: derived_key };
+        derived_service.encrypt_chunked(plaintext)
+    }
+
+    /// Decrypt data that was encrypted with a per-release derived key.
+    pub fn decrypt_for_release(
+        &self,
+        release_id: &str,
+        ciphertext: &[u8],
+    ) -> Result<Vec<u8>, EncryptionError> {
+        let derived_key = self.derive_release_key(release_id);
+        let derived_service = EncryptionService { key: derived_key };
+        derived_service.decrypt_chunked(ciphertext)
     }
 }
 
@@ -895,5 +938,116 @@ mod tests {
         assert!(compute_key_fingerprint("not-hex").is_none());
         assert!(compute_key_fingerprint(&hex::encode([0u8; 16])).is_none()); // wrong length
         assert!(compute_key_fingerprint("").is_none());
+    }
+
+    // ---- Key derivation tests ----
+
+    #[test]
+    fn test_derive_release_key_deterministic() {
+        let service = create_test_service();
+        let key1 = service.derive_release_key("release-abc");
+        let key2 = service.derive_release_key("release-abc");
+        assert_eq!(key1, key2);
+    }
+
+    #[test]
+    fn test_derive_release_key_different_releases() {
+        let service = create_test_service();
+        let key1 = service.derive_release_key("release-1");
+        let key2 = service.derive_release_key("release-2");
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn test_derive_release_key_different_master_keys() {
+        let service1 = EncryptionService::new_with_key(&[0u8; 32]);
+        let service2 = EncryptionService::new_with_key(&[1u8; 32]);
+        let key1 = service1.derive_release_key("same-release");
+        let key2 = service2.derive_release_key("same-release");
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn test_derive_release_key_differs_from_master() {
+        let service = create_test_service();
+        let derived = service.derive_release_key("any-release");
+        assert_ne!(derived, test_key());
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_for_release_roundtrip() {
+        let service = create_test_service();
+        let release_id = "release-xyz";
+        let plaintext = b"Per-release encrypted data";
+
+        let ciphertext = service.encrypt_for_release(release_id, plaintext);
+        let decrypted = service
+            .decrypt_for_release(release_id, &ciphertext)
+            .unwrap();
+
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_wrong_release_id_fails_to_decrypt() {
+        let service = create_test_service();
+        let ciphertext = service.encrypt_for_release("release-A", b"secret");
+
+        let result = service.decrypt_for_release("release-B", &ciphertext);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_master_key_cannot_decrypt_derived_ciphertext() {
+        let service = create_test_service();
+
+        // Encrypt with derived key
+        let ciphertext = service.encrypt_for_release("release-1", b"derived secret");
+
+        // Try to decrypt with master key (standard decrypt, not decrypt_for_release)
+        let result = service.decrypt(&ciphertext);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_derived_key_cannot_decrypt_master_ciphertext() {
+        let service = create_test_service();
+
+        // Encrypt with master key
+        let ciphertext = service.encrypt(b"master secret");
+
+        // Try to decrypt with derived key
+        let result = service.decrypt_for_release("release-1", &ciphertext);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encrypt_for_release_multi_chunk_roundtrip() {
+        let service = create_test_service();
+        let release_id = "release-large";
+
+        // 2.5 chunks of data
+        let plaintext: Vec<u8> = (0..CHUNK_SIZE * 2 + CHUNK_SIZE / 2)
+            .map(|i| (i % 256) as u8)
+            .collect();
+
+        let ciphertext = service.encrypt_for_release(release_id, &plaintext);
+        let decrypted = service
+            .decrypt_for_release(release_id, &ciphertext)
+            .unwrap();
+
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_master_key_backward_compat() {
+        // Verify that existing encrypt/decrypt (master key) still works as before
+        let service = create_test_service();
+        let plaintext = b"Legacy master-key encrypted data";
+
+        let ciphertext = service.encrypt(plaintext);
+        let decrypted = service.decrypt(&ciphertext).unwrap();
+
+        assert_eq!(decrypted, plaintext);
     }
 }

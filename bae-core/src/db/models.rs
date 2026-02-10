@@ -205,6 +205,31 @@ pub struct DbTrack {
     pub updated_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
 }
+/// Which encryption key was used for a release file.
+/// - `Master`: legacy, encrypted with the library master key directly
+/// - `Derived`: per-release key derived via HKDF from the master key
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EncryptionScheme {
+    Master,
+    Derived,
+}
+
+impl EncryptionScheme {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EncryptionScheme::Master => "master",
+            EncryptionScheme::Derived => "derived",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Self {
+        match s {
+            "derived" => EncryptionScheme::Derived,
+            _ => EncryptionScheme::Master,
+        }
+    }
+}
+
 /// Physical file belonging to a release
 ///
 /// Stores original file information needed to reconstruct file structure for export
@@ -233,6 +258,8 @@ pub struct DbFile {
     /// Only set when file is encrypted with chunked encryption.
     /// Stored at import time, used during seek to avoid fetching nonce from cloud.
     pub encryption_nonce: Option<Vec<u8>>,
+    /// Which encryption scheme was used: master key directly, or HKDF-derived per-release key.
+    pub encryption_scheme: EncryptionScheme,
     pub updated_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
 }
@@ -543,6 +570,7 @@ impl DbFile {
             content_type,
             source_path: None,
             encryption_nonce: None,
+            encryption_scheme: EncryptionScheme::Master,
             updated_at: now,
             created_at: now,
         }
@@ -559,6 +587,12 @@ impl DbFile {
     /// The nonce is the first 24 bytes of the encrypted file.
     pub fn with_encryption_nonce(mut self, nonce: Vec<u8>) -> Self {
         self.encryption_nonce = Some(nonce);
+        self
+    }
+
+    /// Set the encryption scheme (master or derived).
+    pub fn with_encryption_scheme(mut self, scheme: EncryptionScheme) -> Self {
+        self.encryption_scheme = scheme;
         self
     }
 }

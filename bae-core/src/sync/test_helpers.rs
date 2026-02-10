@@ -200,6 +200,7 @@ pub unsafe fn create_synced_schema(db: *mut ffi::sqlite3) {
             content_type TEXT NOT NULL,
             source_path TEXT,
             encryption_nonce BLOB,
+            encryption_scheme TEXT NOT NULL DEFAULT 'master',
             _updated_at TEXT NOT NULL,
             created_at TEXT NOT NULL,
             FOREIGN KEY (release_id) REFERENCES releases (id) ON DELETE CASCADE
