@@ -53,6 +53,25 @@ impl S3Config {
         Ok(())
     }
 }
+/// Build an S3Config from a cloud storage profile by reading credentials from the keyring.
+///
+/// Returns None if the profile is not a cloud profile or if credentials are missing.
+pub fn s3_config_from_profile(
+    profile: &crate::db::DbStorageProfile,
+    key_service: &crate::keys::KeyService,
+) -> Option<S3Config> {
+    if profile.location != crate::db::StorageLocation::Cloud {
+        return None;
+    }
+    Some(S3Config {
+        bucket_name: profile.cloud_bucket.clone()?,
+        region: profile.cloud_region.clone()?,
+        access_key_id: key_service.get_profile_access_key(&profile.id)?,
+        secret_access_key: key_service.get_profile_secret_key(&profile.id)?,
+        endpoint_url: profile.cloud_endpoint.clone(),
+    })
+}
+
 /// Trait for cloud storage operations (allows mocking for tests)
 #[async_trait::async_trait]
 pub trait CloudStorage: Send + Sync {

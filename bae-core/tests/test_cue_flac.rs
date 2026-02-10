@@ -15,6 +15,7 @@ use bae_core::db::{Database, ImportStatus};
 use bae_core::discogs::models::{DiscogsRelease, DiscogsTrack};
 use bae_core::encryption::EncryptionService;
 use bae_core::import::{ImportProgress, ImportRequest, ImportService};
+use bae_core::keys::KeyService;
 use bae_core::library::{LibraryManager, SharedLibraryManager};
 use std::path::Path;
 use std::sync::Arc;
@@ -263,6 +264,7 @@ async fn test_cue_flac_playback_uses_track_positions() {
     let playback_handle = bae_core::playback::PlaybackService::start(
         library_manager.as_ref().clone(),
         encryption_service,
+        KeyService::new(true, "test".to_string()),
         runtime_handle,
     );
     playback_handle.set_volume(0.0);
@@ -395,6 +397,7 @@ async fn test_cue_flac_decoded_duration_matches_cue_timing() {
     let playback_handle = bae_core::playback::PlaybackService::start(
         library_manager.as_ref().clone(),
         encryption_service,
+        KeyService::new(true, "test".to_string()),
         runtime_handle,
     );
     playback_handle.set_volume(0.0);

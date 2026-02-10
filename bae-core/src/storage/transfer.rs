@@ -8,6 +8,7 @@ use crate::cloud_storage::CloudStorage;
 use crate::content_type::ContentType;
 use crate::db::{DbFile, DbReleaseStorage, DbStorageProfile, StorageLocation};
 use crate::encryption::EncryptionService;
+use crate::keys::KeyService;
 use crate::library::SharedLibraryManager;
 use crate::library_dir::LibraryDir;
 use crate::storage::{create_storage_reader, ReleaseStorage, ReleaseStorageImpl};
@@ -53,6 +54,7 @@ pub struct TransferService {
     library_manager: SharedLibraryManager,
     encryption_service: Option<EncryptionService>,
     library_dir: LibraryDir,
+    key_service: KeyService,
     #[cfg(feature = "test-utils")]
     injected_source_cloud: Option<Arc<dyn CloudStorage>>,
     #[cfg(feature = "test-utils")]
@@ -64,11 +66,13 @@ impl TransferService {
         library_manager: SharedLibraryManager,
         encryption_service: Option<EncryptionService>,
         library_dir: LibraryDir,
+        key_service: KeyService,
     ) -> Self {
         Self {
             library_manager,
             encryption_service,
             library_dir,
+            key_service,
             #[cfg(feature = "test-utils")]
             injected_source_cloud: None,
             #[cfg(feature = "test-utils")]
@@ -99,6 +103,7 @@ impl TransferService {
         let library_manager = self.library_manager.clone();
         let encryption_service = self.encryption_service.clone();
         let library_dir = self.library_dir.clone();
+        let key_service = self.key_service.clone();
 
         #[cfg(feature = "test-utils")]
         let injected_source = self.injected_source_cloud.clone();
@@ -112,6 +117,7 @@ impl TransferService {
                 &library_manager,
                 encryption_service.as_ref(),
                 &library_dir,
+                &key_service,
                 &tx,
                 #[cfg(feature = "test-utils")]
                 injected_source,
@@ -139,6 +145,7 @@ async fn do_transfer(
     library_manager: &SharedLibraryManager,
     encryption_service: Option<&EncryptionService>,
     library_path: &Path,
+    key_service: &KeyService,
     tx: &mpsc::UnboundedSender<TransferProgress>,
     #[cfg(feature = "test-utils")] injected_source: Option<Arc<dyn CloudStorage>>,
     #[cfg(feature = "test-utils")] injected_dest: Option<Arc<dyn CloudStorage>>,
@@ -170,10 +177,10 @@ async fn do_transfer(
         if let Some(ref cloud) = injected_source {
             Some(cloud.clone())
         } else {
-            Some(create_storage_reader(profile).await?)
+            Some(create_storage_reader(profile, key_service).await?)
         }
         #[cfg(not(feature = "test-utils"))]
-        Some(create_storage_reader(profile).await?)
+        Some(create_storage_reader(profile, key_service).await?)
     } else {
         None
     };
@@ -237,6 +244,7 @@ async fn do_transfer(
                     dest_profile.clone(),
                     encryption_service.cloned(),
                     database,
+                    key_service,
                 )
                 .await?
             };
@@ -246,6 +254,7 @@ async fn do_transfer(
                 dest_profile.clone(),
                 encryption_service.cloned(),
                 database,
+                key_service,
             )
             .await?;
 

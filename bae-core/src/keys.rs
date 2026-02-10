@@ -226,6 +226,111 @@ impl KeyService {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Per-storage-profile S3 credentials
+    // -------------------------------------------------------------------------
+
+    /// Read the S3 access key for a storage profile. Returns None if not set.
+    ///
+    /// Dev mode: reads `BAE_S3_ACCESS_KEY_{profile_id}`, then falls back to `BAE_S3_ACCESS_KEY`.
+    /// Prod mode: reads from OS keyring.
+    pub fn get_profile_access_key(&self, profile_id: &str) -> Option<String> {
+        if self.dev_mode {
+            std::env::var(format!("BAE_S3_ACCESS_KEY_{}", profile_id))
+                .ok()
+                .filter(|k| !k.is_empty())
+                .or_else(|| {
+                    std::env::var("BAE_S3_ACCESS_KEY")
+                        .ok()
+                        .filter(|k| !k.is_empty())
+                })
+        } else {
+            let account = self.account(&format!("s3_access_key:{}", profile_id));
+            keyring_core::Entry::new("bae", &account)
+                .ok()
+                .and_then(|e| e.get_password().ok())
+                .filter(|k| !k.is_empty())
+        }
+    }
+
+    /// Save the S3 access key for a storage profile.
+    ///
+    /// Dev mode: sets the env var (so tests can round-trip without a real keyring).
+    /// Prod mode: writes to OS keyring.
+    pub fn set_profile_access_key(&self, profile_id: &str, value: &str) -> Result<(), KeyError> {
+        if self.dev_mode {
+            std::env::set_var(format!("BAE_S3_ACCESS_KEY_{}", profile_id), value);
+            return Ok(());
+        }
+
+        let account = self.account(&format!("s3_access_key:{}", profile_id));
+        keyring_core::Entry::new("bae", &account)?.set_password(value)?;
+        info!("S3 access key saved for profile {}", profile_id);
+        Ok(())
+    }
+
+    /// Read the S3 secret key for a storage profile. Returns None if not set.
+    ///
+    /// Dev mode: reads `BAE_S3_SECRET_KEY_{profile_id}`, then falls back to `BAE_S3_SECRET_KEY`.
+    /// Prod mode: reads from OS keyring.
+    pub fn get_profile_secret_key(&self, profile_id: &str) -> Option<String> {
+        if self.dev_mode {
+            std::env::var(format!("BAE_S3_SECRET_KEY_{}", profile_id))
+                .ok()
+                .filter(|k| !k.is_empty())
+                .or_else(|| {
+                    std::env::var("BAE_S3_SECRET_KEY")
+                        .ok()
+                        .filter(|k| !k.is_empty())
+                })
+        } else {
+            let account = self.account(&format!("s3_secret_key:{}", profile_id));
+            keyring_core::Entry::new("bae", &account)
+                .ok()
+                .and_then(|e| e.get_password().ok())
+                .filter(|k| !k.is_empty())
+        }
+    }
+
+    /// Save the S3 secret key for a storage profile.
+    ///
+    /// Dev mode: sets the env var (so tests can round-trip without a real keyring).
+    /// Prod mode: writes to OS keyring.
+    pub fn set_profile_secret_key(&self, profile_id: &str, value: &str) -> Result<(), KeyError> {
+        if self.dev_mode {
+            std::env::set_var(format!("BAE_S3_SECRET_KEY_{}", profile_id), value);
+            return Ok(());
+        }
+
+        let account = self.account(&format!("s3_secret_key:{}", profile_id));
+        keyring_core::Entry::new("bae", &account)?.set_password(value)?;
+        info!("S3 secret key saved for profile {}", profile_id);
+        Ok(())
+    }
+
+    /// Delete S3 credentials for a storage profile from the keyring.
+    ///
+    /// Dev mode: removes env vars.
+    /// Prod mode: deletes from OS keyring. Silently ignores missing entries.
+    pub fn delete_profile_credentials(&self, profile_id: &str) -> Result<(), KeyError> {
+        if self.dev_mode {
+            std::env::remove_var(format!("BAE_S3_ACCESS_KEY_{}", profile_id));
+            std::env::remove_var(format!("BAE_S3_SECRET_KEY_{}", profile_id));
+            return Ok(());
+        }
+
+        for key_type in ["s3_access_key", "s3_secret_key"] {
+            let account = self.account(&format!("{}:{}", key_type, profile_id));
+            match keyring_core::Entry::new("bae", &account)?.delete_credential() {
+                Ok(()) => info!("Deleted {} for profile {}", key_type, profile_id),
+                Err(keyring_core::Error::NoEntry) => {}
+                Err(e) => return Err(KeyError::Keyring(e)),
+            }
+        }
+
+        Ok(())
+    }
+
     /// Migrate keys from the old global keyring entries to per-library namespaced entries.
     /// Reads from old names, writes to new names, deletes old entries.
     /// No-op in dev mode.

@@ -170,8 +170,6 @@ CREATE TABLE storage_profiles (
     cloud_bucket TEXT,
     cloud_region TEXT,
     cloud_endpoint TEXT,
-    cloud_access_key TEXT,
-    cloud_secret_key TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );

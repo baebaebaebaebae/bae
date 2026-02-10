@@ -6,6 +6,7 @@
 //! streams time to complete.
 
 use crate::db::DbStorageProfile;
+use crate::keys::KeyService;
 use crate::storage::create_storage_reader;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -53,7 +54,11 @@ pub async fn append_pending_deletions(
 /// Process all pending deletions from the manifest.
 ///
 /// Called on app startup and after a delay post-transfer.
-pub async fn process_pending_deletions(library_path: &Path, get_profile: impl AsyncProfileLookup) {
+pub async fn process_pending_deletions(
+    library_path: &Path,
+    get_profile: impl AsyncProfileLookup,
+    key_service: &KeyService,
+) {
     let manifest_path = library_path.join(MANIFEST_FILENAME);
     let pending = read_manifest(&manifest_path).await;
 
@@ -81,7 +86,7 @@ pub async fn process_pending_deletions(library_path: &Path, get_profile: impl As
             }
             PendingDeletion::Cloud { profile_id, key } => {
                 match get_profile.get_profile(profile_id).await {
-                    Some(profile) => match create_storage_reader(&profile).await {
+                    Some(profile) => match create_storage_reader(&profile, key_service).await {
                         Ok(reader) => {
                             if let Err(e) = reader.delete(key).await {
                                 warn!("Failed to delete cloud file {}: {}, will retry", key, e);
@@ -119,11 +124,15 @@ pub async fn process_pending_deletions(library_path: &Path, get_profile: impl As
 }
 
 /// Schedule deferred cleanup after a transfer completes
-pub fn schedule_cleanup(library_path: &Path, get_profile: impl AsyncProfileLookup + 'static) {
+pub fn schedule_cleanup(
+    library_path: &Path,
+    get_profile: impl AsyncProfileLookup + 'static,
+    key_service: KeyService,
+) {
     let library_path = library_path.to_path_buf();
     tokio::spawn(async move {
         sleep(CLEANUP_DELAY).await;
-        process_pending_deletions(&library_path, get_profile).await;
+        process_pending_deletions(&library_path, get_profile, &key_service).await;
     });
 }
 
@@ -157,6 +166,10 @@ impl AsyncProfileLookup for crate::library::SharedLibraryManager {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    fn test_key_service() -> KeyService {
+        KeyService::new(true, "test".to_string())
+    }
 
     /// A no-op profile lookup that always returns None
     struct NoOpProfileLookup;
@@ -249,7 +262,7 @@ mod tests {
         .await
         .unwrap();
 
-        process_pending_deletions(library_path, NoOpProfileLookup).await;
+        process_pending_deletions(library_path, NoOpProfileLookup, &test_key_service()).await;
 
         assert!(!file1.exists());
         assert!(!file2.exists());
@@ -272,7 +285,7 @@ mod tests {
         .await
         .unwrap();
 
-        process_pending_deletions(library_path, NoOpProfileLookup).await;
+        process_pending_deletions(library_path, NoOpProfileLookup, &test_key_service()).await;
 
         // Manifest should be cleaned up (not-found is not a retry)
         assert!(!library_path.join(MANIFEST_FILENAME).exists());
@@ -294,7 +307,7 @@ mod tests {
         .unwrap();
 
         // NoOpProfileLookup returns None for all profiles
-        process_pending_deletions(library_path, NoOpProfileLookup).await;
+        process_pending_deletions(library_path, NoOpProfileLookup, &test_key_service()).await;
 
         // Entry should be dropped (not retried), manifest cleaned up
         assert!(!library_path.join(MANIFEST_FILENAME).exists());
@@ -304,7 +317,7 @@ mod tests {
     async fn test_process_with_no_manifest_is_noop() {
         let temp = TempDir::new().unwrap();
         // No manifest file exists — should not panic
-        process_pending_deletions(temp.path(), NoOpProfileLookup).await;
+        process_pending_deletions(temp.path(), NoOpProfileLookup, &test_key_service()).await;
     }
 
     #[tokio::test]

@@ -19,6 +19,7 @@ pub struct SubsonicState {
     pub library_manager: SharedLibraryManager,
     pub encryption_service: Option<crate::encryption::EncryptionService>,
     pub library_dir: LibraryDir,
+    pub key_service: crate::keys::KeyService,
 }
 /// Common query parameters for Subsonic API
 #[derive(Debug, Deserialize)]
@@ -127,11 +128,13 @@ pub fn create_router(
     library_manager: SharedLibraryManager,
     encryption_service: Option<crate::encryption::EncryptionService>,
     library_dir: LibraryDir,
+    key_service: crate::keys::KeyService,
 ) -> Router {
     let state = SubsonicState {
         library_manager,
         encryption_service,
         library_dir,
+        key_service,
     };
     Router::new()
         .route("/rest/ping", get(ping))
@@ -604,7 +607,7 @@ async fn stream_track_audio(
             .await
             .map_err(|e| format!("Failed to read file: {}", e))?
     } else if let Some(ref profile) = storage_profile {
-        let storage = create_storage_reader(profile)
+        let storage = create_storage_reader(profile, &state.key_service)
             .await
             .map_err(|e| format!("Failed to create storage reader: {}", e))?;
         let key = format!("{}/{}", track.release_id, audio_file.original_filename);

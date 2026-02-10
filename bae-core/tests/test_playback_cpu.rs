@@ -10,6 +10,7 @@ use bae_core::db::Database;
 use bae_core::discogs::models::{DiscogsArtist, DiscogsRelease, DiscogsTrack};
 use bae_core::encryption::EncryptionService;
 use bae_core::import::ImportRequest;
+use bae_core::keys::KeyService;
 use bae_core::library::{LibraryManager, SharedLibraryManager};
 use bae_core::playback::{PlaybackProgress, PlaybackState};
 use std::sync::Arc;
@@ -221,6 +222,7 @@ impl CueFlacTestFixture {
         let playback_handle = bae_core::playback::PlaybackService::start(
             library_manager_arc.as_ref().clone(),
             encryption_service,
+            KeyService::new(true, "test".to_string()),
             runtime_handle,
         );
         playback_handle.set_volume(0.0);

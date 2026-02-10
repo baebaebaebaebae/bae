@@ -207,6 +207,7 @@ fn main() {
     let playback_handle = playback::PlaybackService::start(
         library_manager.get().clone(),
         encryption_service.clone(),
+        key_service.clone(),
         runtime_handle.clone(),
     );
 
@@ -241,6 +242,24 @@ fn main() {
     #[cfg(target_os = "macos")]
     ui::shortcuts::init_playback_channel();
 
+    if config.subsonic_enabled {
+        let subsonic_library = library_manager.clone();
+        let subsonic_encryption = encryption_service.clone();
+        let subsonic_port = config.subsonic_port;
+        let subsonic_library_dir = config.library_dir.clone();
+        let subsonic_key_service = key_service.clone();
+        runtime_handle.spawn(async move {
+            start_subsonic_server(
+                subsonic_library,
+                subsonic_encryption,
+                subsonic_port,
+                subsonic_library_dir,
+                subsonic_key_service,
+            )
+            .await
+        });
+    }
+
     let ui_context = AppContext {
         library_manager: library_manager.clone(),
         config: config.clone(),
@@ -252,22 +271,6 @@ fn main() {
         key_service,
         image_server,
     };
-
-    if config.subsonic_enabled {
-        let subsonic_library = library_manager.clone();
-        let subsonic_encryption = encryption_service.clone();
-        let subsonic_port = config.subsonic_port;
-        let subsonic_library_dir = config.library_dir.clone();
-        runtime_handle.spawn(async move {
-            start_subsonic_server(
-                subsonic_library,
-                subsonic_encryption,
-                subsonic_port,
-                subsonic_library_dir,
-            )
-            .await
-        });
-    }
 
     // Initialize auto-updater (checks for updates on launch)
     updater::start();
@@ -283,9 +286,15 @@ async fn start_subsonic_server(
     encryption_service: Option<encryption::EncryptionService>,
     port: u16,
     library_dir: bae_core::library_dir::LibraryDir,
+    key_service: bae_core::keys::KeyService,
 ) {
     info!("Starting Subsonic API server...");
-    let app = create_router(library_manager, encryption_service, library_dir);
+    let app = create_router(
+        library_manager,
+        encryption_service,
+        library_dir,
+        key_service,
+    );
     let addr = format!("127.0.0.1:{}", port);
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => {

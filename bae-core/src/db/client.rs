@@ -1515,9 +1515,9 @@ impl Database {
             r#"
             INSERT INTO storage_profiles (
                 id, name, location, location_path, encrypted, is_default,
-                cloud_bucket, cloud_region, cloud_endpoint, cloud_access_key, cloud_secret_key,
+                cloud_bucket, cloud_region, cloud_endpoint,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&profile.id)
@@ -1529,8 +1529,6 @@ impl Database {
         .bind(&profile.cloud_bucket)
         .bind(&profile.cloud_region)
         .bind(&profile.cloud_endpoint)
-        .bind(&profile.cloud_access_key)
-        .bind(&profile.cloud_secret_key)
         .bind(profile.created_at.to_rfc3339())
         .bind(profile.updated_at.to_rfc3339())
         .execute(&self.pool)
@@ -1584,7 +1582,6 @@ impl Database {
                 name = ?, location = ?, location_path = ?, encrypted = ?,
                 is_default = ?,
                 cloud_bucket = ?, cloud_region = ?, cloud_endpoint = ?,
-                cloud_access_key = ?, cloud_secret_key = ?,
                 updated_at = ?
             WHERE id = ?
             "#,
@@ -1597,8 +1594,6 @@ impl Database {
         .bind(&profile.cloud_bucket)
         .bind(&profile.cloud_region)
         .bind(&profile.cloud_endpoint)
-        .bind(&profile.cloud_access_key)
-        .bind(&profile.cloud_secret_key)
         .bind(profile.updated_at.to_rfc3339())
         .bind(&profile.id)
         .execute(&self.pool)
@@ -1653,8 +1648,6 @@ impl Database {
             cloud_bucket: row.get("cloud_bucket"),
             cloud_region: row.get("cloud_region"),
             cloud_endpoint: row.get("cloud_endpoint"),
-            cloud_access_key: row.get("cloud_access_key"),
-            cloud_secret_key: row.get("cloud_secret_key"),
             created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                 .unwrap()
                 .with_timezone(&Utc),

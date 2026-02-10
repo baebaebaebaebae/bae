@@ -622,15 +622,9 @@ fn create_storage_profile(
     );
     match location {
         StorageLocation::Local => DbStorageProfile::new_local(&name, storage_path, encrypted),
-        StorageLocation::Cloud => DbStorageProfile::new_cloud(
-            &name,
-            "test-bucket",
-            "us-east-1",
-            None,
-            "test-access-key",
-            "test-secret-key",
-            encrypted,
-        ),
+        StorageLocation::Cloud => {
+            DbStorageProfile::new_cloud(&name, "test-bucket", "us-east-1", None, encrypted)
+        }
     }
 }
 

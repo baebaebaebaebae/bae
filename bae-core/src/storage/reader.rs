@@ -1,16 +1,20 @@
 //! Storage reader utilities for creating storage clients from profiles
-use crate::cloud_storage::{CloudStorage, CloudStorageError, S3CloudStorage};
+use crate::cloud_storage::{
+    s3_config_from_profile, CloudStorage, CloudStorageError, S3CloudStorage,
+};
 use crate::db::{DbStorageProfile, StorageLocation};
+use crate::keys::KeyService;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tracing::debug;
 
 /// Create a storage reader from a profile.
 ///
-/// For cloud profiles: creates S3CloudStorage from profile credentials
+/// For cloud profiles: creates S3CloudStorage using credentials from the keyring
 /// For local profiles: returns LocalFileStorage that reads from disk
 pub async fn create_storage_reader(
     profile: &DbStorageProfile,
+    key_service: &KeyService,
 ) -> Result<Arc<dyn CloudStorage>, CloudStorageError> {
     debug!(
         "Creating storage reader for profile '{}' (id={}, location={:?})",
@@ -19,8 +23,8 @@ pub async fn create_storage_reader(
 
     match profile.location {
         StorageLocation::Cloud => {
-            let s3_config = profile.to_s3_config().ok_or_else(|| {
-                CloudStorageError::Config("Missing S3 credentials in profile".into())
+            let s3_config = s3_config_from_profile(profile, key_service).ok_or_else(|| {
+                CloudStorageError::Config("Missing S3 credentials for profile".into())
             })?;
             let client = S3CloudStorage::new(s3_config).await?;
             Ok(Arc::new(client))
