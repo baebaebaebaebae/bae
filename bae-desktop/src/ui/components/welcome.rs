@@ -1,7 +1,7 @@
 //! Welcome screen for first-run setup
 //!
-//! Shown when no `~/.bae/library` pointer file exists. Offers two choices:
-//! - Create a new library (writes pointer file, re-execs binary)
+//! Shown when no `~/.bae/active-library` pointer file exists. Offers two choices:
+//! - Create a new library (writes pointer file with UUID, re-execs binary)
 //! - Restore from cloud (downloads encrypted DB + covers, then re-execs)
 
 use bae_core::keys::KeyService;
@@ -80,7 +80,7 @@ fn WelcomeScreen() -> Element {
             .expect("Failed to create new library");
 
         config
-            .save_library_path()
+            .save_active_library()
             .expect("Failed to write library pointer");
 
         relaunch();
@@ -406,7 +406,7 @@ async fn do_restore(
     }
 
     // Write pointer file last (makes this idempotent on failure)
-    config.save_library_path()?;
+    config.save_active_library()?;
 
     info!(
         "Cloud restore complete: library at {}",
