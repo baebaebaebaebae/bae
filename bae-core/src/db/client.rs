@@ -865,7 +865,7 @@ impl Database {
     pub async fn insert_file(&self, file: &DbFile) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
-            INSERT INTO files (
+            INSERT INTO release_files (
                 id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
@@ -887,7 +887,7 @@ impl Database {
         &self,
         release_id: &str,
     ) -> Result<Vec<DbFile>, sqlx::Error> {
-        let rows = sqlx::query("SELECT * FROM files WHERE release_id = ?")
+        let rows = sqlx::query("SELECT * FROM release_files WHERE release_id = ?")
             .bind(release_id)
             .fetch_all(&self.pool)
             .await?;
@@ -910,7 +910,7 @@ impl Database {
     }
     /// Get a specific file by ID
     pub async fn get_file_by_id(&self, file_id: &str) -> Result<Option<DbFile>, sqlx::Error> {
-        let row = sqlx::query("SELECT * FROM files WHERE id = ?")
+        let row = sqlx::query("SELECT * FROM release_files WHERE id = ?")
             .bind(file_id)
             .fetch_optional(&self.pool)
             .await?;
@@ -1764,7 +1764,7 @@ impl Database {
 
     /// Delete all file records for a release
     pub async fn delete_files_for_release(&self, release_id: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("DELETE FROM files WHERE release_id = ?")
+        sqlx::query("DELETE FROM release_files WHERE release_id = ?")
             .bind(release_id)
             .execute(&self.pool)
             .await?;

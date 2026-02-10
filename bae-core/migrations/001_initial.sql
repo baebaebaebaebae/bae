@@ -91,7 +91,7 @@ CREATE TABLE track_artists (
     FOREIGN KEY (artist_id) REFERENCES artists (id) ON DELETE CASCADE
 );
 
-CREATE TABLE files (
+CREATE TABLE release_files (
     id TEXT PRIMARY KEY,
     release_id TEXT NOT NULL,
     original_filename TEXT NOT NULL,
@@ -118,7 +118,7 @@ CREATE TABLE audio_formats (
     bits_per_sample INTEGER NOT NULL,
     seektable_json TEXT NOT NULL,
     audio_data_start INTEGER NOT NULL,
-    file_id TEXT REFERENCES files(id),
+    file_id TEXT REFERENCES release_files(id),
     created_at TEXT NOT NULL,
     FOREIGN KEY (track_id) REFERENCES tracks (id) ON DELETE CASCADE
 );
@@ -177,7 +177,7 @@ CREATE TABLE storage_profiles (
 
 CREATE TABLE release_storage (
     id TEXT PRIMARY KEY,
-    release_id TEXT NOT NULL UNIQUE,
+    release_id TEXT NOT NULL,
     storage_profile_id TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY (release_id) REFERENCES releases (id) ON DELETE CASCADE,
@@ -206,7 +206,7 @@ CREATE INDEX idx_track_artists_track_id ON track_artists (track_id);
 CREATE INDEX idx_track_artists_artist_id ON track_artists (artist_id);
 CREATE INDEX idx_releases_album_id ON releases (album_id);
 CREATE INDEX idx_tracks_release_id ON tracks (release_id);
-CREATE INDEX idx_files_release_id ON files (release_id);
+CREATE INDEX idx_release_files_release_id ON release_files (release_id);
 CREATE INDEX idx_torrents_release_id ON torrents (release_id);
 CREATE INDEX idx_torrents_info_hash ON torrents (info_hash);
 CREATE INDEX idx_torrent_piece_mappings_torrent_id ON torrent_piece_mappings (torrent_id);
