@@ -2124,4 +2124,82 @@ impl Database {
         .await?;
         Ok(())
     }
+
+    // ---- Share grants ----
+
+    /// Insert an accepted share grant into the local DB.
+    pub async fn insert_share_grant(&self, grant: &DbShareGrant) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
+        sqlx::query(
+            r#"
+            INSERT INTO share_grants (
+                id, from_library_id, from_user_pubkey, release_id,
+                bucket, region, endpoint, wrapped_payload,
+                expires, signature, accepted_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&grant.id)
+        .bind(&grant.from_library_id)
+        .bind(&grant.from_user_pubkey)
+        .bind(&grant.release_id)
+        .bind(&grant.bucket)
+        .bind(&grant.region)
+        .bind(&grant.endpoint)
+        .bind(&grant.wrapped_payload)
+        .bind(&grant.expires)
+        .bind(&grant.signature)
+        .bind(&grant.accepted_at)
+        .bind(&grant.created_at)
+        .execute(&mut *conn)
+        .await?;
+        Ok(())
+    }
+
+    /// Get all share grants for a release.
+    pub async fn get_share_grants_for_release(
+        &self,
+        release_id: &str,
+    ) -> Result<Vec<DbShareGrant>, sqlx::Error> {
+        let rows = sqlx::query("SELECT * FROM share_grants WHERE release_id = ?")
+            .bind(release_id)
+            .fetch_all(&self.inner.read_pool)
+            .await?;
+        Ok(rows.iter().map(Self::row_to_share_grant).collect())
+    }
+
+    /// List all share grants.
+    pub async fn list_share_grants(&self) -> Result<Vec<DbShareGrant>, sqlx::Error> {
+        let rows = sqlx::query("SELECT * FROM share_grants ORDER BY created_at DESC")
+            .fetch_all(&self.inner.read_pool)
+            .await?;
+        Ok(rows.iter().map(Self::row_to_share_grant).collect())
+    }
+
+    /// Delete a share grant by ID.
+    pub async fn delete_share_grant(&self, id: &str) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
+        sqlx::query("DELETE FROM share_grants WHERE id = ?")
+            .bind(id)
+            .execute(&mut *conn)
+            .await?;
+        Ok(())
+    }
+
+    fn row_to_share_grant(row: &sqlx::sqlite::SqliteRow) -> DbShareGrant {
+        DbShareGrant {
+            id: row.get("id"),
+            from_library_id: row.get("from_library_id"),
+            from_user_pubkey: row.get("from_user_pubkey"),
+            release_id: row.get("release_id"),
+            bucket: row.get("bucket"),
+            region: row.get("region"),
+            endpoint: row.get("endpoint"),
+            wrapped_payload: row.get("wrapped_payload"),
+            expires: row.get("expires"),
+            signature: row.get("signature"),
+            accepted_at: row.get("accepted_at"),
+            created_at: row.get("created_at"),
+        }
+    }
 }
