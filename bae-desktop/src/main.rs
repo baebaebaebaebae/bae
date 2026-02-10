@@ -418,6 +418,7 @@ fn torrent_options_from_config(config: &config::Config) -> torrent::client::Torr
         listen_port: config.torrent_listen_port,
         enable_upnp: config.torrent_enable_upnp,
         enable_natpmp: config.torrent_enable_natpmp,
+        enable_dht: config.torrent_enable_dht,
         max_connections: config.torrent_max_connections,
         max_uploads: config.torrent_max_uploads,
     }
