@@ -15,8 +15,10 @@ use std::collections::HashMap;
 
 use tracing::info;
 
+use crate::keys::UserKeypair;
+
 use super::bucket::SyncBucketClient;
-use super::envelope::{self, ChangesetEnvelope};
+use super::envelope::{self, sign_envelope, ChangesetEnvelope};
 use super::pull::{self, PullResult};
 use super::push::{OutgoingChangeset, SCHEMA_VERSION};
 use super::session::SyncSession;
@@ -69,6 +71,7 @@ impl SyncService {
         bucket: &dyn SyncBucketClient,
         timestamp: &str,
         message: &str,
+        keypair: &UserKeypair,
     ) -> Result<SyncResult, SyncCycleError> {
         // Step 1: grab outgoing changeset from the session.
         let outgoing_cs = session.changeset().map_err(SyncCycleError::Session)?;
@@ -81,14 +84,17 @@ impl SyncService {
         // in a follow-up.
         let outgoing = outgoing_cs.map(|cs| {
             let next_seq = local_seq + 1;
-            let env = ChangesetEnvelope {
+            let mut env = ChangesetEnvelope {
                 device_id: self.device_id.clone(),
                 seq: next_seq,
                 schema_version: SCHEMA_VERSION,
                 message: message.to_string(),
                 timestamp: timestamp.to_string(),
                 changeset_size: cs.len(),
+                author_pubkey: None,
+                signature: None,
             };
+            sign_envelope(&mut env, keypair, cs.as_bytes());
             let packed = envelope::pack(&env, cs.as_bytes());
             OutgoingChangeset {
                 packed,

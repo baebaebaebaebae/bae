@@ -16,7 +16,7 @@ use tracing::{info, warn};
 
 use super::apply::apply_changeset_lww;
 use super::bucket::{DeviceHead, SyncBucketClient};
-use super::envelope;
+use super::envelope::{self, verify_changeset_signature};
 use super::push::SCHEMA_VERSION;
 use super::session_ext::Changeset;
 
@@ -150,6 +150,16 @@ pub async unsafe fn pull_changes(
                 // When we upgrade, a new snapshot will reconcile.
                 updated_cursors.insert(head.device_id.clone(), seq);
                 continue;
+            }
+
+            // Signature check: log a warning if present but invalid.
+            // Full rejection comes in Phase 2e (changeset validation on pull).
+            if !verify_changeset_signature(&env, &changeset_bytes) {
+                warn!(
+                    device_id = %head.device_id,
+                    seq,
+                    "changeset has invalid signature"
+                );
             }
 
             if changeset_bytes.is_empty() {

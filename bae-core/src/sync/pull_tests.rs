@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use libsqlite3_sys as ffi;
 
+use crate::keys::KeyService;
 use crate::sync::bucket::SyncBucketClient;
 use crate::sync::envelope;
 use crate::sync::pull;
@@ -485,6 +486,9 @@ async fn sync_cycle_push_then_pull() {
         let bucket = MockBucket::new();
 
         // Device 1: write some data, create outgoing.
+        let ks = KeyService::new(true, "test-sync-cycle".to_string());
+        let keypair = ks.get_or_create_user_keypair().unwrap();
+
         let svc1 = SyncService::new("dev-1".into());
         let session1 = SyncSession::start(db1).expect("start session");
         exec(
@@ -501,6 +505,7 @@ async fn sync_cycle_push_then_pull() {
                 &bucket,
                 "2026-02-10T00:00:00Z",
                 "Imported Kind of Blue",
+                &keypair,
             )
             .await
             .expect("sync");
@@ -596,6 +601,9 @@ async fn sync_cycle_no_local_changes_returns_none() {
         create_synced_schema(db);
 
         let bucket = MockBucket::new();
+        let ks = KeyService::new(true, "test-sync-no-changes".to_string());
+        let keypair = ks.get_or_create_user_keypair().unwrap();
+
         let svc = SyncService::new("dev-local".into());
         let session = SyncSession::start(db).expect("start");
 
@@ -609,6 +617,7 @@ async fn sync_cycle_no_local_changes_returns_none() {
                 &bucket,
                 "2026-02-10T00:00:00Z",
                 "",
+                &keypair,
             )
             .await
             .expect("sync");
@@ -627,6 +636,9 @@ async fn sync_service_outgoing_has_correct_envelope() {
         create_synced_schema(db);
 
         let bucket = MockBucket::new();
+        let ks = KeyService::new(true, "test-sync-envelope".to_string());
+        let keypair = ks.get_or_create_user_keypair().unwrap();
+
         let svc = SyncService::new("dev-local".into());
         let session = SyncSession::start(db).expect("start");
 
@@ -644,6 +656,7 @@ async fn sync_service_outgoing_has_correct_envelope() {
                 &bucket,
                 "2026-02-10T12:00:00Z",
                 "Added Test artist",
+                &keypair,
             )
             .await
             .expect("sync");
@@ -659,6 +672,11 @@ async fn sync_service_outgoing_has_correct_envelope() {
         assert_eq!(env.timestamp, "2026-02-10T12:00:00Z");
         assert_eq!(env.message, "Added Test artist");
         assert!(!cs_bytes.is_empty());
+
+        // Envelope should be signed.
+        assert!(env.author_pubkey.is_some());
+        assert!(env.signature.is_some());
+        assert!(envelope::verify_changeset_signature(&env, &cs_bytes));
 
         ffi::sqlite3_close(db);
     }

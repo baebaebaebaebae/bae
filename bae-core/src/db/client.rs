@@ -979,8 +979,8 @@ impl Database {
         sqlx::query(
             r#"
             INSERT INTO release_files (
-                id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, _updated_at, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, encryption_scheme, _updated_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&file.id)
@@ -990,6 +990,7 @@ impl Database {
         .bind(file.content_type.as_str())
         .bind(&file.source_path)
         .bind(&file.encryption_nonce)
+        .bind(file.encryption_scheme.as_str())
         .bind(file.updated_at.to_rfc3339())
         .bind(file.created_at.to_rfc3339())
         .execute(&mut *conn)
@@ -1015,6 +1016,9 @@ impl Database {
                 content_type: ContentType::from_mime(&row.get::<String, _>("content_type")),
                 source_path: row.get("source_path"),
                 encryption_nonce: row.get("encryption_nonce"),
+                encryption_scheme: EncryptionScheme::from_db_str(
+                    &row.get::<String, _>("encryption_scheme"),
+                ),
                 updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
                     .with_timezone(&Utc),
@@ -1040,6 +1044,9 @@ impl Database {
                 content_type: ContentType::from_mime(&row.get::<String, _>("content_type")),
                 source_path: row.get("source_path"),
                 encryption_nonce: row.get("encryption_nonce"),
+                encryption_scheme: EncryptionScheme::from_db_str(
+                    &row.get::<String, _>("encryption_scheme"),
+                ),
                 updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
                     .with_timezone(&Utc),

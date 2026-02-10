@@ -6,6 +6,9 @@
 /// unpacking the binary portion (schema version, author, description).
 use serde::{Deserialize, Serialize};
 
+use crate::keys::{self, UserKeypair};
+use crate::sodium_ffi;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChangesetEnvelope {
     pub device_id: String,
@@ -14,6 +17,57 @@ pub struct ChangesetEnvelope {
     pub message: String,
     pub timestamp: String,
     pub changeset_size: usize,
+    /// Hex-encoded Ed25519 public key of the author. None for unsigned changesets.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub author_pubkey: Option<String>,
+    /// Hex-encoded detached Ed25519 signature over the changeset bytes. None for unsigned.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub signature: Option<String>,
+}
+
+/// Sign a changeset envelope with the user's Ed25519 keypair.
+///
+/// Sets `author_pubkey` to the hex-encoded public key and `signature` to the
+/// hex-encoded detached signature over the raw changeset bytes.
+pub fn sign_envelope(env: &mut ChangesetEnvelope, keypair: &UserKeypair, changeset_bytes: &[u8]) {
+    let sig = keypair.sign(changeset_bytes);
+    env.author_pubkey = Some(hex::encode(keypair.public_key));
+    env.signature = Some(hex::encode(sig));
+}
+
+/// Verify the signature on a changeset envelope.
+///
+/// Returns true if:
+/// - No signature is present (unsigned changesets are accepted for now).
+/// - A valid signature is present that matches the author's public key.
+///
+/// Returns false if a signature is present but invalid (wrong key, tampered data,
+/// or malformed hex).
+pub fn verify_changeset_signature(env: &ChangesetEnvelope, changeset_bytes: &[u8]) -> bool {
+    match (&env.author_pubkey, &env.signature) {
+        (None, None) => return true, // Unsigned envelope -- OK for now.
+        (Some(_), None) | (None, Some(_)) => return false, // Half-signed is invalid.
+        _ => {}
+    }
+    let (Some(pk_hex), Some(sig_hex)) = (&env.author_pubkey, &env.signature) else {
+        unreachable!()
+    };
+
+    let Ok(pk_bytes) = hex::decode(pk_hex) else {
+        return false;
+    };
+    let Ok(sig_bytes) = hex::decode(sig_hex) else {
+        return false;
+    };
+
+    let Ok(pk): Result<[u8; sodium_ffi::SIGN_PUBLICKEYBYTES], _> = pk_bytes.try_into() else {
+        return false;
+    };
+    let Ok(sig): Result<[u8; sodium_ffi::SIGN_BYTES], _> = sig_bytes.try_into() else {
+        return false;
+    };
+
+    keys::verify_signature(&sig, changeset_bytes, &pk)
 }
 
 /// Pack an envelope and changeset into the wire format.
@@ -47,6 +101,7 @@ pub fn unpack(data: &[u8]) -> Option<(ChangesetEnvelope, Vec<u8>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::keys::KeyService;
 
     fn test_envelope() -> ChangesetEnvelope {
         ChangesetEnvelope {
@@ -56,6 +111,8 @@ mod tests {
             message: "Imported Kind of Blue".into(),
             timestamp: "2026-02-10T14:30:00Z".into(),
             changeset_size: 4096,
+            author_pubkey: None,
+            signature: None,
         }
     }
 
@@ -135,5 +192,61 @@ mod tests {
     #[test]
     fn unpack_empty_input() {
         assert!(unpack(&[]).is_none());
+    }
+
+    // ---- Signing tests ----
+
+    /// Combined test for signing operations. Uses a single KeyService call
+    /// because env vars are process-global and parallel tests race.
+    #[test]
+    fn changeset_signing() {
+        // Clear env to avoid interference from other tests.
+        std::env::remove_var("BAE_USER_SIGNING_KEY");
+        std::env::remove_var("BAE_USER_PUBLIC_KEY");
+
+        let ks = KeyService::new(true, "test-signing".to_string());
+        let keypair = ks.get_or_create_user_keypair().unwrap();
+
+        let changeset_bytes = b"some changeset payload";
+
+        // sign_envelope produces a valid signature.
+        let mut env = test_envelope();
+        sign_envelope(&mut env, &keypair, changeset_bytes);
+
+        assert!(env.author_pubkey.is_some());
+        assert!(env.signature.is_some());
+        assert_eq!(
+            env.author_pubkey.as_ref().unwrap(),
+            &hex::encode(keypair.public_key)
+        );
+        assert!(verify_changeset_signature(&env, changeset_bytes));
+
+        // Signed envelope round-trips through pack/unpack.
+        let packed = pack(&env, changeset_bytes);
+        let (unpacked_env, unpacked_cs) = unpack(&packed).expect("unpack");
+        assert_eq!(unpacked_env.author_pubkey, env.author_pubkey);
+        assert_eq!(unpacked_env.signature, env.signature);
+        assert!(verify_changeset_signature(&unpacked_env, &unpacked_cs));
+
+        // Tampered changeset bytes fail verification.
+        assert!(!verify_changeset_signature(&env, b"tampered payload"));
+
+        // Unsigned envelope passes verification.
+        let unsigned_env = test_envelope();
+        assert!(verify_changeset_signature(&unsigned_env, changeset_bytes));
+
+        // Malformed hex in signature fails.
+        let mut bad_sig_env = env.clone();
+        bad_sig_env.signature = Some("not-valid-hex!!".to_string());
+        assert!(!verify_changeset_signature(&bad_sig_env, changeset_bytes));
+
+        // Wrong-length public key fails.
+        let mut bad_pk_env = env.clone();
+        bad_pk_env.author_pubkey = Some(hex::encode([0u8; 16])); // 16 bytes, not 32
+        assert!(!verify_changeset_signature(&bad_pk_env, changeset_bytes));
+
+        // Clean up
+        std::env::remove_var("BAE_USER_SIGNING_KEY");
+        std::env::remove_var("BAE_USER_PUBLIC_KEY");
     }
 }

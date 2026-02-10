@@ -199,6 +199,7 @@ pub unsafe fn create_synced_schema(db: *mut ffi::sqlite3) {
             content_type TEXT NOT NULL,
             source_path TEXT,
             encryption_nonce BLOB,
+            encryption_scheme TEXT NOT NULL DEFAULT 'master',
             _updated_at TEXT NOT NULL,
             created_at TEXT NOT NULL,
             FOREIGN KEY (release_id) REFERENCES releases (id) ON DELETE CASCADE
@@ -307,6 +308,8 @@ impl MockBucket {
             message: String::new(),
             timestamp: "2026-02-10T00:00:00Z".to_string(),
             changeset_size: changeset_bytes.len(),
+            author_pubkey: None,
+            signature: None,
         };
         let packed = envelope::pack(&env, changeset_bytes);
 
