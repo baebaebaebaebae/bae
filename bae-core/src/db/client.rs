@@ -1711,18 +1711,6 @@ impl Database {
             .map(|row| self.row_to_storage_profile(row))
             .collect())
     }
-    /// Get all non-home storage profiles (replicas to sync metadata to)
-    pub async fn get_replica_profiles(&self) -> Result<Vec<DbStorageProfile>, sqlx::Error> {
-        let rows =
-            sqlx::query("SELECT * FROM storage_profiles WHERE is_home = FALSE ORDER BY name")
-                .fetch_all(&self.inner.read_pool)
-                .await?;
-        Ok(rows
-            .iter()
-            .map(|row| self.row_to_storage_profile(row))
-            .collect())
-    }
-
     /// Get the default storage profile
     pub async fn get_default_storage_profile(
         &self,

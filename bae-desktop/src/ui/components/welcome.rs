@@ -358,7 +358,6 @@ async fn do_restore(
         encryption_key_fingerprint: Some(fingerprint.clone()),
         profile_id: home_profile_id,
         profile_name: "Local".to_string(),
-        replicated_at: None,
     };
     let manifest_json = serde_json::to_string_pretty(&home_manifest)?;
     tokio::fs::write(library_dir.manifest_path(), manifest_json).await?;

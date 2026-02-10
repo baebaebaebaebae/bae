@@ -343,7 +343,6 @@ async fn ensure_home_profile(
                 .as_ref()
                 .map(|p| p.name.clone())
                 .unwrap_or_else(|| "Local".to_string()),
-            replicated_at: None,
         };
 
         match serde_json::to_string_pretty(&manifest) {
