@@ -44,9 +44,13 @@ pub fn sign_envelope(env: &mut ChangesetEnvelope, keypair: &UserKeypair, changes
 /// Returns false if a signature is present but invalid (wrong key, tampered data,
 /// or malformed hex).
 pub fn verify_changeset_signature(env: &ChangesetEnvelope, changeset_bytes: &[u8]) -> bool {
+    match (&env.author_pubkey, &env.signature) {
+        (None, None) => return true, // Unsigned envelope -- OK for now.
+        (Some(_), None) | (None, Some(_)) => return false, // Half-signed is invalid.
+        _ => {}
+    }
     let (Some(pk_hex), Some(sig_hex)) = (&env.author_pubkey, &env.signature) else {
-        // Unsigned envelope -- OK for now.
-        return true;
+        unreachable!()
     };
 
     let Ok(pk_bytes) = hex::decode(pk_hex) else {

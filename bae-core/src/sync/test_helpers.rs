@@ -9,9 +9,8 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use libsqlite3_sys as ffi;
 
-use crate::keys::UserKeypair;
 use crate::sync::bucket::{BucketError, DeviceHead, SyncBucketClient};
-use crate::sync::envelope::{self, sign_envelope, ChangesetEnvelope};
+use crate::sync::envelope::{self, ChangesetEnvelope};
 
 /// Open an in-memory sqlite3 database via libsqlite3-sys directly.
 pub unsafe fn open_memory_db() -> *mut ffi::sqlite3 {
@@ -312,37 +311,6 @@ impl MockBucket {
             author_pubkey: None,
             signature: None,
         };
-        let packed = envelope::pack(&env, changeset_bytes);
-
-        let key = format!("changes/{device_id}/{seq}");
-        self.objects.lock().unwrap().insert(key, packed);
-        self.heads
-            .lock()
-            .unwrap()
-            .insert(device_id.to_string(), seq);
-    }
-
-    /// Store a signed changeset in the mock bucket.
-    #[allow(dead_code)] // Used by Phase 2e tests (changeset validation on pull).
-    pub fn store_signed_changeset(
-        &self,
-        device_id: &str,
-        seq: u64,
-        changeset_bytes: &[u8],
-        schema_version: u32,
-        keypair: &UserKeypair,
-    ) {
-        let mut env = ChangesetEnvelope {
-            device_id: device_id.to_string(),
-            seq,
-            schema_version,
-            message: String::new(),
-            timestamp: "2026-02-10T00:00:00Z".to_string(),
-            changeset_size: changeset_bytes.len(),
-            author_pubkey: None,
-            signature: None,
-        };
-        sign_envelope(&mut env, keypair, changeset_bytes);
         let packed = envelope::pack(&env, changeset_bytes);
 
         let key = format!("changes/{device_id}/{seq}");
