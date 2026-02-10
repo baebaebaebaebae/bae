@@ -28,13 +28,9 @@ async fn create_cache_manager() -> cache::CacheManager {
 
 /// Initialize database
 async fn create_database(config: &config::Config) -> Database {
-    info!(
-        "Creating library directory: {}",
-        config.library_dir.display()
-    );
     std::fs::create_dir_all(&*config.library_dir).expect("Failed to create library directory");
     let db_path = config.library_dir.db_path();
-    info!("Initializing database at: {}", db_path.display());
+    info!("Opening database at {}", db_path.display());
     let database = Database::new(db_path.to_str().unwrap())
         .await
         .expect("Failed to create database");
