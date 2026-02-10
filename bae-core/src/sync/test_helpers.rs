@@ -400,4 +400,61 @@ impl SyncBucketClient for MockBucket {
         *self.min_schema_version.lock().unwrap() = Some(version);
         Ok(())
     }
+
+    async fn put_membership_entry(
+        &self,
+        author_pubkey: &str,
+        seq: u64,
+        data: Vec<u8>,
+    ) -> Result<(), BucketError> {
+        let key = format!("membership/{author_pubkey}/{seq}");
+        self.objects.lock().unwrap().insert(key, data);
+        Ok(())
+    }
+
+    async fn get_membership_entry(
+        &self,
+        author_pubkey: &str,
+        seq: u64,
+    ) -> Result<Vec<u8>, BucketError> {
+        let key = format!("membership/{author_pubkey}/{seq}");
+        let objects = self.objects.lock().unwrap();
+        objects.get(&key).cloned().ok_or(BucketError::NotFound(key))
+    }
+
+    async fn list_membership_entries(&self) -> Result<Vec<(String, u64)>, BucketError> {
+        let objects = self.objects.lock().unwrap();
+        let mut entries = Vec::new();
+
+        for key in objects.keys() {
+            if let Some(rest) = key.strip_prefix("membership/") {
+                if let Some(slash_pos) = rest.rfind('/') {
+                    let author = &rest[..slash_pos];
+                    if let Ok(seq) = rest[slash_pos + 1..].parse::<u64>() {
+                        entries.push((author.to_string(), seq));
+                    }
+                }
+            }
+        }
+
+        Ok(entries)
+    }
+
+    async fn put_wrapped_key(&self, user_pubkey: &str, data: Vec<u8>) -> Result<(), BucketError> {
+        let key = format!("keys/{user_pubkey}");
+        self.objects.lock().unwrap().insert(key, data);
+        Ok(())
+    }
+
+    async fn get_wrapped_key(&self, user_pubkey: &str) -> Result<Vec<u8>, BucketError> {
+        let key = format!("keys/{user_pubkey}");
+        let objects = self.objects.lock().unwrap();
+        objects.get(&key).cloned().ok_or(BucketError::NotFound(key))
+    }
+
+    async fn delete_wrapped_key(&self, user_pubkey: &str) -> Result<(), BucketError> {
+        let key = format!("keys/{user_pubkey}");
+        self.objects.lock().unwrap().remove(&key);
+        Ok(())
+    }
 }
