@@ -2308,6 +2308,39 @@ impl Database {
         Ok(rows.iter().map(Self::row_to_attestation).collect())
     }
 
+    /// Count distinct signers attesting to a specific mbid+infohash pair.
+    pub async fn get_attestation_confidence(
+        &self,
+        mbid: &str,
+        infohash: &str,
+    ) -> Result<usize, sqlx::Error> {
+        let row = sqlx::query(
+            "SELECT COUNT(DISTINCT author_pubkey) as cnt FROM attestations WHERE mbid = ? AND infohash = ?",
+        )
+        .bind(mbid)
+        .bind(infohash)
+        .fetch_one(&self.inner.read_pool)
+        .await?;
+        let cnt: i64 = row.get("cnt");
+        Ok(cnt as usize)
+    }
+
+    /// Get distinct signer public keys for a specific mbid+infohash pair.
+    pub async fn get_distinct_signers(
+        &self,
+        mbid: &str,
+        infohash: &str,
+    ) -> Result<Vec<String>, sqlx::Error> {
+        let rows = sqlx::query(
+            "SELECT DISTINCT author_pubkey FROM attestations WHERE mbid = ? AND infohash = ?",
+        )
+        .bind(mbid)
+        .bind(infohash)
+        .fetch_all(&self.inner.read_pool)
+        .await?;
+        Ok(rows.iter().map(|r| r.get("author_pubkey")).collect())
+    }
+
     /// Delete an attestation by ID.
     pub async fn delete_attestation(&self, id: &str) -> Result<(), sqlx::Error> {
         let mut conn = self.writer()?.lock().await;

@@ -1,5 +1,6 @@
 pub mod apply;
 pub mod attestation;
+pub mod attestation_cache;
 pub mod attribution;
 pub mod bucket;
 pub mod conflict;
