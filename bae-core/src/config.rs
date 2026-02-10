@@ -80,6 +80,9 @@ pub struct ConfigYaml {
     /// Enable NAT-PMP port forwarding
     #[serde(default = "default_true")]
     pub torrent_enable_natpmp: bool,
+    /// Enable the Mainline DHT (BEP 5) for peer discovery
+    #[serde(default)]
+    pub torrent_enable_dht: bool,
     /// Global max connections. None = disabled/unlimited.
     pub torrent_max_connections: Option<i32>,
     /// Max connections per torrent. None = disabled/unlimited.
@@ -130,6 +133,7 @@ pub struct Config {
     pub torrent_listen_port: Option<u16>,
     pub torrent_enable_upnp: bool,
     pub torrent_enable_natpmp: bool,
+    pub torrent_enable_dht: bool,
     pub torrent_max_connections: Option<i32>,
     pub torrent_max_connections_per_torrent: Option<i32>,
     pub torrent_max_uploads: Option<i32>,
@@ -213,6 +217,7 @@ impl Config {
             torrent_listen_port: None,
             torrent_enable_upnp: true,
             torrent_enable_natpmp: true,
+            torrent_enable_dht: false,
             torrent_max_connections: None,
             torrent_max_connections_per_torrent: None,
             torrent_max_uploads: None,
@@ -299,6 +304,7 @@ impl Config {
             torrent_listen_port: yaml_config.torrent_listen_port,
             torrent_enable_upnp: yaml_config.torrent_enable_upnp,
             torrent_enable_natpmp: yaml_config.torrent_enable_natpmp,
+            torrent_enable_dht: yaml_config.torrent_enable_dht,
             torrent_max_connections: yaml_config.torrent_max_connections,
             torrent_max_connections_per_torrent: yaml_config.torrent_max_connections_per_torrent,
             torrent_max_uploads: yaml_config.torrent_max_uploads,
@@ -383,6 +389,7 @@ impl Config {
             torrent_listen_port: self.torrent_listen_port,
             torrent_enable_upnp: self.torrent_enable_upnp,
             torrent_enable_natpmp: self.torrent_enable_natpmp,
+            torrent_enable_dht: self.torrent_enable_dht,
             torrent_max_connections: self.torrent_max_connections,
             torrent_max_connections_per_torrent: self.torrent_max_connections_per_torrent,
             torrent_max_uploads: self.torrent_max_uploads,
@@ -424,6 +431,7 @@ impl Config {
             torrent_listen_port: None,
             torrent_enable_upnp: true,
             torrent_enable_natpmp: true,
+            torrent_enable_dht: false,
             torrent_max_connections: None,
             torrent_max_connections_per_torrent: None,
             torrent_max_uploads: None,
@@ -676,6 +684,7 @@ mod tests {
             torrent_listen_port: None,
             torrent_enable_upnp: true,
             torrent_enable_natpmp: true,
+            torrent_enable_dht: false,
             torrent_max_connections: None,
             torrent_max_connections_per_torrent: None,
             torrent_max_uploads: None,

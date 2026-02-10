@@ -484,7 +484,7 @@ std::vector<libtorrent::AlertData> session_pop_alerts(session* sess) {
 static sha1_hash hex_to_sha1(const std::string& hex) {
     sha1_hash hash;
     for (int i = 0; i < 20; ++i) {
-        unsigned int byte;
+        unsigned int byte = 0;
         std::istringstream iss(hex.substr(i * 2, 2));
         iss >> std::hex >> byte;
         hash[i] = static_cast<char>(byte);
@@ -511,6 +511,14 @@ void session_dht_get_peers(session* sess, const std::string& info_hash_hex) {
 void set_enable_dht(session_params* params, bool enable) {
     if (params) {
         params->settings.set_bool(settings_pack::enable_dht, enable);
+
+        if (enable) {
+            // The default alert_mask excludes dht_notification, so DHT alerts
+            // (get_peers replies, bootstrap) would be silently dropped.
+            auto mask = params->settings.get_int(settings_pack::alert_mask);
+            mask |= static_cast<int>(alert::dht_notification);
+            params->settings.set_int(settings_pack::alert_mask, mask);
+        }
     }
 }
 

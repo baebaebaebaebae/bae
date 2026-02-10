@@ -376,6 +376,7 @@ async fn do_restore(
         torrent_listen_port: None,
         torrent_enable_upnp: false,
         torrent_enable_natpmp: false,
+        torrent_enable_dht: false,
         torrent_max_connections: None,
         torrent_max_connections_per_torrent: None,
         torrent_max_uploads: None,
