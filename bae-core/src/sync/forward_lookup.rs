@@ -47,6 +47,7 @@ pub struct LookupResult {
 /// the MBID, then parses the peer list. Non-matching alerts are ignored.
 pub fn collect_dht_peers(mbid: &str, alerts: &[AlertData]) -> Vec<PeerEndpoint> {
     let expected_hash = rendezvous_hex(mbid);
+    let mut seen = std::collections::HashSet::new();
     let mut peers = Vec::new();
 
     for alert in alerts {
@@ -60,12 +61,13 @@ pub fn collect_dht_peers(mbid: &str, alerts: &[AlertData]) -> Vec<PeerEndpoint> 
 
         for peer_str in &alert.peers {
             if let Some(ep) = parse_peer_endpoint(peer_str) {
-                peers.push(ep);
+                if seen.insert(ep.clone()) {
+                    peers.push(ep);
+                }
             }
         }
     }
 
-    peers.dedup();
     peers
 }
 
