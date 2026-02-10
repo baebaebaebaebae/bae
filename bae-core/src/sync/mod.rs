@@ -5,6 +5,8 @@ pub mod attribution;
 pub mod bucket;
 pub mod conflict;
 pub mod envelope;
+#[cfg(feature = "torrent")]
+pub mod forward_lookup;
 pub mod hlc;
 pub mod invite;
 pub mod membership;
