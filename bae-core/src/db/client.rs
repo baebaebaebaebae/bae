@@ -2251,4 +2251,111 @@ impl Database {
             s3_secret_key: row.get("s3_secret_key"),
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Attestations
+    // -------------------------------------------------------------------------
+
+    /// Store an attestation.
+    pub async fn insert_attestation(&self, attestation: &DbAttestation) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
+        sqlx::query(
+            r#"
+            INSERT INTO attestations (
+                id, mbid, infohash, content_hash, format,
+                author_pubkey, timestamp, signature, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&attestation.id)
+        .bind(&attestation.mbid)
+        .bind(&attestation.infohash)
+        .bind(&attestation.content_hash)
+        .bind(&attestation.format)
+        .bind(&attestation.author_pubkey)
+        .bind(&attestation.timestamp)
+        .bind(&attestation.signature)
+        .bind(&attestation.created_at)
+        .execute(&mut *conn)
+        .await?;
+        Ok(())
+    }
+
+    /// Look up attestations by MusicBrainz release ID.
+    pub async fn get_attestations_by_mbid(
+        &self,
+        mbid: &str,
+    ) -> Result<Vec<DbAttestation>, sqlx::Error> {
+        let rows =
+            sqlx::query("SELECT * FROM attestations WHERE mbid = ? ORDER BY created_at DESC")
+                .bind(mbid)
+                .fetch_all(&self.inner.read_pool)
+                .await?;
+        Ok(rows.iter().map(Self::row_to_attestation).collect())
+    }
+
+    /// Look up attestations by BitTorrent infohash.
+    pub async fn get_attestations_by_infohash(
+        &self,
+        infohash: &str,
+    ) -> Result<Vec<DbAttestation>, sqlx::Error> {
+        let rows =
+            sqlx::query("SELECT * FROM attestations WHERE infohash = ? ORDER BY created_at DESC")
+                .bind(infohash)
+                .fetch_all(&self.inner.read_pool)
+                .await?;
+        Ok(rows.iter().map(Self::row_to_attestation).collect())
+    }
+
+    /// Look up attestations by content hash.
+    pub async fn get_attestations_by_content_hash(
+        &self,
+        content_hash: &str,
+    ) -> Result<Vec<DbAttestation>, sqlx::Error> {
+        let rows = sqlx::query(
+            "SELECT * FROM attestations WHERE content_hash = ? ORDER BY created_at DESC",
+        )
+        .bind(content_hash)
+        .fetch_all(&self.inner.read_pool)
+        .await?;
+        Ok(rows.iter().map(Self::row_to_attestation).collect())
+    }
+
+    /// Look up attestations by author public key.
+    pub async fn get_attestations_by_author(
+        &self,
+        author_pubkey: &str,
+    ) -> Result<Vec<DbAttestation>, sqlx::Error> {
+        let rows = sqlx::query(
+            "SELECT * FROM attestations WHERE author_pubkey = ? ORDER BY created_at DESC",
+        )
+        .bind(author_pubkey)
+        .fetch_all(&self.inner.read_pool)
+        .await?;
+        Ok(rows.iter().map(Self::row_to_attestation).collect())
+    }
+
+    /// Delete an attestation by ID.
+    pub async fn delete_attestation(&self, id: &str) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
+        sqlx::query("DELETE FROM attestations WHERE id = ?")
+            .bind(id)
+            .execute(&mut *conn)
+            .await?;
+        Ok(())
+    }
+
+    fn row_to_attestation(row: &sqlx::sqlite::SqliteRow) -> DbAttestation {
+        DbAttestation {
+            id: row.get("id"),
+            mbid: row.get("mbid"),
+            infohash: row.get("infohash"),
+            content_hash: row.get("content_hash"),
+            format: row.get("format"),
+            author_pubkey: row.get("author_pubkey"),
+            timestamp: row.get("timestamp"),
+            signature: row.get("signature"),
+            created_at: row.get("created_at"),
+        }
+    }
 }
