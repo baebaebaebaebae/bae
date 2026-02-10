@@ -15,6 +15,7 @@
 #include <libtorrent/alert_types.hpp>
 #include <libtorrent/alert.hpp>
 #include <libtorrent/sha1_hash.hpp>
+#include <libtorrent/kademlia/dht_tracker.hpp>
 #include <sstream>
 #include <iomanip>
 
@@ -459,12 +460,58 @@ std::vector<libtorrent::AlertData> session_pop_alerts(session* sess) {
             alert_data.num_peers = static_cast<int32_t>(status.num_peers);
             alert_data.num_seeds = static_cast<int32_t>(status.num_seeds);
             alert_data.progress = static_cast<float>(status.progress_ppm) / 1000000.0f;
+        } else if (auto* dht_reply = dynamic_cast<libtorrent::dht_get_peers_reply_alert*>(alert_ptr)) {
+            alert_data.type = libtorrent::ALERT_DHT_GET_PEERS_REPLY;
+            alert_data.info_hash = hash_to_string(dht_reply->info_hash);
+            auto peer_list = dht_reply->peers();
+            for (const auto& ep : peer_list) {
+                std::ostringstream oss;
+                oss << ep.address().to_string() << ":" << ep.port();
+                alert_data.peers.push_back(oss.str());
+            }
+            alert_data.num_peers = static_cast<int32_t>(peer_list.size());
+        } else if (dynamic_cast<libtorrent::dht_bootstrap_alert*>(alert_ptr)) {
+            alert_data.type = libtorrent::ALERT_DHT_BOOTSTRAP;
         }
-        
+
         alerts.push_back(alert_data);
     }
     
     return alerts;
+}
+
+/// Parse a 40-char hex string into a sha1_hash
+static sha1_hash hex_to_sha1(const std::string& hex) {
+    sha1_hash hash;
+    for (int i = 0; i < 20; ++i) {
+        unsigned int byte;
+        std::istringstream iss(hex.substr(i * 2, 2));
+        iss >> std::hex >> byte;
+        hash[i] = static_cast<char>(byte);
+    }
+    return hash;
+}
+
+void session_dht_announce(session* sess, const std::string& info_hash_hex, int port) {
+    if (!sess || info_hash_hex.size() != 40) {
+        return;
+    }
+    sha1_hash hash = hex_to_sha1(info_hash_hex);
+    sess->dht_announce(hash, port);
+}
+
+void session_dht_get_peers(session* sess, const std::string& info_hash_hex) {
+    if (!sess || info_hash_hex.size() != 40) {
+        return;
+    }
+    sha1_hash hash = hex_to_sha1(info_hash_hex);
+    sess->dht_get_peers(hash);
+}
+
+void set_enable_dht(session_params* params, bool enable) {
+    if (params) {
+        params->settings.set_bool(settings_pack::enable_dht, enable);
+    }
 }
 
 } // namespace libtorrent

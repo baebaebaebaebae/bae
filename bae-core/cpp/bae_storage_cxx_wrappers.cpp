@@ -264,8 +264,26 @@ rust::Vec<AlertData> session_pop_alerts(Session* sess) {
         rust_alert.file_path = rust::String(cpp_alert.file_path.data(), cpp_alert.file_path.size());
         rust_alert.progress = cpp_alert.progress;
         rust_alert.error_message = rust::String(cpp_alert.error_message.data(), cpp_alert.error_message.size());
+        rust::Vec<rust::String> peers;
+        for (const auto& peer : cpp_alert.peers) {
+            peers.push_back(rust::String(peer.data(), peer.size()));
+        }
+        rust_alert.peers = peers;
         rust_alerts.push_back(rust_alert);
     }
     return rust_alerts;
+}
+
+// DHT wrappers
+void session_dht_announce(Session* sess, rust::Str info_hash_hex, int32_t port) {
+    libtorrent::session_dht_announce(sess, std::string(info_hash_hex), static_cast<int>(port));
+}
+
+void session_dht_get_peers(Session* sess, rust::Str info_hash_hex) {
+    libtorrent::session_dht_get_peers(sess, std::string(info_hash_hex));
+}
+
+void set_enable_dht(SessionParams* params, bool enable) {
+    libtorrent::set_enable_dht(params, enable);
 }
 

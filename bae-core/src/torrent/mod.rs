@@ -1,4 +1,5 @@
 pub mod client;
+pub mod dht;
 pub mod ffi;
 pub mod lazy;
 pub mod manager;
@@ -7,6 +8,7 @@ pub mod parser;
 pub mod piece_mapper;
 pub mod progress;
 pub mod storage;
+pub use dht::DhtService;
 pub use lazy::LazyTorrentManager;
 pub use metadata_detector::detect_metadata_from_torrent_file;
 pub use parser::parse_torrent_info;
