@@ -175,6 +175,9 @@ enum AlertType {
     ALERT_TORRENT_RESUMED = 9,
     ALERT_STATE_CHANGED = 10,
     ALERT_STATS = 11,
+    ALERT_DHT_GET_PEERS_REPLY = 12,
+    ALERT_DHT_ANNOUNCE = 13,
+    ALERT_DHT_BOOTSTRAP = 14,
     ALERT_UNKNOWN = 99,
 };
 
@@ -189,10 +192,20 @@ struct AlertData {
     std::string file_path;
     float progress;
     std::string error_message;
+    std::vector<std::string> peers;
 };
 
 /// Pop all pending alerts from session
 std::vector<AlertData> session_pop_alerts(session* sess);
+
+/// Announce on the DHT for a given info hash (20-byte SHA-1 as 40-char hex string)
+void session_dht_announce(session* sess, const std::string& info_hash_hex, int port);
+
+/// Request peers from the DHT for a given info hash (20-byte SHA-1 as 40-char hex string)
+void session_dht_get_peers(session* sess, const std::string& info_hash_hex);
+
+/// Enable or disable DHT on session_params
+void set_enable_dht(session_params* params, bool enable);
 
 } // namespace libtorrent
 
@@ -239,6 +252,11 @@ void torrent_resume(TorrentHandle* handle);
 // Alert handling (implemented in bae_storage_helpers.cpp)
 struct AlertData;
 rust::Vec<AlertData> session_pop_alerts(Session* sess);
+
+// DHT functions (implemented in bae_storage_cxx_wrappers.cpp)
+void session_dht_announce(Session* sess, rust::Str info_hash_hex, int32_t port);
+void session_dht_get_peers(Session* sess, rust::Str info_hash_hex);
+void set_enable_dht(SessionParams* params, bool enable);
 
 std::unique_ptr<BaeStorageConstructor> create_bae_storage_constructor(
     rust::Fn<rust::Vec<uint8_t>(int32_t, int32_t, int32_t, int32_t)> read_cb,

@@ -193,6 +193,23 @@ mod ffi {
         /// Parses the torrent file and returns all available metadata.
         /// Returns an empty struct if the file cannot be parsed.
         fn get_torrent_info(file_path: &str) -> TorrentInfo;
+        /// Announce on the DHT for a given info hash (40-char hex string)
+        ///
+        /// # Safety
+        /// `sess` must be a valid pointer to a Session that outlives the call.
+        unsafe fn session_dht_announce(sess: *mut Session, info_hash_hex: &str, port: i32);
+        /// Request peers from the DHT for a given info hash (40-char hex string)
+        ///
+        /// Results arrive asynchronously via `dht_get_peers_reply_alert`.
+        ///
+        /// # Safety
+        /// `sess` must be a valid pointer to a Session that outlives the call.
+        unsafe fn session_dht_get_peers(sess: *mut Session, info_hash_hex: &str);
+        /// Enable or disable DHT on session_params
+        ///
+        /// # Safety
+        /// `params` must be a valid pointer to SessionParams that outlives the call.
+        unsafe fn set_enable_dht(params: *mut SessionParams, enable: bool);
     }
     /// File info from torrent (shared between Rust and C++)
     struct TorrentFileInfo {
@@ -224,13 +241,15 @@ mod ffi {
         file_path: String,
         progress: f32,
         error_message: String,
+        peers: Vec<String>,
     }
 }
 pub use ffi::{
     create_bae_storage_constructor, create_session_params_default,
     create_session_params_with_storage, create_session_with_params, get_session_ptr,
-    get_torrent_info, load_torrent_file, parse_magnet_uri, session_add_torrent, session_pop_alerts,
-    session_remove_torrent, set_connections_limit, set_enable_natpmp, set_enable_upnp,
+    get_torrent_info, load_torrent_file, parse_magnet_uri, session_add_torrent,
+    session_dht_announce, session_dht_get_peers, session_pop_alerts, session_remove_torrent,
+    set_connections_limit, set_enable_dht, set_enable_natpmp, set_enable_upnp,
     set_listen_interfaces, set_paused, set_seed_mode, set_unchoke_slots_limit,
     torrent_get_file_list, torrent_get_name, torrent_get_num_peers, torrent_get_num_pieces,
     torrent_get_num_seeds, torrent_get_piece_length, torrent_get_progress,

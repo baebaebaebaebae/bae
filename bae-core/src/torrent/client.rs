@@ -68,6 +68,8 @@ pub struct TorrentClientOptions {
     pub max_connections: Option<i32>,
     /// Global max upload slots. None = unlimited.
     pub max_uploads: Option<i32>,
+    /// Enable the Mainline DHT (BEP 5). Defaults to false.
+    pub enable_dht: bool,
 }
 /// Wrapper around libtorrent session
 pub struct TorrentClient {
@@ -290,6 +292,36 @@ impl TorrentClient {
         drop(session_guard);
         Ok(())
     }
+    /// Announce on the DHT for a given info hash (40-char hex string)
+    pub async fn dht_announce(&self, info_hash_hex: &str, port: u16) -> Result<(), TorrentError> {
+        let mut session_guard = self.session.write().await;
+        let session_ptr = get_session_ptr(&mut session_guard);
+        if session_ptr.is_null() {
+            return Err(TorrentError::Libtorrent(
+                "Failed to get session pointer".to_string(),
+            ));
+        }
+        unsafe { ffi::session_dht_announce(session_ptr, info_hash_hex, port as i32) };
+        drop(session_guard);
+        Ok(())
+    }
+
+    /// Request peers from the DHT for a given info hash (40-char hex string)
+    ///
+    /// Results arrive asynchronously via `dht_get_peers_reply_alert` in `pop_alerts()`.
+    pub async fn dht_get_peers(&self, info_hash_hex: &str) -> Result<(), TorrentError> {
+        let mut session_guard = self.session.write().await;
+        let session_ptr = get_session_ptr(&mut session_guard);
+        if session_ptr.is_null() {
+            return Err(TorrentError::Libtorrent(
+                "Failed to get session pointer".to_string(),
+            ));
+        }
+        unsafe { ffi::session_dht_get_peers(session_ptr, info_hash_hex) };
+        drop(session_guard);
+        Ok(())
+    }
+
     /// Pop all pending alerts from the session
     pub async fn pop_alerts(&self) -> Vec<AlertData> {
         let mut session_guard = self.session.write().await;
@@ -571,14 +603,21 @@ fn apply_options_to_session_params(
         info!("Torrent session using default network binding");
     }
 
-    // Apply UPnP and NAT-PMP settings
+    // Apply DHT, UPnP and NAT-PMP settings
     unsafe {
         if let Some(pinned_params) = session_params.as_mut() {
             let params_ptr = std::pin::Pin::get_unchecked_mut(pinned_params) as *mut _;
+            ffi::set_enable_dht(params_ptr, options.enable_dht);
             ffi::set_enable_upnp(params_ptr, options.enable_upnp);
             ffi::set_enable_natpmp(params_ptr, options.enable_natpmp);
+
             info!(
-                "UPnP: {}, NAT-PMP: {}",
+                "DHT: {}, UPnP: {}, NAT-PMP: {}",
+                if options.enable_dht {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
                 if options.enable_upnp {
                     "enabled"
                 } else {

@@ -1725,7 +1725,7 @@ impl ImportService {
             storage_profile,
             cover_image_path.as_deref(),
             &import_id,
-            None,
+            false,
         )
         .await?;
 
