@@ -14,6 +14,7 @@ pub mod pull;
 #[cfg(test)]
 mod pull_tests;
 pub mod push;
+pub mod reverse_lookup;
 pub mod s3_bucket;
 pub mod service;
 pub mod session;
