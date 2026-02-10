@@ -1,0 +1,56 @@
+---
+title: Sharing a Library
+description: Invite others to your library
+---
+
+bae lets you share your entire library with other people. Everyone gets full read and write access — importing, editing, and deleting — with every change synced to all members.
+
+## Identity
+
+Each bae user has a global Ed25519 keypair — one identity across all libraries. The keypair is generated on first use and stored in your OS keyring. Your public key is how other members recognize you.
+
+## Membership
+
+A library's membership is tracked by an append-only chain of signed entries stored in the sync bucket. Each entry records an Add or Remove action, signed by a current owner.
+
+There are two roles:
+
+- **Owner** — can invite and revoke members, and make all edits
+- **Member** — can make all edits, but cannot manage membership
+
+The first entry in the chain is always the library creator adding themselves as owner.
+
+## Inviting someone
+
+To invite a new member:
+
+1. The invitee generates their keypair (happens automatically on first launch)
+2. They share their public key with you (copy-paste, QR code, etc.)
+3. You invite them from **Settings → Members** — this wraps your library's encryption key to their public key and creates a signed membership entry
+4. You share the sync bucket coordinates with them
+5. They connect, unwrap the key, download the library, and start syncing
+
+The library key is encrypted specifically to the invitee's key using a sealed box. Only they can decrypt it.
+
+## Signed changesets
+
+Every changeset pushed to the sync bucket is signed by its author. On pull, bae verifies that the author was a valid member at the time the changeset was created. Changesets from non-members or with invalid signatures are discarded.
+
+Unsigned changesets from before the membership chain was created are grandfathered — they predate the identity system and are trusted.
+
+## Revocation
+
+An owner can revoke any member:
+
+1. A signed Remove entry is added to the membership chain
+2. A new library encryption key is generated
+3. The new key is re-wrapped to all remaining members
+4. The revoked member's wrapped key is deleted
+
+After revocation, the removed member can no longer decrypt new data. Old data (encrypted with the previous key) remains accessible to them — they had legitimate access and could have downloaded everything.
+
+The last owner of a library cannot be revoked. At least one owner must always remain.
+
+## Attribution
+
+Every changeset carries the author's public key. bae maps public keys to display names locally, so you can see who imported a release or edited metadata. Display names are set during invitation and stored per-device.

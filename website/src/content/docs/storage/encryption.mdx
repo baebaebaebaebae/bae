@@ -1,0 +1,48 @@
+---
+title: Encryption
+description: How bae encrypts your data
+---
+
+bae encrypts your music files and library metadata before they leave your machine. The bucket provider stores ciphertext only.
+
+## Library key
+
+Each library has a 256-bit master encryption key, generated when the library is created and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or Linux Secret Service). The key never touches disk in plaintext.
+
+## File encryption
+
+Files are encrypted with XChaCha20-Poly1305 in 64 KB chunks. Each file gets a random nonce prepended to the encrypted blob. This means:
+
+- Identical files produce different ciphertext (random nonce)
+- Files can be decrypted independently (no dependency between files)
+- Chunk-based encryption supports efficient range requests for streaming
+
+## Per-release keys
+
+For sharing individual releases across libraries, bae derives a unique key for each release using HKDF-SHA256:
+
+```
+release_key = HKDF-SHA256(master_key, salt, "bae-release-v1:" + release_id)
+```
+
+The salt is deterministically derived from the master key, so it doesn't need to be distributed separately. Per-release keys allow sharing a single release without exposing the full library key.
+
+New imports use per-release derived keys by default. Legacy files encrypted with the master key continue to work — bae tracks the encryption scheme per file and uses the correct key automatically.
+
+## Sync bucket encryption
+
+Everything in the sync bucket is encrypted:
+
+- **Changesets** — encrypted with the library key
+- **Snapshots** — encrypted with the library key
+- **Images** — encrypted with the library key
+- **Membership entries** — encrypted with the library key
+- **Wrapped keys** — encrypted to individual members via sealed boxes (see [Sharing](/library/sharing))
+
+Head files (per-device sequence numbers) are also encrypted. The bucket provider sees only opaque blobs and key paths.
+
+## Key management
+
+Your library key is stored in the OS keyring under a library-specific namespace. If you use bae on multiple devices, the key is distributed via the membership system — encrypted to your personal public key using a sealed box, so only your devices can unwrap it.
+
+If you lose access to all devices and don't have a backup of your keyring, the library data in the bucket is unrecoverable. This is by design — there is no server-side recovery mechanism.
