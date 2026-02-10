@@ -366,6 +366,7 @@ async fn do_restore(
     // Write config.yaml
     let config = bae_core::config::Config {
         library_id: library_id.clone(),
+        device_id: uuid::Uuid::new_v4().to_string(),
         library_dir: library_dir.clone(),
         library_name: manifest.library_name,
         keys_migrated: true,
