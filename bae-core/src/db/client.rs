@@ -2160,40 +2160,13 @@ impl Database {
         Ok(())
     }
 
-    /// Mark a share grant as accepted with the unwrapped key and credentials.
-    pub async fn accept_share_grant_db(
-        &self,
-        id: &str,
-        release_key_hex: &str,
-        s3_access_key: Option<&str>,
-        s3_secret_key: Option<&str>,
-        accepted_at: &str,
-    ) -> Result<(), sqlx::Error> {
-        let mut conn = self.writer()?.lock().await;
-        sqlx::query(
-            r#"
-            UPDATE share_grants
-            SET release_key_hex = ?, s3_access_key = ?, s3_secret_key = ?, accepted_at = ?
-            WHERE id = ?
-            "#,
-        )
-        .bind(release_key_hex)
-        .bind(s3_access_key)
-        .bind(s3_secret_key)
-        .bind(accepted_at)
-        .bind(id)
-        .execute(&mut *conn)
-        .await?;
-        Ok(())
-    }
-
     /// Get all accepted, non-expired share grants.
     pub async fn get_active_share_grants(&self) -> Result<Vec<DbShareGrant>, sqlx::Error> {
         let rows = sqlx::query(
             r#"
             SELECT * FROM share_grants
             WHERE accepted_at IS NOT NULL
-              AND (expires IS NULL OR expires > datetime('now'))
+              AND (expires IS NULL OR expires > strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
             ORDER BY created_at DESC
             "#,
         )
