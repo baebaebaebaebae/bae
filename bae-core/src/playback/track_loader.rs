@@ -45,22 +45,20 @@ pub async fn load_track_audio(
         .find(|f| f.content_type == crate::content_type::ContentType::Flac)
         .ok_or_else(|| PlaybackError::not_found("Audio file", track_id))?;
 
-    // Read the file data
-    let file_data = if let Some(ref source_path) = audio_file.source_path {
-        // Local file - read directly
-        debug!("Reading from local file: {}", source_path);
-        tokio::fs::read(source_path)
-            .await
-            .map_err(|e| PlaybackError::io(format!("Failed to read file: {}", e)))?
-    } else if let Some(storage) = storage {
-        // Cloud storage - download (and decrypt if needed)
+    // Read the file data from source_path
+    let source_path = audio_file
+        .source_path
+        .as_ref()
+        .ok_or_else(|| PlaybackError::not_found("source_path", track_id))?;
+
+    let file_data = if let Some(storage) = storage {
+        // Remote storage - download (and decrypt if needed)
         let storage_profile = library_manager
             .get_storage_profile_for_release(&track.release_id)
             .await
             .map_err(PlaybackError::database)?;
 
-        let key = format!("{}/{}", track.release_id, audio_file.original_filename);
-        debug!("Downloading from cloud: {}", key);
+        debug!("Downloading from cloud: {}", source_path);
 
         // Check cache first
         let cache_key = format!("file:{}", audio_file.id);
@@ -71,7 +69,10 @@ pub async fn load_track_audio(
             }
             Ok(None) | Err(_) => {
                 debug!("Cache miss - downloading file: {}", audio_file.id);
-                let data = storage.download(&key).await.map_err(PlaybackError::cloud)?;
+                let data = storage
+                    .download(source_path)
+                    .await
+                    .map_err(PlaybackError::cloud)?;
 
                 if let Err(e) = cache.put(&cache_key, &data).await {
                     warn!("Failed to cache file (non-fatal): {}", e);
@@ -100,7 +101,11 @@ pub async fn load_track_audio(
             encrypted_data
         }
     } else {
-        return Err(PlaybackError::not_found("Storage location", track_id));
+        // Local file - read directly from source_path
+        debug!("Reading from local file: {}", source_path);
+        tokio::fs::read(source_path)
+            .await
+            .map_err(|e| PlaybackError::io(format!("Failed to read file: {}", e)))?
     };
 
     debug!("Read {} bytes of audio data", file_data.len());

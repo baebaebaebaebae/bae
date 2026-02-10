@@ -4,6 +4,23 @@ use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 use tracing::info;
 use uuid::Uuid;
+
+fn row_to_library_image(row: sqlx::sqlite::SqliteRow) -> DbLibraryImage {
+    DbLibraryImage {
+        id: row.get("id"),
+        image_type: row.get::<String, _>("type").parse().unwrap(),
+        content_type: ContentType::from_mime(&row.get::<String, _>("content_type")),
+        file_size: row.get("file_size"),
+        width: row.get("width"),
+        height: row.get("height"),
+        source: row.get("source"),
+        source_url: row.get("source_url"),
+        created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+            .unwrap()
+            .with_timezone(&Utc),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Database {
     pool: SqlitePool,
@@ -1458,19 +1475,19 @@ impl Database {
             .bind(image_type.as_str())
             .fetch_optional(&self.pool)
             .await?;
-        Ok(row.map(|row| DbLibraryImage {
-            id: row.get("id"),
-            image_type: row.get::<String, _>("type").parse().unwrap(),
-            content_type: ContentType::from_mime(&row.get::<String, _>("content_type")),
-            file_size: row.get("file_size"),
-            width: row.get("width"),
-            height: row.get("height"),
-            source: row.get("source"),
-            source_url: row.get("source_url"),
-            created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
-                .unwrap()
-                .with_timezone(&Utc),
-        }))
+        Ok(row.map(row_to_library_image))
+    }
+
+    /// Get a library image by ID (regardless of type)
+    pub async fn get_library_image_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<DbLibraryImage>, sqlx::Error> {
+        let row = sqlx::query("SELECT * FROM library_images WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(row_to_library_image))
     }
 
     /// Delete a library image by ID and type

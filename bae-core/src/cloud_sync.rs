@@ -174,80 +174,69 @@ impl CloudSyncService {
         Ok(())
     }
 
-    /// Upload all cover images (encrypted) to S3.
-    pub async fn upload_covers(&self, covers_dir: &Path) -> Result<(), CloudSyncError> {
-        self.upload_image_dir(covers_dir, "covers").await
-    }
-
-    /// Download and decrypt all cover images from S3.
-    pub async fn download_covers(&self, covers_dir: &Path) -> Result<(), CloudSyncError> {
-        self.download_image_dir(covers_dir, "covers").await
-    }
-
-    /// Upload all artist images (encrypted) to S3.
-    pub async fn upload_artists(&self, artists_dir: &Path) -> Result<(), CloudSyncError> {
-        self.upload_image_dir(artists_dir, "artists").await
-    }
-
-    /// Download and decrypt all artist images from S3.
-    pub async fn download_artists(&self, artists_dir: &Path) -> Result<(), CloudSyncError> {
-        self.download_image_dir(artists_dir, "artists").await
-    }
-
-    /// Upload all files in a directory (encrypted) to S3 under the given subdirectory.
-    async fn upload_image_dir(&self, dir: &Path, subdir: &str) -> Result<(), CloudSyncError> {
-        if !dir.exists() {
-            debug!("No {} directory, skipping upload", subdir);
+    /// Upload all library images (encrypted) to S3 under `images/`.
+    /// Walks the `images/` directory tree recursively.
+    pub async fn upload_images(&self, images_dir: &Path) -> Result<(), CloudSyncError> {
+        if !images_dir.exists() {
+            debug!("No images directory, skipping upload");
             return Ok(());
         }
 
-        let mut entries = tokio::fs::read_dir(dir).await?;
         let mut count = 0u32;
+        let mut stack = vec![images_dir.to_path_buf()];
 
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if !path.is_file() {
-                continue;
+        while let Some(dir) = stack.pop() {
+            let mut entries = tokio::fs::read_dir(&dir).await?;
+            while let Some(entry) = entries.next_entry().await? {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.is_file() {
+                    // Compute the relative path under images_dir
+                    let rel = path
+                        .strip_prefix(images_dir)
+                        .map_err(|e| CloudSyncError::Io(std::io::Error::other(e)))?;
+
+                    let data = tokio::fs::read(&path).await?;
+                    let encrypted = self.encryption_service.encrypt(&data);
+                    let key = format!("bae/{}/images/{}", self.library_id, rel.to_string_lossy());
+                    self.put_object(&key, &encrypted).await?;
+                    count += 1;
+                }
             }
-
-            let filename = match path.file_name().and_then(|n| n.to_str()) {
-                Some(n) => n.to_string(),
-                None => continue,
-            };
-
-            let data = tokio::fs::read(&path).await?;
-            let encrypted = self.encryption_service.encrypt(&data);
-            let key = format!("bae/{}/{}/{}", self.library_id, subdir, filename);
-            self.put_object(&key, &encrypted).await?;
-            count += 1;
         }
 
-        info!("Uploaded {} {} images", count, subdir);
+        info!("Uploaded {} images", count);
         Ok(())
     }
 
-    /// Download and decrypt all files from an S3 subdirectory into a local directory.
-    async fn download_image_dir(&self, dir: &Path, subdir: &str) -> Result<(), CloudSyncError> {
-        tokio::fs::create_dir_all(dir).await?;
+    /// Download and decrypt all library images from S3 into the local images directory.
+    pub async fn download_images(&self, images_dir: &Path) -> Result<(), CloudSyncError> {
+        tokio::fs::create_dir_all(images_dir).await?;
 
-        let prefix = format!("bae/{}/{}/", self.library_id, subdir);
+        let prefix = format!("bae/{}/images/", self.library_id);
         let keys = self.list_objects(&prefix).await?;
 
         let mut count = 0u32;
         for key in &keys {
-            let filename = match key.strip_prefix(&prefix) {
+            let rel = match key.strip_prefix(&prefix) {
                 Some(f) if !f.is_empty() => f,
                 _ => continue,
             };
 
             let encrypted = self.get_object(key).await?;
             let decrypted = self.encryption_service.decrypt(&encrypted)?;
-            let target = dir.join(filename);
+            let target = images_dir.join(rel);
+
+            if let Some(parent) = target.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+
             tokio::fs::write(&target, &decrypted).await?;
             count += 1;
         }
 
-        info!("Downloaded {} {} images", count, subdir);
+        info!("Downloaded {} images", count);
         Ok(())
     }
 

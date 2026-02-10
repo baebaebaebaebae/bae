@@ -387,6 +387,14 @@ impl LibraryManager {
         Ok(self.database.get_library_image(id, image_type).await?)
     }
 
+    /// Get a library image by ID (regardless of type)
+    pub async fn get_library_image_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<DbLibraryImage>, LibraryError> {
+        Ok(self.database.get_library_image_by_id(id).await?)
+    }
+
     /// Delete a library image by ID and type
     pub async fn delete_library_image(
         &self,

@@ -211,14 +211,9 @@ impl S3CloudStorage {
             bucket_name,
         })
     }
-    /// Generate S3 key using hash-based partitioning for better distribution
+    /// S3 key — callers provide the full key (e.g. `storage/ab/cd/{file_id}`).
     fn object_key(&self, key: &str) -> String {
-        if key.len() < 4 {
-            return format!("files/misc/{}", key);
-        }
-        let prefix = &key[..2];
-        let subprefix = &key[2..4];
-        format!("files/{}/{}/{}", prefix, subprefix, key)
+        key.to_string()
     }
 }
 #[async_trait::async_trait]

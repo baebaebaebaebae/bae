@@ -278,7 +278,7 @@ async fn update_media_metadata(
     };
 
     let cover_url = cover_release_id
-        .map(|rid| imgs.cover_url(&rid))
+        .map(|rid| imgs.image_url(&rid))
         .or(cover_art_url);
     let title = track.title.clone();
     let artist_str = artist_name.as_deref();

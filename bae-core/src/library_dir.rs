@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 /// Typed wrapper for a library directory path.
 ///
 /// Centralizes the on-disk layout so callers use methods instead of
-/// ad-hoc `path.join("covers")` etc.
+/// ad-hoc `path.join("images")` etc.
 #[derive(Clone, Debug)]
 pub struct LibraryDir {
     path: PathBuf,
@@ -23,20 +23,14 @@ impl LibraryDir {
         self.path.join("config.yaml")
     }
 
-    pub fn covers_dir(&self) -> PathBuf {
-        self.path.join("covers")
+    pub fn images_dir(&self) -> PathBuf {
+        self.path.join("images")
     }
 
-    pub fn artists_dir(&self) -> PathBuf {
-        self.path.join("artists")
-    }
-
-    pub fn cover_path(&self, release_id: &str) -> PathBuf {
-        self.covers_dir().join(release_id)
-    }
-
-    pub fn artist_image_path(&self, artist_id: &str) -> PathBuf {
-        self.artists_dir().join(artist_id)
+    /// Hash-based image path: `images/{ab}/{cd}/{id}`
+    pub fn image_path(&self, id: &str) -> PathBuf {
+        let hex = id.replace('-', "");
+        self.images_dir().join(&hex[..2]).join(&hex[2..4]).join(id)
     }
 
     pub fn pending_deletions_path(&self) -> PathBuf {
@@ -45,7 +39,7 @@ impl LibraryDir {
 
     /// All asset directories that should be synced/created.
     pub fn asset_dirs(&self) -> Vec<PathBuf> {
-        vec![self.covers_dir(), self.artists_dir()]
+        vec![self.images_dir()]
     }
 }
 

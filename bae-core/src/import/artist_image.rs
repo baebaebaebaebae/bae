@@ -2,13 +2,13 @@ use crate::content_type::ContentType;
 use crate::db::{DbLibraryImage, LibraryImageType};
 use crate::discogs::DiscogsClient;
 use crate::library::LibraryManager;
-use std::path::Path;
+use crate::library_dir::LibraryDir;
 use tracing::{debug, info, warn};
 
 /// Fetch and save an artist image from Discogs.
 ///
 /// Skips if the artist already has an image on disk.
-/// Downloads the primary image from Discogs and saves to `{artists_dir}/{artist_id}`.
+/// Downloads the primary image from Discogs and saves to `images/ab/cd/{artist_id}`.
 /// Best-effort: logs warnings on failure, never fails the import.
 ///
 /// Returns true if an image was saved successfully.
@@ -16,11 +16,11 @@ pub async fn fetch_and_save_artist_image(
     artist_id: &str,
     discogs_artist_id: &str,
     discogs_client: &DiscogsClient,
-    artists_dir: &Path,
+    library_dir: &LibraryDir,
     library_manager: &LibraryManager,
 ) -> bool {
-    // Check if image already exists on disk (extensionless path)
-    let dest_path = artists_dir.join(artist_id);
+    // Check if image already exists on disk
+    let dest_path = library_dir.image_path(artist_id);
     if dest_path.exists() {
         debug!("Artist image already exists: {}", dest_path.display());
         return false;
@@ -99,9 +99,11 @@ pub async fn fetch_and_save_artist_image(
         return false;
     }
 
-    if let Err(e) = std::fs::create_dir_all(artists_dir) {
-        warn!("Failed to create artists directory: {}", e);
-        return false;
+    if let Some(parent) = dest_path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            warn!("Failed to create images directory: {}", e);
+            return false;
+        }
     }
 
     if let Err(e) = std::fs::write(&dest_path, &bytes) {

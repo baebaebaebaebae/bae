@@ -906,14 +906,14 @@ impl ImportService {
         let content_type = ContentType::from_extension(ext);
         let source_url = format!("release://{}", relative_path);
 
-        // Copy cover to covers/{release_id}
-        let covers_dir = self.library_dir.covers_dir();
-        if let Err(e) = std::fs::create_dir_all(&covers_dir) {
-            error!("Failed to create covers directory: {}", e);
-            return Ok(());
+        // Copy cover to images/ab/cd/{release_id}
+        let cache_path = self.library_dir.image_path(release_id);
+        if let Some(parent) = cache_path.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                error!("Failed to create images directory: {}", e);
+                return Ok(());
+            }
         }
-
-        let cache_path = self.library_dir.cover_path(release_id);
         if let Err(e) = std::fs::copy(&cover_file.path, &cache_path) {
             error!("Failed to cache cover art: {}", e);
             return Ok(());
@@ -973,20 +973,20 @@ impl ImportService {
             }
         };
 
-        let cover_path = self.library_dir.cover_path(release_id);
-        if let Some(parent) = cover_path.parent() {
+        let image_path = self.library_dir.image_path(release_id);
+        if let Some(parent) = image_path.parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
-                error!("Failed to create covers directory: {}", e);
+                error!("Failed to create images directory: {}", e);
                 return false;
             }
         }
 
-        if let Err(e) = std::fs::write(&cover_path, &bytes) {
+        if let Err(e) = std::fs::write(&image_path, &bytes) {
             error!("Failed to write cover: {}", e);
             return false;
         }
 
-        info!("Wrote remote cover art to {}", cover_path.display());
+        info!("Wrote remote cover art to {}", image_path.display());
         let source = if url.contains("musicbrainz") || url.contains("coverartarchive") {
             "musicbrainz"
         } else {
