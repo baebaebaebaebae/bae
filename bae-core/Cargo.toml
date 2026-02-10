@@ -38,6 +38,7 @@ regex = "1.11"
 ffmpeg-next = { version = "8.0", default-features = false, features = ["codec", "format", "software-resampling"] }
 ffmpeg-sys-next = { version = "8.0", default-features = false, features = ["avcodec", "avformat", "swresample"] }
 libc = "0.2"
+libsqlite3-sys = { version = "0.30.1", features = ["session", "bundled"] }
 crc32fast = "1.4"
 if-addrs = "0.14"
 chardetng = "0.1"
@@ -70,6 +71,7 @@ bindgen = "0.69"
 
 [dev-dependencies]
 tempfile = "3.8"
+rusqlite = { version = "0.32.1", features = ["session", "bundled"] }
 
 [[test]]
 name = "test_playback_behavior"
