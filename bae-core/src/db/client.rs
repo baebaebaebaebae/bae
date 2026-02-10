@@ -2036,4 +2036,66 @@ impl Database {
             error_message: row.get("error_message"),
         }
     }
+
+    // ---- Sync cursors ----
+
+    /// Get the last applied sequence number for a remote device.
+    pub async fn get_sync_cursor(&self, device_id: &str) -> Result<Option<u64>, sqlx::Error> {
+        let row: Option<(i64,)> =
+            sqlx::query_as("SELECT last_seq FROM sync_cursors WHERE device_id = ?")
+                .bind(device_id)
+                .fetch_optional(&self.inner.read_pool)
+                .await?;
+        Ok(row.map(|(seq,)| seq as u64))
+    }
+
+    /// Set (upsert) the last applied sequence number for a remote device.
+    pub async fn set_sync_cursor(&self, device_id: &str, seq: u64) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
+        sqlx::query(
+            "INSERT INTO sync_cursors (device_id, last_seq) VALUES (?, ?)
+             ON CONFLICT(device_id) DO UPDATE SET last_seq = excluded.last_seq",
+        )
+        .bind(device_id)
+        .bind(seq as i64)
+        .execute(&mut *conn)
+        .await?;
+        Ok(())
+    }
+
+    /// Get all sync cursors as a map of device_id -> last_seq.
+    pub async fn get_all_sync_cursors(
+        &self,
+    ) -> Result<std::collections::HashMap<String, u64>, sqlx::Error> {
+        let rows: Vec<(String, i64)> =
+            sqlx::query_as("SELECT device_id, last_seq FROM sync_cursors")
+                .fetch_all(&self.inner.read_pool)
+                .await?;
+        Ok(rows.into_iter().map(|(id, seq)| (id, seq as u64)).collect())
+    }
+
+    // ---- Sync state (key-value) ----
+
+    /// Get a value from the sync_state key-value table.
+    pub async fn get_sync_state(&self, key: &str) -> Result<Option<String>, sqlx::Error> {
+        let row: Option<(String,)> = sqlx::query_as("SELECT value FROM sync_state WHERE key = ?")
+            .bind(key)
+            .fetch_optional(&self.inner.read_pool)
+            .await?;
+        Ok(row.map(|(v,)| v))
+    }
+
+    /// Set (upsert) a value in the sync_state key-value table.
+    pub async fn set_sync_state(&self, key: &str, value: &str) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
+        sqlx::query(
+            "INSERT INTO sync_state (key, value) VALUES (?, ?)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        )
+        .bind(key)
+        .bind(value)
+        .execute(&mut *conn)
+        .await?;
+        Ok(())
+    }
 }
