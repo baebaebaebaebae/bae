@@ -2135,8 +2135,9 @@ impl Database {
             INSERT INTO share_grants (
                 id, from_library_id, from_user_pubkey, release_id,
                 bucket, region, endpoint, wrapped_payload,
-                expires, signature, accepted_at, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                expires, signature, accepted_at, created_at,
+                release_key_hex, s3_access_key, s3_secret_key
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&grant.id)
@@ -2151,9 +2152,54 @@ impl Database {
         .bind(&grant.signature)
         .bind(&grant.accepted_at)
         .bind(&grant.created_at)
+        .bind(&grant.release_key_hex)
+        .bind(&grant.s3_access_key)
+        .bind(&grant.s3_secret_key)
         .execute(&mut *conn)
         .await?;
         Ok(())
+    }
+
+    /// Mark a share grant as accepted with the unwrapped key and credentials.
+    pub async fn accept_share_grant_db(
+        &self,
+        id: &str,
+        release_key_hex: &str,
+        s3_access_key: Option<&str>,
+        s3_secret_key: Option<&str>,
+        accepted_at: &str,
+    ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
+        sqlx::query(
+            r#"
+            UPDATE share_grants
+            SET release_key_hex = ?, s3_access_key = ?, s3_secret_key = ?, accepted_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(release_key_hex)
+        .bind(s3_access_key)
+        .bind(s3_secret_key)
+        .bind(accepted_at)
+        .bind(id)
+        .execute(&mut *conn)
+        .await?;
+        Ok(())
+    }
+
+    /// Get all accepted, non-expired share grants.
+    pub async fn get_active_share_grants(&self) -> Result<Vec<DbShareGrant>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT * FROM share_grants
+            WHERE accepted_at IS NOT NULL
+              AND (expires IS NULL OR expires > datetime('now'))
+            ORDER BY created_at DESC
+            "#,
+        )
+        .fetch_all(&self.inner.read_pool)
+        .await?;
+        Ok(rows.iter().map(Self::row_to_share_grant).collect())
     }
 
     /// Get all share grants for a release.
@@ -2200,6 +2246,9 @@ impl Database {
             signature: row.get("signature"),
             accepted_at: row.get("accepted_at"),
             created_at: row.get("created_at"),
+            release_key_hex: row.get("release_key_hex"),
+            s3_access_key: row.get("s3_access_key"),
+            s3_secret_key: row.get("s3_secret_key"),
         }
     }
 }

@@ -1025,6 +1025,12 @@ pub struct DbShareGrant {
     pub signature: String,
     pub accepted_at: Option<String>,
     pub created_at: String,
+    /// Hex-encoded 32-byte release decryption key, populated on accept.
+    pub release_key_hex: Option<String>,
+    /// S3 access key from the unwrapped payload, populated on accept.
+    pub s3_access_key: Option<String>,
+    /// S3 secret key from the unwrapped payload, populated on accept.
+    pub s3_secret_key: Option<String>,
 }
 
 // ============================================================================
