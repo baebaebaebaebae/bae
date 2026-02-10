@@ -49,7 +49,7 @@ pub trait SyncBucketClient: Send + Sync {
     /// it before returning. Callers receive plaintext ready for `envelope::unpack()`.
     async fn get_changeset(&self, device_id: &str, seq: u64) -> Result<Vec<u8>, BucketError>;
 
-    /// Upload an encrypted changeset blob.
+    /// Upload a changeset blob (plaintext — the implementation encrypts it).
     /// Writes to `changes/{device_id}/{seq}.enc`.
     async fn put_changeset(
         &self,
@@ -71,7 +71,7 @@ pub trait SyncBucketClient: Send + Sync {
         timestamp: &str,
     ) -> Result<(), BucketError>;
 
-    /// Upload an encrypted image.
+    /// Upload an image (plaintext — the implementation encrypts it).
     /// Writes to `images/{id[0..2]}/{id[2..4]}/{id}`.
     async fn upload_image(&self, id: &str, data: Vec<u8>) -> Result<(), BucketError>;
 

@@ -220,7 +220,8 @@ impl SyncBucketClient for S3SyncBucketClient {
         data: Vec<u8>,
     ) -> Result<(), BucketError> {
         let key = format!("changes/{device_id}/{seq}.enc");
-        self.put_object(&key, data).await
+        let encrypted = self.encryption.encrypt(&data);
+        self.put_object(&key, encrypted).await
     }
 
     async fn put_head(
@@ -244,7 +245,8 @@ impl SyncBucketClient for S3SyncBucketClient {
 
     async fn upload_image(&self, id: &str, data: Vec<u8>) -> Result<(), BucketError> {
         let key = Self::image_key(id);
-        self.put_object(&key, data).await
+        let encrypted = self.encryption.encrypt(&data);
+        self.put_object(&key, encrypted).await
     }
 
     async fn download_image(&self, id: &str) -> Result<Vec<u8>, BucketError> {
