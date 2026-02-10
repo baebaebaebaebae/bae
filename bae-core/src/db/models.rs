@@ -1004,6 +1004,30 @@ impl DbReleaseStorage {
 }
 
 // ============================================================================
+// Share Grants
+// ============================================================================
+
+/// An accepted share grant stored in the local DB.
+///
+/// This represents a grant the user received from someone else, giving access
+/// to one release in a remote library.
+#[derive(Debug, Clone)]
+pub struct DbShareGrant {
+    pub id: String,
+    pub from_library_id: String,
+    pub from_user_pubkey: String,
+    pub release_id: String,
+    pub bucket: String,
+    pub region: String,
+    pub endpoint: Option<String>,
+    pub wrapped_payload: Vec<u8>,
+    pub expires: Option<String>,
+    pub signature: String,
+    pub accepted_at: Option<String>,
+    pub created_at: String,
+}
+
+// ============================================================================
 // Library Search Result Types
 // ============================================================================
 
