@@ -1,0 +1,50 @@
+---
+title: Sync
+description: Sync your library across devices
+---
+
+bae can sync your library across multiple devices using a single S3-compatible bucket. Every edit, import, and deletion propagates automatically.
+
+## How it works
+
+When sync is enabled, bae records every change you make as a compact binary changeset. These changesets are encrypted and pushed to your sync bucket. Other devices pull and apply them.
+
+The sync bucket stores:
+
+- **Changesets** — incremental diffs of your database, one per edit session
+- **Snapshots** — periodic full copies for bootstrapping new devices
+- **Images** — album art and other library images
+- **Heads** — per-device sequence numbers for efficient polling
+
+Changesets are tiny (usually a few KB) compared to full database snapshots. A typical edit session produces one changeset covering all the changes you made.
+
+## Setting up sync
+
+1. Create an S3-compatible bucket (AWS S3, MinIO, Backblaze B2, etc.)
+2. Go to **Settings → Sync** and enter your bucket details
+3. bae generates a device ID and starts syncing
+
+Each device gets its own device ID. Changesets are namespaced by device, so multiple devices can push concurrently without conflicts.
+
+## Conflict resolution
+
+When two devices edit the same data, bae resolves conflicts automatically using last-writer-wins at the row level. Each row carries a hybrid logical clock (HLC) timestamp that's robust against clock skew.
+
+If two devices edit *different fields* of the same row, both changes survive — the changeset only contains the columns that actually changed. True conflicts (same field edited on both sides) are resolved by timestamp.
+
+Deletes win over concurrent edits. If one device deletes a release while another edits it, the deletion stands.
+
+## Snapshots
+
+Periodically, bae writes a full database snapshot to the sync bucket. New devices start from the latest snapshot and then apply only the changesets that came after it. This keeps initial sync fast regardless of how long the library has been active.
+
+## Schema versioning
+
+Every changeset carries a schema version number. When bae ships a database schema change:
+
+- **Additive changes** (new columns, new tables) are transparent — old and new clients interoperate without coordination
+- **Breaking changes** (column removal, reordering) bump a minimum version — older clients stop syncing until they upgrade, then bootstrap from a fresh snapshot
+
+## Encryption
+
+All data in the sync bucket is encrypted before upload using your library's encryption key. The bucket provider never sees plaintext metadata or images. See [Encryption](/storage/encryption) for details.

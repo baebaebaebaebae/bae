@@ -32,6 +32,8 @@ export default defineConfig({
 					items: [
 						{ label: 'Overview', slug: 'storage/overview' },
 						{ label: 'Profiles', slug: 'storage/profiles' },
+						{ label: 'Sync', slug: 'storage/sync' },
+						{ label: 'Encryption', slug: 'storage/encryption' },
 					],
 				},
 				{
@@ -39,6 +41,8 @@ export default defineConfig({
 					items: [
 						{ label: 'Browsing', slug: 'library/browsing' },
 						{ label: 'Metadata', slug: 'library/metadata' },
+						{ label: 'Sharing', slug: 'library/sharing' },
+						{ label: 'Share Grants', slug: 'library/share-grants' },
 					],
 				},
 			],
