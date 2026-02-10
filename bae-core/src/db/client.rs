@@ -1,7 +1,11 @@
 use crate::content_type::ContentType;
 use crate::db::models::*;
 use chrono::{DateTime, Utc};
-use sqlx::{Row, SqlitePool};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
+use sqlx::{ConnectOptions, Connection, Row, SqlitePool};
+use std::str::FromStr;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::info;
 use uuid::Uuid;
 
@@ -15,44 +19,106 @@ fn row_to_library_image(row: sqlx::sqlite::SqliteRow) -> DbLibraryImage {
         height: row.get("height"),
         source: row.get("source"),
         source_url: row.get("source_url"),
+        updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
+            .unwrap()
+            .with_timezone(&Utc),
         created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
             .unwrap()
             .with_timezone(&Utc),
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Database {
-    pool: SqlitePool,
+struct DatabaseInner {
+    /// Dedicated write connection. All INSERT/UPDATE/DELETE go through this.
+    /// None for read-only databases (bae-server).
+    writer: Option<Mutex<sqlx::SqliteConnection>>,
+    /// Pool for read queries (SELECT).
+    read_pool: SqlitePool,
 }
+
+/// Database client with a dedicated write connection and a read pool.
+///
+/// The write connection is a single `SqliteConnection` behind a tokio Mutex,
+/// ensuring all writes are serialized through the same physical connection.
+/// This is required for the SQLite session extension (changeset sync) which
+/// must attach to one connection and capture all writes through it.
+///
+/// Read queries go through a connection pool for concurrency.
+#[derive(Clone)]
+pub struct Database {
+    inner: Arc<DatabaseInner>,
+}
+
+impl std::fmt::Debug for Database {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Database")
+            .field("has_writer", &self.inner.writer.is_some())
+            .finish()
+    }
+}
+
 impl Database {
     /// Initialize database connection and run migrations.
     ///
-    /// Note: sqlx enables `PRAGMA foreign_keys = ON` by default (since v0.4),
+    /// Creates a dedicated write connection and a read pool from the same file.
+    /// sqlx enables `PRAGMA foreign_keys = ON` by default (since v0.4),
     /// so FK constraints in the schema are enforced on every connection.
     pub async fn new(database_path: &str) -> Result<Self, sqlx::Error> {
-        let database_url = format!("sqlite://{}?mode=rwc", database_path);
-        info!("Connecting to {}", database_url);
-        let pool = SqlitePool::connect(&database_url).await?;
-        sqlx::migrate!().run(&pool).await.map_err(|e| {
+        let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", database_path))?
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal);
+
+        info!("Connecting to sqlite://{}", database_path);
+
+        // Dedicated write connection
+        let mut write_conn = opts.clone().connect().await?;
+
+        // Run migrations on the write connection
+        sqlx::migrate!().run(&mut write_conn).await.map_err(|e| {
             tracing::error!("Migration failed: {}", e);
             sqlx::Error::Protocol(format!("Migration failed: {}", e))
         })?;
-        Ok(Database { pool })
+
+        // Read pool (inherits WAL from the database file)
+        let read_pool = SqlitePool::connect_with(opts).await?;
+
+        Ok(Database {
+            inner: Arc::new(DatabaseInner {
+                writer: Some(Mutex::new(write_conn)),
+                read_pool,
+            }),
+        })
     }
 
-    /// Open database in read-only mode (no migrations, no writes)
+    /// Open database in read-only mode (no migrations, no writes).
+    /// Write methods will return an error if called.
     pub async fn open_read_only(database_path: &str) -> Result<Self, sqlx::Error> {
         let database_url = format!("sqlite://{}?mode=ro", database_path);
+
         info!("Connecting read-only to {}", database_url);
-        let pool = SqlitePool::connect(&database_url).await?;
-        Ok(Database { pool })
+
+        let read_pool = SqlitePool::connect(&database_url).await?;
+        Ok(Database {
+            inner: Arc::new(DatabaseInner {
+                writer: None,
+                read_pool,
+            }),
+        })
     }
+
+    /// Returns a reference to the writer mutex, or an error if this is a read-only database.
+    fn writer(&self) -> Result<&Mutex<sqlx::SqliteConnection>, sqlx::Error> {
+        self.inner.writer.as_ref().ok_or_else(|| {
+            sqlx::Error::Protocol("Cannot write to a read-only database".to_string())
+        })
+    }
+
     /// Create a consistent snapshot of the database at the given path.
     /// Uses VACUUM INTO which copies without blocking the connection pool.
     pub async fn vacuum_into(&self, path: &str) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query(&format!("VACUUM INTO '{}'", path.replace('\'', "''")))
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
         Ok(())
     }
@@ -68,7 +134,7 @@ impl Database {
             created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                 .unwrap()
                 .with_timezone(&Utc),
-            updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                 .unwrap()
                 .with_timezone(&Utc),
         }
@@ -76,12 +142,13 @@ impl Database {
 
     /// Insert a new artist
     pub async fn insert_artist(&self, artist: &DbArtist) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query(
             r#"
             INSERT INTO artists (
                 id, name, sort_name, discogs_artist_id,
                 bandcamp_artist_id, musicbrainz_artist_id,
-                created_at, updated_at
+                _updated_at, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
@@ -91,9 +158,9 @@ impl Database {
         .bind(&artist.discogs_artist_id)
         .bind(&artist.bandcamp_artist_id)
         .bind(&artist.musicbrainz_artist_id)
-        .bind(artist.created_at.to_rfc3339())
         .bind(artist.updated_at.to_rfc3339())
-        .execute(&self.pool)
+        .bind(artist.created_at.to_rfc3339())
+        .execute(&mut *conn)
         .await?;
         Ok(())
     }
@@ -104,7 +171,7 @@ impl Database {
     ) -> Result<Option<DbArtist>, sqlx::Error> {
         let row = sqlx::query("SELECT * FROM artists WHERE discogs_artist_id = ?")
             .bind(discogs_artist_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&self.inner.read_pool)
             .await?;
         Ok(row.as_ref().map(Self::row_to_artist))
     }
@@ -113,7 +180,7 @@ impl Database {
     pub async fn get_artist_by_mb_id(&self, mb_id: &str) -> Result<Option<DbArtist>, sqlx::Error> {
         let row = sqlx::query("SELECT * FROM artists WHERE musicbrainz_artist_id = ?")
             .bind(mb_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&self.inner.read_pool)
             .await?;
         Ok(row.as_ref().map(Self::row_to_artist))
     }
@@ -122,7 +189,7 @@ impl Database {
     pub async fn get_artist_by_name(&self, name: &str) -> Result<Option<DbArtist>, sqlx::Error> {
         let row = sqlx::query("SELECT * FROM artists WHERE name = ? COLLATE NOCASE LIMIT 1")
             .bind(name)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&self.inner.read_pool)
             .await?;
         Ok(row.as_ref().map(Self::row_to_artist))
     }
@@ -136,13 +203,14 @@ impl Database {
         mb_id: Option<&str>,
         sort_name: Option<&str>,
     ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query(
             r#"
             UPDATE artists SET
                 discogs_artist_id = COALESCE(discogs_artist_id, ?),
                 musicbrainz_artist_id = COALESCE(musicbrainz_artist_id, ?),
                 sort_name = COALESCE(sort_name, ?),
-                updated_at = ?
+                _updated_at = ?
             WHERE id = ?
             "#,
         )
@@ -151,7 +219,7 @@ impl Database {
         .bind(sort_name)
         .bind(Utc::now().to_rfc3339())
         .bind(id)
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
         Ok(())
     }
@@ -161,17 +229,20 @@ impl Database {
         &self,
         album_artist: &DbAlbumArtist,
     ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query(
             r#"
-            INSERT INTO album_artists (id, album_id, artist_id, position)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO album_artists (id, album_id, artist_id, position, _updated_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&album_artist.id)
         .bind(&album_artist.album_id)
         .bind(&album_artist.artist_id)
         .bind(album_artist.position)
-        .execute(&self.pool)
+        .bind(album_artist.updated_at.to_rfc3339())
+        .bind(album_artist.created_at.to_rfc3339())
+        .execute(&mut *conn)
         .await?;
         Ok(())
     }
@@ -180,10 +251,11 @@ impl Database {
         &self,
         track_artist: &DbTrackArtist,
     ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query(
             r#"
-            INSERT INTO track_artists (id, track_id, artist_id, position, role)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO track_artists (id, track_id, artist_id, position, role, _updated_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&track_artist.id)
@@ -191,7 +263,9 @@ impl Database {
         .bind(&track_artist.artist_id)
         .bind(track_artist.position)
         .bind(&track_artist.role)
-        .execute(&self.pool)
+        .bind(track_artist.updated_at.to_rfc3339())
+        .bind(track_artist.created_at.to_rfc3339())
+        .execute(&mut *conn)
         .await?;
         Ok(())
     }
@@ -209,7 +283,7 @@ impl Database {
             "#,
         )
         .bind(album_id)
-        .fetch_all(&self.pool)
+        .fetch_all(&self.inner.read_pool)
         .await?;
         Ok(rows.iter().map(Self::row_to_artist).collect())
     }
@@ -227,7 +301,7 @@ impl Database {
             "#,
         )
         .bind(track_id)
-        .fetch_all(&self.pool)
+        .fetch_all(&self.inner.read_pool)
         .await?;
         Ok(rows.iter().map(Self::row_to_artist).collect())
     }
@@ -235,7 +309,7 @@ impl Database {
     pub async fn get_artist_by_id(&self, artist_id: &str) -> Result<Option<DbArtist>, sqlx::Error> {
         let row = sqlx::query("SELECT * FROM artists WHERE id = ?")
             .bind(artist_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&self.inner.read_pool)
             .await?;
         Ok(row.as_ref().map(Self::row_to_artist))
     }
@@ -248,7 +322,7 @@ impl Database {
             r#"
             SELECT
                 a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
-                a.is_compilation, a.created_at, a.updated_at,
+                a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
             FROM albums a
@@ -260,7 +334,7 @@ impl Database {
             "#,
         )
         .bind(artist_id)
-        .fetch_all(&self.pool)
+        .fetch_all(&self.inner.read_pool)
         .await?;
         let mut albums = Vec::new();
         for row in rows {
@@ -290,10 +364,10 @@ impl Database {
                 cover_release_id: row.get("cover_release_id"),
                 cover_art_url: row.get("cover_art_url"),
                 is_compilation: row.get("is_compilation"),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
                     .with_timezone(&Utc),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
             });
@@ -323,7 +397,7 @@ impl Database {
         )
         .bind(&pattern)
         .bind(limit_i64)
-        .fetch_all(&self.pool)
+        .fetch_all(&self.inner.read_pool)
         .await?;
 
         let artists = artist_rows
@@ -350,7 +424,7 @@ impl Database {
         )
         .bind(&pattern)
         .bind(limit_i64)
-        .fetch_all(&self.pool)
+        .fetch_all(&self.inner.read_pool)
         .await?;
 
         let albums = album_rows
@@ -382,7 +456,7 @@ impl Database {
         )
         .bind(&pattern)
         .bind(limit_i64)
-        .fetch_all(&self.pool)
+        .fetch_all(&self.inner.read_pool)
         .await?;
 
         let tracks = track_rows
@@ -406,52 +480,59 @@ impl Database {
 
     /// Insert a new album
     pub async fn insert_album(&self, album: &DbAlbum) -> Result<(), sqlx::Error> {
-        let mut tx = self.pool.begin().await?;
+        let mut conn = self.writer()?.lock().await;
+        let mut tx = conn.begin().await?;
         sqlx::query(
-                r#"
+            r#"
             INSERT INTO albums (
-                id, title, year, bandcamp_album_id, cover_release_id, cover_art_url, is_compilation, created_at, updated_at
+                id, title, year, bandcamp_album_id, cover_release_id, cover_art_url, is_compilation, _updated_at, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
-            )
-            .bind(&album.id)
-            .bind(&album.title)
-            .bind(album.year)
-            .bind(&album.bandcamp_album_id)
-            .bind(&album.cover_release_id)
-            .bind(&album.cover_art_url)
-            .bind(album.is_compilation)
-            .bind(album.created_at.to_rfc3339())
-            .bind(album.updated_at.to_rfc3339())
-            .execute(&mut *tx)
-            .await?;
+        )
+        .bind(&album.id)
+        .bind(&album.title)
+        .bind(album.year)
+        .bind(&album.bandcamp_album_id)
+        .bind(&album.cover_release_id)
+        .bind(&album.cover_art_url)
+        .bind(album.is_compilation)
+        .bind(album.updated_at.to_rfc3339())
+        .bind(album.created_at.to_rfc3339())
+        .execute(&mut *tx)
+        .await?;
         if let Some(discogs_release) = &album.discogs_release {
+            let now = Utc::now().to_rfc3339();
             sqlx::query(
                 r#"
                 INSERT INTO album_discogs (
-                    id, album_id, discogs_master_id, discogs_release_id
-                ) VALUES (?, ?, ?, ?)
+                    id, album_id, discogs_master_id, discogs_release_id, _updated_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(Uuid::new_v4().to_string())
             .bind(&album.id)
             .bind(&discogs_release.master_id)
             .bind(&discogs_release.release_id)
+            .bind(&now)
+            .bind(&now)
             .execute(&mut *tx)
             .await?;
         }
         if let Some(mb_release) = &album.musicbrainz_release {
+            let now = Utc::now().to_rfc3339();
             sqlx::query(
                 r#"
                 INSERT INTO album_musicbrainz (
-                    id, album_id, musicbrainz_release_group_id, musicbrainz_release_id
-                ) VALUES (?, ?, ?, ?)
+                    id, album_id, musicbrainz_release_group_id, musicbrainz_release_id, _updated_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(Uuid::new_v4().to_string())
             .bind(&album.id)
             .bind(&mb_release.release_group_id)
             .bind(&mb_release.release_id)
+            .bind(&now)
+            .bind(&now)
             .execute(&mut *tx)
             .await?;
         }
@@ -460,12 +541,13 @@ impl Database {
     }
     /// Insert a new release
     pub async fn insert_release(&self, release: &DbRelease) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query(
             r#"
             INSERT INTO releases (
                 id, album_id, release_name, year, discogs_release_id,
                 bandcamp_release_id, format, label, catalog_number, country, barcode,
-                import_status, created_at, updated_at
+                import_status, _updated_at, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
@@ -481,20 +563,21 @@ impl Database {
         .bind(&release.country)
         .bind(&release.barcode)
         .bind(release.import_status)
-        .bind(release.created_at.to_rfc3339())
         .bind(release.updated_at.to_rfc3339())
-        .execute(&self.pool)
+        .bind(release.created_at.to_rfc3339())
+        .execute(&mut *conn)
         .await?;
         Ok(())
     }
     /// Insert a new track
     pub async fn insert_track(&self, track: &DbTrack) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query(
             r#"
             INSERT INTO tracks (
-                id, release_id, title, disc_number, track_number, duration_ms, 
-                discogs_position, import_status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, release_id, title, disc_number, track_number, duration_ms,
+                discogs_position, import_status, _updated_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&track.id)
@@ -505,8 +588,9 @@ impl Database {
         .bind(track.duration_ms)
         .bind(&track.discogs_position)
         .bind(track.import_status)
+        .bind(track.updated_at.to_rfc3339())
         .bind(track.created_at.to_rfc3339())
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
         Ok(())
     }
@@ -518,52 +602,59 @@ impl Database {
         release: &DbRelease,
         tracks: &[DbTrack],
     ) -> Result<(), sqlx::Error> {
-        let mut tx = self.pool.begin().await?;
+        let mut conn = self.writer()?.lock().await;
+        let mut tx = conn.begin().await?;
         sqlx::query(
-                r#"
+            r#"
             INSERT INTO albums (
-                id, title, year, bandcamp_album_id, cover_release_id, cover_art_url, is_compilation, created_at, updated_at
+                id, title, year, bandcamp_album_id, cover_release_id, cover_art_url, is_compilation, _updated_at, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
-            )
-            .bind(&album.id)
-            .bind(&album.title)
-            .bind(album.year)
-            .bind(&album.bandcamp_album_id)
-            .bind(&album.cover_release_id)
-            .bind(&album.cover_art_url)
-            .bind(album.is_compilation)
-            .bind(album.created_at.to_rfc3339())
-            .bind(album.updated_at.to_rfc3339())
-            .execute(&mut *tx)
-            .await?;
+        )
+        .bind(&album.id)
+        .bind(&album.title)
+        .bind(album.year)
+        .bind(&album.bandcamp_album_id)
+        .bind(&album.cover_release_id)
+        .bind(&album.cover_art_url)
+        .bind(album.is_compilation)
+        .bind(album.updated_at.to_rfc3339())
+        .bind(album.created_at.to_rfc3339())
+        .execute(&mut *tx)
+        .await?;
         if let Some(discogs_release) = &album.discogs_release {
+            let now = Utc::now().to_rfc3339();
             sqlx::query(
                 r#"
                 INSERT INTO album_discogs (
-                    id, album_id, discogs_master_id, discogs_release_id
-                ) VALUES (?, ?, ?, ?)
+                    id, album_id, discogs_master_id, discogs_release_id, _updated_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(Uuid::new_v4().to_string())
             .bind(&album.id)
             .bind(&discogs_release.master_id)
             .bind(&discogs_release.release_id)
+            .bind(&now)
+            .bind(&now)
             .execute(&mut *tx)
             .await?;
         }
         if let Some(mb_release) = &album.musicbrainz_release {
+            let now = Utc::now().to_rfc3339();
             sqlx::query(
                 r#"
                 INSERT INTO album_musicbrainz (
-                    id, album_id, musicbrainz_release_group_id, musicbrainz_release_id
-                ) VALUES (?, ?, ?, ?)
+                    id, album_id, musicbrainz_release_group_id, musicbrainz_release_id, _updated_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(Uuid::new_v4().to_string())
             .bind(&album.id)
             .bind(&mb_release.release_group_id)
             .bind(&mb_release.release_id)
+            .bind(&now)
+            .bind(&now)
             .execute(&mut *tx)
             .await?;
         }
@@ -572,7 +663,7 @@ impl Database {
             INSERT INTO releases (
                 id, album_id, release_name, year, discogs_release_id,
                 bandcamp_release_id, format, label, catalog_number, country, barcode,
-                import_status, created_at, updated_at
+                import_status, _updated_at, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
@@ -588,17 +679,17 @@ impl Database {
         .bind(&release.country)
         .bind(&release.barcode)
         .bind(release.import_status)
-        .bind(release.created_at.to_rfc3339())
         .bind(release.updated_at.to_rfc3339())
+        .bind(release.created_at.to_rfc3339())
         .execute(&mut *tx)
         .await?;
         for track in tracks {
             sqlx::query(
                 r#"
                 INSERT INTO tracks (
-                    id, release_id, title, disc_number, track_number, duration_ms, 
-                    discogs_position, import_status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    id, release_id, title, disc_number, track_number, duration_ms,
+                    discogs_position, import_status, _updated_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&track.id)
@@ -609,6 +700,7 @@ impl Database {
             .bind(track.duration_ms)
             .bind(&track.discogs_position)
             .bind(track.import_status)
+            .bind(track.updated_at.to_rfc3339())
             .bind(track.created_at.to_rfc3339())
             .execute(&mut *tx)
             .await?;
@@ -622,10 +714,12 @@ impl Database {
         track_id: &str,
         status: ImportStatus,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE tracks SET import_status = ? WHERE id = ?")
+        let mut conn = self.writer()?.lock().await;
+        sqlx::query("UPDATE tracks SET import_status = ?, _updated_at = ? WHERE id = ?")
             .bind(status)
+            .bind(Utc::now().to_rfc3339())
             .bind(track_id)
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
         Ok(())
     }
@@ -635,10 +729,12 @@ impl Database {
         track_id: &str,
         duration_ms: Option<i64>,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE tracks SET duration_ms = ? WHERE id = ?")
+        let mut conn = self.writer()?.lock().await;
+        sqlx::query("UPDATE tracks SET duration_ms = ?, _updated_at = ? WHERE id = ?")
             .bind(duration_ms)
+            .bind(Utc::now().to_rfc3339())
             .bind(track_id)
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
         Ok(())
     }
@@ -648,11 +744,12 @@ impl Database {
         release_id: &str,
         status: ImportStatus,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE releases SET import_status = ?, updated_at = ? WHERE id = ?")
+        let mut conn = self.writer()?.lock().await;
+        sqlx::query("UPDATE releases SET import_status = ?, _updated_at = ? WHERE id = ?")
             .bind(status)
             .bind(Utc::now().to_rfc3339())
             .bind(release_id)
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
         Ok(())
     }
@@ -660,9 +757,9 @@ impl Database {
     pub async fn get_albums(&self) -> Result<Vec<DbAlbum>, sqlx::Error> {
         let rows = sqlx::query(
             r#"
-            SELECT 
+            SELECT
                 a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
-                a.is_compilation, a.created_at, a.updated_at,
+                a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
             FROM albums a
@@ -671,7 +768,7 @@ impl Database {
             ORDER BY a.title
             "#,
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&self.inner.read_pool)
         .await?;
         let mut albums = Vec::new();
         for row in rows {
@@ -701,10 +798,10 @@ impl Database {
                 cover_release_id: row.get("cover_release_id"),
                 cover_art_url: row.get("cover_art_url"),
                 is_compilation: row.get("is_compilation"),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
                     .with_timezone(&Utc),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
             });
@@ -715,9 +812,9 @@ impl Database {
     pub async fn get_album_by_id(&self, album_id: &str) -> Result<Option<DbAlbum>, sqlx::Error> {
         let row = sqlx::query(
             r#"
-            SELECT 
+            SELECT
                 a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
-                a.is_compilation, a.created_at, a.updated_at,
+                a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
             FROM albums a
@@ -727,7 +824,7 @@ impl Database {
             "#,
         )
         .bind(album_id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&self.inner.read_pool)
         .await?;
         Ok(row.map(|row| {
             let discogs_master_id: Option<String> = row.get("discogs_master_id");
@@ -756,10 +853,10 @@ impl Database {
                 cover_release_id: row.get("cover_release_id"),
                 cover_art_url: row.get("cover_art_url"),
                 is_compilation: row.get("is_compilation"),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
                     .with_timezone(&Utc),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
             }
@@ -772,7 +869,7 @@ impl Database {
     ) -> Result<Vec<DbRelease>, sqlx::Error> {
         let rows = sqlx::query("SELECT * FROM releases WHERE album_id = ? ORDER BY created_at")
             .bind(album_id)
-            .fetch_all(&self.pool)
+            .fetch_all(&self.inner.read_pool)
             .await?;
         let mut releases = Vec::new();
         for row in rows {
@@ -789,10 +886,10 @@ impl Database {
                 country: row.get("country"),
                 barcode: row.get("barcode"),
                 import_status: row.get("import_status"),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
                     .with_timezone(&Utc),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
             });
@@ -803,7 +900,7 @@ impl Database {
     pub async fn get_track_by_id(&self, track_id: &str) -> Result<Option<DbTrack>, sqlx::Error> {
         let row = sqlx::query("SELECT * FROM tracks WHERE id = ?")
             .bind(track_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&self.inner.read_pool)
             .await?;
         if let Some(row) = row {
             Ok(Some(DbTrack {
@@ -815,6 +912,9 @@ impl Database {
                 duration_ms: row.get("duration_ms"),
                 discogs_position: row.get("discogs_position"),
                 import_status: row.get("import_status"),
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
+                    .unwrap()
+                    .with_timezone(&Utc),
                 created_at: row.get("created_at"),
             }))
         } else {
@@ -828,7 +928,7 @@ impl Database {
     ) -> Result<Option<String>, sqlx::Error> {
         let row = sqlx::query("SELECT album_id FROM releases WHERE id = ?")
             .bind(release_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&self.inner.read_pool)
             .await?;
         Ok(row.map(|r| r.get("album_id")))
     }
@@ -841,7 +941,7 @@ impl Database {
             "SELECT * FROM tracks WHERE release_id = ? ORDER BY disc_number, track_number",
         )
         .bind(release_id)
-        .fetch_all(&self.pool)
+        .fetch_all(&self.inner.read_pool)
         .await?;
         let mut tracks = Vec::new();
         for row in rows {
@@ -854,6 +954,9 @@ impl Database {
                 duration_ms: row.get("duration_ms"),
                 discogs_position: row.get("discogs_position"),
                 import_status: row.get("import_status"),
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
+                    .unwrap()
+                    .with_timezone(&Utc),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
@@ -863,11 +966,12 @@ impl Database {
     }
     /// Insert a new file record
     pub async fn insert_file(&self, file: &DbFile) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query(
             r#"
-            INSERT INTO files (
-                id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO release_files (
+                id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, _updated_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&file.id)
@@ -877,8 +981,9 @@ impl Database {
         .bind(file.content_type.as_str())
         .bind(&file.source_path)
         .bind(&file.encryption_nonce)
+        .bind(file.updated_at.to_rfc3339())
         .bind(file.created_at.to_rfc3339())
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
         Ok(())
     }
@@ -887,9 +992,9 @@ impl Database {
         &self,
         release_id: &str,
     ) -> Result<Vec<DbFile>, sqlx::Error> {
-        let rows = sqlx::query("SELECT * FROM files WHERE release_id = ?")
+        let rows = sqlx::query("SELECT * FROM release_files WHERE release_id = ?")
             .bind(release_id)
-            .fetch_all(&self.pool)
+            .fetch_all(&self.inner.read_pool)
             .await?;
         let mut files = Vec::new();
         for row in rows {
@@ -901,6 +1006,9 @@ impl Database {
                 content_type: ContentType::from_mime(&row.get::<String, _>("content_type")),
                 source_path: row.get("source_path"),
                 encryption_nonce: row.get("encryption_nonce"),
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
+                    .unwrap()
+                    .with_timezone(&Utc),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
@@ -910,9 +1018,9 @@ impl Database {
     }
     /// Get a specific file by ID
     pub async fn get_file_by_id(&self, file_id: &str) -> Result<Option<DbFile>, sqlx::Error> {
-        let row = sqlx::query("SELECT * FROM files WHERE id = ?")
+        let row = sqlx::query("SELECT * FROM release_files WHERE id = ?")
             .bind(file_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&self.inner.read_pool)
             .await?;
         if let Some(row) = row {
             Ok(Some(DbFile {
@@ -923,6 +1031,9 @@ impl Database {
                 content_type: ContentType::from_mime(&row.get::<String, _>("content_type")),
                 source_path: row.get("source_path"),
                 encryption_nonce: row.get("encryption_nonce"),
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
+                    .unwrap()
+                    .with_timezone(&Utc),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
@@ -936,11 +1047,12 @@ impl Database {
         &self,
         audio_format: &DbAudioFormat,
     ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query(
             r#"
             INSERT INTO audio_formats (
-                id, track_id, content_type, flac_headers, needs_headers, start_byte_offset, end_byte_offset, pregap_ms, frame_offset_samples, exact_sample_count, sample_rate, bits_per_sample, seektable_json, audio_data_start, file_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, track_id, content_type, flac_headers, needs_headers, start_byte_offset, end_byte_offset, pregap_ms, frame_offset_samples, exact_sample_count, sample_rate, bits_per_sample, seektable_json, audio_data_start, file_id, _updated_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&audio_format.id)
@@ -958,8 +1070,9 @@ impl Database {
         .bind(&audio_format.seektable_json)
         .bind(audio_format.audio_data_start)
         .bind(&audio_format.file_id)
+        .bind(audio_format.updated_at.to_rfc3339())
         .bind(audio_format.created_at.to_rfc3339())
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
         Ok(())
     }
@@ -970,7 +1083,7 @@ impl Database {
     ) -> Result<Option<DbAudioFormat>, sqlx::Error> {
         let row = sqlx::query("SELECT * FROM audio_formats WHERE track_id = ?")
             .bind(track_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&self.inner.read_pool)
             .await?;
         if let Some(row) = row {
             Ok(Some(DbAudioFormat {
@@ -989,6 +1102,9 @@ impl Database {
                 seektable_json: row.get("seektable_json"),
                 audio_data_start: row.get("audio_data_start"),
                 file_id: row.get("file_id"),
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
+                    .unwrap()
+                    .with_timezone(&Utc),
                 created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
@@ -1005,14 +1121,15 @@ impl Database {
     /// - Track artists, audio formats (via FOREIGN KEY ON DELETE CASCADE)
     /// - Import records referencing this release (cleared before delete)
     pub async fn delete_release(&self, release_id: &str) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query("UPDATE imports SET release_id = NULL WHERE release_id = ?")
             .bind(release_id)
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
 
         sqlx::query("DELETE FROM releases WHERE id = ?")
             .bind(release_id)
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
         Ok(())
     }
@@ -1025,15 +1142,16 @@ impl Database {
     /// - All tracks, files, etc. from releases (via cascading)
     /// - Import records referencing this album's releases (cleared before delete)
     pub async fn delete_album(&self, album_id: &str) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query(
-                "UPDATE imports SET release_id = NULL WHERE release_id IN (SELECT id FROM releases WHERE album_id = ?)",
-            )
-            .bind(album_id)
-            .execute(&self.pool)
-            .await?;
+            "UPDATE imports SET release_id = NULL WHERE release_id IN (SELECT id FROM releases WHERE album_id = ?)",
+        )
+        .bind(album_id)
+        .execute(&mut *conn)
+        .await?;
         sqlx::query("DELETE FROM albums WHERE id = ?")
             .bind(album_id)
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
         Ok(())
     }
@@ -1048,9 +1166,9 @@ impl Database {
     ) -> Result<Option<DbAlbum>, sqlx::Error> {
         let query = if master_id.is_some() && release_id.is_some() {
             r#"
-            SELECT 
+            SELECT
                 a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
-                a.is_compilation, a.created_at, a.updated_at,
+                a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
             FROM albums a
@@ -1061,9 +1179,9 @@ impl Database {
             "#
         } else if master_id.is_some() {
             r#"
-            SELECT 
+            SELECT
                 a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
-                a.is_compilation, a.created_at, a.updated_at,
+                a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
             FROM albums a
@@ -1074,9 +1192,9 @@ impl Database {
             "#
         } else if release_id.is_some() {
             r#"
-            SELECT 
+            SELECT
                 a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
-                a.is_compilation, a.created_at, a.updated_at,
+                a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
             FROM albums a
@@ -1093,19 +1211,19 @@ impl Database {
                 sqlx::query(query)
                     .bind(mid)
                     .bind(rid)
-                    .fetch_optional(&self.pool)
+                    .fetch_optional(&self.inner.read_pool)
                     .await?
             }
             (Some(mid), None) => {
                 sqlx::query(query)
                     .bind(mid)
-                    .fetch_optional(&self.pool)
+                    .fetch_optional(&self.inner.read_pool)
                     .await?
             }
             (None, Some(rid)) => {
                 sqlx::query(query)
                     .bind(rid)
-                    .fetch_optional(&self.pool)
+                    .fetch_optional(&self.inner.read_pool)
                     .await?
             }
             (None, None) => unreachable!(), // Already handled above with return Ok(None)
@@ -1137,10 +1255,10 @@ impl Database {
                 cover_release_id: row.get("cover_release_id"),
                 cover_art_url: row.get("cover_art_url"),
                 is_compilation: row.get("is_compilation"),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
                     .with_timezone(&Utc),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
             }
@@ -1157,9 +1275,9 @@ impl Database {
     ) -> Result<Option<DbAlbum>, sqlx::Error> {
         let query = if release_id.is_some() && release_group_id.is_some() {
             r#"
-            SELECT 
+            SELECT
                 a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
-                a.is_compilation, a.created_at, a.updated_at,
+                a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
             FROM albums a
@@ -1170,9 +1288,9 @@ impl Database {
             "#
         } else if release_id.is_some() {
             r#"
-            SELECT 
+            SELECT
                 a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
-                a.is_compilation, a.created_at, a.updated_at,
+                a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
             FROM albums a
@@ -1183,9 +1301,9 @@ impl Database {
             "#
         } else if release_group_id.is_some() {
             r#"
-            SELECT 
+            SELECT
                 a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
-                a.is_compilation, a.created_at, a.updated_at,
+                a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
             FROM albums a
@@ -1202,19 +1320,19 @@ impl Database {
                 sqlx::query(query)
                     .bind(rid)
                     .bind(rgid)
-                    .fetch_optional(&self.pool)
+                    .fetch_optional(&self.inner.read_pool)
                     .await?
             }
             (Some(rid), None) => {
                 sqlx::query(query)
                     .bind(rid)
-                    .fetch_optional(&self.pool)
+                    .fetch_optional(&self.inner.read_pool)
                     .await?
             }
             (None, Some(rgid)) => {
                 sqlx::query(query)
                     .bind(rgid)
-                    .fetch_optional(&self.pool)
+                    .fetch_optional(&self.inner.read_pool)
                     .await?
             }
             (None, None) => unreachable!(), // Already handled above with return Ok(None)
@@ -1246,10 +1364,10 @@ impl Database {
                 cover_release_id: row.get("cover_release_id"),
                 cover_art_url: row.get("cover_art_url"),
                 is_compilation: row.get("is_compilation"),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
                     .with_timezone(&Utc),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
+                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
                     .unwrap()
                     .with_timezone(&Utc),
             }
@@ -1257,6 +1375,7 @@ impl Database {
     }
     /// Insert a torrent record
     pub async fn insert_torrent(&self, torrent: &DbTorrent) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query(
             r#"
             INSERT INTO torrents (
@@ -1275,7 +1394,7 @@ impl Database {
         .bind(torrent.num_pieces)
         .bind(torrent.is_seeding)
         .bind(torrent.created_at.to_rfc3339())
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
         Ok(())
     }
@@ -1294,7 +1413,7 @@ impl Database {
             "#,
         )
         .bind(release_id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&self.inner.read_pool)
         .await?;
         Ok(row.map(|row| DbTorrent {
             id: row.get("id"),
@@ -1316,6 +1435,7 @@ impl Database {
         &self,
         mapping: &DbTorrentPieceMapping,
     ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query(
             r#"
             INSERT INTO torrent_piece_mappings (
@@ -1330,7 +1450,7 @@ impl Database {
         .bind(&mapping.chunk_ids)
         .bind(mapping.start_byte_in_first_chunk)
         .bind(mapping.end_byte_in_last_chunk)
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
         Ok(())
     }
@@ -1349,7 +1469,7 @@ impl Database {
             "#,
         )
         .bind(torrent_id)
-        .fetch_all(&self.pool)
+        .fetch_all(&self.inner.read_pool)
         .await?;
         Ok(rows
             .into_iter()
@@ -1380,7 +1500,7 @@ impl Database {
         )
         .bind(torrent_id)
         .bind(piece_index)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&self.inner.read_pool)
         .await?;
         Ok(row.map(|row| DbTorrentPieceMapping {
             id: row.get("id"),
@@ -1397,10 +1517,11 @@ impl Database {
         torrent_id: &str,
         is_seeding: bool,
     ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query("UPDATE torrents SET is_seeding = ? WHERE id = ?")
             .bind(is_seeding)
             .bind(torrent_id)
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
         Ok(())
     }
@@ -1414,7 +1535,7 @@ impl Database {
             WHERE is_seeding = TRUE
             "#,
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&self.inner.read_pool)
         .await?;
         Ok(rows
             .into_iter()
@@ -1436,10 +1557,11 @@ impl Database {
     }
     /// Upsert a library image record
     pub async fn upsert_library_image(&self, image: &DbLibraryImage) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query(
             r#"
-            INSERT INTO library_images (id, type, content_type, file_size, width, height, source, source_url, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO library_images (id, type, content_type, file_size, width, height, source, source_url, _updated_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 type = excluded.type,
                 content_type = excluded.content_type,
@@ -1447,7 +1569,8 @@ impl Database {
                 width = excluded.width,
                 height = excluded.height,
                 source = excluded.source,
-                source_url = excluded.source_url
+                source_url = excluded.source_url,
+                _updated_at = excluded._updated_at
             "#,
         )
         .bind(&image.id)
@@ -1458,8 +1581,9 @@ impl Database {
         .bind(image.height)
         .bind(&image.source)
         .bind(&image.source_url)
+        .bind(image.updated_at.to_rfc3339())
         .bind(image.created_at.to_rfc3339())
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
         Ok(())
     }
@@ -1473,7 +1597,7 @@ impl Database {
         let row = sqlx::query("SELECT * FROM library_images WHERE id = ? AND type = ?")
             .bind(id)
             .bind(image_type.as_str())
-            .fetch_optional(&self.pool)
+            .fetch_optional(&self.inner.read_pool)
             .await?;
         Ok(row.map(row_to_library_image))
     }
@@ -1485,7 +1609,7 @@ impl Database {
     ) -> Result<Option<DbLibraryImage>, sqlx::Error> {
         let row = sqlx::query("SELECT * FROM library_images WHERE id = ?")
             .bind(id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&self.inner.read_pool)
             .await?;
         Ok(row.map(row_to_library_image))
     }
@@ -1496,10 +1620,11 @@ impl Database {
         id: &str,
         image_type: &LibraryImageType,
     ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query("DELETE FROM library_images WHERE id = ? AND type = ?")
             .bind(id)
             .bind(image_type.as_str())
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
         Ok(())
     }
@@ -1510,10 +1635,12 @@ impl Database {
         album_id: &str,
         cover_release_id: &str,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE albums SET cover_release_id = ? WHERE id = ?")
+        let mut conn = self.writer()?.lock().await;
+        sqlx::query("UPDATE albums SET cover_release_id = ?, _updated_at = ? WHERE id = ?")
             .bind(cover_release_id)
+            .bind(Utc::now().to_rfc3339())
             .bind(album_id)
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
         Ok(())
     }
@@ -1522,9 +1649,10 @@ impl Database {
         &self,
         profile: &DbStorageProfile,
     ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         if profile.is_default {
             sqlx::query("UPDATE storage_profiles SET is_default = FALSE WHERE is_default = TRUE")
-                .execute(&self.pool)
+                .execute(&mut *conn)
                 .await?;
         }
 
@@ -1549,7 +1677,7 @@ impl Database {
         .bind(&profile.cloud_endpoint)
         .bind(profile.created_at.to_rfc3339())
         .bind(profile.updated_at.to_rfc3339())
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
         Ok(())
     }
@@ -1560,14 +1688,14 @@ impl Database {
     ) -> Result<Option<DbStorageProfile>, sqlx::Error> {
         let row = sqlx::query("SELECT * FROM storage_profiles WHERE id = ?")
             .bind(profile_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&self.inner.read_pool)
             .await?;
         Ok(row.map(|row| self.row_to_storage_profile(&row)))
     }
     /// Get all storage profiles
     pub async fn get_all_storage_profiles(&self) -> Result<Vec<DbStorageProfile>, sqlx::Error> {
         let rows = sqlx::query("SELECT * FROM storage_profiles ORDER BY name")
-            .fetch_all(&self.pool)
+            .fetch_all(&self.inner.read_pool)
             .await?;
         Ok(rows
             .iter()
@@ -1578,7 +1706,7 @@ impl Database {
     pub async fn get_replica_profiles(&self) -> Result<Vec<DbStorageProfile>, sqlx::Error> {
         let rows =
             sqlx::query("SELECT * FROM storage_profiles WHERE is_home = FALSE ORDER BY name")
-                .fetch_all(&self.pool)
+                .fetch_all(&self.inner.read_pool)
                 .await?;
         Ok(rows
             .iter()
@@ -1591,7 +1719,7 @@ impl Database {
         &self,
     ) -> Result<Option<DbStorageProfile>, sqlx::Error> {
         let row = sqlx::query("SELECT * FROM storage_profiles WHERE is_default = TRUE")
-            .fetch_optional(&self.pool)
+            .fetch_optional(&self.inner.read_pool)
             .await?;
         Ok(row.map(|row| self.row_to_storage_profile(&row)))
     }
@@ -1600,9 +1728,10 @@ impl Database {
         &self,
         profile: &DbStorageProfile,
     ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         if profile.is_default {
             sqlx::query("UPDATE storage_profiles SET is_default = FALSE WHERE is_default = TRUE")
-                .execute(&self.pool)
+                .execute(&mut *conn)
                 .await?;
         }
 
@@ -1626,15 +1755,17 @@ impl Database {
         .bind(&profile.cloud_endpoint)
         .bind(profile.updated_at.to_rfc3339())
         .bind(&profile.id)
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
         Ok(())
     }
     /// Delete a storage profile. Fails if it is the home profile or if any releases are linked to it.
     pub async fn delete_storage_profile(&self, profile_id: &str) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
+
         let is_home: bool = sqlx::query_scalar("SELECT is_home FROM storage_profiles WHERE id = ?")
             .bind(profile_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&mut *conn)
             .await?
             .unwrap_or(false);
 
@@ -1647,7 +1778,7 @@ impl Database {
         let count: i32 =
             sqlx::query_scalar("SELECT COUNT(*) FROM release_storage WHERE storage_profile_id = ?")
                 .bind(profile_id)
-                .fetch_one(&self.pool)
+                .fetch_one(&mut *conn)
                 .await?;
 
         if count > 0 {
@@ -1659,18 +1790,19 @@ impl Database {
 
         sqlx::query("DELETE FROM storage_profiles WHERE id = ?")
             .bind(profile_id)
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
         Ok(())
     }
     /// Set a profile as the default (clears other defaults)
     pub async fn set_default_storage_profile(&self, profile_id: &str) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query("UPDATE storage_profiles SET is_default = FALSE WHERE is_default = TRUE")
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
         sqlx::query("UPDATE storage_profiles SET is_default = TRUE WHERE id = ?")
             .bind(profile_id)
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
         Ok(())
     }
@@ -1704,6 +1836,7 @@ impl Database {
         &self,
         release_storage: &DbReleaseStorage,
     ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query(
             r#"
             INSERT INTO release_storage (id, release_id, storage_profile_id, created_at)
@@ -1714,7 +1847,7 @@ impl Database {
         .bind(&release_storage.release_id)
         .bind(&release_storage.storage_profile_id)
         .bind(release_storage.created_at.to_rfc3339())
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
         Ok(())
     }
@@ -1725,7 +1858,7 @@ impl Database {
     ) -> Result<Option<DbReleaseStorage>, sqlx::Error> {
         let row = sqlx::query("SELECT * FROM release_storage WHERE release_id = ?")
             .bind(release_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&self.inner.read_pool)
             .await?;
         Ok(row.map(|row| DbReleaseStorage {
             id: row.get("id"),
@@ -1749,30 +1882,33 @@ impl Database {
             "#,
         )
         .bind(release_id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&self.inner.read_pool)
         .await?;
         Ok(row.map(|row| self.row_to_storage_profile(&row)))
     }
     /// Delete release storage link (release_storage row)
     pub async fn delete_release_storage(&self, release_id: &str) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query("DELETE FROM release_storage WHERE release_id = ?")
             .bind(release_id)
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
         Ok(())
     }
 
     /// Delete all file records for a release
     pub async fn delete_files_for_release(&self, release_id: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("DELETE FROM files WHERE release_id = ?")
+        let mut conn = self.writer()?.lock().await;
+        sqlx::query("DELETE FROM release_files WHERE release_id = ?")
             .bind(release_id)
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
         Ok(())
     }
 
     /// Insert a new import operation record
     pub async fn insert_import(&self, import: &DbImport) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query(
             r#"
             INSERT INTO imports (
@@ -1790,7 +1926,7 @@ impl Database {
         .bind(import.created_at)
         .bind(import.updated_at)
         .bind(&import.error_message)
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
         Ok(())
     }
@@ -1798,17 +1934,17 @@ impl Database {
     pub async fn get_import(&self, id: &str) -> Result<Option<DbImport>, sqlx::Error> {
         let row = sqlx::query("SELECT * FROM imports WHERE id = ?")
             .bind(id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&self.inner.read_pool)
             .await?;
         Ok(row.map(|row| self.row_to_import(&row)))
     }
     /// Get all active (non-complete, non-failed) imports
     pub async fn get_active_imports(&self) -> Result<Vec<DbImport>, sqlx::Error> {
         let rows = sqlx::query(
-                "SELECT * FROM imports WHERE status IN ('preparing', 'importing') ORDER BY created_at DESC",
-            )
-            .fetch_all(&self.pool)
-            .await?;
+            "SELECT * FROM imports WHERE status IN ('preparing', 'importing') ORDER BY created_at DESC",
+        )
+        .fetch_all(&self.inner.read_pool)
+        .await?;
         Ok(rows.iter().map(|row| self.row_to_import(row)).collect())
     }
     /// Update import status
@@ -1817,17 +1953,19 @@ impl Database {
         id: &str,
         status: ImportOperationStatus,
     ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         let now = Utc::now().timestamp();
         sqlx::query("UPDATE imports SET status = ?, updated_at = ? WHERE id = ?")
             .bind(status.as_str())
             .bind(now)
             .bind(id)
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
         Ok(())
     }
     /// Update import with error message and set status to Failed
     pub async fn update_import_error(&self, id: &str, error: &str) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         let now = Utc::now().timestamp();
         sqlx::query(
             "UPDATE imports SET status = ?, error_message = ?, updated_at = ? WHERE id = ?",
@@ -1836,7 +1974,7 @@ impl Database {
         .bind(error)
         .bind(now)
         .bind(id)
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
         Ok(())
     }
@@ -1846,12 +1984,13 @@ impl Database {
         import_id: &str,
         release_id: &str,
     ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         let now = Utc::now().timestamp();
         sqlx::query("UPDATE imports SET release_id = ?, updated_at = ? WHERE id = ?")
             .bind(release_id)
             .bind(now)
             .bind(import_id)
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
         Ok(())
     }
@@ -1859,9 +1998,10 @@ impl Database {
     /// Delete an import record from the database.
     /// Used by UI to dismiss stuck imports so they don't reappear after restart.
     pub async fn delete_import(&self, id: &str) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
         sqlx::query("DELETE FROM imports WHERE id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&mut *conn)
             .await?;
         Ok(())
     }

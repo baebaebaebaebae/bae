@@ -6,8 +6,8 @@ CREATE TABLE artists (
     bandcamp_artist_id TEXT,
     musicbrainz_artist_id TEXT,
 
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    _updated_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
 );
 
 CREATE TABLE albums (
@@ -18,8 +18,8 @@ CREATE TABLE albums (
     cover_release_id TEXT,
     cover_art_url TEXT,
     is_compilation BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    _updated_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
 );
 
 CREATE TABLE album_discogs (
@@ -27,6 +27,8 @@ CREATE TABLE album_discogs (
     album_id TEXT NOT NULL UNIQUE,
     discogs_master_id TEXT,
     discogs_release_id TEXT NOT NULL,
+    _updated_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
     FOREIGN KEY (album_id) REFERENCES albums (id) ON DELETE CASCADE
 );
 
@@ -35,6 +37,8 @@ CREATE TABLE album_musicbrainz (
     album_id TEXT NOT NULL UNIQUE,
     musicbrainz_release_group_id TEXT NOT NULL,
     musicbrainz_release_id TEXT NOT NULL,
+    _updated_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
     FOREIGN KEY (album_id) REFERENCES albums (id) ON DELETE CASCADE
 );
 
@@ -43,6 +47,8 @@ CREATE TABLE album_artists (
     album_id TEXT NOT NULL,
     artist_id TEXT NOT NULL,
     position INTEGER NOT NULL,
+    _updated_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
     FOREIGN KEY (album_id) REFERENCES albums (id) ON DELETE CASCADE,
     FOREIGN KEY (artist_id) REFERENCES artists (id) ON DELETE CASCADE,
     UNIQUE(album_id, artist_id)
@@ -61,8 +67,8 @@ CREATE TABLE releases (
     country TEXT,
     barcode TEXT,
     import_status TEXT NOT NULL DEFAULT 'queued',
+    _updated_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
     FOREIGN KEY (album_id) REFERENCES albums (id) ON DELETE CASCADE,
     UNIQUE(album_id, discogs_release_id),
     UNIQUE(album_id, bandcamp_release_id)
@@ -77,6 +83,7 @@ CREATE TABLE tracks (
     duration_ms INTEGER,
     discogs_position TEXT,
     import_status TEXT NOT NULL DEFAULT 'queued',
+    _updated_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY (release_id) REFERENCES releases (id) ON DELETE CASCADE
 );
@@ -87,11 +94,13 @@ CREATE TABLE track_artists (
     artist_id TEXT NOT NULL,
     position INTEGER NOT NULL,
     role TEXT,
+    _updated_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
     FOREIGN KEY (track_id) REFERENCES tracks (id) ON DELETE CASCADE,
     FOREIGN KEY (artist_id) REFERENCES artists (id) ON DELETE CASCADE
 );
 
-CREATE TABLE files (
+CREATE TABLE release_files (
     id TEXT PRIMARY KEY,
     release_id TEXT NOT NULL,
     original_filename TEXT NOT NULL,
@@ -99,6 +108,7 @@ CREATE TABLE files (
     content_type TEXT NOT NULL,
     source_path TEXT,
     encryption_nonce BLOB,
+    _updated_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY (release_id) REFERENCES releases (id) ON DELETE CASCADE
 );
@@ -118,7 +128,8 @@ CREATE TABLE audio_formats (
     bits_per_sample INTEGER NOT NULL,
     seektable_json TEXT NOT NULL,
     audio_data_start INTEGER NOT NULL,
-    file_id TEXT REFERENCES files(id),
+    file_id TEXT REFERENCES release_files(id),
+    _updated_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY (track_id) REFERENCES tracks (id) ON DELETE CASCADE
 );
@@ -157,6 +168,7 @@ CREATE TABLE library_images (
     height INTEGER,
     source TEXT NOT NULL,
     source_url TEXT,
+    _updated_at TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
 
@@ -177,7 +189,7 @@ CREATE TABLE storage_profiles (
 
 CREATE TABLE release_storage (
     id TEXT PRIMARY KEY,
-    release_id TEXT NOT NULL UNIQUE,
+    release_id TEXT NOT NULL,
     storage_profile_id TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY (release_id) REFERENCES releases (id) ON DELETE CASCADE,
@@ -206,7 +218,7 @@ CREATE INDEX idx_track_artists_track_id ON track_artists (track_id);
 CREATE INDEX idx_track_artists_artist_id ON track_artists (artist_id);
 CREATE INDEX idx_releases_album_id ON releases (album_id);
 CREATE INDEX idx_tracks_release_id ON tracks (release_id);
-CREATE INDEX idx_files_release_id ON files (release_id);
+CREATE INDEX idx_release_files_release_id ON release_files (release_id);
 CREATE INDEX idx_torrents_release_id ON torrents (release_id);
 CREATE INDEX idx_torrents_info_hash ON torrents (info_hash);
 CREATE INDEX idx_torrent_piece_mappings_torrent_id ON torrent_piece_mappings (torrent_id);

@@ -23,6 +23,7 @@ pub mod retry;
 pub mod sodium_ffi;
 pub mod storage;
 pub mod subsonic;
+pub mod sync;
 #[cfg(feature = "test-utils")]
 pub mod test_support;
 pub mod text_encoding;

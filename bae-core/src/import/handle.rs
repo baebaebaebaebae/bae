@@ -334,6 +334,7 @@ impl ImportServiceHandle {
                 height: None,
                 source: source.to_string(),
                 source_url: Some(url),
+                updated_at: chrono::Utc::now(),
                 created_at: chrono::Utc::now(),
             };
             library_manager

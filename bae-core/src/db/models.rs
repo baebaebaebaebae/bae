@@ -70,6 +70,8 @@ pub struct DbAlbumArtist {
     pub artist_id: String,
     /// Order of this artist in multi-artist albums (0-indexed)
     pub position: i32,
+    pub updated_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
 }
 /// Links artists to tracks (many-to-many)
 ///
@@ -84,6 +86,8 @@ pub struct DbTrackArtist {
     pub position: i32,
     /// Role: "main", "featuring", "remixer", etc.
     pub role: Option<String>,
+    pub updated_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
 }
 /// Discogs release information for an album.
 ///
@@ -198,6 +202,7 @@ pub struct DbTrack {
     /// Position from metadata source (e.g., "A1", "1", "1-1")
     pub discogs_position: Option<String>,
     pub import_status: ImportStatus,
+    pub updated_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
 }
 /// Physical file belonging to a release
@@ -228,6 +233,7 @@ pub struct DbFile {
     /// Only set when file is encrypted with chunked encryption.
     /// Stored at import time, used during seek to avoid fetching nonce from cloud.
     pub encryption_nonce: Option<Vec<u8>>,
+    pub updated_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
 }
 /// Audio format metadata for a track
@@ -279,6 +285,7 @@ pub struct DbAudioFormat {
     /// FK to DbFile containing this track's audio data.
     /// Links to files.id to get the actual source_path.
     pub file_id: Option<String>,
+    pub updated_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
 }
 impl DbArtist {
@@ -299,22 +306,28 @@ impl DbArtist {
 }
 impl DbAlbumArtist {
     pub fn new(album_id: &str, artist_id: &str, position: i32) -> Self {
+        let now = Utc::now();
         DbAlbumArtist {
             id: Uuid::new_v4().to_string(),
             album_id: album_id.to_string(),
             artist_id: artist_id.to_string(),
             position,
+            updated_at: now,
+            created_at: now,
         }
     }
 }
 impl DbTrackArtist {
     pub fn new(track_id: &str, artist_id: &str, position: i32, role: Option<String>) -> Self {
+        let now = Utc::now();
         DbTrackArtist {
             id: Uuid::new_v4().to_string(),
             track_id: track_id.to_string(),
             artist_id: artist_id.to_string(),
             position,
             role,
+            updated_at: now,
+            created_at: now,
         }
     }
 }
@@ -475,6 +488,7 @@ impl DbTrack {
         title: &str,
         track_number: Option<i32>,
     ) -> Self {
+        let now = chrono::Utc::now();
         DbTrack {
             id: track_id.to_string(),
             release_id: release_id.to_string(),
@@ -484,7 +498,8 @@ impl DbTrack {
             duration_ms: None,
             discogs_position: None,
             import_status: ImportStatus::Queued,
-            created_at: chrono::Utc::now(),
+            updated_at: now,
+            created_at: now,
         }
     }
     pub fn from_discogs_track(
@@ -493,6 +508,7 @@ impl DbTrack {
         track_index: usize,
         disc_number: Option<i32>,
     ) -> Result<Self, String> {
+        let now = Utc::now();
         Ok(DbTrack {
             id: Uuid::new_v4().to_string(),
             release_id: release_id.to_string(),
@@ -502,7 +518,8 @@ impl DbTrack {
             duration_ms: None,
             discogs_position: Some(discogs_track.position.clone()),
             import_status: ImportStatus::Queued,
-            created_at: Utc::now(),
+            updated_at: now,
+            created_at: now,
         })
     }
 }
@@ -517,6 +534,7 @@ impl DbFile {
         file_size: i64,
         content_type: ContentType,
     ) -> Self {
+        let now = Utc::now();
         DbFile {
             id: Uuid::new_v4().to_string(),
             release_id: release_id.to_string(),
@@ -525,7 +543,8 @@ impl DbFile {
             content_type,
             source_path: None,
             encryption_nonce: None,
-            created_at: Utc::now(),
+            updated_at: now,
+            created_at: now,
         }
     }
 
@@ -627,6 +646,7 @@ impl DbAudioFormat {
         audio_data_start: i64,
         file_id: Option<String>,
     ) -> Self {
+        let now = Utc::now();
         DbAudioFormat {
             id: Uuid::new_v4().to_string(),
             track_id: track_id.to_string(),
@@ -643,7 +663,8 @@ impl DbAudioFormat {
             seektable_json,
             audio_data_start,
             file_id,
-            created_at: Utc::now(),
+            updated_at: now,
+            created_at: now,
         }
     }
 }
@@ -827,6 +848,7 @@ pub struct DbLibraryImage {
     pub source: String,
     /// MB: CAA image ID, Discogs: URL, local: "release://{path}"
     pub source_url: Option<String>,
+    pub updated_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
 }
 /// Where release data is stored

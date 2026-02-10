@@ -54,6 +54,10 @@ pub struct ConfigYaml {
     /// Human-readable name for this library
     #[serde(default)]
     pub library_name: Option<String>,
+    /// Unique identifier for this device, used as the namespace key for sync changesets.
+    /// Auto-generated on first startup if missing.
+    #[serde(default)]
+    pub device_id: Option<String>,
     /// Whether global keyring entries have been migrated to per-library entries
     #[serde(default)]
     pub keys_migrated: bool,
@@ -110,6 +114,9 @@ struct KnownLibraries {
 #[derive(Clone, Debug)]
 pub struct Config {
     pub library_id: String,
+    /// Unique device identifier for sync changeset namespacing.
+    /// Always present after startup (auto-generated if missing from config).
+    pub device_id: String,
     pub library_dir: LibraryDir,
     pub library_name: Option<String>,
     pub keys_migrated: bool,
@@ -158,6 +165,20 @@ impl Config {
                 id
             }
         };
+        let device_id = match std::env::var("BAE_DEVICE_ID")
+            .ok()
+            .filter(|s| !s.is_empty())
+        {
+            Some(id) => id,
+            None => {
+                let id = uuid::Uuid::new_v4().to_string();
+
+                info!("No BAE_DEVICE_ID in .env, generated: {}", id);
+                append_to_env_file(env_path, "BAE_DEVICE_ID", &id);
+                id
+            }
+        };
+
         let discogs_key_stored = std::env::var("BAE_DISCOGS_API_KEY")
             .ok()
             .filter(|k| !k.is_empty())
@@ -181,6 +202,7 @@ impl Config {
 
         Self {
             library_id,
+            device_id,
             library_dir,
             library_name: None,
             keys_migrated: true,
@@ -246,8 +268,27 @@ impl Config {
             }))
             .unwrap_or_else(|e| panic!("Failed to parse {}: {}", config_path.display(), e));
 
+        // Auto-generate device_id if missing (first startup after upgrade)
+        let device_id = match yaml_config.device_id {
+            Some(id) => id,
+            None => {
+                let id = uuid::Uuid::new_v4().to_string();
+
+                info!("No device_id in config.yaml, generated: {}", id);
+                let mut yaml_to_save = yaml_config.clone();
+                yaml_to_save.device_id = Some(id.clone());
+                if let Err(e) =
+                    std::fs::write(&config_path, serde_yaml::to_string(&yaml_to_save).unwrap())
+                {
+                    warn!("Failed to save device_id to config.yaml: {e}");
+                }
+                id
+            }
+        };
+
         Self {
             library_id: yaml_config.library_id,
+            device_id,
             library_dir,
             library_name: yaml_config.library_name,
             keys_migrated: yaml_config.keys_migrated,
@@ -291,6 +332,7 @@ impl Config {
 
         let mut new_values = std::collections::HashMap::new();
         new_values.insert("BAE_LIBRARY_ID", self.library_id.clone());
+        new_values.insert("BAE_DEVICE_ID", self.device_id.clone());
         if let Some(iface) = &self.torrent_bind_interface {
             new_values.insert("BAE_TORRENT_BIND_INTERFACE", iface.clone());
         }
@@ -332,6 +374,7 @@ impl Config {
         let yaml = ConfigYaml {
             library_id: self.library_id.clone(),
             library_name: self.library_name.clone(),
+            device_id: Some(self.device_id.clone()),
             keys_migrated: self.keys_migrated,
             discogs_key_stored: self.discogs_key_stored,
             encryption_key_stored: self.encryption_key_stored,
@@ -366,8 +409,11 @@ impl Config {
 
         let key_service = crate::keys::KeyService::new(dev_mode, id.clone());
 
+        let device_id = uuid::Uuid::new_v4().to_string();
+
         let mut config = Config {
             library_id: id,
+            device_id,
             library_dir: library_dir.clone(),
             library_name: None,
             keys_migrated: true,
@@ -619,6 +665,7 @@ mod tests {
     fn make_test_config(library_id: &str, library_path: PathBuf) -> Config {
         Config {
             library_id: library_id.to_string(),
+            device_id: "test-device-id".to_string(),
             library_dir: LibraryDir::new(library_path),
             library_name: None,
             keys_migrated: true,

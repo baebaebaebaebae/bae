@@ -934,6 +934,7 @@ impl ImportService {
             height: None,
             source: "local".to_string(),
             source_url: Some(source_url),
+            updated_at: chrono::Utc::now(),
             created_at: chrono::Utc::now(),
         };
 
@@ -1001,6 +1002,7 @@ impl ImportService {
             height: None,
             source: source.to_string(),
             source_url: Some(url.to_string()),
+            updated_at: chrono::Utc::now(),
             created_at: chrono::Utc::now(),
         };
 

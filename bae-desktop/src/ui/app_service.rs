@@ -1569,6 +1569,7 @@ async fn change_cover_async(
                 height: None,
                 source: "local".to_string(),
                 source_url: Some(format!("release://{}", file.original_filename)),
+                updated_at: chrono::Utc::now(),
                 created_at: chrono::Utc::now(),
             };
             library_manager
@@ -1611,6 +1612,7 @@ async fn change_cover_async(
                 height: None,
                 source,
                 source_url: Some(url.clone()),
+                updated_at: chrono::Utc::now(),
                 created_at: chrono::Utc::now(),
             };
             library_manager
