@@ -18,6 +18,15 @@ struct HeadJson {
     seq: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     snapshot_seq: Option<u64>,
+    /// RFC 3339 timestamp of when this head was last written.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_sync: Option<String>,
+}
+
+/// Serialized form of `min_schema_version.json.enc`.
+#[derive(Serialize, Deserialize)]
+struct MinSchemaVersionJson {
+    min_schema_version: u32,
 }
 
 /// S3-backed sync bucket client.
@@ -189,6 +198,7 @@ impl SyncBucketClient for S3SyncBucketClient {
                 device_id: device_id.to_string(),
                 seq: head_json.seq,
                 snapshot_seq: head_json.snapshot_seq,
+                last_sync: head_json.last_sync,
             });
         }
 
@@ -218,8 +228,13 @@ impl SyncBucketClient for S3SyncBucketClient {
         device_id: &str,
         seq: u64,
         snapshot_seq: Option<u64>,
+        timestamp: &str,
     ) -> Result<(), BucketError> {
-        let head = HeadJson { seq, snapshot_seq };
+        let head = HeadJson {
+            seq,
+            snapshot_seq,
+            last_sync: Some(timestamp.to_string()),
+        };
         let json = serde_json::to_vec(&head)
             .map_err(|e| BucketError::S3(format!("serialize head: {e}")))?;
         let encrypted = self.encryption.encrypt(&json);
@@ -267,6 +282,36 @@ impl SyncBucketClient for S3SyncBucketClient {
             .collect();
         seqs.sort();
         Ok(seqs)
+    }
+
+    async fn get_min_schema_version(&self) -> Result<Option<u32>, BucketError> {
+        let key = "min_schema_version.json.enc";
+        let encrypted = match self.get_object(key).await {
+            Ok(data) => data,
+            Err(BucketError::NotFound(_)) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+
+        let decrypted = self
+            .encryption
+            .decrypt(&encrypted)
+            .map_err(|e| BucketError::Decryption(format!("min_schema_version: {e}")))?;
+
+        let parsed: MinSchemaVersionJson = serde_json::from_slice(&decrypted)
+            .map_err(|e| BucketError::S3(format!("parse min_schema_version: {e}")))?;
+
+        Ok(Some(parsed.min_schema_version))
+    }
+
+    async fn set_min_schema_version(&self, version: u32) -> Result<(), BucketError> {
+        let payload = MinSchemaVersionJson {
+            min_schema_version: version,
+        };
+        let json = serde_json::to_vec(&payload)
+            .map_err(|e| BucketError::S3(format!("serialize min_schema_version: {e}")))?;
+        let encrypted = self.encryption.encrypt(&json);
+        self.put_object("min_schema_version.json.enc", encrypted)
+            .await
     }
 }
 

@@ -20,6 +20,10 @@ pub struct DeviceHead {
     /// The seq up to which the latest snapshot covers. None if no snapshot
     /// has been created by this device.
     pub snapshot_seq: Option<u64>,
+    /// RFC 3339 timestamp of when this head was last updated (i.e., when
+    /// the device last synced). None for heads written before this field
+    /// was added.
+    pub last_sync: Option<String>,
 }
 
 /// Error type for bucket operations.
@@ -57,12 +61,14 @@ pub trait SyncBucketClient: Send + Sync {
     /// Update the head pointer for a device.
     /// Writes to `heads/{device_id}.json.enc`.
     /// If `snapshot_seq` is Some, the head records that a snapshot covers
-    /// all changesets up to that seq.
+    /// all changesets up to that seq. `timestamp` is the RFC 3339 time of
+    /// this sync (used by the sync status UI).
     async fn put_head(
         &self,
         device_id: &str,
         seq: u64,
         snapshot_seq: Option<u64>,
+        timestamp: &str,
     ) -> Result<(), BucketError>;
 
     /// Upload an encrypted image.
@@ -88,4 +94,16 @@ pub trait SyncBucketClient: Send + Sync {
     /// List all changeset keys for a device.
     /// Returns the sequence numbers that exist in `changes/{device_id}/`.
     async fn list_changesets(&self, device_id: &str) -> Result<Vec<u64>, BucketError>;
+
+    /// Get the minimum schema version required to sync with this bucket.
+    ///
+    /// Returns `None` if no minimum has been set (backwards compat: any version
+    /// can sync). Reads from `min_schema_version.json.enc`.
+    async fn get_min_schema_version(&self) -> Result<Option<u32>, BucketError>;
+
+    /// Set the minimum schema version required to sync with this bucket.
+    ///
+    /// Writes to `min_schema_version.json.enc`. Used when a breaking migration
+    /// bumps the schema and all devices must upgrade before syncing.
+    async fn set_min_schema_version(&self, version: u32) -> Result<(), BucketError>;
 }

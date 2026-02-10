@@ -12,6 +12,7 @@ pub mod service;
 pub mod session;
 pub mod session_ext;
 pub mod snapshot;
+pub mod status;
 #[cfg(test)]
 mod test_helpers;
 #[cfg(test)]

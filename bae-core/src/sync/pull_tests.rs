@@ -349,6 +349,128 @@ async fn pull_cursor_advancement_is_incremental() {
     }
 }
 
+// ---- Min schema version tests ----
+
+#[tokio::test]
+async fn pull_refuses_when_local_version_below_min() {
+    unsafe {
+        let db = open_memory_db();
+        create_synced_schema(db);
+
+        let bucket = MockBucket::new();
+        // Set min_schema_version higher than our SCHEMA_VERSION.
+        bucket
+            .set_min_schema_version(SCHEMA_VERSION + 1)
+            .await
+            .unwrap();
+
+        let cursors = HashMap::new();
+        let result = pull::pull_changes(db, &bucket, "dev-local", &cursors).await;
+
+        match result {
+            Err(pull::PullError::SchemaVersionTooOld {
+                local_version,
+                min_version,
+            }) => {
+                assert_eq!(local_version, SCHEMA_VERSION);
+                assert_eq!(min_version, SCHEMA_VERSION + 1);
+            }
+            other => panic!("expected SchemaVersionTooOld, got {other:?}"),
+        }
+
+        ffi::sqlite3_close(db);
+    }
+}
+
+#[tokio::test]
+async fn pull_works_when_local_version_equals_min() {
+    unsafe {
+        let db = open_memory_db();
+        create_synced_schema(db);
+
+        let bucket = MockBucket::new();
+        // Set min_schema_version equal to our SCHEMA_VERSION.
+        bucket.set_min_schema_version(SCHEMA_VERSION).await.unwrap();
+
+        // Add a changeset so we can verify pull actually works.
+        let remote_db = open_memory_db();
+        create_synced_schema(remote_db);
+        let cs = capture_changeset(
+            remote_db,
+            &["artists"],
+            &["INSERT INTO artists (id, name, _updated_at, created_at) VALUES ('a1', 'Test', '0000000001000-0000-dev-r', '2026-01-01')"],
+        );
+        bucket.store_changeset("dev-remote", 1, &cs, SCHEMA_VERSION);
+
+        let cursors = HashMap::new();
+        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors)
+            .await
+            .expect("pull should succeed when local version equals min");
+
+        assert_eq!(result.changesets_applied, 1);
+        assert_eq!(updated.get("dev-remote"), Some(&1));
+
+        let name = query_text(db, "SELECT name FROM artists WHERE id = 'a1'");
+        assert_eq!(name, "Test");
+
+        ffi::sqlite3_close(db);
+        ffi::sqlite3_close(remote_db);
+    }
+}
+
+#[tokio::test]
+async fn pull_works_when_local_version_above_min() {
+    unsafe {
+        let db = open_memory_db();
+        create_synced_schema(db);
+
+        let bucket = MockBucket::new();
+        // Set min_schema_version below our SCHEMA_VERSION (currently 2).
+        bucket.set_min_schema_version(1).await.unwrap();
+
+        let cursors = HashMap::new();
+        let (_, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors)
+            .await
+            .expect("pull should succeed when local version is above min");
+
+        assert_eq!(result.changesets_applied, 0);
+
+        ffi::sqlite3_close(db);
+    }
+}
+
+#[tokio::test]
+async fn pull_works_when_no_min_schema_version_set() {
+    // Missing min_schema_version file is treated as "no minimum" (backwards compat).
+    unsafe {
+        let db = open_memory_db();
+        create_synced_schema(db);
+
+        let bucket = MockBucket::new();
+        // Don't set any min_schema_version -- default is None.
+
+        let remote_db = open_memory_db();
+        create_synced_schema(remote_db);
+        let cs = capture_changeset(
+            remote_db,
+            &["artists"],
+            &["INSERT INTO artists (id, name, _updated_at, created_at) VALUES ('a1', 'NoMin', '0000000001000-0000-dev-r', '2026-01-01')"],
+        );
+        bucket.store_changeset("dev-remote", 1, &cs, SCHEMA_VERSION);
+
+        let cursors = HashMap::new();
+        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors)
+            .await
+            .expect("pull should succeed when no min_schema_version is set");
+
+        assert_eq!(result.changesets_applied, 1);
+        assert_eq!(updated.get("dev-remote"), Some(&1));
+
+        ffi::sqlite3_close(db);
+        ffi::sqlite3_close(remote_db);
+    }
+}
+
 // ---- Full sync cycle tests ----
 
 #[tokio::test]
@@ -391,7 +513,7 @@ async fn sync_cycle_push_then_pull() {
             .await
             .expect("put");
         bucket
-            .put_head("dev-1", outgoing.seq, None)
+            .put_head("dev-1", outgoing.seq, None, "2026-02-10T00:00:00Z")
             .await
             .expect("put head");
 
