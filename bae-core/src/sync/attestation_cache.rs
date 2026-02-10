@@ -32,7 +32,7 @@ impl<'a> AttestationCache<'a> {
         self.db
             .insert_attestation(&db_att)
             .await
-            .map_err(|e| AttestationError::InvalidPubkey(format!("db error: {e}")))?;
+            .map_err(|e| AttestationError::Database(e.to_string()))?;
         Ok(())
     }
 
@@ -45,7 +45,7 @@ impl<'a> AttestationCache<'a> {
             .db
             .get_attestations_by_mbid(mbid)
             .await
-            .map_err(|e| AttestationError::InvalidPubkey(format!("db error: {e}")))?;
+            .map_err(|e| AttestationError::Database(e.to_string()))?;
         Ok(rows.into_iter().map(from_db_attestation).collect())
     }
 
@@ -58,7 +58,7 @@ impl<'a> AttestationCache<'a> {
             .db
             .get_attestations_by_infohash(infohash)
             .await
-            .map_err(|e| AttestationError::InvalidPubkey(format!("db error: {e}")))?;
+            .map_err(|e| AttestationError::Database(e.to_string()))?;
         Ok(rows.into_iter().map(from_db_attestation).collect())
     }
 
@@ -94,7 +94,7 @@ impl<'a> AttestationCache<'a> {
         self.db
             .get_attestation_confidence(mbid, infohash)
             .await
-            .map_err(|e| AttestationError::InvalidPubkey(format!("db error: {e}")))
+            .map_err(|e| AttestationError::Database(e.to_string()))
     }
 }
 

@@ -2325,22 +2325,6 @@ impl Database {
         Ok(cnt as usize)
     }
 
-    /// Get distinct signer public keys for a specific mbid+infohash pair.
-    pub async fn get_distinct_signers(
-        &self,
-        mbid: &str,
-        infohash: &str,
-    ) -> Result<Vec<String>, sqlx::Error> {
-        let rows = sqlx::query(
-            "SELECT DISTINCT author_pubkey FROM attestations WHERE mbid = ? AND infohash = ?",
-        )
-        .bind(mbid)
-        .bind(infohash)
-        .fetch_all(&self.inner.read_pool)
-        .await?;
-        Ok(rows.iter().map(|r| r.get("author_pubkey")).collect())
-    }
-
     /// Delete an attestation by ID.
     pub async fn delete_attestation(&self, id: &str) -> Result<(), sqlx::Error> {
         let mut conn = self.writer()?.lock().await;

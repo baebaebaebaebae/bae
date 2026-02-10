@@ -18,6 +18,8 @@ pub enum AttestationError {
     InvalidSignature(String),
     #[error("signature verification failed")]
     VerificationFailed,
+    #[error("database error: {0}")]
+    Database(String),
 }
 
 /// A signed attestation linking a MusicBrainz release ID to a BitTorrent infohash.
