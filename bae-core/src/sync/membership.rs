@@ -109,10 +109,12 @@ impl MembershipChain {
     }
 
     /// Create a chain from existing entries (e.g., downloaded from the bucket).
-    /// Entries are sorted by timestamp on construction.
-    pub fn from_entries(mut entries: Vec<MembershipEntry>) -> Self {
+    /// Entries are sorted by timestamp and validated on construction.
+    pub fn from_entries(mut entries: Vec<MembershipEntry>) -> Result<Self, MembershipError> {
         entries.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
-        Self { entries }
+        let chain = Self { entries };
+        chain.validate()?;
+        Ok(chain)
     }
 
     /// Return the entries in the chain.
@@ -419,9 +421,8 @@ mod tests {
                 MemberRole::Member,
                 "0000000004000-0000-dev1",
             ),
-        ]);
-
-        chain.validate().unwrap();
+        ])
+        .unwrap();
 
         // Owner is always a member.
         assert!(chain.is_member_at(&pubkey_hex(&owner), "0000000001000-0000-dev1"));
@@ -463,9 +464,8 @@ mod tests {
                 MemberRole::Member,
                 "0000000004000-0000-dev1",
             ),
-        ]);
-
-        chain.validate().unwrap();
+        ])
+        .unwrap();
 
         let members = chain.current_members();
         assert_eq!(members.len(), 2);
@@ -638,11 +638,8 @@ mod tests {
             "0000000002000-0000-dev1",
         );
 
-        // from_entries should sort them.
-        let chain = MembershipChain::from_entries(vec![e3, e1, e2]);
-
-        // Should validate because sorting puts them in correct order.
-        chain.validate().unwrap();
+        // from_entries should sort and validate them.
+        let chain = MembershipChain::from_entries(vec![e3, e1, e2]).unwrap();
 
         // Verify they're sorted.
         let entries = chain.entries();
@@ -674,8 +671,7 @@ mod tests {
         // Tamper with e2's timestamp after signing.
         e2.timestamp = "0000000002500-0000-dev1".to_string();
 
-        let chain = MembershipChain::from_entries(vec![e1, e2]);
-        let result = chain.validate();
+        let result = MembershipChain::from_entries(vec![e1, e2]);
         assert!(matches!(result, Err(MembershipError::InvalidSignature(1))));
     }
 

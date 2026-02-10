@@ -25,6 +25,8 @@ pub enum InviteError {
     Crypto(String),
     #[error("User {0} is not a current member")]
     NotAMember(String),
+    #[error("Cannot revoke the last owner of a library")]
+    LastOwner,
 }
 
 /// Determine the next seq for an author's membership entries in the bucket.
@@ -52,21 +54,18 @@ fn ed25519_hex_to_x25519(
     Ok(keys::ed25519_to_x25519_public_key(&pk_bytes))
 }
 
-/// Sign a membership entry and upload it to the bucket.
-async fn sign_and_upload_entry(
+/// Upload a signed membership entry to the bucket.
+async fn upload_membership_entry(
     bucket: &dyn SyncBucketClient,
-    entry: &mut MembershipEntry,
-    keypair: &UserKeypair,
+    entry: &MembershipEntry,
+    author_pubkey_hex: &str,
 ) -> Result<(), InviteError> {
-    sign_membership_entry(entry, keypair);
-
-    let author_pubkey_hex = hex::encode(keypair.public_key);
-    let next_seq = next_membership_seq(bucket, &author_pubkey_hex).await?;
+    let next_seq = next_membership_seq(bucket, author_pubkey_hex).await?;
 
     let entry_bytes =
-        serde_json::to_vec(&entry).map_err(|e| InviteError::Crypto(format!("serialize: {e}")))?;
+        serde_json::to_vec(entry).map_err(|e| InviteError::Crypto(format!("serialize: {e}")))?;
     bucket
-        .put_membership_entry(&author_pubkey_hex, next_seq, entry_bytes)
+        .put_membership_entry(author_pubkey_hex, next_seq, entry_bytes)
         .await?;
 
     Ok(())
@@ -75,8 +74,8 @@ async fn sign_and_upload_entry(
 /// Create an invitation for a new member.
 ///
 /// This wraps the library encryption key to the invitee's X25519 public key,
-/// creates and signs a membership entry (Add), uploads both to the bucket,
-/// and appends the entry to the local chain.
+/// creates and signs a membership entry (Add), validates it against the local
+/// chain, and only then uploads both to the bucket.
 pub async fn create_invitation(
     bucket: &dyn SyncBucketClient,
     chain: &mut MembershipChain,
@@ -92,12 +91,7 @@ pub async fn create_invitation(
     // Wrap the library encryption key.
     let wrapped_key = keys::seal_box_encrypt(encryption_key, &invitee_x25519_pk);
 
-    // Upload wrapped key.
-    bucket
-        .put_wrapped_key(invitee_ed25519_pubkey, wrapped_key)
-        .await?;
-
-    // Create, sign, and upload a membership entry.
+    // Create and sign a membership entry.
     let mut entry = MembershipEntry {
         action: MembershipAction::Add,
         user_pubkey: invitee_ed25519_pubkey.to_string(),
@@ -106,10 +100,18 @@ pub async fn create_invitation(
         author_pubkey: String::new(),
         signature: String::new(),
     };
-    sign_and_upload_entry(bucket, &mut entry, owner_keypair).await?;
+    sign_membership_entry(&mut entry, owner_keypair);
 
-    // Add to the local chain (validates signature and author ownership).
-    chain.add_entry(entry)?;
+    // Validate against the local chain BEFORE any bucket writes.
+    chain.add_entry(entry.clone())?;
+
+    // Upload wrapped key and membership entry.
+    bucket
+        .put_wrapped_key(invitee_ed25519_pubkey, wrapped_key)
+        .await?;
+
+    let author_pubkey_hex = hex::encode(owner_keypair.public_key);
+    upload_membership_entry(bucket, &entry, &author_pubkey_hex).await?;
 
     Ok(())
 }
@@ -155,13 +157,23 @@ pub async fn revoke_member(
     revokee_pubkey: &str,
     timestamp: &str,
 ) -> Result<[u8; 32], InviteError> {
-    // Verify the revokee is a current member before doing anything.
     let members = chain.current_members();
+
+    // Verify the revokee is a current member.
     if !members.iter().any(|(pk, _)| pk == revokee_pubkey) {
         return Err(InviteError::NotAMember(revokee_pubkey.to_string()));
     }
 
-    // Create, sign, and upload a Remove entry.
+    // Ensure at least one owner would remain after the removal.
+    let remaining_owners = members
+        .iter()
+        .filter(|(pk, role)| pk != revokee_pubkey && *role == MemberRole::Owner)
+        .count();
+    if remaining_owners == 0 {
+        return Err(InviteError::LastOwner);
+    }
+
+    // Create and sign a Remove entry.
     let mut entry = MembershipEntry {
         action: MembershipAction::Remove,
         user_pubkey: revokee_pubkey.to_string(),
@@ -170,10 +182,14 @@ pub async fn revoke_member(
         author_pubkey: String::new(),
         signature: String::new(),
     };
-    sign_and_upload_entry(bucket, &mut entry, owner_keypair).await?;
+    sign_membership_entry(&mut entry, owner_keypair);
 
-    // Add to the local chain (validates signature and author ownership).
-    chain.add_entry(entry)?;
+    // Validate against the local chain BEFORE any bucket writes.
+    chain.add_entry(entry.clone())?;
+
+    // Upload the Remove entry.
+    let author_pubkey_hex = hex::encode(owner_keypair.public_key);
+    upload_membership_entry(bucket, &entry, &author_pubkey_hex).await?;
 
     // Generate a new random encryption key.
     let new_key = encryption::generate_random_key();
@@ -533,5 +549,86 @@ mod tests {
         .await;
 
         assert!(matches!(result, Err(InviteError::NotAMember(_))));
+    }
+
+    #[tokio::test]
+    async fn revoke_last_owner_fails() {
+        let owner = gen_keypair();
+        let member = gen_keypair();
+
+        let bucket = MockBucket::new();
+        let mut chain = bootstrap_chain(&owner);
+
+        // Add a regular member.
+        create_invitation(
+            &bucket,
+            &mut chain,
+            &owner,
+            &pubkey_hex(&member),
+            MemberRole::Member,
+            &[42u8; 32],
+            "0000000002000-0000-dev1",
+        )
+        .await
+        .unwrap();
+
+        // Owner tries to revoke themselves (the only owner).
+        let result = revoke_member(
+            &bucket,
+            &mut chain,
+            &owner,
+            &pubkey_hex(&owner),
+            "0000000003000-0000-dev1",
+        )
+        .await;
+
+        assert!(matches!(result, Err(InviteError::LastOwner)));
+    }
+
+    #[tokio::test]
+    async fn non_owner_revoke_fails() {
+        let owner = gen_keypair();
+        let member1 = gen_keypair();
+        let member2 = gen_keypair();
+
+        let bucket = MockBucket::new();
+        let mut chain = bootstrap_chain(&owner);
+
+        // Add two members.
+        create_invitation(
+            &bucket,
+            &mut chain,
+            &owner,
+            &pubkey_hex(&member1),
+            MemberRole::Member,
+            &[42u8; 32],
+            "0000000002000-0000-dev1",
+        )
+        .await
+        .unwrap();
+
+        create_invitation(
+            &bucket,
+            &mut chain,
+            &owner,
+            &pubkey_hex(&member2),
+            MemberRole::Member,
+            &[42u8; 32],
+            "0000000003000-0000-dev1",
+        )
+        .await
+        .unwrap();
+
+        // Member (not owner) tries to revoke another member.
+        let result = revoke_member(
+            &bucket,
+            &mut chain,
+            &member1,
+            &pubkey_hex(&member2),
+            "0000000004000-0000-dev1",
+        )
+        .await;
+
+        assert!(matches!(result, Err(InviteError::Membership(_))));
     }
 }
