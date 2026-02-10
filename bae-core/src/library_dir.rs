@@ -57,7 +57,6 @@ pub struct Manifest {
     pub encryption_key_fingerprint: Option<String>,
     pub profile_id: String,
     pub profile_name: String,
-    pub replicated_at: Option<String>,
 }
 
 impl Deref for LibraryDir {

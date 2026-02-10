@@ -106,7 +106,6 @@ impl AppService {
 
         self.subscribe_import_progress();
         self.subscribe_library_events();
-        self.subscribe_metadata_replication();
         self.subscribe_folder_scan_events();
         self.load_initial_data();
         self.process_pending_deletions();
@@ -404,44 +403,6 @@ impl AppService {
                     LibraryEvent::AlbumsChanged => {
                         load_library(&state, &library_manager, &imgs).await;
                     }
-                }
-            }
-        });
-    }
-
-    /// Subscribe to library changes and auto-replicate metadata (2s debounce)
-    fn subscribe_metadata_replication(&self) {
-        let library_manager = self.library_manager.clone();
-        let library_dir = self.config.library_dir.clone();
-        let key_service = self.key_service.clone();
-        let encryption_service = library_manager.get().encryption_service().cloned();
-        let library_id = self.config.library_id.clone();
-        let library_name = self.config.library_name.clone();
-
-        spawn(async move {
-            let mut rx = library_manager.get().subscribe_events();
-
-            loop {
-                match rx.recv().await {
-                    Ok(LibraryEvent::AlbumsChanged) => {}
-                    Err(_) => break,
-                }
-
-                // Debounce: wait 2s, draining any additional events
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                while rx.try_recv().is_ok() {}
-
-                let replicator = bae_core::metadata_replicator::MetadataReplicator::new(
-                    library_manager.clone(),
-                    library_dir.clone(),
-                    key_service.clone(),
-                    encryption_service.clone(),
-                    library_id.clone(),
-                    library_name.clone(),
-                );
-
-                if let Err(e) = replicator.sync_all().await {
-                    tracing::error!("Auto metadata replication failed: {}", e);
                 }
             }
         });
