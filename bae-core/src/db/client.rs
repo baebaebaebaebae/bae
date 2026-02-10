@@ -113,6 +113,15 @@ impl Database {
         })
     }
 
+    /// Returns a reference to the writer mutex for direct access.
+    ///
+    /// Used by `SyncSession` to get the raw sqlite3 handle via
+    /// `conn.lock_handle().await.as_raw_handle()`. The caller is responsible
+    /// for ensuring the session extension's lifetime requirements are met.
+    pub fn writer_mutex(&self) -> Result<&Mutex<sqlx::SqliteConnection>, sqlx::Error> {
+        self.writer()
+    }
+
     /// Create a consistent snapshot of the database at the given path.
     /// Uses VACUUM INTO which copies without blocking the connection pool.
     pub async fn vacuum_into(&self, path: &str) -> Result<(), sqlx::Error> {

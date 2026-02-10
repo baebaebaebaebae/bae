@@ -1,9 +1,8 @@
 /// Safe-ish wrappers around the SQLite session extension FFI.
 ///
 /// These operate on raw `*mut sqlite3` pointers so they can be used with
-/// sqlx's `LockedSqliteHandle::as_raw_handle()`. This is a spike module --
-/// the API will evolve as we build the production sync system.
-use std::ffi::{c_char, c_int, c_void, CString};
+/// sqlx's `LockedSqliteHandle::as_raw_handle()`.
+use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::ptr;
 
 use libsqlite3_sys as ffi;
@@ -15,6 +14,26 @@ pub struct Changeset {
 }
 
 impl Changeset {
+    /// Create a `Changeset` from owned bytes. The bytes are copied into
+    /// sqlite3-managed memory so `sqlite3_free` works correctly on drop.
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        if bytes.is_empty() {
+            return Changeset {
+                buf: ptr::null_mut(),
+                len: 0,
+            };
+        }
+        unsafe {
+            let buf = ffi::sqlite3_malloc(bytes.len() as c_int);
+            assert!(!buf.is_null(), "sqlite3_malloc failed");
+            ptr::copy_nonoverlapping(bytes.as_ptr(), buf as *mut u8, bytes.len());
+            Changeset {
+                buf,
+                len: bytes.len() as c_int,
+            }
+        }
+    }
+
     pub fn as_bytes(&self) -> &[u8] {
         if self.buf.is_null() || self.len == 0 {
             return &[];
@@ -71,6 +90,97 @@ impl ConflictType {
     }
 }
 
+/// Context available to a conflict handler during changeset application.
+///
+/// Wraps the raw `sqlite3_changeset_iter` to provide safe access to the
+/// table name, column count, and column values involved in a conflict.
+pub struct ConflictContext {
+    iter: *mut ffi::sqlite3_changeset_iter,
+}
+
+impl ConflictContext {
+    /// The table name for this conflict's operation.
+    pub fn table_name(&self) -> &str {
+        unsafe {
+            let mut table: *const c_char = ptr::null();
+            let mut ncol: c_int = 0;
+            let mut op: c_int = 0;
+            let mut indirect: c_int = 0;
+            ffi::sqlite3changeset_op(self.iter, &mut table, &mut ncol, &mut op, &mut indirect);
+            CStr::from_ptr(table).to_str().unwrap_or("")
+        }
+    }
+
+    /// The number of columns in this table.
+    pub fn column_count(&self) -> usize {
+        unsafe {
+            let mut table: *const c_char = ptr::null();
+            let mut ncol: c_int = 0;
+            let mut op: c_int = 0;
+            let mut indirect: c_int = 0;
+            ffi::sqlite3changeset_op(self.iter, &mut table, &mut ncol, &mut op, &mut indirect);
+            ncol as usize
+        }
+    }
+
+    /// Get the "new" value for a column (the incoming value from the changeset).
+    /// Available for DATA and CONSTRAINT conflicts. Returns None if the column
+    /// was not changed or the value is NULL.
+    pub fn new_value(&self, col: usize) -> Option<String> {
+        unsafe {
+            let mut val: *mut ffi::sqlite3_value = ptr::null_mut();
+            let rc = ffi::sqlite3changeset_new(self.iter, col as c_int, &mut val);
+            if rc != ffi::SQLITE_OK as c_int || val.is_null() {
+                return None;
+            }
+            value_to_string(val)
+        }
+    }
+
+    /// Get the "conflict" value for a column (the current local value).
+    /// Available for DATA and CONFLICT conflicts.
+    pub fn conflict_value(&self, col: usize) -> Option<String> {
+        unsafe {
+            let mut val: *mut ffi::sqlite3_value = ptr::null_mut();
+            let rc = ffi::sqlite3changeset_conflict(self.iter, col as c_int, &mut val);
+            if rc != ffi::SQLITE_OK as c_int || val.is_null() {
+                return None;
+            }
+            value_to_string(val)
+        }
+    }
+
+    /// Get the "old" value for a column (the value expected by the changeset).
+    /// Available for DATA and NOTFOUND conflicts.
+    pub fn old_value(&self, col: usize) -> Option<String> {
+        unsafe {
+            let mut val: *mut ffi::sqlite3_value = ptr::null_mut();
+            let rc = ffi::sqlite3changeset_old(self.iter, col as c_int, &mut val);
+            if rc != ffi::SQLITE_OK as c_int || val.is_null() {
+                return None;
+            }
+            value_to_string(val)
+        }
+    }
+}
+
+/// Extract a text string from a sqlite3_value, or None if NULL.
+unsafe fn value_to_string(val: *mut ffi::sqlite3_value) -> Option<String> {
+    let vtype = ffi::sqlite3_value_type(val);
+    if vtype == ffi::SQLITE_NULL as c_int {
+        return None;
+    }
+    let text = ffi::sqlite3_value_text(val);
+    if text.is_null() {
+        return None;
+    }
+    Some(
+        CStr::from_ptr(text as *const c_char)
+            .to_string_lossy()
+            .into_owned(),
+    )
+}
+
 /// A session that tracks changes to a database.
 ///
 /// Wraps `sqlite3_session*`. Must be created and used on the same connection,
@@ -124,10 +234,10 @@ impl Drop for Session {
     }
 }
 
-/// Apply a changeset to a database connection.
+/// Apply a changeset to a database connection with a simple conflict handler.
 ///
-/// `conflict_handler` is called for each conflict. It receives the conflict type
-/// and should return a `ConflictAction`.
+/// The handler receives only the conflict type (no column value access).
+/// For production use, prefer `apply_changeset_with_context`.
 ///
 /// # Safety
 /// `db` must be a valid, open sqlite3 connection pointer.
@@ -139,6 +249,24 @@ pub unsafe fn apply_changeset<F>(
 where
     F: FnMut(ConflictType) -> ConflictAction,
 {
+    apply_changeset_with_context(db, changeset, |ct, _ctx| conflict_handler(ct))
+}
+
+/// Apply a changeset to a database connection with full conflict context.
+///
+/// The handler receives the conflict type AND a `ConflictContext` that provides
+/// access to the table name, column count, and column values (new, old, conflict).
+///
+/// # Safety
+/// `db` must be a valid, open sqlite3 connection pointer.
+pub unsafe fn apply_changeset_with_context<F>(
+    db: *mut ffi::sqlite3,
+    changeset: &Changeset,
+    mut conflict_handler: F,
+) -> Result<(), i32>
+where
+    F: FnMut(ConflictType, &ConflictContext) -> ConflictAction,
+{
     unsafe extern "C" fn filter_cb(_ctx: *mut c_void, _table: *const c_char) -> c_int {
         // Accept all tables
         1
@@ -147,14 +275,15 @@ where
     unsafe extern "C" fn conflict_cb<F>(
         ctx: *mut c_void,
         conflict_type: c_int,
-        _iter: *mut ffi::sqlite3_changeset_iter,
+        iter: *mut ffi::sqlite3_changeset_iter,
     ) -> c_int
     where
-        F: FnMut(ConflictType) -> ConflictAction,
+        F: FnMut(ConflictType, &ConflictContext) -> ConflictAction,
     {
         let handler = &mut *(ctx as *mut F);
         let ct = ConflictType::from_raw(conflict_type);
-        handler(ct) as c_int
+        let context = ConflictContext { iter };
+        handler(ct, &context) as c_int
     }
 
     let rc = ffi::sqlite3changeset_apply(
@@ -175,54 +304,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Helper: open an in-memory sqlite3 database via libsqlite3-sys directly.
-    unsafe fn open_memory_db() -> *mut ffi::sqlite3 {
-        let mut db: *mut ffi::sqlite3 = ptr::null_mut();
-        let rc = ffi::sqlite3_open(c":memory:".as_ptr(), &mut db);
-        assert_eq!(rc, ffi::SQLITE_OK as c_int, "Failed to open in-memory DB");
-        db
-    }
-
-    /// Helper: execute a SQL statement on a raw connection.
-    unsafe fn exec(db: *mut ffi::sqlite3, sql: &str) {
-        let c_sql = CString::new(sql).unwrap();
-        let rc = ffi::sqlite3_exec(db, c_sql.as_ptr(), None, ptr::null_mut(), ptr::null_mut());
-        assert_eq!(rc, ffi::SQLITE_OK as c_int, "exec failed for: {sql}");
-    }
-
-    /// Helper: query a single integer value.
-    unsafe fn query_int(db: *mut ffi::sqlite3, sql: &str) -> i64 {
-        let c_sql = CString::new(sql).unwrap();
-        let mut stmt: *mut ffi::sqlite3_stmt = ptr::null_mut();
-        let rc = ffi::sqlite3_prepare_v2(db, c_sql.as_ptr(), -1, &mut stmt, ptr::null_mut());
-        assert_eq!(rc, ffi::SQLITE_OK as c_int, "prepare failed for: {sql}");
-
-        let step = ffi::sqlite3_step(stmt);
-        assert_eq!(step, ffi::SQLITE_ROW as c_int, "expected a row for: {sql}");
-
-        let val = ffi::sqlite3_column_int64(stmt, 0);
-        ffi::sqlite3_finalize(stmt);
-        val
-    }
-
-    /// Helper: query a single text value.
-    unsafe fn query_text(db: *mut ffi::sqlite3, sql: &str) -> String {
-        let c_sql = CString::new(sql).unwrap();
-        let mut stmt: *mut ffi::sqlite3_stmt = ptr::null_mut();
-        let rc = ffi::sqlite3_prepare_v2(db, c_sql.as_ptr(), -1, &mut stmt, ptr::null_mut());
-        assert_eq!(rc, ffi::SQLITE_OK as c_int, "prepare failed for: {sql}");
-
-        let step = ffi::sqlite3_step(stmt);
-        assert_eq!(step, ffi::SQLITE_ROW as c_int, "expected a row for: {sql}");
-
-        let ptr = ffi::sqlite3_column_text(stmt, 0);
-        let val = std::ffi::CStr::from_ptr(ptr as *const c_char)
-            .to_string_lossy()
-            .into_owned();
-        ffi::sqlite3_finalize(stmt);
-        val
-    }
+    use crate::sync::test_helpers::*;
 
     #[test]
     fn test_basic_changeset_capture() {
@@ -440,6 +522,60 @@ mod tests {
 
             drop(session);
             ffi::sqlite3_close(db);
+            ffi::sqlite3_close(db2);
+        }
+    }
+
+    #[test]
+    fn test_conflict_context_reads_values() {
+        unsafe {
+            let db1 = open_memory_db();
+            exec(
+                db1,
+                "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, _updated_at TEXT)",
+            );
+            exec(
+                db1,
+                "INSERT INTO items VALUES (1, 'orig', '2026-01-01T00:00:00Z')",
+            );
+
+            let session = Session::new(db1).expect("session create");
+            session.attach(Some("items")).expect("attach");
+            exec(
+                db1,
+                "UPDATE items SET name = 'updated', _updated_at = '2026-01-03T00:00:00Z' WHERE id = 1",
+            );
+            let cs = session.changeset().expect("changeset");
+            drop(session);
+
+            let db2 = open_memory_db();
+            exec(
+                db2,
+                "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, _updated_at TEXT)",
+            );
+            exec(
+                db2,
+                "INSERT INTO items VALUES (1, 'local', '2026-01-02T00:00:00Z')",
+            );
+
+            let mut seen_table = String::new();
+            let mut seen_new_ts = String::new();
+            let mut seen_conflict_ts = String::new();
+
+            apply_changeset_with_context(db2, &cs, |_ct, ctx| {
+                seen_table = ctx.table_name().to_string();
+                // _updated_at is column index 2
+                seen_new_ts = ctx.new_value(2).unwrap_or_default();
+                seen_conflict_ts = ctx.conflict_value(2).unwrap_or_default();
+                ConflictAction::Replace
+            })
+            .expect("apply");
+
+            assert_eq!(seen_table, "items");
+            assert_eq!(seen_new_ts, "2026-01-03T00:00:00Z");
+            assert_eq!(seen_conflict_ts, "2026-01-02T00:00:00Z");
+
+            ffi::sqlite3_close(db1);
             ffi::sqlite3_close(db2);
         }
     }
