@@ -215,6 +215,43 @@ impl S3CloudStorage {
     fn object_key(&self, key: &str) -> String {
         key.to_string()
     }
+
+    /// List all object keys under a given prefix.
+    pub async fn list_keys(&self, prefix: &str) -> Result<Vec<String>, CloudStorageError> {
+        let mut keys = Vec::new();
+        let mut continuation_token: Option<String> = None;
+
+        loop {
+            let mut req = self
+                .client
+                .list_objects_v2()
+                .bucket(&self.bucket_name)
+                .prefix(prefix);
+
+            if let Some(token) = continuation_token.take() {
+                req = req.continuation_token(token);
+            }
+
+            let resp = req
+                .send()
+                .await
+                .map_err(|e| CloudStorageError::SdkError(format!("List objects failed: {}", e)))?;
+
+            for obj in resp.contents() {
+                if let Some(key) = obj.key() {
+                    keys.push(key.to_string());
+                }
+            }
+
+            if resp.is_truncated() == Some(true) {
+                continuation_token = resp.next_continuation_token().map(|s| s.to_string());
+            } else {
+                break;
+            }
+        }
+
+        Ok(keys)
+    }
 }
 #[async_trait::async_trait]
 impl CloudStorage for S3CloudStorage {

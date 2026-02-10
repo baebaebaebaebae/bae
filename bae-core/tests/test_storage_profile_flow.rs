@@ -287,6 +287,35 @@ async fn test_delete_storage_profile_blocked_by_linked_releases() {
     );
 }
 
+/// Test that deleting the home storage profile is rejected.
+#[tokio::test]
+async fn test_delete_home_storage_profile_blocked() {
+    tracing_init();
+
+    let temp_dir = TempDir::new().unwrap();
+    let db_path = temp_dir.path().join("test.db");
+    let database = Database::new(db_path.to_str().unwrap()).await.unwrap();
+
+    // Create a home profile
+    let profile = DbStorageProfile::new_local("Home", "/tmp/library", false).with_home(true);
+    let profile_id = profile.id.clone();
+    database.insert_storage_profile(&profile).await.unwrap();
+
+    // Try to delete it -- should fail because it's the home profile
+    let result = database.delete_storage_profile(&profile_id).await;
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("Cannot delete the home storage profile"),
+        "Expected home profile error, got: {}",
+        err_msg
+    );
+
+    // Verify it still exists
+    let fetched = database.get_storage_profile(&profile_id).await.unwrap();
+    assert!(fetched.is_some(), "Home profile should not be deleted");
+}
+
 // Helper functions to create test data
 
 fn create_test_album(title: &str) -> DbAlbum {

@@ -3,7 +3,6 @@ pub mod cache;
 #[cfg(feature = "cd-rip")]
 pub mod cd;
 pub mod cloud_storage;
-pub mod cloud_sync;
 #[doc(hidden)]
 pub mod config;
 pub mod content_type;
@@ -16,6 +15,7 @@ pub mod import;
 pub mod keys;
 pub mod library;
 pub mod library_dir;
+pub mod metadata_replicator;
 pub mod musicbrainz;
 pub mod network;
 pub mod playback;

@@ -862,6 +862,8 @@ pub struct DbStorageProfile {
     pub encrypted: bool,
     /// True if this is the default profile for new imports
     pub is_default: bool,
+    /// True if this is the library home profile (where desktop writes the authoritative DB)
+    pub is_home: bool,
     /// S3 bucket name
     pub cloud_bucket: Option<String>,
     /// AWS region (e.g., "us-east-1")
@@ -882,6 +884,7 @@ impl DbStorageProfile {
             location_path: path.to_string(),
             encrypted,
             is_default: false,
+            is_home: false,
             cloud_bucket: None,
             cloud_region: None,
             cloud_endpoint: None,
@@ -905,12 +908,17 @@ impl DbStorageProfile {
             location_path: String::new(),
             encrypted,
             is_default: false,
+            is_home: false,
             cloud_bucket: Some(bucket.to_string()),
             cloud_region: Some(region.to_string()),
             cloud_endpoint: endpoint.map(|s| s.to_string()),
             created_at: now,
             updated_at: now,
         }
+    }
+    pub fn with_home(mut self, is_home: bool) -> Self {
+        self.is_home = is_home;
+        self
     }
     pub fn with_default(mut self, is_default: bool) -> Self {
         self.is_default = is_default;

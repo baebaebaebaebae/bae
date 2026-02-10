@@ -1,4 +1,3 @@
-use bae_core::cloud_sync::CloudSyncService;
 use bae_core::config::ConfigYaml;
 use bae_core::db::Database;
 use bae_core::encryption::EncryptionService;
@@ -27,11 +26,23 @@ struct Args {
     #[arg(long, env = "BAE_RECOVERY_KEY")]
     recovery_key: Option<String>,
 
-    /// S3 access key for cloud sync.
+    /// S3 bucket name for cloud download (--refresh or first-time setup).
+    #[arg(long, env = "BAE_CLOUD_BUCKET")]
+    cloud_bucket: Option<String>,
+
+    /// S3 region for cloud download.
+    #[arg(long, env = "BAE_CLOUD_REGION")]
+    cloud_region: Option<String>,
+
+    /// S3 endpoint URL for cloud download (S3-compatible services like MinIO).
+    #[arg(long, env = "BAE_CLOUD_ENDPOINT")]
+    cloud_endpoint: Option<String>,
+
+    /// S3 access key for cloud download.
     #[arg(long, env = "BAE_CLOUD_ACCESS_KEY")]
     cloud_access_key: Option<String>,
 
-    /// S3 secret key for cloud sync.
+    /// S3 secret key for cloud download.
     #[arg(long, env = "BAE_CLOUD_SECRET_KEY")]
     cloud_secret_key: Option<String>,
 
@@ -114,12 +125,12 @@ async fn main() {
 
     // Download from cloud if library.db is missing or --refresh was passed
     if needs_download {
-        download_from_cloud(&args, &library_dir, &config).await;
+        download_from_cloud(&args, &library_dir).await;
     }
 
     if !db_path.exists() {
         error!("Database not found at {}", db_path.display());
-        error!("Ensure the library directory is populated or configure cloud sync in config.yaml");
+        error!("Ensure the library directory is populated or use --cloud-bucket/--cloud-access-key/--cloud-secret-key to download from cloud");
         std::process::exit(1);
     }
 
@@ -200,18 +211,19 @@ async fn main() {
     }
 }
 
-async fn download_from_cloud(args: &Args, library_dir: &LibraryDir, config: &ConfigYaml) {
+async fn download_from_cloud(args: &Args, library_dir: &LibraryDir) {
+    use bae_core::cloud_storage::{CloudStorage, S3CloudStorage, S3Config};
+
     let recovery_key = args.recovery_key.as_deref().unwrap_or_else(|| {
         error!("--recovery-key is required to download from cloud");
         std::process::exit(1);
     });
-    let library_id = &config.library_id;
-    let bucket = config.cloud_sync_bucket.as_deref().unwrap_or_else(|| {
-        error!("cloud_sync_bucket missing from config.yaml");
+    let bucket = args.cloud_bucket.as_deref().unwrap_or_else(|| {
+        error!("--cloud-bucket is required to download from cloud");
         std::process::exit(1);
     });
-    let region = config.cloud_sync_region.as_deref().unwrap_or_else(|| {
-        error!("cloud_sync_region missing from config.yaml");
+    let region = args.cloud_region.as_deref().unwrap_or_else(|| {
+        error!("--cloud-region is required to download from cloud");
         std::process::exit(1);
     });
     let access_key = args.cloud_access_key.as_deref().unwrap_or_else(|| {
@@ -227,30 +239,56 @@ async fn download_from_cloud(args: &Args, library_dir: &LibraryDir, config: &Con
         error!("Invalid recovery key: {e}");
         std::process::exit(1);
     });
+    let fingerprint = encryption_service.fingerprint();
 
-    info!("Downloading library from cloud (bucket: {bucket}, library: {library_id})");
+    let s3_config = S3Config {
+        bucket_name: bucket.to_string(),
+        region: region.to_string(),
+        access_key_id: access_key.to_string(),
+        secret_access_key: secret_key.to_string(),
+        endpoint_url: args.cloud_endpoint.clone(),
+    };
 
-    let cloud = CloudSyncService::new(
-        bucket.to_string(),
-        region.to_string(),
-        config.cloud_sync_endpoint.clone(),
-        access_key.to_string(),
-        secret_key.to_string(),
-        library_id.to_string(),
-        encryption_service,
-    )
-    .await
-    .unwrap_or_else(|e| {
-        error!("Failed to create cloud sync service: {e}");
+    info!("Downloading library from cloud (bucket: {bucket})");
+
+    let storage = S3CloudStorage::new_with_bucket_creation(s3_config, false)
+        .await
+        .unwrap_or_else(|e| {
+            error!("Failed to connect to S3: {e}");
+            std::process::exit(1);
+        });
+
+    // Download and decrypt manifest to validate key
+    info!("Downloading manifest...");
+    let location = format!("s3://{}/manifest.json.enc", bucket);
+    let encrypted_manifest = storage.download(&location).await.unwrap_or_else(|e| {
+        error!("Failed to download manifest: {e}");
         std::process::exit(1);
     });
+    let manifest_bytes = encryption_service
+        .decrypt(&encrypted_manifest)
+        .unwrap_or_else(|e| {
+            error!("Failed to decrypt manifest (wrong key?): {e}");
+            std::process::exit(1);
+        });
+    let manifest: bae_core::library_dir::Manifest = serde_json::from_slice(&manifest_bytes)
+        .unwrap_or_else(|e| {
+            error!("Failed to parse manifest: {e}");
+            std::process::exit(1);
+        });
 
-    // Validate encryption key fingerprint against meta.json
-    info!("Validating encryption key fingerprint...");
-    cloud.validate_key().await.unwrap_or_else(|e| {
-        error!("Key validation failed: {e}");
-        std::process::exit(1);
-    });
+    // Validate fingerprint
+    if let Some(ref expected_fp) = manifest.encryption_key_fingerprint {
+        if *expected_fp != fingerprint {
+            error!(
+                "Encryption key fingerprint mismatch: expected {}, got {}",
+                expected_fp, fingerprint
+            );
+            std::process::exit(1);
+        }
+    }
+
+    info!("Key validated, downloading library...");
 
     // Create library directory
     std::fs::create_dir_all(&args.library_path).unwrap_or_else(|e| {
@@ -262,23 +300,32 @@ async fn download_from_cloud(args: &Args, library_dir: &LibraryDir, config: &Con
     });
 
     // Download and decrypt database
-    let db_path = library_dir.db_path();
-    info!("Downloading database...");
-    cloud.download_db(&db_path).await.unwrap_or_else(|e| {
+    let db_location = format!("s3://{}/library.db.enc", bucket);
+    let encrypted_db = storage.download(&db_location).await.unwrap_or_else(|e| {
         error!("Failed to download database: {e}");
         std::process::exit(1);
     });
-
-    // Download and decrypt library images
-    let images_path = library_dir.images_dir();
-    info!("Downloading images...");
-    cloud
-        .download_images(&images_path)
-        .await
+    let decrypted_db = encryption_service
+        .decrypt(&encrypted_db)
         .unwrap_or_else(|e| {
-            error!("Failed to download images: {e}");
+            error!("Failed to decrypt database: {e}");
             std::process::exit(1);
         });
+
+    let db_path = library_dir.db_path();
+    std::fs::write(&db_path, &decrypted_db).unwrap_or_else(|e| {
+        error!("Failed to write database: {e}");
+        std::process::exit(1);
+    });
+
+    info!("Restored DB ({} bytes)", decrypted_db.len());
+
+    // Create images directory (images will be served from cloud profiles on demand)
+    let images_dir = library_dir.images_dir();
+    std::fs::create_dir_all(&images_dir).unwrap_or_else(|e| {
+        error!("Failed to create images directory: {e}");
+        std::process::exit(1);
+    });
 
     info!("Cloud download complete");
 }

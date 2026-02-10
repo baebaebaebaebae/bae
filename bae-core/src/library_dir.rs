@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
@@ -33,6 +34,10 @@ impl LibraryDir {
         self.images_dir().join(&hex[..2]).join(&hex[2..4]).join(id)
     }
 
+    pub fn manifest_path(&self) -> PathBuf {
+        self.path.join("manifest.json")
+    }
+
     pub fn pending_deletions_path(&self) -> PathBuf {
         self.path.join("pending_deletions.json")
     }
@@ -41,6 +46,18 @@ impl LibraryDir {
     pub fn asset_dirs(&self) -> Vec<PathBuf> {
         vec![self.images_dir()]
     }
+}
+
+/// Manifest identifying a library and its owning profile.
+/// Present at the root of every profile directory/bucket.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Manifest {
+    pub library_id: String,
+    pub library_name: Option<String>,
+    pub encryption_key_fingerprint: Option<String>,
+    pub profile_id: String,
+    pub profile_name: String,
+    pub replicated_at: Option<String>,
 }
 
 impl Deref for LibraryDir {
