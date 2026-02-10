@@ -99,13 +99,14 @@ pub async fn push_snapshot(
     current_seq: u64,
 ) -> Result<(), SnapshotError> {
     let size = encrypted_snapshot.len();
+    let timestamp = chrono::Utc::now().to_rfc3339();
 
     // Upload snapshot (overwrites previous).
     bucket.put_snapshot(encrypted_snapshot).await?;
 
     // Update head with snapshot_seq.
     bucket
-        .put_head(device_id, current_seq, Some(current_seq))
+        .put_head(device_id, current_seq, Some(current_seq), &timestamp)
         .await?;
 
     info!(
@@ -274,6 +275,7 @@ mod tests {
         changesets: Mutex<HashMap<String, Vec<u8>>>,
         heads: Mutex<HashMap<String, (u64, Option<u64>)>>,
         snapshot: Mutex<Option<Vec<u8>>>,
+        min_schema_version: Mutex<Option<u32>>,
     }
 
     impl MockBucket {
@@ -282,6 +284,7 @@ mod tests {
                 changesets: Mutex::new(HashMap::new()),
                 heads: Mutex::new(HashMap::new()),
                 snapshot: Mutex::new(None),
+                min_schema_version: Mutex::new(None),
             }
         }
 
@@ -318,6 +321,7 @@ mod tests {
                     device_id: id.clone(),
                     seq: *seq,
                     snapshot_seq: *snap,
+                    last_sync: None,
                 })
                 .collect())
         }
@@ -344,6 +348,7 @@ mod tests {
             device_id: &str,
             seq: u64,
             snapshot_seq: Option<u64>,
+            _timestamp: &str,
         ) -> Result<(), BucketError> {
             let mut heads = self.heads.lock().unwrap();
             let entry = heads.entry(device_id.to_string()).or_insert((0, None));
@@ -390,6 +395,15 @@ mod tests {
                 .collect();
             seqs.sort();
             Ok(seqs)
+        }
+
+        async fn get_min_schema_version(&self) -> Result<Option<u32>, BucketError> {
+            Ok(*self.min_schema_version.lock().unwrap())
+        }
+
+        async fn set_min_schema_version(&self, version: u32) -> Result<(), BucketError> {
+            *self.min_schema_version.lock().unwrap() = Some(version);
+            Ok(())
         }
     }
 
@@ -620,7 +634,10 @@ mod tests {
             let bucket = MockBucket::new();
             bucket.put_snapshot(encrypted).await.unwrap();
             // Set a head with snapshot_seq so bootstrap can find it.
-            bucket.put_head("dev-1", 10, Some(10)).await.unwrap();
+            bucket
+                .put_head("dev-1", 10, Some(10), "2026-02-10T00:00:00Z")
+                .await
+                .unwrap();
 
             // Bootstrap a new database.
             let target = temp.path().join("bootstrapped.db");

@@ -13,6 +13,7 @@ pub mod import;
 pub mod library;
 pub mod playback;
 pub mod storage_profiles;
+pub mod sync;
 pub mod ui;
 
 pub use active_imports::*;
@@ -24,4 +25,5 @@ pub use import::*;
 pub use library::*;
 pub use playback::*;
 pub use storage_profiles::*;
+pub use sync::*;
 pub use ui::*;

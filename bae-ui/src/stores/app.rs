@@ -11,6 +11,7 @@ use super::import::ImportState;
 use super::library::LibraryState;
 use super::playback::PlaybackUiState;
 use super::storage_profiles::StorageProfilesState;
+use super::sync::SyncState;
 use super::ui::UiState;
 use dioxus::prelude::*;
 
@@ -35,4 +36,6 @@ pub struct AppState {
     pub config: ConfigState,
     /// Storage profiles
     pub storage_profiles: StorageProfilesState,
+    /// Sync status
+    pub sync: SyncState,
 }

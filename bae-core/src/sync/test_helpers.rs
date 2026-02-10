@@ -279,6 +279,8 @@ pub struct MockBucket {
     objects: Mutex<HashMap<String, Vec<u8>>>,
     /// Heads: device_id -> seq.
     heads: Mutex<HashMap<String, u64>>,
+    /// Minimum schema version marker (None = no minimum set).
+    min_schema_version: Mutex<Option<u32>>,
 }
 
 impl MockBucket {
@@ -286,6 +288,7 @@ impl MockBucket {
         MockBucket {
             objects: Mutex::new(HashMap::new()),
             heads: Mutex::new(HashMap::new()),
+            min_schema_version: Mutex::new(None),
         }
     }
 
@@ -326,6 +329,7 @@ impl SyncBucketClient for MockBucket {
                 device_id: id.clone(),
                 seq,
                 snapshot_seq: None,
+                last_sync: None,
             })
             .collect())
     }
@@ -352,6 +356,7 @@ impl SyncBucketClient for MockBucket {
         device_id: &str,
         seq: u64,
         _snapshot_seq: Option<u64>,
+        _timestamp: &str,
     ) -> Result<(), BucketError> {
         self.heads
             .lock()
@@ -382,5 +387,14 @@ impl SyncBucketClient for MockBucket {
 
     async fn list_changesets(&self, _device_id: &str) -> Result<Vec<u64>, BucketError> {
         Ok(vec![])
+    }
+
+    async fn get_min_schema_version(&self) -> Result<Option<u32>, BucketError> {
+        Ok(*self.min_schema_version.lock().unwrap())
+    }
+
+    async fn set_min_schema_version(&self, version: u32) -> Result<(), BucketError> {
+        *self.min_schema_version.lock().unwrap() = Some(version);
+        Ok(())
     }
 }

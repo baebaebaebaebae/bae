@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use tracing::{info, warn};
 
 use super::apply::apply_changeset_lww;
-use super::bucket::SyncBucketClient;
+use super::bucket::{DeviceHead, SyncBucketClient};
 use super::envelope;
 use super::push::SCHEMA_VERSION;
 use super::session_ext::Changeset;
@@ -29,6 +29,9 @@ pub struct PullResult {
     pub devices_pulled: u64,
     /// Changesets skipped due to schema version being newer than ours.
     pub skipped_schema: u64,
+    /// All device heads fetched during this pull (including our own).
+    /// Used by the sync status UI to show other devices' activity.
+    pub remote_heads: Vec<DeviceHead>,
 }
 
 /// A changeset that had FK violations on first apply and needs retry.
@@ -56,6 +59,21 @@ pub async unsafe fn pull_changes(
     our_device_id: &str,
     cursors: &HashMap<String, u64>,
 ) -> Result<(HashMap<String, u64>, PullResult), PullError> {
+    // Check min_schema_version before processing any changesets.
+    // If the bucket has a minimum that's higher than ours, refuse to sync.
+    if let Some(min_version) = bucket
+        .get_min_schema_version()
+        .await
+        .map_err(PullError::Bucket)?
+    {
+        if SCHEMA_VERSION < min_version {
+            return Err(PullError::SchemaVersionTooOld {
+                local_version: SCHEMA_VERSION,
+                min_version,
+            });
+        }
+    }
+
     let heads = bucket.list_heads().await.map_err(PullError::Bucket)?;
 
     let mut updated_cursors = cursors.clone();
@@ -63,6 +81,7 @@ pub async unsafe fn pull_changes(
         changesets_applied: 0,
         devices_pulled: 0,
         skipped_schema: 0,
+        remote_heads: heads.clone(),
     };
     let mut deferred: Vec<DeferredChangeset> = Vec::new();
 
@@ -191,6 +210,12 @@ pub enum PullError {
     Bucket(super::bucket::BucketError),
     InvalidEnvelope,
     Apply(super::session::SyncError),
+    /// The sync bucket requires a schema version newer than ours.
+    /// The client must upgrade before syncing.
+    SchemaVersionTooOld {
+        local_version: u32,
+        min_version: u32,
+    },
 }
 
 impl std::fmt::Display for PullError {
@@ -199,6 +224,13 @@ impl std::fmt::Display for PullError {
             PullError::Bucket(e) => write!(f, "bucket error: {e}"),
             PullError::InvalidEnvelope => write!(f, "invalid changeset envelope"),
             PullError::Apply(e) => write!(f, "changeset apply failed: {e}"),
+            PullError::SchemaVersionTooOld {
+                local_version,
+                min_version,
+            } => write!(
+                f,
+                "local schema version {local_version} is below the bucket minimum {min_version}, upgrade required"
+            ),
         }
     }
 }

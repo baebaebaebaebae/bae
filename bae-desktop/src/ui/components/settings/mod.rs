@@ -4,6 +4,7 @@ mod discogs;
 mod library;
 mod storage_profiles;
 mod subsonic;
+mod sync;
 
 use bae_ui::SettingsTab;
 use bae_ui::SettingsView;
@@ -24,6 +25,9 @@ pub fn Settings() -> Element {
                 },
                 SettingsTab::Storage => rsx! {
                     storage_profiles::StorageProfilesSection {}
+                },
+                SettingsTab::Sync => rsx! {
+                    sync::SyncSection {}
                 },
                 SettingsTab::Discogs => rsx! {
                     discogs::DiscogsSection {}
