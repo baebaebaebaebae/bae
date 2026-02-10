@@ -91,7 +91,7 @@ fn is_first_run() -> bool {
         return false;
     }
     let home_dir = dirs::home_dir().expect("Failed to get home directory");
-    !home_dir.join(".bae").join("library").exists()
+    !home_dir.join(".bae").join("active-library").exists()
 }
 
 fn main() {

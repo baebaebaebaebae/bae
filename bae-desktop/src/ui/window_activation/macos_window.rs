@@ -317,11 +317,19 @@ unsafe fn open_library_picker(create_new: bool) {
 
     info!("Switching library to: {}", path.display());
 
-    // Save the library path pointer (persists for future launches)
+    // Read the library UUID and save as active library
+    let target_id = match bae_core::config::Config::read_library_id(&path) {
+        Ok(id) => id,
+        Err(e) => {
+            error!("Failed to read library ID: {}", e);
+            return;
+        }
+    };
+
     let mut config = bae_core::config::Config::load();
-    config.library_dir = bae_core::library_dir::LibraryDir::new(path);
-    if let Err(e) = config.save_library_path() {
-        error!("Failed to save library path: {}", e);
+    config.library_id = target_id;
+    if let Err(e) = config.save_active_library() {
+        error!("Failed to save active library: {}", e);
         return;
     }
 
