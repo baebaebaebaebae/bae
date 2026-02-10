@@ -2234,7 +2234,7 @@ impl Database {
         let mut conn = self.writer()?.lock().await;
         sqlx::query(
             r#"
-            INSERT INTO attestations (
+            INSERT OR REPLACE INTO attestations (
                 id, mbid, infohash, content_hash, format,
                 author_pubkey, timestamp, signature, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
