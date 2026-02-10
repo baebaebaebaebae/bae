@@ -89,17 +89,6 @@ pub struct ConfigYaml {
     pub subsonic_enabled: bool,
     /// Subsonic server port
     pub subsonic_port: Option<u16>,
-    /// Whether cloud sync is enabled
-    #[serde(default)]
-    pub cloud_sync_enabled: bool,
-    /// S3 bucket for cloud sync
-    pub cloud_sync_bucket: Option<String>,
-    /// S3 region for cloud sync
-    pub cloud_sync_region: Option<String>,
-    /// S3 endpoint for cloud sync (custom endpoint for MinIO etc.)
-    pub cloud_sync_endpoint: Option<String>,
-    /// Last successful cloud sync upload (ISO 8601)
-    pub cloud_sync_last_upload: Option<String>,
 }
 
 /// Metadata about a discovered library (for the library switcher UI)
@@ -140,11 +129,6 @@ pub struct Config {
     pub torrent_max_uploads_per_torrent: Option<i32>,
     pub subsonic_enabled: bool,
     pub subsonic_port: u16,
-    pub cloud_sync_enabled: bool,
-    pub cloud_sync_bucket: Option<String>,
-    pub cloud_sync_region: Option<String>,
-    pub cloud_sync_endpoint: Option<String>,
-    pub cloud_sync_last_upload: Option<String>,
 }
 
 impl Config {
@@ -213,17 +197,6 @@ impl Config {
             torrent_max_uploads_per_torrent: None,
             subsonic_enabled: true,
             subsonic_port: 4533,
-            cloud_sync_enabled: false,
-            cloud_sync_bucket: std::env::var("BAE_CLOUD_SYNC_BUCKET")
-                .ok()
-                .filter(|s| !s.is_empty()),
-            cloud_sync_region: std::env::var("BAE_CLOUD_SYNC_REGION")
-                .ok()
-                .filter(|s| !s.is_empty()),
-            cloud_sync_endpoint: std::env::var("BAE_CLOUD_SYNC_ENDPOINT")
-                .ok()
-                .filter(|s| !s.is_empty()),
-            cloud_sync_last_upload: None,
         }
     }
 
@@ -285,11 +258,6 @@ impl Config {
             torrent_max_uploads_per_torrent: yaml_config.torrent_max_uploads_per_torrent,
             subsonic_enabled: yaml_config.subsonic_enabled,
             subsonic_port: yaml_config.subsonic_port.unwrap_or(4533),
-            cloud_sync_enabled: yaml_config.cloud_sync_enabled,
-            cloud_sync_bucket: yaml_config.cloud_sync_bucket,
-            cloud_sync_region: yaml_config.cloud_sync_region,
-            cloud_sync_endpoint: yaml_config.cloud_sync_endpoint,
-            cloud_sync_last_upload: yaml_config.cloud_sync_last_upload,
         }
     }
 
@@ -375,11 +343,6 @@ impl Config {
             torrent_max_uploads_per_torrent: self.torrent_max_uploads_per_torrent,
             subsonic_enabled: self.subsonic_enabled,
             subsonic_port: Some(self.subsonic_port),
-            cloud_sync_enabled: self.cloud_sync_enabled,
-            cloud_sync_bucket: self.cloud_sync_bucket.clone(),
-            cloud_sync_region: self.cloud_sync_region.clone(),
-            cloud_sync_endpoint: self.cloud_sync_endpoint.clone(),
-            cloud_sync_last_upload: self.cloud_sync_last_upload.clone(),
         };
         std::fs::write(
             self.library_dir.config_path(),
@@ -419,11 +382,6 @@ impl Config {
             torrent_max_uploads_per_torrent: None,
             subsonic_enabled: true,
             subsonic_port: 4533,
-            cloud_sync_enabled: false,
-            cloud_sync_bucket: None,
-            cloud_sync_region: None,
-            cloud_sync_endpoint: None,
-            cloud_sync_last_upload: None,
         };
 
         match key_service.get_or_create_encryption_key() {
@@ -605,11 +563,6 @@ mod tests {
             torrent_max_uploads_per_torrent: None,
             subsonic_enabled: true,
             subsonic_port: 4533,
-            cloud_sync_enabled: false,
-            cloud_sync_bucket: None,
-            cloud_sync_region: None,
-            cloud_sync_endpoint: None,
-            cloud_sync_last_upload: None,
         }
     }
 

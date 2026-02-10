@@ -11,7 +11,6 @@ pub enum SettingsTab {
     Discogs,
     BitTorrent,
     Subsonic,
-    Cloud,
     About,
 }
 
@@ -23,7 +22,6 @@ impl SettingsTab {
             SettingsTab::Discogs => "Discogs",
             SettingsTab::BitTorrent => "BitTorrent",
             SettingsTab::Subsonic => "Subsonic",
-            SettingsTab::Cloud => "Cloud Sync",
             SettingsTab::About => "About",
         }
     }
@@ -36,7 +34,6 @@ impl SettingsTab {
             #[cfg(feature = "torrent")]
             SettingsTab::BitTorrent,
             SettingsTab::Subsonic,
-            SettingsTab::Cloud,
             SettingsTab::About,
         ]
     }

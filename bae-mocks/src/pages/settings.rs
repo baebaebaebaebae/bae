@@ -1,10 +1,9 @@
 //! Settings page
 
-use bae_ui::stores::CloudSyncStatus;
 use bae_ui::{
-    AboutSectionView, BitTorrentSectionView, BitTorrentSettings, CloudSectionView,
-    DiscogsSectionView, LibraryInfo, LibrarySectionView, SettingsTab, SettingsView,
-    StorageLocation, StorageProfile, StorageProfilesSectionView, SubsonicSectionView,
+    AboutSectionView, BitTorrentSectionView, BitTorrentSettings, DiscogsSectionView, LibraryInfo,
+    LibrarySectionView, SettingsTab, SettingsView, StorageLocation, StorageProfile,
+    StorageProfilesSectionView, SubsonicSectionView,
 };
 use dioxus::prelude::*;
 
@@ -113,34 +112,6 @@ pub fn Settings() -> Element {
                         on_save: |_| {},
                         on_enabled_change: |_| {},
                         on_port_change: |_| {},
-                    }
-                },
-                SettingsTab::Cloud => rsx! {
-                    CloudSectionView {
-                        encryption_configured: true,
-                        enabled: true,
-                        last_upload: Some("2025-01-15T10:30:00Z".to_string()),
-                        sync_status: CloudSyncStatus::Idle,
-                        is_editing: false,
-                        edit_enabled: true,
-                        edit_bucket: String::new(),
-                        edit_region: String::new(),
-                        edit_endpoint: String::new(),
-                        edit_access_key: String::new(),
-                        edit_secret_key: String::new(),
-                        is_saving: false,
-                        has_changes: false,
-                        save_error: None,
-                        on_edit_start: |_| {},
-                        on_cancel: |_| {},
-                        on_save: |_| {},
-                        on_sync_now: |_| {},
-                        on_enabled_change: |_| {},
-                        on_bucket_change: |_| {},
-                        on_region_change: |_| {},
-                        on_endpoint_change: |_| {},
-                        on_access_key_change: |_| {},
-                        on_secret_key_change: |_| {},
                     }
                 },
                 SettingsTab::About => rsx! {

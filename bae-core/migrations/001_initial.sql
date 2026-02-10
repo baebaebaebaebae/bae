@@ -167,6 +167,7 @@ CREATE TABLE storage_profiles (
     location_path TEXT NOT NULL,
     encrypted BOOLEAN NOT NULL DEFAULT FALSE,
     is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    is_home BOOLEAN NOT NULL DEFAULT FALSE,
     cloud_bucket TEXT,
     cloud_region TEXT,
     cloud_endpoint TEXT,

@@ -1,11 +1,10 @@
 //! Settings mock component
 
 use super::framework::{ControlRegistryBuilder, MockPage, MockPanel};
-use bae_ui::stores::CloudSyncStatus;
 use bae_ui::{
-    AboutSectionView, BitTorrentSectionView, BitTorrentSettings, CloudSectionView,
-    DiscogsSectionView, LibraryInfo, LibrarySectionView, SettingsTab, SettingsView,
-    StorageLocation, StorageProfile, StorageProfilesSectionView, SubsonicSectionView,
+    AboutSectionView, BitTorrentSectionView, BitTorrentSettings, DiscogsSectionView, LibraryInfo,
+    LibrarySectionView, SettingsTab, SettingsView, StorageLocation, StorageProfile,
+    StorageProfilesSectionView, SubsonicSectionView,
 };
 use dioxus::prelude::*;
 
@@ -28,15 +27,6 @@ pub fn SettingsMock(initial_state: Option<String>) -> Element {
     let mut subsonic_editing = use_signal(|| false);
     let mut subsonic_edit_enabled = use_signal(|| true);
     let mut subsonic_edit_port = use_signal(|| "4533".to_string());
-
-    // Cloud state
-    let mut cloud_editing = use_signal(|| false);
-    let mut cloud_edit_enabled = use_signal(|| true);
-    let mut cloud_edit_bucket = use_signal(String::new);
-    let mut cloud_edit_region = use_signal(String::new);
-    let mut cloud_edit_endpoint = use_signal(String::new);
-    let mut cloud_edit_access_key = use_signal(String::new);
-    let mut cloud_edit_secret_key = use_signal(String::new);
 
     rsx! {
         MockPanel {
@@ -158,34 +148,6 @@ pub fn SettingsMock(initial_state: Option<String>) -> Element {
                             on_save: move |_| subsonic_editing.set(false),
                             on_enabled_change: move |v| subsonic_edit_enabled.set(v),
                             on_port_change: move |v| subsonic_edit_port.set(v),
-                        }
-                    },
-                    SettingsTab::Cloud => rsx! {
-                        CloudSectionView {
-                            encryption_configured: true,
-                            enabled: true,
-                            last_upload: Some("2025-01-15T10:30:00Z".to_string()),
-                            sync_status: CloudSyncStatus::Idle,
-                            is_editing: *cloud_editing.read(),
-                            edit_enabled: *cloud_edit_enabled.read(),
-                            edit_bucket: cloud_edit_bucket(),
-                            edit_region: cloud_edit_region(),
-                            edit_endpoint: cloud_edit_endpoint(),
-                            edit_access_key: cloud_edit_access_key(),
-                            edit_secret_key: cloud_edit_secret_key(),
-                            is_saving: false,
-                            has_changes: false,
-                            save_error: None,
-                            on_edit_start: move |_| cloud_editing.set(true),
-                            on_cancel: move |_| cloud_editing.set(false),
-                            on_save: move |_| cloud_editing.set(false),
-                            on_sync_now: |_| {},
-                            on_enabled_change: move |v| cloud_edit_enabled.set(v),
-                            on_bucket_change: move |v| cloud_edit_bucket.set(v),
-                            on_region_change: move |v| cloud_edit_region.set(v),
-                            on_endpoint_change: move |v| cloud_edit_endpoint.set(v),
-                            on_access_key_change: move |v| cloud_edit_access_key.set(v),
-                            on_secret_key_change: move |v| cloud_edit_secret_key.set(v),
                         }
                     },
                     SettingsTab::About => rsx! {

@@ -106,7 +106,7 @@ impl AppService {
 
         self.subscribe_import_progress();
         self.subscribe_library_events();
-        self.subscribe_cloud_sync();
+        self.subscribe_metadata_replication();
         self.subscribe_folder_scan_events();
         self.load_initial_data();
         self.process_pending_deletions();
@@ -409,59 +409,39 @@ impl AppService {
         });
     }
 
-    /// Subscribe to library changes and auto-upload to cloud sync (2s debounce)
-    fn subscribe_cloud_sync(&self) {
-        let app = self.clone();
+    /// Subscribe to library changes and auto-replicate metadata (2s debounce)
+    fn subscribe_metadata_replication(&self) {
+        let library_manager = self.library_manager.clone();
+        let library_dir = self.config.library_dir.clone();
+        let key_service = self.key_service.clone();
+        let encryption_service = library_manager.get().encryption_service().cloned();
+        let library_id = self.config.library_id.clone();
+        let library_name = self.config.library_name.clone();
 
         spawn(async move {
-            let mut rx = app.library_manager.get().subscribe_events();
+            let mut rx = library_manager.get().subscribe_events();
 
             loop {
-                // Wait for an AlbumsChanged event
                 match rx.recv().await {
                     Ok(LibraryEvent::AlbumsChanged) => {}
                     Err(_) => break,
-                }
-
-                // Check if cloud sync is enabled
-                if !app.config.cloud_sync_enabled {
-                    continue;
                 }
 
                 // Debounce: wait 2s, draining any additional events
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 while rx.try_recv().is_ok() {}
 
-                // Trigger upload
-                tracing::info!("Auto cloud sync triggered by library change");
+                let replicator = bae_core::metadata_replicator::MetadataReplicator::new(
+                    library_manager.clone(),
+                    library_dir.clone(),
+                    key_service.clone(),
+                    encryption_service.clone(),
+                    library_id.clone(),
+                    library_name.clone(),
+                );
 
-                app.state
-                    .config()
-                    .cloud_sync_status()
-                    .set(bae_ui::stores::CloudSyncStatus::Syncing);
-
-                match cloud_sync_upload(&app).await {
-                    Ok(timestamp) => {
-                        app.save_config(|c| {
-                            c.cloud_sync_last_upload = Some(timestamp.clone());
-                        });
-                        app.state
-                            .config()
-                            .cloud_sync_last_upload()
-                            .set(Some(timestamp));
-                        app.state
-                            .config()
-                            .cloud_sync_status()
-                            .set(bae_ui::stores::CloudSyncStatus::Idle);
-                    }
-                    Err(e) => {
-                        tracing::error!("Auto cloud sync failed: {}", e);
-
-                        app.state
-                            .config()
-                            .cloud_sync_status()
-                            .set(bae_ui::stores::CloudSyncStatus::Error(e.to_string()));
-                    }
+                if let Err(e) = replicator.sync_all().await {
+                    tracing::error!("Auto metadata replication failed: {}", e);
                 }
             }
         });
@@ -553,26 +533,6 @@ impl AppService {
             .config()
             .torrent_max_uploads_per_torrent()
             .set(config.torrent_max_uploads_per_torrent);
-        self.state
-            .config()
-            .cloud_sync_enabled()
-            .set(config.cloud_sync_enabled);
-        self.state
-            .config()
-            .cloud_sync_bucket()
-            .set(config.cloud_sync_bucket.clone());
-        self.state
-            .config()
-            .cloud_sync_region()
-            .set(config.cloud_sync_region.clone());
-        self.state
-            .config()
-            .cloud_sync_endpoint()
-            .set(config.cloud_sync_endpoint.clone());
-        self.state
-            .config()
-            .cloud_sync_last_upload()
-            .set(config.cloud_sync_last_upload.clone());
     }
 
     /// Load active imports from database
@@ -1031,26 +991,6 @@ impl AppService {
             .config()
             .torrent_max_uploads_per_torrent()
             .set(new_config.torrent_max_uploads_per_torrent);
-        self.state
-            .config()
-            .cloud_sync_enabled()
-            .set(new_config.cloud_sync_enabled);
-        self.state
-            .config()
-            .cloud_sync_bucket()
-            .set(new_config.cloud_sync_bucket.clone());
-        self.state
-            .config()
-            .cloud_sync_region()
-            .set(new_config.cloud_sync_region.clone());
-        self.state
-            .config()
-            .cloud_sync_endpoint()
-            .set(new_config.cloud_sync_endpoint.clone());
-        self.state
-            .config()
-            .cloud_sync_last_upload()
-            .set(new_config.cloud_sync_last_upload.clone());
     }
 
     // =========================================================================
@@ -1138,6 +1078,7 @@ impl AppService {
                     location_path: profile.location_path.clone(),
                     encrypted,
                     is_default: profile.is_default,
+                    is_home: false,
                     cloud_bucket: profile.cloud_bucket.clone(),
                     cloud_region: profile.cloud_region.clone(),
                     cloud_endpoint: profile.cloud_endpoint.clone(),
@@ -1898,71 +1839,6 @@ fn handle_import_progress(state: &Store<AppState>, event: ImportProgress) {
             state.album_detail().import_error().set(Some(error));
         }
     }
-}
-
-/// Build CloudSyncService from config + keyring, upload DB + covers.
-/// Returns the upload timestamp on success.
-pub(crate) async fn cloud_sync_upload(
-    app: &AppService,
-) -> Result<String, Box<dyn std::error::Error>> {
-    use bae_core::cloud_sync::CloudSyncService;
-    use bae_core::encryption::EncryptionService;
-
-    let config = &app.config;
-
-    let bucket = config
-        .cloud_sync_bucket
-        .as_ref()
-        .ok_or("No bucket configured")?
-        .clone();
-    let region = config
-        .cloud_sync_region
-        .as_ref()
-        .ok_or("No region configured")?
-        .clone();
-    let endpoint = config.cloud_sync_endpoint.clone();
-
-    let access_key = app
-        .key_service
-        .get_cloud_sync_access_key()
-        .ok_or("No access key configured")?;
-    let secret_key = app
-        .key_service
-        .get_cloud_sync_secret_key()
-        .ok_or("No secret key configured")?;
-
-    let encryption_key = app
-        .key_service
-        .get_encryption_key()
-        .ok_or("No encryption key")?;
-    let encryption_service = EncryptionService::new(&encryption_key)?;
-
-    let sync_service = CloudSyncService::new(
-        bucket,
-        region,
-        endpoint,
-        access_key,
-        secret_key,
-        config.library_id.clone(),
-        encryption_service,
-    )
-    .await?;
-
-    // Create DB snapshot via VACUUM INTO
-    let db_path = config.library_dir.db_path();
-    let snapshot_path = db_path.with_extension("db.snapshot");
-    app.library_manager
-        .database()
-        .vacuum_into(snapshot_path.to_str().unwrap())
-        .await?;
-
-    // Upload DB + covers + artist images
-    let timestamp = sync_service.upload_db(&db_path).await?;
-
-    let images_dir = config.library_dir.images_dir();
-    sync_service.upload_images(&images_dir).await?;
-
-    Ok(timestamp)
 }
 
 /// Hook to access the AppService from any component

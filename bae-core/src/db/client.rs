@@ -1531,10 +1531,10 @@ impl Database {
         sqlx::query(
             r#"
             INSERT INTO storage_profiles (
-                id, name, location, location_path, encrypted, is_default,
+                id, name, location, location_path, encrypted, is_default, is_home,
                 cloud_bucket, cloud_region, cloud_endpoint,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&profile.id)
@@ -1543,6 +1543,7 @@ impl Database {
         .bind(&profile.location_path)
         .bind(profile.encrypted)
         .bind(profile.is_default)
+        .bind(profile.is_home)
         .bind(&profile.cloud_bucket)
         .bind(&profile.cloud_region)
         .bind(&profile.cloud_endpoint)
@@ -1573,6 +1574,18 @@ impl Database {
             .map(|row| self.row_to_storage_profile(row))
             .collect())
     }
+    /// Get all non-home storage profiles (replicas to sync metadata to)
+    pub async fn get_replica_profiles(&self) -> Result<Vec<DbStorageProfile>, sqlx::Error> {
+        let rows =
+            sqlx::query("SELECT * FROM storage_profiles WHERE is_home = FALSE ORDER BY name")
+                .fetch_all(&self.pool)
+                .await?;
+        Ok(rows
+            .iter()
+            .map(|row| self.row_to_storage_profile(row))
+            .collect())
+    }
+
     /// Get the default storage profile
     pub async fn get_default_storage_profile(
         &self,
@@ -1617,8 +1630,20 @@ impl Database {
         .await?;
         Ok(())
     }
-    /// Delete a storage profile. Fails if any releases are linked to it.
+    /// Delete a storage profile. Fails if it is the home profile or if any releases are linked to it.
     pub async fn delete_storage_profile(&self, profile_id: &str) -> Result<(), sqlx::Error> {
+        let is_home: bool = sqlx::query_scalar("SELECT is_home FROM storage_profiles WHERE id = ?")
+            .bind(profile_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .unwrap_or(false);
+
+        if is_home {
+            return Err(sqlx::Error::Protocol(
+                "Cannot delete the home storage profile".to_string(),
+            ));
+        }
+
         let count: i32 =
             sqlx::query_scalar("SELECT COUNT(*) FROM release_storage WHERE storage_profile_id = ?")
                 .bind(profile_id)
@@ -1662,6 +1687,7 @@ impl Database {
             location_path: row.get("location_path"),
             encrypted: row.get("encrypted"),
             is_default: row.get("is_default"),
+            is_home: row.get("is_home"),
             cloud_bucket: row.get("cloud_bucket"),
             cloud_region: row.get("cloud_region"),
             cloud_endpoint: row.get("cloud_endpoint"),

@@ -178,6 +178,13 @@ fn main() {
     };
     let library_manager = create_library_manager(database.clone(), encryption_service.clone());
 
+    // Ensure the home storage profile and manifest.json exist (idempotent, runs every startup)
+    runtime_handle.block_on(ensure_home_profile(
+        &library_manager,
+        &config,
+        encryption_service.as_ref(),
+    ));
+
     #[cfg(feature = "torrent")]
     let torrent_manager = {
         let torrent_options = torrent_options_from_config(&config);
@@ -278,6 +285,82 @@ fn main() {
     info!("Starting UI");
     ui::launch_app(ui_context);
     info!("UI quit");
+}
+
+/// Ensure a home storage profile exists and manifest.json is present at the library root.
+///
+/// On first launch after library creation, no home profile exists yet. This creates one
+/// and writes manifest.json. On subsequent launches, this is a no-op.
+async fn ensure_home_profile(
+    library_manager: &SharedLibraryManager,
+    config: &config::Config,
+    encryption_service: Option<&encryption::EncryptionService>,
+) {
+    let profiles = match library_manager.get_all_storage_profiles().await {
+        Ok(p) => p,
+        Err(e) => {
+            error!("Failed to load storage profiles: {e}");
+            return;
+        }
+    };
+
+    let home_exists = profiles.iter().any(|p| p.is_home);
+
+    if !home_exists {
+        info!("Creating home storage profile");
+        let home_profile = bae_core::db::DbStorageProfile::new_local(
+            "Local",
+            &config.library_dir.to_string_lossy(),
+            false,
+        )
+        .with_home(true);
+
+        if let Err(e) = library_manager.insert_storage_profile(&home_profile).await {
+            error!("Failed to create home storage profile: {e}");
+            return;
+        }
+    }
+
+    // Write manifest.json if missing
+    let manifest_path = config.library_dir.manifest_path();
+    if !manifest_path.exists() {
+        info!("Writing manifest.json");
+
+        // Re-read profiles to get the home profile id
+        let home_profile = match library_manager.get_all_storage_profiles().await {
+            Ok(profiles) => profiles.into_iter().find(|p| p.is_home),
+            Err(e) => {
+                error!("Failed to read profiles for manifest: {e}");
+                return;
+            }
+        };
+
+        let manifest = bae_core::library_dir::Manifest {
+            library_id: config.library_id.clone(),
+            library_name: config.library_name.clone(),
+            encryption_key_fingerprint: encryption_service.map(|e| e.fingerprint()),
+            profile_id: home_profile
+                .as_ref()
+                .map(|p| p.id.clone())
+                .unwrap_or_default(),
+            profile_name: home_profile
+                .as_ref()
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| "Local".to_string()),
+            replicated_at: None,
+        };
+
+        match serde_json::to_string_pretty(&manifest) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(&manifest_path, json) {
+                    error!("Failed to write manifest.json: {e}");
+                }
+            }
+            Err(e) => {
+                error!("Failed to serialize manifest: {e}");
+            }
+        }
+    }
 }
 
 /// Start the Subsonic API server

@@ -262,7 +262,7 @@ fn WelcomeScreen() -> Element {
     }
 }
 
-/// Perform the full cloud restore: download DB + covers, write config + keyring + pointer file
+/// Perform the full cloud restore: download DB + images, create home profile, write config + keyring + pointer file
 async fn do_restore(
     key_service: &KeyService,
     library_id: String,
@@ -273,7 +273,7 @@ async fn do_restore(
     secret_key: String,
     encryption_key_hex: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use bae_core::cloud_sync::CloudSyncService;
+    use bae_core::cloud_storage::{CloudStorage, S3CloudStorage, S3Config};
     use bae_core::encryption::EncryptionService;
 
     let encryption_service = EncryptionService::new(&encryption_key_hex)?;
@@ -282,22 +282,38 @@ async fn do_restore(
     let endpoint_opt = if endpoint.is_empty() {
         None
     } else {
-        Some(endpoint)
+        Some(endpoint.clone())
     };
 
-    let sync_service = CloudSyncService::new(
-        bucket.clone(),
-        region.clone(),
-        endpoint_opt.clone(),
-        access_key.clone(),
-        secret_key.clone(),
-        library_id.clone(),
-        encryption_service,
-    )
-    .await?;
+    let s3_config = S3Config {
+        bucket_name: bucket.clone(),
+        region: region.clone(),
+        access_key_id: access_key.clone(),
+        secret_access_key: secret_key.clone(),
+        endpoint_url: endpoint_opt.clone(),
+    };
+    let storage = S3CloudStorage::new_with_bucket_creation(s3_config, false).await?;
 
-    // Validate key fingerprint against cloud meta
-    sync_service.validate_key().await?;
+    // Download and decrypt manifest to validate key
+    info!("Downloading manifest from cloud...");
+    let encrypted_manifest = storage
+        .download(&format!("s3://{}/manifest.json.enc", bucket))
+        .await?;
+    let manifest_bytes = encryption_service.decrypt(&encrypted_manifest)?;
+    let manifest: bae_core::library_dir::Manifest = serde_json::from_slice(&manifest_bytes)?;
+
+    // Validate fingerprint
+    if let Some(ref expected_fp) = manifest.encryption_key_fingerprint {
+        if *expected_fp != fingerprint {
+            return Err(format!(
+                "Encryption key fingerprint mismatch: expected {}, got {}",
+                expected_fp, fingerprint
+            )
+            .into());
+        }
+    }
+
+    info!("Key validated, downloading library...");
 
     // Set up local library directory
     let home_dir = dirs::home_dir().expect("Failed to get home directory");
@@ -306,19 +322,52 @@ async fn do_restore(
         bae_core::library_dir::LibraryDir::new(bae_dir.join("libraries").join(&library_id));
     std::fs::create_dir_all(&*library_dir)?;
 
-    // Download DB
+    // Download and decrypt DB
+    let encrypted_db = storage
+        .download(&format!("s3://{}/library.db.enc", bucket))
+        .await?;
+    let decrypted_db = encryption_service.decrypt(&encrypted_db)?;
     let db_path = library_dir.db_path();
-    sync_service.download_db(&db_path).await?;
+    tokio::fs::write(&db_path, &decrypted_db).await?;
 
-    // Download library images (covers + artist photos)
+    info!("Restored DB ({} bytes)", decrypted_db.len());
+
+    // Download and decrypt images
     let images_dir = library_dir.images_dir();
-    sync_service.download_images(&images_dir).await?;
+    download_images_encrypted(&storage, &encryption_service, &bucket, &images_dir).await?;
 
-    // Write config.yaml with cloud sync settings already populated
+    // Generate a new home profile UUID
+    let home_profile_id = uuid::Uuid::new_v4().to_string();
+
+    // Open the restored DB to insert the home profile
+    let database = bae_core::db::Database::new(db_path.to_str().unwrap()).await?;
+    let home_profile =
+        bae_core::db::DbStorageProfile::new_local("Local", &library_dir.to_string_lossy(), false)
+            .with_home(true);
+    // Override the auto-generated ID
+    let home_profile = bae_core::db::DbStorageProfile {
+        id: home_profile_id.clone(),
+        ..home_profile
+    };
+    database.insert_storage_profile(&home_profile).await?;
+
+    // Write local manifest.json for the new home
+    let home_manifest = bae_core::library_dir::Manifest {
+        library_id: library_id.clone(),
+        library_name: manifest.library_name.clone(),
+        encryption_key_fingerprint: Some(fingerprint.clone()),
+        profile_id: home_profile_id,
+        profile_name: "Local".to_string(),
+        replicated_at: None,
+    };
+    let manifest_json = serde_json::to_string_pretty(&home_manifest)?;
+    tokio::fs::write(library_dir.manifest_path(), manifest_json).await?;
+
+    // Write config.yaml
     let config = bae_core::config::Config {
         library_id: library_id.clone(),
         library_dir: library_dir.clone(),
-        library_name: None,
+        library_name: manifest.library_name,
         keys_migrated: true,
         discogs_key_stored: false,
         encryption_key_stored: true,
@@ -333,19 +382,28 @@ async fn do_restore(
         torrent_max_uploads_per_torrent: None,
         subsonic_enabled: false,
         subsonic_port: 4533,
-        cloud_sync_enabled: true,
-        cloud_sync_bucket: Some(bucket),
-        cloud_sync_region: Some(region),
-        cloud_sync_endpoint: endpoint_opt,
-        cloud_sync_last_upload: None,
     };
     config.save_to_config_yaml()?;
     bae_core::config::Config::add_known_library(&library_dir)?;
 
     // Write secrets to keyring
     key_service.set_encryption_key(&encryption_key_hex)?;
-    key_service.set_cloud_sync_access_key(&access_key)?;
-    key_service.set_cloud_sync_secret_key(&secret_key)?;
+
+    // Save S3 credentials for the cloud profile that matches the bucket we restored from.
+    // Without this, auto-sync would fail because the credentials only live in the keyring.
+    let all_profiles = database.get_all_storage_profiles().await?;
+    if let Some(cloud_profile) = all_profiles
+        .iter()
+        .find(|p| p.cloud_bucket.as_deref() == Some(&bucket))
+    {
+        key_service.set_profile_access_key(&cloud_profile.id, &access_key)?;
+        key_service.set_profile_secret_key(&cloud_profile.id, &secret_key)?;
+
+        info!(
+            "Saved S3 credentials for cloud profile '{}'",
+            cloud_profile.name
+        );
+    }
 
     // Write pointer file last (makes this idempotent on failure)
     config.save_library_path()?;
@@ -354,6 +412,45 @@ async fn do_restore(
         "Cloud restore complete: library at {}",
         library_dir.display()
     );
+    Ok(())
+}
+
+/// Download and decrypt all images from the cloud bucket.
+async fn download_images_encrypted(
+    storage: &bae_core::cloud_storage::S3CloudStorage,
+    encryption: &bae_core::encryption::EncryptionService,
+    bucket: &str,
+    images_dir: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use bae_core::cloud_storage::CloudStorage;
+
+    tokio::fs::create_dir_all(images_dir).await?;
+
+    let keys = storage.list_keys("images/").await?;
+
+    info!("Found {} image(s) to download", keys.len());
+
+    for key in &keys {
+        // key looks like "images/ab/cd/<id>" — strip "images/" prefix to get the relative path
+        let rel = key.strip_prefix("images/").unwrap_or(key);
+        let target_path = images_dir.join(rel);
+
+        if let Some(parent) = target_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+
+        let location = format!("s3://{}/{}", bucket, key);
+        let encrypted_data = storage.download(&location).await?;
+        let decrypted_data = encryption.decrypt(&encrypted_data)?;
+        tokio::fs::write(&target_path, &decrypted_data).await?;
+    }
+
+    info!(
+        "Downloaded {} image(s) to {}",
+        keys.len(),
+        images_dir.display()
+    );
+
     Ok(())
 }
 
