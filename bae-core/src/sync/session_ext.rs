@@ -58,6 +58,10 @@ impl Drop for Changeset {
     }
 }
 
+// SAFETY: The changeset buffer is just heap-allocated memory extracted from
+// sqlite3session_changeset. It has no thread affinity after extraction.
+unsafe impl Send for Changeset {}
+
 /// Action a conflict handler can return.
 #[repr(i32)]
 pub enum ConflictAction {

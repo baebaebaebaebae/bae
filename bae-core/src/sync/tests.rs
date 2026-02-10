@@ -426,14 +426,14 @@ fn insert_conflict_newer_wins() {
 fn changeset_from_bytes_roundtrip() {
     unsafe {
         let db1 = open_memory_db();
-        exec(
-            db1,
-            "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)",
-        );
+        create_synced_schema(db1);
 
         let session = Session::new(db1).expect("session");
-        session.attach(Some("items")).expect("attach");
-        exec(db1, "INSERT INTO items VALUES (1, 'hello')");
+        session.attach(Some("artists")).expect("attach");
+        exec(
+            db1,
+            "INSERT INTO artists (id, name, _updated_at, created_at) VALUES ('a1', 'hello', '0000000001000-0000-dev1', '2026-01-01')",
+        );
         let cs = session.changeset().expect("changeset");
         drop(session);
 
@@ -442,14 +442,154 @@ fn changeset_from_bytes_roundtrip() {
         let cs2 = Changeset::from_bytes(&bytes);
 
         let db2 = open_memory_db();
-        exec(
-            db2,
-            "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)",
-        );
+        create_synced_schema(db2);
         apply_changeset_lww(db2, &cs2).expect("apply");
 
-        let name = query_text(db2, "SELECT name FROM items WHERE id = 1");
+        let name = query_text(db2, "SELECT name FROM artists WHERE id = 'a1'");
         assert_eq!(name, "hello");
+
+        ffi::sqlite3_close(db1);
+        ffi::sqlite3_close(db2);
+    }
+}
+
+// ---- release_files DATA conflict preserves device-specific columns ----
+
+#[test]
+fn release_files_data_conflict_preserves_source_path_and_nonce() {
+    unsafe {
+        let db1 = open_memory_db();
+        create_synced_schema(db1);
+
+        // Set up parent rows so FK constraints are satisfied
+        exec(
+            db1,
+            "INSERT INTO albums (id, title, _updated_at, created_at) VALUES ('al1', 'Album', '0000000001000-0000-dev1', '2026-01-01')",
+        );
+        exec(
+            db1,
+            "INSERT INTO releases (id, album_id, import_status, _updated_at, created_at) VALUES ('r1', 'al1', 'complete', '0000000001000-0000-dev1', '2026-01-01')",
+        );
+        exec(
+            db1,
+            "INSERT INTO release_files (id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, _updated_at, created_at) VALUES ('f1', 'r1', 'track01.flac', 50000, 'audio/flac', '/dev1/music/track01.flac', X'AABBCCDD', '0000000001000-0000-dev1', '2026-01-01')",
+        );
+
+        // Dev1 updates the file metadata with a NEWER timestamp
+        let session = Session::new(db1).expect("session");
+        session.attach(Some("release_files")).expect("attach");
+        exec(
+            db1,
+            "UPDATE release_files SET original_filename = 'track01_renamed.flac', source_path = '/dev1/music/track01_renamed.flac', encryption_nonce = X'11223344', _updated_at = '0000000003000-0000-dev1' WHERE id = 'f1'",
+        );
+        let cs = session.changeset().expect("changeset");
+        drop(session);
+
+        // Dev2 has the same row with an OLDER timestamp but its own device-specific paths
+        let db2 = open_memory_db();
+        create_synced_schema(db2);
+        exec(
+            db2,
+            "INSERT INTO albums (id, title, _updated_at, created_at) VALUES ('al1', 'Album', '0000000001000-0000-dev1', '2026-01-01')",
+        );
+        exec(
+            db2,
+            "INSERT INTO releases (id, album_id, import_status, _updated_at, created_at) VALUES ('r1', 'al1', 'complete', '0000000001000-0000-dev1', '2026-01-01')",
+        );
+        exec(
+            db2,
+            "INSERT INTO release_files (id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, _updated_at, created_at) VALUES ('f1', 'r1', 'track01.flac', 50000, 'audio/flac', '/dev2/library/track01.flac', X'DEADBEEF', '0000000002000-0000-dev2', '2026-01-01')",
+        );
+
+        apply_changeset_lww(db2, &cs).expect("apply");
+
+        // Shared metadata should come from incoming (dev1 wins by timestamp)
+        let filename = query_text(
+            db2,
+            "SELECT original_filename FROM release_files WHERE id = 'f1'",
+        );
+        assert_eq!(
+            filename, "track01_renamed.flac",
+            "incoming shared metadata should win"
+        );
+
+        // Device-specific columns should be preserved from local (dev2)
+        let source_path = query_text(db2, "SELECT source_path FROM release_files WHERE id = 'f1'");
+        assert_eq!(
+            source_path, "/dev2/library/track01.flac",
+            "local source_path must be preserved"
+        );
+
+        let nonce = query_text(
+            db2,
+            "SELECT hex(encryption_nonce) FROM release_files WHERE id = 'f1'",
+        );
+        assert_eq!(
+            nonce, "DEADBEEF",
+            "local encryption_nonce must be preserved"
+        );
+
+        ffi::sqlite3_close(db1);
+        ffi::sqlite3_close(db2);
+    }
+}
+
+#[test]
+fn release_files_data_conflict_local_wins_no_restore_needed() {
+    unsafe {
+        let db1 = open_memory_db();
+        create_synced_schema(db1);
+
+        exec(
+            db1,
+            "INSERT INTO albums (id, title, _updated_at, created_at) VALUES ('al1', 'Album', '0000000001000-0000-dev1', '2026-01-01')",
+        );
+        exec(
+            db1,
+            "INSERT INTO releases (id, album_id, import_status, _updated_at, created_at) VALUES ('r1', 'al1', 'complete', '0000000001000-0000-dev1', '2026-01-01')",
+        );
+        exec(
+            db1,
+            "INSERT INTO release_files (id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, _updated_at, created_at) VALUES ('f1', 'r1', 'track01.flac', 50000, 'audio/flac', '/dev1/path', X'AABB', '0000000001000-0000-dev1', '2026-01-01')",
+        );
+
+        // Dev1 updates with an OLDER timestamp
+        let session = Session::new(db1).expect("session");
+        session.attach(Some("release_files")).expect("attach");
+        exec(
+            db1,
+            "UPDATE release_files SET original_filename = 'old_name.flac', source_path = '/dev1/old', _updated_at = '0000000002000-0000-dev1' WHERE id = 'f1'",
+        );
+        let cs = session.changeset().expect("changeset");
+        drop(session);
+
+        // Dev2 has a NEWER timestamp -- local wins, no restore needed
+        let db2 = open_memory_db();
+        create_synced_schema(db2);
+        exec(
+            db2,
+            "INSERT INTO albums (id, title, _updated_at, created_at) VALUES ('al1', 'Album', '0000000001000-0000-dev1', '2026-01-01')",
+        );
+        exec(
+            db2,
+            "INSERT INTO releases (id, album_id, import_status, _updated_at, created_at) VALUES ('r1', 'al1', 'complete', '0000000001000-0000-dev1', '2026-01-01')",
+        );
+        exec(
+            db2,
+            "INSERT INTO release_files (id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, _updated_at, created_at) VALUES ('f1', 'r1', 'track01.flac', 50000, 'audio/flac', '/dev2/path', X'CCDD', '0000000005000-0000-dev2', '2026-01-01')",
+        );
+
+        apply_changeset_lww(db2, &cs).expect("apply");
+
+        // Local should win entirely -- both shared and device-specific columns untouched
+        let filename = query_text(
+            db2,
+            "SELECT original_filename FROM release_files WHERE id = 'f1'",
+        );
+        assert_eq!(filename, "track01.flac", "local should win");
+
+        let source_path = query_text(db2, "SELECT source_path FROM release_files WHERE id = 'f1'");
+        assert_eq!(source_path, "/dev2/path", "local source_path preserved");
 
         ffi::sqlite3_close(db1);
         ffi::sqlite3_close(db2);
