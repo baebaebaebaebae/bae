@@ -3,13 +3,17 @@
 use crate::ui::app_service::use_app;
 use crate::ui::import_helpers::{
     build_caa_client, check_candidates_for_duplicates, check_cover_art, confirm_and_start_import,
+    count_local_audio_files, fetch_discogs_release_for_validation, fetch_mb_release_for_validation,
     lookup_discid, search_by_barcode, search_by_catalog_number, search_general, DiscIdLookupResult,
 };
 use crate::ui::Route;
+use bae_core::discogs::DiscogsRelease;
 use bae_ui::components::import::FolderImportView;
-use bae_ui::display_types::{MatchCandidate, SearchSource, SearchTab, SelectedCover};
-use bae_ui::stores::import::CandidateEvent;
+use bae_ui::display_types::{
+    MatchCandidate, MatchSourceType, SearchSource, SearchTab, SelectedCover,
+};
 use bae_ui::stores::import::ImportStateStoreExt;
+use bae_ui::stores::import::{CandidateEvent, PrefetchState};
 use bae_ui::stores::{AppStateStoreExt, StorageProfilesStateStoreExt};
 use bae_ui::ImportSource;
 use dioxus::prelude::*;
@@ -30,6 +34,9 @@ pub fn FolderImport() -> Element {
 
     // Extract values needed by handlers (handlers need current values, not lenses)
     let current_candidate_key = import_state.current_candidate_key().read().clone();
+
+    // Cache for pre-fetched Discogs release (reused during import to avoid double fetch)
+    let mut cached_discogs_release = use_signal(|| None::<DiscogsRelease>);
 
     // Handlers
     let on_folder_select = {
@@ -63,20 +70,42 @@ pub fn FolderImport() -> Element {
     let on_exact_match_select = {
         let app = app.clone();
         move |index: usize| {
+            // Dispatch selection (clears old prefetch state)
             app.state
                 .import()
                 .write()
                 .dispatch(CandidateEvent::SelectExactMatch(index));
+
+            // Spawn prefetch for the selected exact match
+            let app = app.clone();
+            spawn(async move {
+                spawn_prefetch_for_exact_match(&app, index).await;
+            });
         }
     };
 
     let on_confirm_exact_match = {
         let app = app.clone();
         move |_: MatchCandidate| {
-            app.state
-                .import()
-                .write()
-                .dispatch(CandidateEvent::ConfirmExactMatch);
+            let prefetch = app.state.import().read().get_exact_match_prefetch_state();
+            match prefetch {
+                Some(PrefetchState::Valid) => {
+                    app.state
+                        .import()
+                        .write()
+                        .dispatch(CandidateEvent::ConfirmExactMatch);
+                }
+                Some(PrefetchState::Fetching) | None => {
+                    // Still fetching or not started - set pending so auto-confirm on completion
+                    app.state
+                        .import()
+                        .write()
+                        .dispatch(CandidateEvent::SetExactMatchConfirmPending);
+                }
+                _ => {
+                    // Mismatch or failed - button should be disabled, but no-op as safety
+                }
+            }
         }
     };
 
@@ -266,20 +295,45 @@ pub fn FolderImport() -> Element {
     let on_manual_match_select = {
         let app = app.clone();
         move |index: usize| {
+            // Dispatch selection (clears old prefetch state)
             app.state
                 .import()
                 .write()
                 .dispatch(CandidateEvent::SelectSearchResult(index));
+
+            // Clear cached release
+            cached_discogs_release.set(None);
+
+            // Spawn prefetch for the selected search result
+            let app = app.clone();
+            spawn(async move {
+                spawn_prefetch_for_search_result(&app, index, &mut cached_discogs_release).await;
+            });
         }
     };
 
     let on_manual_confirm = {
         let app = app.clone();
         move |_candidate: bae_ui::display_types::MatchCandidate| {
-            app.state
-                .import()
-                .write()
-                .dispatch(CandidateEvent::ConfirmSearchResult);
+            let prefetch = app.state.import().read().get_current_prefetch_state();
+            match prefetch {
+                Some(PrefetchState::Valid) => {
+                    app.state
+                        .import()
+                        .write()
+                        .dispatch(CandidateEvent::ConfirmSearchResult);
+                }
+                Some(PrefetchState::Fetching) | None => {
+                    // Still fetching or not started - set pending so auto-confirm on completion
+                    app.state
+                        .import()
+                        .write()
+                        .dispatch(CandidateEvent::SetConfirmPending);
+                }
+                _ => {
+                    // Mismatch or failed - button should be disabled, but no-op as safety
+                }
+            }
         }
     };
 
@@ -349,6 +403,7 @@ pub fn FolderImport() -> Element {
         let app = app.clone();
         move |_| {
             let app = app.clone();
+            let pre_fetched = cached_discogs_release.read().clone();
             app.state
                 .import()
                 .write()
@@ -357,7 +412,8 @@ pub fn FolderImport() -> Element {
                 let confirmed = app.state.import().read().get_confirmed_candidate();
                 if let Some(candidate) = confirmed {
                     if let Err(e) =
-                        confirm_and_start_import(&app, candidate, ImportSource::Folder).await
+                        confirm_and_start_import(&app, candidate, ImportSource::Folder, pre_fetched)
+                            .await
                     {
                         warn!("Failed to confirm and start import: {}", e);
                         app.state
@@ -590,6 +646,201 @@ pub fn FolderImport() -> Element {
             on_confirm,
             on_configure_storage,
             on_view_in_library,
+        }
+    }
+}
+
+// ============================================================================
+// Prefetch helpers
+// ============================================================================
+
+use crate::ui::app_service::AppService;
+
+/// Spawn a prefetch for a manual search result.
+///
+/// Fetches the full release, counts tracks, compares to local files,
+/// and dispatches a `PrefetchComplete` event.
+async fn spawn_prefetch_for_search_result(
+    app: &AppService,
+    index: usize,
+    cached_discogs_release: &mut Signal<Option<DiscogsRelease>>,
+) {
+    let mut import_store = app.state.import();
+
+    // Read the candidate info we need for the fetch
+    let (candidate, local_file_count, candidate_key) = {
+        let state = import_store.read();
+        let key = state.current_candidate_key.clone();
+        let candidate = state
+            .get_search_state()
+            .and_then(|s| s.current_tab_state().search_results.get(index).cloned());
+        let files = state.current_candidate_state().map(|s| s.files().clone());
+        let local_count = files.map(|f| count_local_audio_files(&f)).unwrap_or(0);
+        (candidate, local_count, key)
+    };
+
+    let Some(candidate) = candidate else {
+        return;
+    };
+    let Some(candidate_key) = candidate_key else {
+        return;
+    };
+
+    // Mark as fetching
+    import_store
+        .write()
+        .dispatch_to_candidate(&candidate_key, CandidateEvent::PrefetchStarted(index));
+
+    let result = prefetch_and_validate(&candidate, local_file_count, &app.key_service).await;
+
+    // Cache the Discogs release if we got one
+    if let PrefetchValidationResult::DiscogsValid(release) = &result {
+        cached_discogs_release.set(Some(release.as_ref().clone()));
+    }
+
+    let prefetch_state = match result {
+        PrefetchValidationResult::Valid | PrefetchValidationResult::DiscogsValid(_) => {
+            PrefetchState::Valid
+        }
+        PrefetchValidationResult::TrackCountMismatch {
+            release_tracks,
+            local_files,
+        } => PrefetchState::TrackCountMismatch {
+            release_tracks,
+            local_files,
+        },
+        PrefetchValidationResult::FetchFailed(err) => PrefetchState::FetchFailed(err),
+    };
+
+    import_store.write().dispatch_to_candidate(
+        &candidate_key,
+        CandidateEvent::PrefetchComplete {
+            index,
+            result: prefetch_state,
+        },
+    );
+}
+
+/// Spawn a prefetch for an exact match result.
+async fn spawn_prefetch_for_exact_match(app: &AppService, index: usize) {
+    let mut import_store = app.state.import();
+
+    let (candidate, local_file_count, candidate_key) = {
+        let state = import_store.read();
+        let key = state.current_candidate_key.clone();
+        let candidate = state.current_candidate_state().and_then(|s| match s {
+            bae_ui::stores::import::CandidateState::Identifying(is) => {
+                is.auto_matches.get(index).cloned()
+            }
+            _ => None,
+        });
+        let files = state.current_candidate_state().map(|s| s.files().clone());
+        let local_count = files.map(|f| count_local_audio_files(&f)).unwrap_or(0);
+        (candidate, local_count, key)
+    };
+
+    let Some(candidate) = candidate else {
+        return;
+    };
+    let Some(candidate_key) = candidate_key else {
+        return;
+    };
+
+    // Mark as fetching
+    import_store.write().dispatch_to_candidate(
+        &candidate_key,
+        CandidateEvent::ExactMatchPrefetchStarted(index),
+    );
+
+    let result = prefetch_and_validate(&candidate, local_file_count, &app.key_service).await;
+
+    let prefetch_state = match result {
+        PrefetchValidationResult::Valid | PrefetchValidationResult::DiscogsValid(_) => {
+            PrefetchState::Valid
+        }
+        PrefetchValidationResult::TrackCountMismatch {
+            release_tracks,
+            local_files,
+        } => PrefetchState::TrackCountMismatch {
+            release_tracks,
+            local_files,
+        },
+        PrefetchValidationResult::FetchFailed(err) => PrefetchState::FetchFailed(err),
+    };
+
+    import_store.write().dispatch_to_candidate(
+        &candidate_key,
+        CandidateEvent::ExactMatchPrefetchComplete {
+            index,
+            result: prefetch_state,
+        },
+    );
+}
+
+enum PrefetchValidationResult {
+    Valid,
+    DiscogsValid(Box<DiscogsRelease>),
+    TrackCountMismatch {
+        release_tracks: usize,
+        local_files: usize,
+    },
+    FetchFailed(String),
+}
+
+/// Fetch the full release and validate track count against local files.
+async fn prefetch_and_validate(
+    candidate: &MatchCandidate,
+    local_file_count: usize,
+    key_service: &bae_core::keys::KeyService,
+) -> PrefetchValidationResult {
+    match candidate.source_type {
+        MatchSourceType::Discogs => {
+            let Some(release_id) = candidate.discogs_release_id.as_ref() else {
+                return PrefetchValidationResult::FetchFailed(
+                    "Missing Discogs release ID".to_string(),
+                );
+            };
+
+            match fetch_discogs_release_for_validation(
+                release_id,
+                candidate.discogs_master_id.as_deref(),
+                key_service,
+            )
+            .await
+            {
+                Ok((release, track_count)) => {
+                    if track_count == local_file_count {
+                        PrefetchValidationResult::DiscogsValid(Box::new(release))
+                    } else {
+                        PrefetchValidationResult::TrackCountMismatch {
+                            release_tracks: track_count,
+                            local_files: local_file_count,
+                        }
+                    }
+                }
+                Err(e) => PrefetchValidationResult::FetchFailed(e),
+            }
+        }
+        MatchSourceType::MusicBrainz => {
+            let Some(release_id) = candidate.musicbrainz_release_id.as_ref() else {
+                return PrefetchValidationResult::FetchFailed(
+                    "Missing MusicBrainz release ID".to_string(),
+                );
+            };
+
+            match fetch_mb_release_for_validation(release_id).await {
+                Ok((_json, track_count)) => {
+                    if track_count == local_file_count {
+                        PrefetchValidationResult::Valid
+                    } else {
+                        PrefetchValidationResult::TrackCountMismatch {
+                            release_tracks: track_count,
+                            local_files: local_file_count,
+                        }
+                    }
+                }
+                Err(e) => PrefetchValidationResult::FetchFailed(e),
+            }
         }
     }
 }

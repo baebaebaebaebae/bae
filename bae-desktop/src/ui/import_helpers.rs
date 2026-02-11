@@ -574,6 +574,73 @@ pub async fn search_by_barcode(
 }
 
 // ============================================================================
+// Prefetch / track count validation helpers
+// ============================================================================
+
+/// Count the number of local audio files from categorized file info.
+///
+/// For CUE/FLAC pairs, sums the track_count of each pair.
+/// For individual track files, returns the number of files.
+pub fn count_local_audio_files(files: &CategorizedFileInfo) -> usize {
+    match &files.audio {
+        AudioContentInfo::CueFlacPairs(pairs) => pairs.iter().map(|p| p.track_count).sum(),
+        AudioContentInfo::TrackFiles(tracks) => tracks.len(),
+    }
+}
+
+/// Count the number of tracks in a Discogs release.
+///
+/// Filters out non-track entries (headings/index tracks have empty position).
+pub fn count_discogs_release_tracks(release: &bae_core::discogs::DiscogsRelease) -> usize {
+    release
+        .tracklist
+        .iter()
+        .filter(|t| !t.position.is_empty())
+        .count()
+}
+
+/// Count the number of tracks in an MB release JSON response.
+///
+/// Sums tracks across all media entries.
+pub fn count_mb_tracks_from_json(json: &serde_json::Value) -> usize {
+    json.get("media")
+        .and_then(|m| m.as_array())
+        .map(|media| {
+            media
+                .iter()
+                .filter_map(|medium| medium.get("tracks").and_then(|t| t.as_array()))
+                .map(|tracks| tracks.len())
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
+/// Fetch a full MusicBrainz release by ID and return the JSON + track count.
+pub async fn fetch_mb_release_for_validation(
+    release_id: &str,
+) -> Result<(serde_json::Value, usize), String> {
+    let (_release, _urls, json) =
+        bae_core::retry::retry_with_backoff(3, "MusicBrainz release prefetch", || {
+            bae_core::musicbrainz::lookup_release_by_id(release_id)
+        })
+        .await
+        .map_err(|e| format!("Failed to fetch release: {}", e))?;
+    let track_count = count_mb_tracks_from_json(&json);
+    Ok((json, track_count))
+}
+
+/// Fetch a full Discogs release and return the release + track count.
+pub async fn fetch_discogs_release_for_validation(
+    release_id: &str,
+    master_id: Option<&str>,
+    key_service: &bae_core::keys::KeyService,
+) -> Result<(bae_core::discogs::DiscogsRelease, usize), String> {
+    let release = fetch_discogs_release(release_id, master_id, key_service).await?;
+    let track_count = count_discogs_release_tracks(&release);
+    Ok((release, track_count))
+}
+
+// ============================================================================
 // Import helpers
 // ============================================================================
 
@@ -599,10 +666,14 @@ async fn fetch_discogs_release(
 }
 
 /// Confirm a match candidate and start the import workflow.
+///
+/// `pre_fetched_discogs`: If the prefetch already fetched the Discogs release,
+/// pass it here to skip the redundant fetch during import.
 pub async fn confirm_and_start_import(
     app: &AppService,
     candidate: DisplayMatchCandidate,
     import_source: ImportSource,
+    pre_fetched_discogs: Option<DiscogsRelease>,
 ) -> Result<(), String> {
     let mut import_store = app.state.import();
 
@@ -636,17 +707,21 @@ pub async fn confirm_and_start_import(
     let request = match import_source {
         ImportSource::Folder => match candidate.source_type {
             MatchSourceType::Discogs => {
-                let release_id = candidate
-                    .discogs_release_id
-                    .as_ref()
-                    .ok_or_else(|| "Missing Discogs release ID".to_string())?;
+                let discogs_release = if let Some(pre_fetched) = pre_fetched_discogs {
+                    pre_fetched
+                } else {
+                    let release_id = candidate
+                        .discogs_release_id
+                        .as_ref()
+                        .ok_or_else(|| "Missing Discogs release ID".to_string())?;
 
-                let discogs_release = fetch_discogs_release(
-                    release_id,
-                    candidate.discogs_master_id.as_deref(),
-                    &app.key_service,
-                )
-                .await?;
+                    fetch_discogs_release(
+                        release_id,
+                        candidate.discogs_master_id.as_deref(),
+                        &app.key_service,
+                    )
+                    .await?
+                };
 
                 ImportRequest::Folder {
                     import_id: import_id.clone(),

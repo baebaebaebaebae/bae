@@ -442,7 +442,7 @@ pub fn CdImport() -> Element {
                 let confirmed = app.state.import().read().get_confirmed_candidate();
                 if let Some(candidate) = confirmed {
                     if let Err(e) =
-                        confirm_and_start_import(&app, candidate, ImportSource::Cd).await
+                        confirm_and_start_import(&app, candidate, ImportSource::Cd, None).await
                     {
                         warn!("Failed to confirm and start import: {}", e);
                         app.state

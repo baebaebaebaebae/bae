@@ -37,6 +37,10 @@ pub struct IdentifyingState {
     pub auto_matches: Vec<MatchCandidate>,
     /// Index of selected match in auto_matches (for MultipleExactMatches mode)
     pub selected_match_index: Option<usize>,
+    /// Prefetch validation state for the selected exact match
+    pub exact_match_prefetch: Option<PrefetchState>,
+    /// True when user clicked "Select" on exact match while prefetch was in-flight
+    pub exact_match_confirm_pending: bool,
     /// Manual search state (persisted even when in MultipleExactMatches)
     pub search_state: ManualSearchState,
     /// Error from DiscID lookup (network/server error - retryable)
@@ -47,6 +51,22 @@ pub struct IdentifyingState {
     pub source_disc_id: Option<String>,
 }
 
+/// Prefetch validation state for a selected search result
+#[derive(Clone, Debug, PartialEq)]
+pub enum PrefetchState {
+    /// Full release fetch in progress
+    Fetching,
+    /// Track count matches local files
+    Valid,
+    /// Track count mismatch
+    TrackCountMismatch {
+        release_tracks: usize,
+        local_files: usize,
+    },
+    /// Fetch failed with error message
+    FetchFailed(String),
+}
+
 /// Per-tab search results and status
 #[derive(Clone, Debug, Default, PartialEq, Store)]
 pub struct TabSearchState {
@@ -54,6 +74,10 @@ pub struct TabSearchState {
     pub search_results: Vec<MatchCandidate>,
     pub selected_result_index: Option<usize>,
     pub error_message: Option<String>,
+    /// Prefetch validation state for the selected result
+    pub prefetch_state: Option<PrefetchState>,
+    /// True when user clicked "Select" while prefetch was still in-flight
+    pub confirm_pending: bool,
 }
 
 /// State for manual search within Identify step
@@ -176,6 +200,12 @@ pub enum CandidateEvent {
     SelectExactMatch(usize),
     /// User confirms the selected exact match and transitions to Confirming
     ConfirmExactMatch,
+    /// Prefetch started for an exact match result (sets Fetching state)
+    ExactMatchPrefetchStarted(usize),
+    /// Prefetch completed for an exact match result
+    ExactMatchPrefetchComplete { index: usize, result: PrefetchState },
+    /// Set confirm_pending for exact match (user clicked Select while prefetch in-flight)
+    SetExactMatchConfirmPending,
     /// User switches from MultipleExactMatches to ManualSearch
     SwitchToManualSearch,
     /// User switches from ManualSearch back to MultipleExactMatches (carries the disc_id)
@@ -208,6 +238,12 @@ pub enum CandidateEvent {
     SelectSearchResult(usize),
     /// User confirms the selected search result
     ConfirmSearchResult,
+    /// Prefetch started for a search result (sets Fetching state)
+    PrefetchStarted(usize),
+    /// Prefetch completed for a search result
+    PrefetchComplete { index: usize, result: PrefetchState },
+    /// Set confirm_pending flag (user clicked Select while prefetch in-flight)
+    SetConfirmPending,
     /// Update cover art for a search result (after retry or initial check)
     UpdateSearchResultCover {
         index: usize,
@@ -308,14 +344,18 @@ impl IdentifyingState {
                 let mut state = self;
                 if idx < state.auto_matches.len() {
                     state.selected_match_index = Some(idx);
+                    state.exact_match_prefetch = None;
+                    state.exact_match_confirm_pending = false;
                 }
                 CandidateState::Identifying(state)
             }
             CandidateEvent::ConfirmExactMatch => {
-                // Confirm the selected match and transition to Confirming
+                // Only transition if prefetch validated successfully
+                if !matches!(self.exact_match_prefetch, Some(PrefetchState::Valid)) {
+                    return CandidateState::Identifying(self);
+                }
                 if let Some(idx) = self.selected_match_index {
                     if let Some(candidate) = self.auto_matches.get(idx).cloned() {
-                        // Extract disc_id from current mode if applicable
                         let source_disc_id = match &self.mode {
                             IdentifyMode::MultipleExactMatches(id) => Some(id.clone()),
                             _ => None,
@@ -335,6 +375,48 @@ impl IdentifyingState {
                     }
                 }
                 CandidateState::Identifying(self)
+            }
+            CandidateEvent::ExactMatchPrefetchStarted(index) => {
+                let mut state = self;
+                if state.selected_match_index == Some(index) {
+                    state.exact_match_prefetch = Some(PrefetchState::Fetching);
+                }
+                CandidateState::Identifying(state)
+            }
+            CandidateEvent::ExactMatchPrefetchComplete { index, result } => {
+                let mut state = self;
+                if state.selected_match_index == Some(index) {
+                    let should_auto_confirm =
+                        state.exact_match_confirm_pending && matches!(result, PrefetchState::Valid);
+                    state.exact_match_prefetch = Some(result);
+                    state.exact_match_confirm_pending = false;
+                    if should_auto_confirm {
+                        if let Some(candidate) = state.auto_matches.get(index).cloned() {
+                            let source_disc_id = match &state.mode {
+                                IdentifyMode::MultipleExactMatches(id) => Some(id.clone()),
+                                _ => None,
+                            };
+                            let selected_cover = default_cover(&candidate, &state.files);
+                            return CandidateState::Confirming(Box::new(ConfirmingState {
+                                files: state.files,
+                                metadata: state.metadata,
+                                confirmed_candidate: candidate,
+                                selected_cover,
+                                selected_profile_id: None,
+                                phase: ConfirmPhase::Ready,
+                                auto_matches: state.auto_matches,
+                                search_state: state.search_state,
+                                source_disc_id,
+                            }));
+                        }
+                    }
+                }
+                CandidateState::Identifying(state)
+            }
+            CandidateEvent::SetExactMatchConfirmPending => {
+                let mut state = self;
+                state.exact_match_confirm_pending = true;
+                CandidateState::Identifying(state)
             }
             CandidateEvent::SwitchToManualSearch => {
                 let mut state = self;
@@ -445,6 +527,8 @@ impl IdentifyingState {
                 tab.search_results = results;
                 tab.error_message = error;
                 tab.selected_result_index = None;
+                tab.prefetch_state = None;
+                tab.confirm_pending = false;
                 CandidateState::Identifying(state)
             }
             CandidateEvent::SelectSearchResult(idx) => {
@@ -452,6 +536,9 @@ impl IdentifyingState {
                 let tab = state.search_state.current_tab_state_mut();
                 if idx < tab.search_results.len() {
                     tab.selected_result_index = Some(idx);
+                    // Clear previous prefetch when selecting a different result
+                    tab.prefetch_state = None;
+                    tab.confirm_pending = false;
                 }
                 CandidateState::Identifying(state)
             }
@@ -468,9 +555,57 @@ impl IdentifyingState {
                 }
                 CandidateState::Identifying(state)
             }
+            CandidateEvent::PrefetchStarted(index) => {
+                let mut state = self;
+                let tab = state.search_state.current_tab_state_mut();
+                if tab.selected_result_index == Some(index) {
+                    tab.prefetch_state = Some(PrefetchState::Fetching);
+                }
+                CandidateState::Identifying(state)
+            }
+            CandidateEvent::PrefetchComplete { index, result } => {
+                let mut state = self;
+                let tab = state.search_state.current_tab_state_mut();
+                // Only apply if the index still matches the selected result
+                if tab.selected_result_index == Some(index) {
+                    let should_auto_confirm =
+                        tab.confirm_pending && matches!(result, PrefetchState::Valid);
+                    tab.prefetch_state = Some(result);
+                    tab.confirm_pending = false;
+                    if should_auto_confirm {
+                        // Auto-transition to Confirming
+                        let tab = state.search_state.current_tab_state();
+                        if let Some(candidate) = tab.search_results.get(index).cloned() {
+                            let selected_cover = default_cover(&candidate, &state.files);
+                            return CandidateState::Confirming(Box::new(ConfirmingState {
+                                files: state.files,
+                                metadata: state.metadata,
+                                confirmed_candidate: candidate,
+                                selected_cover,
+                                selected_profile_id: None,
+                                phase: ConfirmPhase::Ready,
+                                auto_matches: state.auto_matches,
+                                search_state: state.search_state,
+                                source_disc_id: None,
+                            }));
+                        }
+                    }
+                }
+                CandidateState::Identifying(state)
+            }
+            CandidateEvent::SetConfirmPending => {
+                let mut state = self;
+                let tab = state.search_state.current_tab_state_mut();
+                tab.confirm_pending = true;
+                CandidateState::Identifying(state)
+            }
             CandidateEvent::ConfirmSearchResult => {
                 let state = self;
                 let tab = state.search_state.current_tab_state();
+                // Only transition if prefetch validated successfully
+                if !matches!(tab.prefetch_state, Some(PrefetchState::Valid)) {
+                    return CandidateState::Identifying(state);
+                }
                 if let Some(idx) = tab.selected_result_index {
                     if let Some(candidate) = tab.search_results.get(idx).cloned() {
                         let selected_cover = default_cover(&candidate, &state.files);
@@ -515,6 +650,8 @@ impl ConfirmingState {
                     mode,
                     auto_matches: self.auto_matches,
                     selected_match_index: None,
+                    exact_match_prefetch: None,
+                    exact_match_confirm_pending: false,
                     search_state: self.search_state,
                     discid_lookup_error: None,
                     disc_id_not_found: None,
@@ -558,6 +695,9 @@ impl ConfirmingState {
             }
             CandidateEvent::SelectExactMatch(_)
             | CandidateEvent::ConfirmExactMatch
+            | CandidateEvent::ExactMatchPrefetchStarted(_)
+            | CandidateEvent::ExactMatchPrefetchComplete { .. }
+            | CandidateEvent::SetExactMatchConfirmPending
             | CandidateEvent::SwitchToManualSearch
             | CandidateEvent::SwitchToMultipleExactMatches(_)
             | CandidateEvent::StartDiscIdLookup(_)
@@ -570,6 +710,9 @@ impl ConfirmingState {
             | CandidateEvent::SearchComplete { .. }
             | CandidateEvent::SelectSearchResult(_)
             | CandidateEvent::ConfirmSearchResult
+            | CandidateEvent::PrefetchStarted(_)
+            | CandidateEvent::PrefetchComplete { .. }
+            | CandidateEvent::SetConfirmPending
             | CandidateEvent::UpdateSearchResultCover { .. } => {
                 CandidateState::Confirming(Box::new(self))
             }
@@ -674,6 +817,8 @@ impl ImportState {
             mode: IdentifyMode::Created,
             auto_matches: vec![],
             selected_match_index: None,
+            exact_match_prefetch: None,
+            exact_match_confirm_pending: false,
             search_state: ManualSearchState::default(),
             discid_lookup_error: None,
             disc_id_not_found: None,
@@ -786,6 +931,24 @@ impl ImportState {
     pub fn get_selected_match_index(&self) -> Option<usize> {
         self.current_candidate_state().and_then(|s| match s {
             CandidateState::Identifying(is) => is.selected_match_index,
+            _ => None,
+        })
+    }
+
+    /// Get prefetch state for current tab's selected search result
+    pub fn get_current_prefetch_state(&self) -> Option<PrefetchState> {
+        self.current_candidate_state().and_then(|s| match s {
+            CandidateState::Identifying(is) => {
+                is.search_state.current_tab_state().prefetch_state.clone()
+            }
+            _ => None,
+        })
+    }
+
+    /// Get prefetch state for the selected exact match
+    pub fn get_exact_match_prefetch_state(&self) -> Option<PrefetchState> {
+        self.current_candidate_state().and_then(|s| match s {
+            CandidateState::Identifying(is) => is.exact_match_prefetch.clone(),
             _ => None,
         })
     }

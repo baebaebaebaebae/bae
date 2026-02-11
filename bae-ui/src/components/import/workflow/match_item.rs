@@ -3,6 +3,7 @@
 use crate::components::icons::{ImageIcon, RefreshIcon};
 use crate::components::{Button, ButtonSize, ButtonVariant};
 use crate::display_types::MatchCandidate;
+use crate::stores::import::PrefetchState;
 use dioxus::prelude::*;
 
 /// Displays a single match candidate
@@ -10,6 +11,7 @@ use dioxus::prelude::*;
 pub fn MatchItemView(
     candidate: MatchCandidate,
     is_selected: bool,
+    prefetch_state: Option<PrefetchState>,
     on_select: EventHandler<()>,
     on_confirm: EventHandler<()>,
     on_retry_cover: EventHandler<()>,
@@ -50,6 +52,14 @@ pub fn MatchItemView(
         .catalog_number
         .as_ref()
         .map(|c| format!("Catalog: {}", c));
+
+    // Determine button state from prefetch
+    let is_mismatch = matches!(
+        prefetch_state,
+        Some(PrefetchState::TrackCountMismatch { .. }) | Some(PrefetchState::FetchFailed(_))
+    );
+    let is_fetching = matches!(prefetch_state, Some(PrefetchState::Fetching));
+    let button_disabled = is_mismatch;
 
     rsx! {
         div {
@@ -119,6 +129,23 @@ pub fn MatchItemView(
                             }
                         }
                     }
+
+                    // Error message for track count mismatch or fetch failure
+                    if is_selected {
+                        match &prefetch_state {
+                            Some(PrefetchState::TrackCountMismatch { release_tracks, local_files }) => {
+                                rsx! {
+                                    p { class: "text-xs text-red-400 mt-1",
+                                        "Release has {release_tracks} tracks but folder has {local_files} audio files"
+                                    }
+                                }
+                            }
+                            Some(PrefetchState::FetchFailed(err)) => rsx! {
+                                p { class: "text-xs text-red-400 mt-1", "{err}" }
+                            },
+                            _ => rsx! {},
+                        }
+                    }
                 }
 
                 // Actions: "In library" badge + view link, or confirm button
@@ -146,6 +173,8 @@ pub fn MatchItemView(
                         Button {
                             variant: ButtonVariant::Primary,
                             size: ButtonSize::Small,
+                            disabled: button_disabled,
+                            loading: is_fetching,
                             onclick: move |_| on_confirm.call(()),
                             "{confirm_button_text}"
                         }
