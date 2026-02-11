@@ -24,15 +24,20 @@ pub fn MultipleExactMatchesView(
     let candidate_states = state.candidate_states().read().clone();
     let candidate_state = current_key.as_ref().and_then(|k| candidate_states.get(k));
 
-    let (candidates, selected_index, disc_id) = match candidate_state {
+    let (candidates, selected_index, disc_id, prefetch_state) = match candidate_state {
         Some(CandidateState::Identifying(is)) => {
             let disc_id = match &is.mode {
                 IdentifyMode::MultipleExactMatches(id) => Some(id.clone()),
                 _ => None,
             };
-            (is.auto_matches.clone(), is.selected_match_index, disc_id)
+            (
+                is.auto_matches.clone(),
+                is.selected_match_index,
+                disc_id,
+                is.exact_match_prefetch.clone(),
+            )
         }
-        _ => (vec![], None, None),
+        _ => (vec![], None, None, None),
     };
 
     if candidates.is_empty() {
@@ -65,6 +70,7 @@ pub fn MultipleExactMatchesView(
             MatchResultsPanel {
                 candidates,
                 selected_index,
+                prefetch_state,
                 on_select: move |index| on_select.call(index),
                 on_confirm: move |candidate| on_confirm.call(candidate),
                 on_retry_cover: move |_| {},

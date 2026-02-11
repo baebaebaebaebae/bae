@@ -2,6 +2,7 @@
 
 use super::match_item::MatchItemView;
 use crate::display_types::MatchCandidate;
+use crate::stores::import::PrefetchState;
 use dioxus::prelude::*;
 
 /// A panel displaying match results with selection and confirm button
@@ -9,6 +10,7 @@ use dioxus::prelude::*;
 pub fn MatchResultsPanel(
     candidates: Vec<MatchCandidate>,
     selected_index: Option<usize>,
+    prefetch_state: Option<PrefetchState>,
     on_select: EventHandler<usize>,
     on_confirm: EventHandler<MatchCandidate>,
     on_retry_cover: EventHandler<usize>,
@@ -27,6 +29,7 @@ pub fn MatchResultsPanel(
                         key: "{index}",
                         candidate: candidate.clone(),
                         is_selected: selected_index == Some(index),
+                        prefetch_state: if selected_index == Some(index) { prefetch_state.clone() } else { None },
                         on_select: move |_| on_select.call(index),
                         on_confirm: {
                             let candidate = candidate.clone();

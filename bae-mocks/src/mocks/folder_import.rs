@@ -476,6 +476,8 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         search_results: manual_match_candidates.clone(),
         selected_result_index: selected_match_index(),
         error_message: search_error_message,
+        prefetch_state: None,
+        confirm_pending: false,
     };
     let mock_search_state = ManualSearchState {
         search_source: search_source(),
@@ -515,6 +517,8 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             mode: identify_mode.clone(),
             auto_matches: exact_match_candidates.clone(),
             selected_match_index: selected_match_index(),
+            exact_match_prefetch: None,
+            exact_match_confirm_pending: false,
             search_state: mock_search_state,
             discid_lookup_error,
             disc_id_not_found: if show_disc_id_not_found {
@@ -592,6 +596,8 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                         discid_lookup_error: None,
                         disc_id_not_found: None,
                         source_disc_id: None,
+                        exact_match_prefetch: None,
+                        exact_match_confirm_pending: false,
                     }),
                 );
             }

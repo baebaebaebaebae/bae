@@ -221,16 +221,6 @@ impl ImportServiceHandle {
             _ => None,
         };
 
-        let db_import = DbImport::new(
-            &import_id,
-            &album_title,
-            &artist_name,
-            folder.to_str().unwrap_or(""),
-        );
-        self.database
-            .insert_import(&db_import)
-            .await
-            .map_err(|e| format!("Failed to create import record: {}", e))?;
         let emit_preparing = {
             let import_id = import_id.clone();
             let album_title = album_title.clone();
@@ -299,6 +289,16 @@ impl ImportServiceHandle {
         };
 
         emit_preparing(PrepareStep::SavingToDatabase);
+        let db_import = DbImport::new(
+            &import_id,
+            &album_title,
+            &artist_name,
+            folder.to_str().unwrap_or(""),
+        );
+        self.database
+            .insert_import(&db_import)
+            .await
+            .map_err(|e| format!("Failed to create import record: {}", e))?;
         let artist_id_map = find_or_create_artists(library_manager, &artists).await?;
         library_manager
             .insert_album_with_release_and_tracks(&db_album, &db_release, &db_tracks)
