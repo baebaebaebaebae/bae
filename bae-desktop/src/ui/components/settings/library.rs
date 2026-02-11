@@ -64,6 +64,9 @@ pub fn LibrarySection() -> Element {
             }
 
             info!("Switching to library at {path}");
+
+            // Tell the re-exec'd process to open Settings instead of the main view
+            unsafe { std::env::set_var("BAE_OPEN_SETTINGS", "1") };
             super::super::welcome::relaunch();
         }
     };

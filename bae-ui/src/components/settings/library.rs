@@ -24,6 +24,7 @@ pub fn LibrarySectionView(
 ) -> Element {
     let mut renaming_path = use_signal(|| None::<String>);
     let mut rename_value = use_signal(String::new);
+    let mut confirming_switch = use_signal(|| None::<String>);
     let mut confirming_delete = use_signal(|| None::<String>);
 
     let mut start_rename = move |lib: &LibraryInfo| {
@@ -67,9 +68,11 @@ pub fn LibrarySectionView(
                     {
                         let lib_path_rename = lib.path.clone();
                         let lib_path_switch = lib.path.clone();
+                        let lib_path_confirm_switch = lib.path.clone();
                         let lib_path_remove = lib.path.clone();
                         let lib_path_confirm = lib.path.clone();
                         let is_renaming = renaming_path.read().as_ref() == Some(&lib.path);
+                        let is_confirming_switch = confirming_switch.read().as_ref() == Some(&lib.path);
                         let is_confirming = confirming_delete.read().as_ref() == Some(&lib.path);
 
                         rsx! {
@@ -120,10 +123,27 @@ pub fn LibrarySectionView(
                                         }
                                     }
                                     if !lib.is_active {
-                                        button {
-                                            class: "px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors",
-                                            onclick: move |_| on_switch.call(lib_path_switch.clone()),
-                                            "Switch"
+                                        if is_confirming_switch {
+                                            span { class: "text-xs text-gray-400 mr-1", "App will restart. Switch?" }
+                                            button {
+                                                class: "px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors",
+                                                onclick: move |_| {
+                                                    confirming_switch.set(None);
+                                                    on_switch.call(lib_path_switch.clone());
+                                                },
+                                                "Yes"
+                                            }
+                                            button {
+                                                class: "px-2 py-1 text-xs text-gray-400 hover:text-white transition-colors",
+                                                onclick: move |_| confirming_switch.set(None),
+                                                "No"
+                                            }
+                                        } else {
+                                            button {
+                                                class: "px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors",
+                                                onclick: move |_| confirming_switch.set(Some(lib_path_confirm_switch.clone())),
+                                                "Switch"
+                                            }
                                         }
                                         if is_confirming {
                                             span { class: "text-xs text-red-400 mr-1", "Delete?" }
