@@ -79,4 +79,10 @@ pub struct SyncState {
     pub invite_status: Option<InviteStatus>,
     /// Share info shown after a successful invite.
     pub share_info: Option<ShareInfo>,
+
+    // Remove member flow state
+    /// Whether a member removal is in progress.
+    pub removing_member: bool,
+    /// Error from a member removal attempt.
+    pub remove_member_error: Option<String>,
 }

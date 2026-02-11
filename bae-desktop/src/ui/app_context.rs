@@ -4,7 +4,7 @@
 //! This file contains the `AppServices` struct for passing backend service handles
 //! from main.rs through the launch boundary.
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use bae_core::cache;
 use bae_core::config;
@@ -36,8 +36,9 @@ pub struct SyncHandle {
     pub hlc: Arc<Hlc>,
     /// Device ID for this device (used in push, cursors, and SyncService)
     pub device_id: String,
-    /// Encryption service for snapshot creation
-    pub encryption: EncryptionService,
+    /// Shared encryption service (same instance as bucket_client's).
+    /// Wrapped in Arc<RwLock> so key rotation can update it atomically.
+    pub encryption: Arc<RwLock<EncryptionService>>,
     /// Cached raw sqlite3 write connection pointer for session extension ops.
     /// Valid for the lifetime of the Database.
     raw_db: *mut libsqlite3_sys::sqlite3,
@@ -62,12 +63,14 @@ impl SyncHandle {
         bucket_client: S3SyncBucketClient,
         hlc: Hlc,
         device_id: String,
-        encryption: EncryptionService,
         raw_db: *mut libsqlite3_sys::sqlite3,
         session: SyncSession,
         sync_trigger: tokio::sync::mpsc::Sender<()>,
         sync_trigger_rx: tokio::sync::mpsc::Receiver<()>,
     ) -> Self {
+        // Share the encryption lock with the bucket client so key rotation
+        // is visible to both the sync loop and the S3 operations.
+        let encryption = bucket_client.shared_encryption();
         SyncHandle {
             bucket_client: Arc::new(bucket_client),
             hlc: Arc::new(hlc),
@@ -89,6 +92,14 @@ impl SyncHandle {
     /// Called once by the sync loop (Phase 5c) to own the receive end.
     pub async fn take_trigger_rx(&self) -> Option<tokio::sync::mpsc::Receiver<()>> {
         self.sync_trigger_rx.lock().await.take()
+    }
+
+    /// Replace the encryption key (used after member revocation / key rotation).
+    /// This updates the shared lock so both the sync loop and the bucket client
+    /// see the new key immediately.
+    pub fn update_encryption_key(&self, new_key: [u8; 32]) {
+        let mut enc = self.encryption.write().unwrap();
+        *enc = EncryptionService::from_key(new_key);
     }
 }
 

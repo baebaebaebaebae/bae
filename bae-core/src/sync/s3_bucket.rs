@@ -8,6 +8,7 @@ use aws_config::{BehaviorVersion, Region};
 use aws_credential_types::Credentials;
 use aws_sdk_s3::Client;
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, RwLock};
 
 use super::bucket::{BucketError, DeviceHead, SyncBucketClient};
 use crate::encryption::EncryptionService;
@@ -39,7 +40,7 @@ struct MinSchemaVersionJson {
 pub struct S3SyncBucketClient {
     client: Client,
     bucket: String,
-    encryption: EncryptionService,
+    encryption: Arc<RwLock<EncryptionService>>,
 }
 
 impl S3SyncBucketClient {
@@ -70,8 +71,19 @@ impl S3SyncBucketClient {
         Ok(S3SyncBucketClient {
             client,
             bucket,
-            encryption,
+            encryption: Arc::new(RwLock::new(encryption)),
         })
+    }
+
+    /// Return a shared reference to the encryption lock for external use
+    /// (e.g., SyncHandle can share the same instance for snapshot creation).
+    pub fn shared_encryption(&self) -> Arc<RwLock<EncryptionService>> {
+        self.encryption.clone()
+    }
+
+    /// Convenience: read-lock the encryption service.
+    fn enc(&self) -> std::sync::RwLockReadGuard<'_, EncryptionService> {
+        self.encryption.read().unwrap()
     }
 
     /// Download an object by key. Returns raw bytes.
@@ -187,7 +199,7 @@ impl SyncBucketClient for S3SyncBucketClient {
 
             let encrypted = self.get_object(key).await?;
             let decrypted = self
-                .encryption
+                .enc()
                 .decrypt(&encrypted)
                 .map_err(|e| BucketError::Decryption(format!("head {device_id}: {e}")))?;
 
@@ -208,7 +220,7 @@ impl SyncBucketClient for S3SyncBucketClient {
     async fn get_changeset(&self, device_id: &str, seq: u64) -> Result<Vec<u8>, BucketError> {
         let key = format!("changes/{device_id}/{seq}.enc");
         let encrypted = self.get_object(&key).await?;
-        self.encryption
+        self.enc()
             .decrypt(&encrypted)
             .map_err(|e| BucketError::Decryption(format!("changeset {device_id}/{seq}: {e}")))
     }
@@ -220,7 +232,7 @@ impl SyncBucketClient for S3SyncBucketClient {
         data: Vec<u8>,
     ) -> Result<(), BucketError> {
         let key = format!("changes/{device_id}/{seq}.enc");
-        let encrypted = self.encryption.encrypt(&data);
+        let encrypted = self.enc().encrypt(&data);
         self.put_object(&key, encrypted).await
     }
 
@@ -238,21 +250,21 @@ impl SyncBucketClient for S3SyncBucketClient {
         };
         let json = serde_json::to_vec(&head)
             .map_err(|e| BucketError::S3(format!("serialize head: {e}")))?;
-        let encrypted = self.encryption.encrypt(&json);
+        let encrypted = self.enc().encrypt(&json);
         let key = format!("heads/{device_id}.json.enc");
         self.put_object(&key, encrypted).await
     }
 
     async fn upload_image(&self, id: &str, data: Vec<u8>) -> Result<(), BucketError> {
         let key = Self::image_key(id);
-        let encrypted = self.encryption.encrypt(&data);
+        let encrypted = self.enc().encrypt(&data);
         self.put_object(&key, encrypted).await
     }
 
     async fn download_image(&self, id: &str) -> Result<Vec<u8>, BucketError> {
         let key = Self::image_key(id);
         let encrypted = self.get_object(&key).await?;
-        self.encryption
+        self.enc()
             .decrypt(&encrypted)
             .map_err(|e| BucketError::Decryption(format!("image {id}: {e}")))
     }
@@ -295,7 +307,7 @@ impl SyncBucketClient for S3SyncBucketClient {
         };
 
         let decrypted = self
-            .encryption
+            .enc()
             .decrypt(&encrypted)
             .map_err(|e| BucketError::Decryption(format!("min_schema_version: {e}")))?;
 
@@ -311,7 +323,7 @@ impl SyncBucketClient for S3SyncBucketClient {
         };
         let json = serde_json::to_vec(&payload)
             .map_err(|e| BucketError::S3(format!("serialize min_schema_version: {e}")))?;
-        let encrypted = self.encryption.encrypt(&json);
+        let encrypted = self.enc().encrypt(&json);
         self.put_object("min_schema_version.json.enc", encrypted)
             .await
     }
@@ -323,7 +335,7 @@ impl SyncBucketClient for S3SyncBucketClient {
         data: Vec<u8>,
     ) -> Result<(), BucketError> {
         let key = format!("membership/{author_pubkey}/{seq}.enc");
-        let encrypted = self.encryption.encrypt(&data);
+        let encrypted = self.enc().encrypt(&data);
         self.put_object(&key, encrypted).await
     }
 
@@ -334,7 +346,7 @@ impl SyncBucketClient for S3SyncBucketClient {
     ) -> Result<Vec<u8>, BucketError> {
         let key = format!("membership/{author_pubkey}/{seq}.enc");
         let encrypted = self.get_object(&key).await?;
-        self.encryption
+        self.enc()
             .decrypt(&encrypted)
             .map_err(|e| BucketError::Decryption(format!("membership {author_pubkey}/{seq}: {e}")))
     }

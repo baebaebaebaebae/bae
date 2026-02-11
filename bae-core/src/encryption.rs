@@ -87,6 +87,11 @@ impl EncryptionService {
         Ok(EncryptionService { key })
     }
 
+    /// Create a new encryption service from a raw 32-byte key.
+    pub fn from_key(key: [u8; 32]) -> Self {
+        EncryptionService { key }
+    }
+
     /// SHA-256 fingerprint of the key, first 8 bytes hex-encoded (16 hex chars).
     /// Short enough to display in UI, long enough to detect wrong keys.
     pub fn fingerprint(&self) -> String {
