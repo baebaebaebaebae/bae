@@ -404,6 +404,78 @@ impl KeyService {
     }
 
     // -------------------------------------------------------------------------
+    // Sync bucket S3 credentials (library-scoped)
+    // -------------------------------------------------------------------------
+
+    /// Read the sync bucket S3 access key. Returns None if not set.
+    ///
+    /// Dev mode: reads `BAE_SYNC_S3_ACCESS_KEY` env var.
+    /// Prod mode: reads from OS keyring.
+    pub fn get_sync_access_key(&self) -> Option<String> {
+        if self.dev_mode {
+            std::env::var("BAE_SYNC_S3_ACCESS_KEY")
+                .ok()
+                .filter(|k| !k.is_empty())
+        } else {
+            let account = self.account("sync_s3_access_key");
+            keyring_core::Entry::new("bae", &account)
+                .ok()
+                .and_then(|e| e.get_password().ok())
+                .filter(|k| !k.is_empty())
+        }
+    }
+
+    /// Save the sync bucket S3 access key.
+    ///
+    /// Dev mode: sets the env var.
+    /// Prod mode: writes to OS keyring.
+    pub fn set_sync_access_key(&self, value: &str) -> Result<(), KeyError> {
+        if self.dev_mode {
+            std::env::set_var("BAE_SYNC_S3_ACCESS_KEY", value);
+            return Ok(());
+        }
+
+        let account = self.account("sync_s3_access_key");
+        keyring_core::Entry::new("bae", &account)?.set_password(value)?;
+        info!("Sync S3 access key saved to keyring");
+        Ok(())
+    }
+
+    /// Read the sync bucket S3 secret key. Returns None if not set.
+    ///
+    /// Dev mode: reads `BAE_SYNC_S3_SECRET_KEY` env var.
+    /// Prod mode: reads from OS keyring.
+    pub fn get_sync_secret_key(&self) -> Option<String> {
+        if self.dev_mode {
+            std::env::var("BAE_SYNC_S3_SECRET_KEY")
+                .ok()
+                .filter(|k| !k.is_empty())
+        } else {
+            let account = self.account("sync_s3_secret_key");
+            keyring_core::Entry::new("bae", &account)
+                .ok()
+                .and_then(|e| e.get_password().ok())
+                .filter(|k| !k.is_empty())
+        }
+    }
+
+    /// Save the sync bucket S3 secret key.
+    ///
+    /// Dev mode: sets the env var.
+    /// Prod mode: writes to OS keyring.
+    pub fn set_sync_secret_key(&self, value: &str) -> Result<(), KeyError> {
+        if self.dev_mode {
+            std::env::set_var("BAE_SYNC_S3_SECRET_KEY", value);
+            return Ok(());
+        }
+
+        let account = self.account("sync_s3_secret_key");
+        keyring_core::Entry::new("bae", &account)?.set_password(value)?;
+        info!("Sync S3 secret key saved to keyring");
+        Ok(())
+    }
+
+    // -------------------------------------------------------------------------
     // Global user keypair (Ed25519 identity, NOT library-scoped)
     // -------------------------------------------------------------------------
 

@@ -21,5 +21,5 @@ pub use storage_profiles::{
     StorageLocation, StorageProfile, StorageProfileEditorView, StorageProfilesSectionView,
 };
 pub use subsonic::SubsonicSectionView;
-pub use sync::SyncSectionView;
+pub use sync::{SyncBucketConfig, SyncSectionView};
 pub use view::{SettingsTab, SettingsView};
