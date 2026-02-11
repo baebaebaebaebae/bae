@@ -49,6 +49,7 @@ pub fn SyncSection() -> Element {
     let mut test_error = use_signal(|| Option::<String>::None);
 
     // Clone app for each closure that needs it
+    let app_for_sync = app.clone();
     let app_for_edit = app.clone();
     let app_for_save = app.clone();
     let app_for_test = app.clone();
@@ -62,6 +63,7 @@ pub fn SyncSection() -> Element {
             error,
             user_pubkey,
             on_copy_pubkey: copy_pubkey,
+            on_sync_now: move |_| app_for_sync.trigger_sync(),
 
             // Config display
             sync_bucket: sync_bucket.clone(),

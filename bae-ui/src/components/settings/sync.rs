@@ -72,6 +72,7 @@ pub fn SyncSectionView(
     test_error: Option<String>,
 
     // --- Callbacks ---
+    on_sync_now: EventHandler<()>,
     on_edit_start: EventHandler<()>,
     on_cancel_edit: EventHandler<()>,
     on_save_config: EventHandler<SyncBucketConfig>,
@@ -160,6 +161,21 @@ pub fn SyncSectionView(
                     // Error display
                     if let Some(ref err) = error {
                         div { class: "text-red-400 text-sm", "{err}" }
+                    }
+                }
+
+                div { class: "mt-4",
+                    Button {
+                        variant: ButtonVariant::Secondary,
+                        size: ButtonSize::Small,
+                        disabled: syncing || !sync_configured,
+                        loading: syncing,
+                        onclick: move |_| on_sync_now.call(()),
+                        if syncing {
+                            "Syncing..."
+                        } else {
+                            "Sync Now"
+                        }
                     }
                 }
             }

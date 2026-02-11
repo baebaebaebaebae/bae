@@ -63,6 +63,7 @@ pub fn Settings() -> Element {
                         error: None,
                         user_pubkey: Some("a1b2c3d4e5f67890abcdef1234567890a1b2c3d4e5f67890abcdef1234567890".to_string()),
                         on_copy_pubkey: |_| {},
+                        on_sync_now: |_| {},
                         sync_bucket: Some("my-sync-bucket".to_string()),
                         sync_region: Some("us-east-1".to_string()),
                         sync_endpoint: None,
