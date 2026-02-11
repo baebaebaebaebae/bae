@@ -114,20 +114,6 @@ impl LibraryManager {
             .await?;
         Ok(())
     }
-    /// Mark track as complete after successful import
-    pub async fn mark_track_complete(&self, track_id: &str) -> Result<(), LibraryError> {
-        self.database
-            .update_track_status(track_id, ImportStatus::Complete)
-            .await?;
-        Ok(())
-    }
-    /// Mark track as failed if import errors
-    pub async fn mark_track_failed(&self, track_id: &str) -> Result<(), LibraryError> {
-        self.database
-            .update_track_status(track_id, ImportStatus::Failed)
-            .await?;
-        Ok(())
-    }
     /// Update track duration
     pub async fn update_track_duration(
         &self,
@@ -136,13 +122,6 @@ impl LibraryManager {
     ) -> Result<(), LibraryError> {
         self.database
             .update_track_duration(track_id, duration_ms)
-            .await?;
-        Ok(())
-    }
-    /// Mark release as complete after successful import
-    pub async fn mark_release_complete(&self, release_id: &str) -> Result<(), LibraryError> {
-        self.database
-            .update_release_status(release_id, ImportStatus::Complete)
             .await?;
         Ok(())
     }
@@ -159,11 +138,27 @@ impl LibraryManager {
         Ok(())
     }
 
-    /// Add audio format for a track
-    pub async fn add_audio_format(&self, audio_format: &DbAudioFormat) -> Result<(), LibraryError> {
-        self.database.insert_audio_format(audio_format).await?;
+    /// Add multiple files in a single transaction
+    pub async fn batch_add_files(&self, files: &[DbFile]) -> Result<(), LibraryError> {
+        self.database.batch_insert_files(files).await?;
         Ok(())
     }
+
+    /// Atomically finalize an import: insert audio formats, mark tracks complete,
+    /// mark release complete, and update import status.
+    pub async fn finalize_import(
+        &self,
+        audio_formats: &[DbAudioFormat],
+        track_ids: &[&str],
+        release_id: &str,
+        import_id: Option<&str>,
+    ) -> Result<(), LibraryError> {
+        self.database
+            .finalize_import(audio_formats, track_ids, release_id, import_id)
+            .await?;
+        Ok(())
+    }
+
     /// Insert torrent metadata
     pub async fn insert_torrent(&self, torrent: &DbTorrent) -> Result<(), LibraryError> {
         self.database.insert_torrent(torrent).await?;
@@ -247,6 +242,20 @@ impl LibraryManager {
     ) -> Result<Option<DbAudioFormat>, LibraryError> {
         Ok(self.database.get_audio_format_by_track_id(track_id).await?)
     }
+
+    /// Batch-update source_path (and encryption fields) on existing file records.
+    ///
+    /// All updates are applied in a single transaction.
+    pub async fn batch_update_file_source_paths(
+        &self,
+        updates: &[(&str, &str, Option<&[u8]>, &str)],
+    ) -> Result<(), LibraryError> {
+        Ok(self
+            .database
+            .batch_update_file_source_paths(updates)
+            .await?)
+    }
+
     /// Get release ID for a track
     pub async fn get_release_id_for_track(&self, track_id: &str) -> Result<String, LibraryError> {
         let track = self
@@ -658,20 +667,12 @@ impl LibraryManager {
         Ok(self.database.delete_release_storage(release_id).await?)
     }
 
-    /// Delete all file records for a release
-    pub async fn delete_files_for_release(&self, release_id: &str) -> Result<(), LibraryError> {
-        Ok(self.database.delete_files_for_release(release_id).await?)
-    }
-
-    /// Insert release storage link
-    pub async fn insert_release_storage(
+    /// Set release storage link (insert or replace atomically)
+    pub async fn set_release_storage(
         &self,
         release_storage: &crate::db::DbReleaseStorage,
     ) -> Result<(), LibraryError> {
-        Ok(self
-            .database
-            .insert_release_storage(release_storage)
-            .await?)
+        Ok(self.database.set_release_storage(release_storage).await?)
     }
 
     /// Insert a new import operation record

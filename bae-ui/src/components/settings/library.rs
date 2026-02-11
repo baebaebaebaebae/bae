@@ -18,13 +18,13 @@ pub fn LibrarySectionView(
     libraries: Vec<LibraryInfo>,
     on_switch: EventHandler<String>,
     on_create: EventHandler<()>,
-    on_add_existing: EventHandler<()>,
     on_join: EventHandler<()>,
     on_rename: EventHandler<(String, String)>,
     on_remove: EventHandler<String>,
 ) -> Element {
     let mut renaming_path = use_signal(|| None::<String>);
     let mut rename_value = use_signal(String::new);
+    let mut confirming_delete = use_signal(|| None::<String>);
 
     let mut start_rename = move |lib: &LibraryInfo| {
         renaming_path.set(Some(lib.path.clone()));
@@ -56,11 +56,6 @@ pub fn LibrarySectionView(
                     }
                     button {
                         class: "px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded-md transition-colors",
-                        onclick: move |_| on_add_existing.call(()),
-                        "Add Existing..."
-                    }
-                    button {
-                        class: "px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded-md transition-colors",
                         onclick: move |_| on_join.call(()),
                         "Join Shared..."
                     }
@@ -73,7 +68,9 @@ pub fn LibrarySectionView(
                         let lib_path_rename = lib.path.clone();
                         let lib_path_switch = lib.path.clone();
                         let lib_path_remove = lib.path.clone();
+                        let lib_path_confirm = lib.path.clone();
                         let is_renaming = renaming_path.read().as_ref() == Some(&lib.path);
+                        let is_confirming = confirming_delete.read().as_ref() == Some(&lib.path);
 
                         rsx! {
                             div {
@@ -128,10 +125,27 @@ pub fn LibrarySectionView(
                                             onclick: move |_| on_switch.call(lib_path_switch.clone()),
                                             "Switch"
                                         }
-                                        button {
-                                            class: "px-2 py-1 text-xs text-red-400 hover:text-red-300 transition-colors",
-                                            onclick: move |_| on_remove.call(lib_path_remove.clone()),
-                                            "Remove"
+                                        if is_confirming {
+                                            span { class: "text-xs text-red-400 mr-1", "Delete?" }
+                                            button {
+                                                class: "px-2 py-1 text-xs bg-red-600 hover:bg-red-500 text-white rounded transition-colors",
+                                                onclick: move |_| {
+                                                    confirming_delete.set(None);
+                                                    on_remove.call(lib_path_remove.clone());
+                                                },
+                                                "Yes"
+                                            }
+                                            button {
+                                                class: "px-2 py-1 text-xs text-gray-400 hover:text-white transition-colors",
+                                                onclick: move |_| confirming_delete.set(None),
+                                                "No"
+                                            }
+                                        } else {
+                                            button {
+                                                class: "px-2 py-1 text-xs text-red-400 hover:text-red-300 transition-colors",
+                                                onclick: move |_| confirming_delete.set(Some(lib_path_confirm.clone())),
+                                                "Delete"
+                                            }
                                         }
                                     }
                                 }

@@ -5,13 +5,12 @@
 //! deferred cleanup.
 
 use crate::cloud_storage::CloudStorage;
-use crate::content_type::ContentType;
-use crate::db::{DbFile, DbReleaseStorage, DbStorageProfile, StorageLocation};
+use crate::db::{DbFile, DbReleaseStorage, DbStorageProfile, EncryptionScheme, StorageLocation};
 use crate::encryption::EncryptionService;
 use crate::keys::KeyService;
 use crate::library::SharedLibraryManager;
 use crate::library_dir::LibraryDir;
-use crate::storage::{create_storage_reader, ReleaseStorage, ReleaseStorageImpl};
+use crate::storage::{create_storage_reader, ReleaseStorageImpl};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -222,13 +221,9 @@ async fn do_transfer(
         });
     }
 
-    // 3. Write files to destination
+    // 3. Write files to destination, updating existing records in place
     match &target {
         TransferTarget::Profile(dest_profile) => {
-            // Delete old file records first (new ones will be created by write_file)
-            mgr.delete_files_for_release(release_id).await?;
-            mgr.delete_release_storage(release_id).await?;
-
             let database = Arc::new(mgr.database().clone());
 
             #[cfg(feature = "test-utils")]
@@ -258,16 +253,20 @@ async fn do_transfer(
             )
             .await?;
 
-            for (i, (filename, data)) in file_data.iter().enumerate() {
-                let total_files = file_data.len();
+            // Write all bytes to storage first, collecting new paths
+            let mut file_updates: Vec<(String, Option<Vec<u8>>)> =
+                Vec::with_capacity(old_files.len());
+
+            for (i, file) in old_files.iter().enumerate() {
+                let data = &file_data[i].1;
+                let total_files = old_files.len();
                 let tx_clone = tx.clone();
                 let rid = release_id.to_string();
-                let fname = filename.clone();
+                let fname = file.original_filename.clone();
 
-                storage
-                    .write_file(
-                        release_id,
-                        filename,
+                let (new_source_path, nonce) = storage
+                    .store_bytes(
+                        &file.id,
                         data,
                         Box::new(move |bytes_written, total_bytes| {
                             let percent = if total_bytes > 0 {
@@ -285,50 +284,59 @@ async fn do_transfer(
                         }),
                     )
                     .await?;
+
+                file_updates.push((new_source_path, nonce));
             }
 
-            // Link release to new profile
+            // Batch-update all file records + release storage link atomically
+            let updates: Vec<(&str, &str, Option<&[u8]>, &str)> = old_files
+                .iter()
+                .zip(file_updates.iter())
+                .map(|(file, (path, nonce))| {
+                    (
+                        file.id.as_str(),
+                        path.as_str(),
+                        nonce.as_deref(),
+                        file.encryption_scheme.as_str(),
+                    )
+                })
+                .collect();
+            mgr.batch_update_file_source_paths(&updates).await?;
+
             let release_storage = DbReleaseStorage::new(release_id, &dest_profile.id);
-            mgr.insert_release_storage(&release_storage).await?;
+            mgr.set_release_storage(&release_storage).await?;
         }
         TransferTarget::Eject(target_dir) => {
-            // Write files to target directory as plain files
             tokio::fs::create_dir_all(target_dir).await?;
 
-            for (i, (filename, data)) in file_data.iter().enumerate() {
-                let dest_path = target_dir.join(filename);
+            // Write all files to target directory first
+            let mut dest_paths: Vec<String> = Vec::with_capacity(old_files.len());
+
+            for (i, file) in old_files.iter().enumerate() {
+                let data = &file_data[i].1;
+                let dest_path = target_dir.join(&file.original_filename);
                 tokio::fs::write(&dest_path, data).await?;
+                dest_paths.push(dest_path.display().to_string());
 
                 let _ = tx.send(TransferProgress::FileProgress {
                     release_id: release_id.to_string(),
                     file_index: i,
                     total_files: file_data.len(),
-                    filename: filename.clone(),
+                    filename: file.original_filename.clone(),
                     percent: 100,
                 });
             }
 
-            // Update DB: remove storage link and file records, create new file records
-            // pointing to the ejected location
-            mgr.delete_files_for_release(release_id).await?;
-            mgr.delete_release_storage(release_id).await?;
+            // Batch-update all file records atomically
+            let scheme = EncryptionScheme::Master.as_str();
+            let updates: Vec<(&str, &str, Option<&[u8]>, &str)> = old_files
+                .iter()
+                .zip(dest_paths.iter())
+                .map(|(file, path)| (file.id.as_str(), path.as_str(), None, scheme))
+                .collect();
+            mgr.batch_update_file_source_paths(&updates).await?;
 
-            for (filename, data) in &file_data {
-                let dest_path = target_dir.join(filename);
-                let ext = Path::new(filename)
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("bin")
-                    .to_lowercase();
-                let mut db_file = DbFile::new(
-                    release_id,
-                    filename,
-                    data.len() as i64,
-                    ContentType::from_extension(&ext),
-                );
-                db_file.source_path = Some(dest_path.display().to_string());
-                mgr.add_file(&db_file).await?;
-            }
+            mgr.delete_release_storage(release_id).await?;
         }
     }
 

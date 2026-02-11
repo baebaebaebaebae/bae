@@ -99,7 +99,7 @@ async fn test_release_storage_profile_linkage() {
     // Link release to storage profile (this is what import does)
     let release_storage = bae_core::db::DbReleaseStorage::new(&release_id, &profile_id);
     database
-        .insert_release_storage(&release_storage)
+        .set_release_storage(&release_storage)
         .await
         .unwrap();
 
@@ -194,13 +194,13 @@ async fn test_multiple_releases_different_profiles() {
     // Link each release to a different profile
     let release_storage_1 = bae_core::db::DbReleaseStorage::new(&release_1_id, &profile_a_id);
     database
-        .insert_release_storage(&release_storage_1)
+        .set_release_storage(&release_storage_1)
         .await
         .unwrap();
 
     let release_storage_2 = bae_core::db::DbReleaseStorage::new(&release_2_id, &profile_b_id);
     database
-        .insert_release_storage(&release_storage_2)
+        .set_release_storage(&release_storage_2)
         .await
         .unwrap();
 
@@ -259,7 +259,7 @@ async fn test_delete_storage_profile_blocked_by_linked_releases() {
     // Link release to profile
     let release_storage = bae_core::db::DbReleaseStorage::new(&release_id, &profile_id);
     database
-        .insert_release_storage(&release_storage)
+        .set_release_storage(&release_storage)
         .await
         .unwrap();
 

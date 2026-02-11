@@ -1,5 +1,6 @@
 use crate::content_type::ContentType;
 use crate::discogs::client::DiscogsClient;
+use crate::discogs::DiscogsRelease;
 use crate::musicbrainz::{ExternalUrls, MbRelease};
 use crate::network::upgrade_to_https;
 use tracing::{debug, info, warn};
@@ -108,22 +109,36 @@ pub async fn fetch_cover_art_from_discogs(
 }
 
 /// Fetch cover art for a MusicBrainz release with fallback to Discogs
+///
+/// If a `DiscogsRelease` was already fetched (from musicbrainz_parser), its cover image
+/// is used directly. Otherwise, falls back to fetching from Discogs (master-URL-only case).
 pub async fn fetch_cover_art_for_mb_release(
     mb_release: &MbRelease,
     external_urls: &ExternalUrls,
+    discogs_release: Option<&DiscogsRelease>,
     discogs_client: Option<&DiscogsClient>,
 ) -> Option<String> {
     if let Some(url) = fetch_cover_art_from_archive(&mb_release.release_id).await {
         return Some(url);
     }
-    if let Some(client) = discogs_client {
-        if external_urls.discogs_release_url.is_some() || external_urls.discogs_master_url.is_some()
-        {
-            if let Some(url) = fetch_cover_art_from_discogs(client, external_urls).await {
-                return Some(url);
+
+    if let Some(release) = discogs_release {
+        if let Some(url) = release.cover_image.as_ref().or(release.thumb.as_ref()) {
+            return Some(upgrade_to_https(url));
+        }
+    }
+
+    // Fallback: master-URL-only case where no release was pre-fetched
+    if discogs_release.is_none() {
+        if let Some(client) = discogs_client {
+            if external_urls.discogs_master_url.is_some() {
+                if let Some(url) = fetch_cover_art_from_discogs(client, external_urls).await {
+                    return Some(url);
+                }
             }
         }
     }
+
     None
 }
 

@@ -53,7 +53,13 @@ pub async fn fetch_and_parse_mb_release(
         _ => None,
     };
     let cover_art = if cover_art_url.is_none() {
-        fetch_cover_art_for_mb_release(&mb_release, &external_urls, discogs_client).await
+        fetch_cover_art_for_mb_release(
+            &mb_release,
+            &external_urls,
+            discogs_release.as_ref(),
+            discogs_client,
+        )
+        .await
     } else {
         cover_art_url
     };

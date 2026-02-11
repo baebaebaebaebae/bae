@@ -1153,6 +1153,144 @@ impl Database {
             Ok(None)
         }
     }
+
+    /// Batch-update source_path (and encryption fields) on existing file records.
+    ///
+    /// All updates are applied in a single transaction.
+    /// Each tuple is `(file_id, source_path, encryption_nonce, encryption_scheme)`.
+    pub async fn batch_update_file_source_paths(
+        &self,
+        updates: &[(&str, &str, Option<&[u8]>, &str)],
+    ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
+        let mut tx = conn.begin().await?;
+        let now = chrono::Utc::now().to_rfc3339();
+
+        for &(file_id, source_path, encryption_nonce, encryption_scheme) in updates {
+            sqlx::query(
+                r#"UPDATE release_files
+                   SET source_path = ?, encryption_nonce = ?, encryption_scheme = ?, _updated_at = ?
+                   WHERE id = ?"#,
+            )
+            .bind(source_path)
+            .bind(encryption_nonce)
+            .bind(encryption_scheme)
+            .bind(&now)
+            .bind(file_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Insert multiple files in a single transaction.
+    pub async fn batch_insert_files(&self, files: &[DbFile]) -> Result<(), sqlx::Error> {
+        if files.is_empty() {
+            return Ok(());
+        }
+        let mut conn = self.writer()?.lock().await;
+        let mut tx = conn.begin().await?;
+
+        for file in files {
+            sqlx::query(
+                r#"
+                INSERT INTO release_files (
+                    id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, encryption_scheme, _updated_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&file.id)
+            .bind(&file.release_id)
+            .bind(&file.original_filename)
+            .bind(file.file_size)
+            .bind(file.content_type.as_str())
+            .bind(&file.source_path)
+            .bind(&file.encryption_nonce)
+            .bind(file.encryption_scheme.as_str())
+            .bind(file.updated_at.to_rfc3339())
+            .bind(file.created_at.to_rfc3339())
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Atomically finalize an import: insert audio formats, mark tracks complete,
+    /// mark release complete, and update import status in a single transaction.
+    pub async fn finalize_import(
+        &self,
+        audio_formats: &[DbAudioFormat],
+        track_ids: &[&str],
+        release_id: &str,
+        import_id: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
+        let mut tx = conn.begin().await?;
+        let now = Utc::now().to_rfc3339();
+
+        for af in audio_formats {
+            sqlx::query(
+                r#"
+                INSERT INTO audio_formats (
+                    id, track_id, content_type, flac_headers, needs_headers, start_byte_offset, end_byte_offset, pregap_ms, frame_offset_samples, exact_sample_count, sample_rate, bits_per_sample, seektable_json, audio_data_start, file_id, _updated_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&af.id)
+            .bind(&af.track_id)
+            .bind(af.content_type.as_str())
+            .bind(&af.flac_headers)
+            .bind(af.needs_headers)
+            .bind(af.start_byte_offset)
+            .bind(af.end_byte_offset)
+            .bind(af.pregap_ms)
+            .bind(af.frame_offset_samples)
+            .bind(af.exact_sample_count)
+            .bind(af.sample_rate)
+            .bind(af.bits_per_sample)
+            .bind(&af.seektable_json)
+            .bind(af.audio_data_start)
+            .bind(&af.file_id)
+            .bind(af.updated_at.to_rfc3339())
+            .bind(af.created_at.to_rfc3339())
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        for track_id in track_ids {
+            sqlx::query("UPDATE tracks SET import_status = ?, _updated_at = ? WHERE id = ?")
+                .bind(ImportStatus::Complete)
+                .bind(&now)
+                .bind(track_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        sqlx::query("UPDATE releases SET import_status = ?, _updated_at = ? WHERE id = ?")
+            .bind(ImportStatus::Complete)
+            .bind(&now)
+            .bind(release_id)
+            .execute(&mut *tx)
+            .await?;
+
+        if let Some(import_id) = import_id {
+            let now_ts = Utc::now().timestamp();
+            sqlx::query("UPDATE imports SET status = ?, updated_at = ? WHERE id = ?")
+                .bind(ImportOperationStatus::Complete.as_str())
+                .bind(now_ts)
+                .bind(import_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Delete a release by ID
     ///
     /// This will cascade delete all related records:
@@ -1162,15 +1300,17 @@ impl Database {
     /// - Import records referencing this release (cleared before delete)
     pub async fn delete_release(&self, release_id: &str) -> Result<(), sqlx::Error> {
         let mut conn = self.writer()?.lock().await;
+        let mut tx = conn.begin().await?;
         sqlx::query("UPDATE imports SET release_id = NULL WHERE release_id = ?")
             .bind(release_id)
-            .execute(&mut *conn)
+            .execute(&mut *tx)
             .await?;
 
         sqlx::query("DELETE FROM releases WHERE id = ?")
             .bind(release_id)
-            .execute(&mut *conn)
+            .execute(&mut *tx)
             .await?;
+        tx.commit().await?;
         Ok(())
     }
     /// Delete an album by ID
@@ -1183,16 +1323,18 @@ impl Database {
     /// - Import records referencing this album's releases (cleared before delete)
     pub async fn delete_album(&self, album_id: &str) -> Result<(), sqlx::Error> {
         let mut conn = self.writer()?.lock().await;
+        let mut tx = conn.begin().await?;
         sqlx::query(
             "UPDATE imports SET release_id = NULL WHERE release_id IN (SELECT id FROM releases WHERE album_id = ?)",
         )
         .bind(album_id)
-        .execute(&mut *conn)
+        .execute(&mut *tx)
         .await?;
         sqlx::query("DELETE FROM albums WHERE id = ?")
             .bind(album_id)
-            .execute(&mut *conn)
+            .execute(&mut *tx)
             .await?;
+        tx.commit().await?;
         Ok(())
     }
     /// Find album by Discogs master_id or release_id
@@ -1690,9 +1832,11 @@ impl Database {
         profile: &DbStorageProfile,
     ) -> Result<(), sqlx::Error> {
         let mut conn = self.writer()?.lock().await;
+        let mut tx = conn.begin().await?;
+
         if profile.is_default {
             sqlx::query("UPDATE storage_profiles SET is_default = FALSE WHERE is_default = TRUE")
-                .execute(&mut *conn)
+                .execute(&mut *tx)
                 .await?;
         }
 
@@ -1717,8 +1861,10 @@ impl Database {
         .bind(&profile.cloud_endpoint)
         .bind(profile.created_at.to_rfc3339())
         .bind(profile.updated_at.to_rfc3339())
-        .execute(&mut *conn)
+        .execute(&mut *tx)
         .await?;
+
+        tx.commit().await?;
         Ok(())
     }
     /// Get a storage profile by ID
@@ -1757,9 +1903,11 @@ impl Database {
         profile: &DbStorageProfile,
     ) -> Result<(), sqlx::Error> {
         let mut conn = self.writer()?.lock().await;
+        let mut tx = conn.begin().await?;
+
         if profile.is_default {
             sqlx::query("UPDATE storage_profiles SET is_default = FALSE WHERE is_default = TRUE")
-                .execute(&mut *conn)
+                .execute(&mut *tx)
                 .await?;
         }
 
@@ -1783,8 +1931,10 @@ impl Database {
         .bind(&profile.cloud_endpoint)
         .bind(profile.updated_at.to_rfc3339())
         .bind(&profile.id)
-        .execute(&mut *conn)
+        .execute(&mut *tx)
         .await?;
+
+        tx.commit().await?;
         Ok(())
     }
     /// Delete a storage profile. Fails if it is the home profile or if any releases are linked to it.
@@ -1825,13 +1975,17 @@ impl Database {
     /// Set a profile as the default (clears other defaults)
     pub async fn set_default_storage_profile(&self, profile_id: &str) -> Result<(), sqlx::Error> {
         let mut conn = self.writer()?.lock().await;
+        let mut tx = conn.begin().await?;
+
         sqlx::query("UPDATE storage_profiles SET is_default = FALSE WHERE is_default = TRUE")
-            .execute(&mut *conn)
+            .execute(&mut *tx)
             .await?;
         sqlx::query("UPDATE storage_profiles SET is_default = TRUE WHERE id = ?")
             .bind(profile_id)
-            .execute(&mut *conn)
+            .execute(&mut *tx)
             .await?;
+
+        tx.commit().await?;
         Ok(())
     }
     fn row_to_storage_profile(&self, row: &sqlx::sqlite::SqliteRow) -> DbStorageProfile {
@@ -1859,8 +2013,11 @@ impl Database {
                 .with_timezone(&Utc),
         }
     }
-    /// Insert release storage configuration
-    pub async fn insert_release_storage(
+    /// Set release storage link (upsert).
+    ///
+    /// If the release already has a storage link, updates the profile in place.
+    /// Otherwise inserts a new row.
+    pub async fn set_release_storage(
         &self,
         release_storage: &DbReleaseStorage,
     ) -> Result<(), sqlx::Error> {
@@ -1869,6 +2026,7 @@ impl Database {
             r#"
             INSERT INTO release_storage (id, release_id, storage_profile_id, created_at)
             VALUES (?, ?, ?, ?)
+            ON CONFLICT(release_id) DO UPDATE SET storage_profile_id = excluded.storage_profile_id
             "#,
         )
         .bind(&release_storage.id)
@@ -1918,16 +2076,6 @@ impl Database {
     pub async fn delete_release_storage(&self, release_id: &str) -> Result<(), sqlx::Error> {
         let mut conn = self.writer()?.lock().await;
         sqlx::query("DELETE FROM release_storage WHERE release_id = ?")
-            .bind(release_id)
-            .execute(&mut *conn)
-            .await?;
-        Ok(())
-    }
-
-    /// Delete all file records for a release
-    pub async fn delete_files_for_release(&self, release_id: &str) -> Result<(), sqlx::Error> {
-        let mut conn = self.writer()?.lock().await;
-        sqlx::query("DELETE FROM release_files WHERE release_id = ?")
             .bind(release_id)
             .execute(&mut *conn)
             .await?;

@@ -123,12 +123,6 @@ pub struct LibraryInfo {
     pub is_active: bool,
 }
 
-/// All library paths tracked in ~/.bae/known_libraries.yaml
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct KnownLibraries {
-    paths: Vec<PathBuf>,
-}
-
 /// Application configuration
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -517,37 +511,32 @@ impl Config {
         }
 
         config.save_to_config_yaml()?;
-        Self::add_known_library(&library_dir)?;
 
         info!("Created new library at {}", library_dir.display());
         Ok(config)
     }
 
-    /// Discover all libraries registered in ~/.bae/known_libraries.yaml.
+    /// Discover all libraries under ~/.bae/libraries/.
     pub fn discover_libraries() -> Vec<LibraryInfo> {
         let home_dir = match dirs::home_dir() {
             Some(d) => d,
             None => return vec![],
         };
         let bae_dir = home_dir.join(".bae");
-
         let active_id = read_active_library_id(&bae_dir);
 
-        let mut libraries = Vec::new();
-
-        // Read known_libraries.yaml — single source of truth for all libraries
-        let known_path = bae_dir.join("known_libraries.yaml");
-        if known_path.is_file() {
-            if let Ok(content) = std::fs::read_to_string(&known_path) {
-                if let Ok(known) = serde_yaml::from_str::<KnownLibraries>(&content) {
-                    for path in known.paths {
-                        if let Some(info) = read_library_info(&path, &active_id) {
-                            libraries.push(info);
-                        }
-                    }
+        let mut libraries: Vec<LibraryInfo> = discover_all_library_paths(&bae_dir)
+            .into_iter()
+            .map(|(path, yaml)| {
+                let is_active = active_id.as_deref() == Some(&yaml.library_id);
+                LibraryInfo {
+                    id: yaml.library_id,
+                    name: yaml.library_name,
+                    path,
+                    is_active,
                 }
-            }
-        }
+            })
+            .collect();
 
         // Sort: active first, then by name/id
         libraries.sort_by(|a, b| {
@@ -559,50 +548,6 @@ impl Config {
         });
 
         libraries
-    }
-
-    /// Register a library path in ~/.bae/known_libraries.yaml.
-    pub fn add_known_library(path: &std::path::Path) -> Result<(), ConfigError> {
-        let bae_dir = dirs::home_dir()
-            .expect("Failed to get home directory")
-            .join(".bae");
-        let known_path = bae_dir.join("known_libraries.yaml");
-
-        let mut known = if known_path.is_file() {
-            let content = std::fs::read_to_string(&known_path)?;
-            serde_yaml::from_str::<KnownLibraries>(&content).unwrap_or_default()
-        } else {
-            KnownLibraries::default()
-        };
-
-        let path = path.to_path_buf();
-        if !known.paths.contains(&path) {
-            known.paths.push(path);
-            std::fs::create_dir_all(&bae_dir)?;
-            std::fs::write(&known_path, serde_yaml::to_string(&known).unwrap())?;
-        }
-
-        Ok(())
-    }
-
-    /// Remove a library path from ~/.bae/known_libraries.yaml.
-    pub fn remove_known_library(path: &std::path::Path) -> Result<(), ConfigError> {
-        let bae_dir = dirs::home_dir()
-            .expect("Failed to get home directory")
-            .join(".bae");
-        let known_path = bae_dir.join("known_libraries.yaml");
-
-        if !known_path.is_file() {
-            return Ok(());
-        }
-
-        let content = std::fs::read_to_string(&known_path)?;
-        let mut known = serde_yaml::from_str::<KnownLibraries>(&content).unwrap_or_default();
-
-        known.paths.retain(|p| p != path);
-        std::fs::write(&known_path, serde_yaml::to_string(&known).unwrap())?;
-
-        Ok(())
     }
 
     /// Read the library_id from a library directory's config.yaml.
@@ -646,8 +591,7 @@ fn read_active_library_id(bae_dir: &std::path::Path) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Find a library's directory by its UUID. Scans known_libraries.yaml paths and
-/// `~/.bae/libraries/` subdirectories, reading each config.yaml to match.
+/// Find a library's directory by its UUID, scanning `~/.bae/libraries/` subdirectories.
 fn find_library_by_id(bae_dir: &std::path::Path, uuid: &str) -> Option<LibraryDir> {
     for (path, yaml) in discover_all_library_paths(bae_dir) {
         if yaml.library_id == uuid {
@@ -657,34 +601,16 @@ fn find_library_by_id(bae_dir: &std::path::Path, uuid: &str) -> Option<LibraryDi
     None
 }
 
-/// Collect all (path, ConfigYaml) pairs from known_libraries.yaml and ~/.bae/libraries/.
+/// Collect all (path, ConfigYaml) pairs from ~/.bae/libraries/.
 fn discover_all_library_paths(bae_dir: &std::path::Path) -> Vec<(PathBuf, ConfigYaml)> {
-    let mut seen = std::collections::HashSet::new();
     let mut results = Vec::new();
-
-    // Check known_libraries.yaml
-    let known_path = bae_dir.join("known_libraries.yaml");
-    if known_path.is_file() {
-        if let Ok(content) = std::fs::read_to_string(&known_path) {
-            if let Ok(known) = serde_yaml::from_str::<KnownLibraries>(&content) {
-                for path in known.paths {
-                    if seen.insert(path.clone()) {
-                        if let Some(yaml) = read_config_yaml(&path) {
-                            results.push((path, yaml));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Check ~/.bae/libraries/ subdirectories
     let libraries_dir = bae_dir.join("libraries");
+
     if libraries_dir.is_dir() {
         if let Ok(entries) = std::fs::read_dir(&libraries_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.is_dir() && seen.insert(path.clone()) {
+                if path.is_dir() {
                     if let Some(yaml) = read_config_yaml(&path) {
                         results.push((path, yaml));
                     }
@@ -701,19 +627,6 @@ fn read_config_yaml(path: &std::path::Path) -> Option<ConfigYaml> {
     let config_path = path.join("config.yaml");
     let content = std::fs::read_to_string(&config_path).ok()?;
     serde_yaml::from_str(&content).ok()
-}
-
-/// Read library info from a directory if it contains a valid config.yaml.
-fn read_library_info(path: &std::path::Path, active_id: &Option<String>) -> Option<LibraryInfo> {
-    let yaml = read_config_yaml(path)?;
-    let is_active = active_id.as_deref() == Some(&yaml.library_id);
-
-    Some(LibraryInfo {
-        id: yaml.library_id,
-        name: yaml.library_name,
-        path: path.to_path_buf(),
-        is_active,
-    })
 }
 
 /// Append a key=value line to a .env file.
@@ -948,58 +861,50 @@ mod tests {
         // Create an invalid dir (no config.yaml)
         std::fs::create_dir_all(libraries_dir.join("invalid")).unwrap();
 
-        // Test read_library_info with UUID-based active comparison
-        let active_id = Some("lib-1".to_string());
-        let info1 = read_library_info(&lib1_path, &active_id).unwrap();
-        assert_eq!(info1.id, "lib-1");
-        assert!(info1.is_active);
+        let discovered = discover_all_library_paths(bae_dir);
+        assert_eq!(discovered.len(), 2);
 
-        let info2 = read_library_info(&lib2_path, &active_id).unwrap();
-        assert_eq!(info2.id, "lib-2");
-        assert_eq!(info2.name, Some("Second Library".to_string()));
-        assert!(!info2.is_active);
+        let ids: Vec<&str> = discovered
+            .iter()
+            .map(|(_, y)| y.library_id.as_str())
+            .collect();
+        assert!(ids.contains(&"lib-1"));
+        assert!(ids.contains(&"lib-2"));
 
-        // Invalid dir returns None
-        assert!(read_library_info(&libraries_dir.join("invalid"), &active_id).is_none());
+        let lib2_entry = discovered
+            .iter()
+            .find(|(_, y)| y.library_id == "lib-2")
+            .unwrap();
+        assert_eq!(
+            lib2_entry.1.library_name,
+            Some("Second Library".to_string())
+        );
     }
 
     #[test]
-    fn find_library_by_id_scans_known_and_libraries_dir() {
+    fn find_library_by_id_scans_libraries_dir() {
         let tmp = TempDir::new().unwrap();
         let bae_dir = tmp.path();
         let libraries_dir = bae_dir.join("libraries");
 
-        // Library in libraries/ dir (found by directory scan)
         let lib1_path = libraries_dir.join("lib-1");
         make_test_config("lib-1", lib1_path.clone())
             .save_to_config_yaml()
             .unwrap();
 
-        // Library at external path (found via known_libraries.yaml)
-        let external_path = tmp.path().join("external-lib");
-        make_test_config("ext-lib", external_path.clone())
+        let lib2_path = libraries_dir.join("lib-2");
+        make_test_config("lib-2", lib2_path.clone())
             .save_to_config_yaml()
             .unwrap();
-        let known = KnownLibraries {
-            paths: vec![external_path.clone()],
-        };
-        std::fs::write(
-            bae_dir.join("known_libraries.yaml"),
-            serde_yaml::to_string(&known).unwrap(),
-        )
-        .unwrap();
 
-        // Find by directory scan
         let found = find_library_by_id(bae_dir, "lib-1");
         assert!(found.is_some());
         assert_eq!(&*found.unwrap(), lib1_path.as_path());
 
-        // Find by known_libraries.yaml
-        let found = find_library_by_id(bae_dir, "ext-lib");
+        let found = find_library_by_id(bae_dir, "lib-2");
         assert!(found.is_some());
-        assert_eq!(&*found.unwrap(), external_path.as_path());
+        assert_eq!(&*found.unwrap(), lib2_path.as_path());
 
-        // Not found
         assert!(find_library_by_id(bae_dir, "nonexistent").is_none());
     }
 
