@@ -6,6 +6,16 @@ How bae manages where release files live. Storage profiles are file storage loca
 
 A release's files can exist on one or more profiles, or be unmanaged. Each copy is in one of these modes:
 
+|                          | Unmanaged        | Local profile      | Cloud profile        |
+|--------------------------|------------------|--------------------|----------------------|
+| Files live at            | User's location  | Profile directory   | S3 bucket            |
+| Copies files on import   | No               | Yes                | Yes (upload)         |
+| Encrypted at rest        | No               | No                 | Yes (XChaCha20)      |
+| Transfer between profiles| No               | Yes                | Yes                  |
+| Sync across devices      | No               | No                 | Yes                  |
+| User manages files       | Yes              | No (bae owns them) | No (bae owns them)   |
+| Delete release removes files | No (DB only) | Yes (deferred)     | Yes (deferred)       |
+
 ### Unmanaged (no profile)
 
 Files stay wherever the user has them. bae records each file's location in `release_files.source_path` but doesn't copy, move, or touch anything. Deleting a release from the library removes DB records but leaves files on disk.
