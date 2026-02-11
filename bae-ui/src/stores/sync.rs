@@ -11,6 +11,26 @@ pub struct DeviceActivityInfo {
     pub last_sync: Option<String>,
 }
 
+/// Role of a library member (display-only, shadows bae-core's MemberRole).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MemberRole {
+    Owner,
+    Member,
+}
+
+/// A library member for display in the sync settings.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Member {
+    /// Ed25519 public key (hex-encoded).
+    pub pubkey: String,
+    /// Display name (or truncated pubkey if no name is set).
+    pub display_name: String,
+    /// Role in the library.
+    pub role: MemberRole,
+    /// Whether this member is the current user.
+    pub is_self: bool,
+}
+
 /// Sync status state for the UI.
 #[derive(Clone, Debug, Default, PartialEq, Store)]
 pub struct SyncState {
@@ -24,6 +44,8 @@ pub struct SyncState {
     pub error: Option<String>,
     /// User's Ed25519 public key (hex-encoded). None if no keypair exists.
     pub user_pubkey: Option<String>,
+    /// Current library members (from membership chain). Empty if solo or not syncing.
+    pub members: Vec<Member>,
 
     // Sync bucket configuration (mirrors Config, for UI display)
     /// S3 bucket name for sync.

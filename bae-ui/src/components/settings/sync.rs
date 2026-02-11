@@ -5,7 +5,7 @@ use crate::components::{
     Button, ButtonSize, ButtonVariant, ChromelessButton, SettingsCard, SettingsSection, TextInput,
     TextInputSize, TextInputType,
 };
-use crate::stores::DeviceActivityInfo;
+use crate::stores::{DeviceActivityInfo, Member, MemberRole};
 use dioxus::prelude::*;
 
 /// Data bundle for sync bucket configuration fields (avoids 5 separate EventHandler props for save).
@@ -70,6 +70,14 @@ pub fn SyncSectionView(
     test_success: Option<String>,
     /// Error message from a connection test.
     test_error: Option<String>,
+
+    // --- Members props ---
+    /// Current library members from membership chain. Empty if solo/not syncing.
+    members: Vec<Member>,
+    /// Whether the current user is an owner (controls visibility of remove buttons).
+    is_owner: bool,
+    /// Called when the user clicks "Remove" on a member. Carries the member's pubkey.
+    on_remove_member: EventHandler<String>,
 
     // --- Callbacks ---
     on_sync_now: EventHandler<()>,
@@ -197,6 +205,59 @@ pub fn SyncSectionView(
                                         {format_relative_time(ts).as_str()}
                                     } else {
                                         "Unknown"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Members card
+            if !members.is_empty() {
+                SettingsCard {
+                    h3 { class: "text-lg font-medium text-white mb-4", "Members" }
+                    {
+                        let owner_count = members.iter().filter(|m| m.role == MemberRole::Owner).count();
+                        rsx! {
+                            div { class: "space-y-2",
+                                for member in members.iter() {
+                                    {
+                                        let can_remove = is_owner && !member.is_self
+                                            && !(member.role == MemberRole::Owner && owner_count <= 1);
+                                        let pubkey = member.pubkey.clone();
+                                        rsx! {
+                                            div { key: "{member.pubkey}", class: "flex justify-between items-center py-1.5",
+                                                div { class: "flex items-center gap-3 min-w-0",
+                                                    span { class: "text-gray-200 text-sm truncate",
+                                                        "{member.display_name}"
+                                                        if member.is_self {
+                                                            span { class: "text-gray-500 ml-1", "(you)" }
+                                                        }
+                                                    }
+                                                    match member.role {
+                                                        MemberRole::Owner => rsx! {
+                                                            span { class: "px-2 py-0.5 bg-amber-900/60 text-amber-300 rounded text-xs font-medium flex-shrink-0",
+                                                                "Owner"
+                                                            }
+                                                        },
+                                                        MemberRole::Member => rsx! {
+                                                            span { class: "px-2 py-0.5 bg-gray-700 text-gray-400 rounded text-xs font-medium flex-shrink-0",
+                                                                "Member"
+                                                            }
+                                                        },
+                                                    }
+                                                }
+                                                if can_remove {
+                                                    Button {
+                                                        variant: ButtonVariant::Secondary,
+                                                        size: ButtonSize::Small,
+                                                        onclick: move |_| on_remove_member.call(pubkey.clone()),
+                                                        "Remove"
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }

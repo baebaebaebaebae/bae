@@ -2,7 +2,7 @@
 //! delegates config persistence to AppService
 
 use crate::ui::app_service::use_app;
-use bae_ui::stores::{AppStateStoreExt, SyncStateStoreExt};
+use bae_ui::stores::{AppStateStoreExt, MemberRole, SyncStateStoreExt};
 use bae_ui::{SyncBucketConfig, SyncSectionView};
 use dioxus::prelude::*;
 
@@ -17,6 +17,18 @@ pub fn SyncSection() -> Element {
     let syncing = *app.state.sync().syncing().read();
     let error = app.state.sync().error().read().clone();
     let user_pubkey = app.state.sync().user_pubkey().read().clone();
+
+    // --- Members from store ---
+    let members = app.state.sync().members().read().clone();
+    let is_owner = members
+        .iter()
+        .any(|m| m.is_self && m.role == MemberRole::Owner);
+
+    // Load membership on mount
+    let app_for_membership = app.clone();
+    use_effect(move || {
+        app_for_membership.load_membership();
+    });
 
     let copy_pubkey = {
         let user_pubkey = user_pubkey.clone();
@@ -63,6 +75,10 @@ pub fn SyncSection() -> Element {
             error,
             user_pubkey,
             on_copy_pubkey: copy_pubkey,
+            members,
+            is_owner,
+            on_remove_member: // Phase 6e: remove member from membership chain
+            |_pubkey: String| {},
             on_sync_now: move |_| app_for_sync.trigger_sync(),
 
             // Config display
