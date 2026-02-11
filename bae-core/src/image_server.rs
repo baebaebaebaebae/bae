@@ -29,6 +29,7 @@ pub struct ImageServerHandle {
     pub host: String,
     pub port: u16,
     secret: [u8; 32],
+    library_dir: LibraryDir,
 }
 
 impl ImageServerHandle {
@@ -37,6 +38,15 @@ impl ImageServerHandle {
         let path = format!("/image/{}", id);
         let sig = sign(&self.secret, &path);
         format!("http://{}:{}{path}?sig={sig}", self.host, self.port)
+    }
+
+    /// URL for a library image, but only if the image file actually exists on disk.
+    pub fn image_url_if_exists(&self, id: &str) -> Option<String> {
+        if self.library_dir.image_path(id).exists() {
+            Some(self.image_url(id))
+        } else {
+            None
+        }
     }
 
     pub fn file_url(&self, file_id: &str) -> String {
@@ -73,7 +83,7 @@ pub async fn start_image_server(
 
     let state = ImageServerState {
         library_manager,
-        library_dir,
+        library_dir: library_dir.clone(),
         secret,
     };
 
@@ -100,6 +110,7 @@ pub async fn start_image_server(
         host: host.to_string(),
         port,
         secret,
+        library_dir,
     }
 }
 
@@ -271,6 +282,7 @@ mod tests {
             host: "127.0.0.1".to_string(),
             port: 8080,
             secret: [0xAB; 32],
+            library_dir: LibraryDir::new(std::path::PathBuf::from("/tmp/test")),
         }
     }
 
