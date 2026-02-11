@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use bae_core::cache;
 use bae_core::config;
+use bae_core::encryption::EncryptionService;
 use bae_core::image_server::ImageServerHandle;
 use bae_core::import;
 use bae_core::keys::{KeyService, UserKeypair};
@@ -33,6 +34,10 @@ pub struct SyncHandle {
     pub bucket_client: Arc<S3SyncBucketClient>,
     /// Hybrid logical clock for causal ordering of writes
     pub hlc: Arc<Hlc>,
+    /// Device ID for this device (used in push, cursors, and SyncService)
+    pub device_id: String,
+    /// Encryption service for snapshot creation
+    pub encryption: EncryptionService,
     /// Cached raw sqlite3 write connection pointer for session extension ops.
     /// Valid for the lifetime of the Database.
     raw_db: *mut libsqlite3_sys::sqlite3,
@@ -56,6 +61,8 @@ impl SyncHandle {
     pub fn new(
         bucket_client: S3SyncBucketClient,
         hlc: Hlc,
+        device_id: String,
+        encryption: EncryptionService,
         raw_db: *mut libsqlite3_sys::sqlite3,
         session: SyncSession,
         sync_trigger: tokio::sync::mpsc::Sender<()>,
@@ -64,6 +71,8 @@ impl SyncHandle {
         SyncHandle {
             bucket_client: Arc::new(bucket_client),
             hlc: Arc::new(hlc),
+            device_id,
+            encryption,
             raw_db,
             session: Arc::new(tokio::sync::Mutex::new(Some(session))),
             sync_trigger,
