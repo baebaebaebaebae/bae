@@ -2379,12 +2379,4 @@ impl Database {
             .await?;
         Ok(row.map(|r| r.get::<bool, _>("private")).unwrap_or(false))
     }
-
-    /// Get IDs of all releases marked as private.
-    pub async fn get_private_release_ids(&self) -> Result<Vec<String>, sqlx::Error> {
-        let rows = sqlx::query("SELECT id FROM releases WHERE private = 1")
-            .fetch_all(&self.inner.read_pool)
-            .await?;
-        Ok(rows.iter().map(|r| r.get("id")).collect())
-    }
 }

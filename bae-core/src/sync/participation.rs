@@ -33,14 +33,6 @@ impl ParticipationService {
         Self { mode, db }
     }
 
-    pub fn mode(&self) -> ParticipationMode {
-        self.mode
-    }
-
-    pub fn set_mode(&mut self, mode: ParticipationMode) {
-        self.mode = mode;
-    }
-
     /// Whether this library should share attestations at all.
     /// True for `AttestationsOnly` and `Full` modes.
     pub fn should_share_attestations(&self) -> bool {
