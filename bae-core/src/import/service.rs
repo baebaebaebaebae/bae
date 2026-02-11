@@ -898,9 +898,13 @@ impl ImportService {
             .map(|f| (f.original_filename, f.id))
             .collect();
 
-        // Build audio format records
-        let audio_formats =
-            Self::build_audio_formats(tracks_to_files, &cue_flac_analysis, &file_ids)?;
+        // Build audio format records (pass file_data to avoid re-reading standalone FLACs)
+        let audio_formats = Self::build_audio_formats(
+            tracks_to_files,
+            &cue_flac_analysis,
+            &file_ids,
+            Some(&file_data),
+        )?;
 
         let track_ids: Vec<&str> = tracks_to_files
             .iter()
@@ -1136,6 +1140,7 @@ impl ImportService {
         tracks_to_files: &[TrackFile],
         cue_flac_analysis: &HashMap<PathBuf, CueFlacAnalysis>,
         file_ids: &HashMap<String, String>,
+        preloaded_files: Option<&[(String, Vec<u8>, PathBuf)]>,
     ) -> Result<Vec<crate::db::DbAudioFormat>, String> {
         use crate::cue_flac::CueFlacProcessor;
         use crate::db::DbAudioFormat;
@@ -1264,18 +1269,26 @@ impl ImportService {
                     ));
                 }
 
-                // Read once, analyze from data
-                let file_data = std::fs::read(&track_file.file_path)
-                    .map_err(|e| format!("Failed to read FLAC file: {}", e))?;
+                // Use preloaded data if available, otherwise read from disk
+                let preloaded = preloaded_files
+                    .and_then(|files| files.iter().find(|(_, _, p)| p == &track_file.file_path));
+                let fallback;
+                let file_data: &[u8] = if let Some((_, data, _)) = preloaded {
+                    data
+                } else {
+                    fallback = std::fs::read(&track_file.file_path)
+                        .map_err(|e| format!("Failed to read FLAC file: {}", e))?;
+                    &fallback
+                };
 
-                let flac_headers = CueFlacProcessor::extract_flac_headers_from_data(&file_data)
+                let flac_headers = CueFlacProcessor::extract_flac_headers_from_data(file_data)
                     .ok()
                     .map(|h| h.headers);
 
-                let flac_info = CueFlacProcessor::analyze_flac_data(&file_data)
+                let flac_info = CueFlacProcessor::analyze_flac_data(file_data)
                     .map_err(|e| format!("Failed to analyze FLAC: {}", e))?;
 
-                let seektable = CueFlacProcessor::build_dense_seektable(&file_data, &flac_info);
+                let seektable = CueFlacProcessor::build_dense_seektable(file_data, &flac_info);
                 let seektable_json = serde_json::to_string(&seektable.entries)
                     .map_err(|e| format!("Failed to serialize seektable: {}", e))?;
 
@@ -1415,9 +1428,9 @@ impl ImportService {
             HashMap::new()
         };
 
-        // Build audio format records
+        // Build audio format records (no preloaded data in none-import path)
         let audio_formats =
-            Self::build_audio_formats(tracks_to_files, &cue_flac_analysis, &file_ids)?;
+            Self::build_audio_formats(tracks_to_files, &cue_flac_analysis, &file_ids, None)?;
 
         let track_ids: Vec<&str> = tracks_to_files
             .iter()
