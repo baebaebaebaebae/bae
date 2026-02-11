@@ -26,7 +26,7 @@ bae scans the folder, detects audio files and artwork, and moves to the identify
 
 bae needs to match your files to a known release so it can pull in proper metadata. A few ways this happens:
 
-- **Disc ID** -- if your files came with a CUE sheet containing a disc ID, bae looks it up on MusicBrainz automatically. This often finds an exact match with no manual effort.
+- **Disc ID** -- if your folder has a CUE sheet (and a matching FLAC or LOG file), bae calculates a MusicBrainz disc ID from the track offsets and looks it up automatically. This often finds an exact match with no manual effort.
 - **Manual search** -- search by artist and album name, barcode, or catalog number across both MusicBrainz and Discogs.
 
 When you select a result, bae checks that the release's track count matches your local files. If there's a mismatch, the result is flagged and you can't accidentally import the wrong release.
