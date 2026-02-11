@@ -5,7 +5,7 @@ use crate::components::{
     Button, ButtonSize, ButtonVariant, ChromelessButton, SettingsCard, SettingsSection, TextInput,
     TextInputSize, TextInputType,
 };
-use crate::stores::{DeviceActivityInfo, Member, MemberRole};
+use crate::stores::{DeviceActivityInfo, InviteStatus, Member, MemberRole, ShareInfo};
 use dioxus::prelude::*;
 
 /// Data bundle for sync bucket configuration fields (avoids 5 separate EventHandler props for save).
@@ -74,10 +74,22 @@ pub fn SyncSectionView(
     // --- Members props ---
     /// Current library members from membership chain. Empty if solo/not syncing.
     members: Vec<Member>,
-    /// Whether the current user is an owner (controls visibility of remove buttons).
+    /// Whether the current user is an owner (controls visibility of invite/remove).
     is_owner: bool,
     /// Called when the user clicks "Remove" on a member. Carries the member's pubkey.
     on_remove_member: EventHandler<String>,
+
+    // --- Invite props ---
+    /// Whether the invite form is open.
+    show_invite_form: bool,
+    /// Invite form: invitee's public key input.
+    invite_pubkey: String,
+    /// Invite form: selected role for the invitee.
+    invite_role: MemberRole,
+    /// Invite operation status.
+    invite_status: Option<InviteStatus>,
+    /// Share info to display after successful invite.
+    share_info: Option<ShareInfo>,
 
     // --- Callbacks ---
     on_sync_now: EventHandler<()>,
@@ -90,8 +102,23 @@ pub fn SyncSectionView(
     on_endpoint_change: EventHandler<String>,
     on_access_key_change: EventHandler<String>,
     on_secret_key_change: EventHandler<String>,
+
+    // --- Invite callbacks ---
+    /// Toggle the invite form open/closed.
+    on_toggle_invite_form: EventHandler<()>,
+    /// Invite pubkey input changed.
+    on_invite_pubkey_change: EventHandler<String>,
+    /// Invite role selection changed.
+    on_invite_role_change: EventHandler<MemberRole>,
+    /// Submit the invite. Carries (pubkey, role).
+    on_invite_member: EventHandler<(String, MemberRole)>,
+    /// Copy share info text to clipboard. Carries the formatted text.
+    on_copy_share_info: EventHandler<String>,
+    /// Dismiss the share info panel.
+    on_dismiss_share_info: EventHandler<()>,
 ) -> Element {
     let mut copied = use_signal(|| false);
+    let mut share_copied = use_signal(|| false);
 
     let handle_copy = move |_| {
         on_copy_pubkey.call(());
@@ -106,6 +133,10 @@ pub fn SyncSectionView(
         && !edit_region.is_empty()
         && !edit_access_key.is_empty()
         && !edit_secret_key.is_empty();
+
+    let is_valid_invite_pubkey =
+        invite_pubkey.len() == 64 && invite_pubkey.chars().all(|c| c.is_ascii_hexdigit());
+    let is_inviting = matches!(invite_status, Some(InviteStatus::Sending));
 
     rsx! {
         SettingsSection {
@@ -213,50 +244,213 @@ pub fn SyncSectionView(
                 }
             }
 
-            // Members card
-            if !members.is_empty() {
+            // Members card (shown when sync is configured)
+            if sync_configured {
                 SettingsCard {
-                    h3 { class: "text-lg font-medium text-white mb-4", "Members" }
-                    {
-                        let owner_count = members.iter().filter(|m| m.role == MemberRole::Owner).count();
-                        rsx! {
-                            div { class: "space-y-2",
-                                for member in members.iter() {
-                                    {
-                                        let can_remove = is_owner && !member.is_self
-                                            && !(member.role == MemberRole::Owner && owner_count <= 1);
-                                        let pubkey = member.pubkey.clone();
-                                        rsx! {
-                                            div { key: "{member.pubkey}", class: "flex justify-between items-center py-1.5",
-                                                div { class: "flex items-center gap-3 min-w-0",
-                                                    span { class: "text-gray-200 text-sm truncate",
-                                                        "{member.display_name}"
-                                                        if member.is_self {
-                                                            span { class: "text-gray-500 ml-1", "(you)" }
+                    div { class: "flex items-center justify-between mb-4",
+                        h3 { class: "text-lg font-medium text-white", "Members" }
+                        if is_owner && !show_invite_form {
+                            Button {
+                                variant: ButtonVariant::Secondary,
+                                size: ButtonSize::Small,
+                                onclick: move |_| on_toggle_invite_form.call(()),
+                                "Invite Member"
+                            }
+                        }
+                    }
+
+                    if !members.is_empty() {
+                        {
+                            let owner_count = members.iter().filter(|m| m.role == MemberRole::Owner).count();
+                            rsx! {
+                                div { class: "space-y-2",
+                                    for member in members.iter() {
+                                        {
+                                            let can_remove = is_owner && !member.is_self
+                                                && !(member.role == MemberRole::Owner && owner_count <= 1);
+                                            let pubkey = member.pubkey.clone();
+                                            rsx! {
+                                                div { key: "{member.pubkey}", class: "flex justify-between items-center py-1.5",
+                                                    div { class: "flex items-center gap-3 min-w-0",
+                                                        span { class: "text-gray-200 text-sm truncate",
+                                                            "{member.display_name}"
+                                                            if member.is_self {
+                                                                span { class: "text-gray-500 ml-1", "(you)" }
+                                                            }
+                                                        }
+                                                        match member.role {
+                                                            MemberRole::Owner => rsx! {
+                                                                span { class: "px-2 py-0.5 bg-amber-900/60 text-amber-300 rounded text-xs font-medium flex-shrink-0",
+                                                                    "Owner"
+                                                                }
+                                                            },
+                                                            MemberRole::Member => rsx! {
+                                                                span { class: "px-2 py-0.5 bg-gray-700 text-gray-400 rounded text-xs font-medium flex-shrink-0",
+                                                                    "Member"
+                                                                }
+                                                            },
                                                         }
                                                     }
-                                                    match member.role {
-                                                        MemberRole::Owner => rsx! {
-                                                            span { class: "px-2 py-0.5 bg-amber-900/60 text-amber-300 rounded text-xs font-medium flex-shrink-0",
-                                                                "Owner"
-                                                            }
-                                                        },
-                                                        MemberRole::Member => rsx! {
-                                                            span { class: "px-2 py-0.5 bg-gray-700 text-gray-400 rounded text-xs font-medium flex-shrink-0",
-                                                                "Member"
-                                                            }
-                                                        },
-                                                    }
-                                                }
-                                                if can_remove {
-                                                    Button {
-                                                        variant: ButtonVariant::Secondary,
-                                                        size: ButtonSize::Small,
-                                                        onclick: move |_| on_remove_member.call(pubkey.clone()),
-                                                        "Remove"
+                                                    if can_remove {
+                                                        Button {
+                                                            variant: ButtonVariant::Secondary,
+                                                            size: ButtonSize::Small,
+                                                            onclick: move |_| on_remove_member.call(pubkey.clone()),
+                                                            "Remove"
+                                                        }
                                                     }
                                                 }
                                             }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        p { class: "text-sm text-gray-500 mb-2",
+                            "No members yet. Invite someone to share this library."
+                        }
+                    }
+
+                    // Invite form (inline, below member list)
+                    if show_invite_form {
+                        div { class: "mt-4 pt-4 border-t border-gray-700",
+                            h4 { class: "text-sm font-medium text-gray-300 mb-3",
+                                "Invite a new member"
+                            }
+                            div { class: "space-y-3",
+                                div {
+                                    label { class: "block text-sm text-gray-400 mb-1",
+                                        "Public key (64-character hex)"
+                                    }
+                                    TextInput {
+                                        value: invite_pubkey.clone(),
+                                        on_input: move |v| on_invite_pubkey_change.call(v),
+                                        size: TextInputSize::Medium,
+                                        input_type: TextInputType::Text,
+                                        placeholder: "Paste invitee's Ed25519 public key",
+                                    }
+                                }
+
+                                div {
+                                    label { class: "block text-sm text-gray-400 mb-1",
+                                        "Role"
+                                    }
+                                    div { class: "flex gap-2",
+                                        Button {
+                                            variant: if invite_role == MemberRole::Member { ButtonVariant::Primary } else { ButtonVariant::Secondary },
+                                            size: ButtonSize::Small,
+                                            onclick: move |_| on_invite_role_change.call(MemberRole::Member),
+                                            "Member"
+                                        }
+                                        Button {
+                                            variant: if invite_role == MemberRole::Owner { ButtonVariant::Primary } else { ButtonVariant::Secondary },
+                                            size: ButtonSize::Small,
+                                            onclick: move |_| on_invite_role_change.call(MemberRole::Owner),
+                                            "Owner"
+                                        }
+                                    }
+                                }
+
+                                // Invite status messages
+                                if matches!(invite_status, Some(InviteStatus::Success)) {
+                                    div { class: "p-3 bg-green-900/30 border border-green-700 rounded-lg text-sm text-green-300",
+                                        "Invitation sent successfully."
+                                    }
+                                }
+
+                                if let Some(InviteStatus::Error(ref err)) = invite_status {
+                                    div { class: "p-3 bg-red-900/30 border border-red-700 rounded-lg text-sm text-red-300",
+                                        "{err}"
+                                    }
+                                }
+
+                                div { class: "flex gap-3",
+                                    {
+                                        let pk = invite_pubkey.clone();
+                                        let role = invite_role.clone();
+                                        rsx! {
+                                            Button {
+                                                variant: ButtonVariant::Primary,
+                                                size: ButtonSize::Medium,
+                                                disabled: !is_valid_invite_pubkey || is_inviting,
+                                                loading: is_inviting,
+                                                onclick: move |_| on_invite_member.call((pk.clone(), role.clone())),
+                                                if is_inviting {
+                                                    "Inviting..."
+                                                } else {
+                                                    "Invite"
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Button {
+                                        variant: ButtonVariant::Secondary,
+                                        size: ButtonSize::Medium,
+                                        disabled: is_inviting,
+                                        onclick: move |_| on_toggle_invite_form.call(()),
+                                        "Cancel"
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Share info panel (shown after successful invite)
+                    if let Some(ref info) = share_info {
+                        {
+                            let share_text = format_share_text(info);
+                            rsx! {
+                                div { class: "mt-4 pt-4 border-t border-gray-700",
+
+                                    h4 { class: "text-sm font-medium text-gray-300 mb-3", "Share these details with the invitee" }
+                                    div { class: "p-3 bg-gray-700/50 rounded-lg space-y-2 text-sm",
+                                        div { class: "flex justify-between",
+                                            span { class: "text-gray-400", "Bucket" }
+                                            span { class: "text-gray-200 font-mono", "{info.bucket}" }
+                                        }
+                                        div { class: "flex justify-between",
+                                            span { class: "text-gray-400", "Region" }
+                                            span { class: "text-gray-200 font-mono", "{info.region}" }
+                                        }
+                                        if let Some(ref ep) = info.endpoint {
+                                            div { class: "flex justify-between",
+                                                span { class: "text-gray-400", "Endpoint" }
+                                                span { class: "text-gray-200 font-mono", "{ep}" }
+                                            }
+                                        }
+                                        div { class: "flex justify-between",
+                                            span { class: "text-gray-400", "Invitee key" }
+                                            span { class: "text-gray-200 font-mono", {truncate_pubkey(&info.invitee_pubkey)} }
+                                        }
+                                    }
+        
+                                    div { class: "flex gap-3 mt-3",
+                                        Button {
+                                            variant: ButtonVariant::Secondary,
+                                            size: ButtonSize::Small,
+                                            onclick: {
+                                                let text = share_text.clone();
+                                                move |_| {
+                                                    on_copy_share_info.call(text.clone());
+                                                    share_copied.set(true);
+                                                    spawn(async move {
+                                                        sleep_ms(2000).await;
+                                                        share_copied.set(false);
+                                                    });
+                                                }
+                                            },
+                                            if *share_copied.read() {
+                                                "Copied"
+                                            } else {
+                                                "Copy to clipboard"
+                                            }
+                                        }
+                                        Button {
+                                            variant: ButtonVariant::Secondary,
+                                            size: ButtonSize::Small,
+                                            onclick: move |_| on_dismiss_share_info.call(()),
+                                            "Dismiss"
                                         }
                                     }
                                 }
@@ -473,6 +667,19 @@ fn short_device_id(id: &str) -> String {
     } else {
         clean
     }
+}
+
+/// Format share info as a text block for clipboard copy.
+fn format_share_text(info: &ShareInfo) -> String {
+    let mut lines = vec![
+        format!("Bucket: {}", info.bucket),
+        format!("Region: {}", info.region),
+    ];
+    if let Some(ref ep) = info.endpoint {
+        lines.push(format!("Endpoint: {ep}"));
+    }
+    lines.push(format!("Invitee key: {}", info.invitee_pubkey));
+    lines.join("\n")
 }
 
 /// Format an RFC 3339 timestamp as a relative time string.

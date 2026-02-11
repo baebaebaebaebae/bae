@@ -24,6 +24,10 @@ pub fn SyncSection() -> Element {
         .iter()
         .any(|m| m.is_self && m.role == MemberRole::Owner);
 
+    // --- Invite state from store ---
+    let invite_status = app.state.sync().invite_status().read().clone();
+    let share_info = app.state.sync().share_info().read().clone();
+
     // Load membership on mount
     let app_for_membership = app.clone();
     use_effect(move || {
@@ -60,11 +64,18 @@ pub fn SyncSection() -> Element {
     let mut test_success = use_signal(|| Option::<String>::None);
     let mut test_error = use_signal(|| Option::<String>::None);
 
+    // --- Local invite form state ---
+    let mut show_invite_form = use_signal(|| false);
+    let mut invite_pubkey = use_signal(String::new);
+    let mut invite_role = use_signal(|| MemberRole::Member);
+
     // Clone app for each closure that needs it
     let app_for_sync = app.clone();
     let app_for_edit = app.clone();
     let app_for_save = app.clone();
     let app_for_test = app.clone();
+    let app_for_invite = app.clone();
+    let app_for_dismiss = app.clone();
 
     rsx! {
         SyncSectionView {
@@ -77,8 +88,7 @@ pub fn SyncSection() -> Element {
             on_copy_pubkey: copy_pubkey,
             members,
             is_owner,
-            on_remove_member: // Phase 6e: remove member from membership chain
-            |_pubkey: String| {},
+            on_remove_member: |_pubkey: String| {},
             on_sync_now: move |_| app_for_sync.trigger_sync(),
 
             // Config display
@@ -101,6 +111,13 @@ pub fn SyncSection() -> Element {
             is_testing: *is_testing.read(),
             test_success: test_success.read().clone(),
             test_error: test_error.read().clone(),
+
+            // Invite state
+            show_invite_form: *show_invite_form.read(),
+            invite_pubkey: invite_pubkey.read().clone(),
+            invite_role: invite_role.read().clone(),
+            invite_status,
+            share_info,
 
             // Callbacks
             on_edit_start: move |_| {
@@ -205,6 +222,38 @@ pub fn SyncSection() -> Element {
             on_endpoint_change: move |v| edit_endpoint.set(v),
             on_access_key_change: move |v| edit_access_key.set(v),
             on_secret_key_change: move |v| edit_secret_key.set(v),
+
+            // Invite callbacks
+            on_toggle_invite_form: move |_| {
+                let currently_open = *show_invite_form.read();
+                if currently_open {
+                    // Closing: reset form state
+                    show_invite_form.set(false);
+                    invite_pubkey.set(String::new());
+                    invite_role.set(MemberRole::Member);
+                    app_for_invite.state.sync().invite_status().set(None);
+                } else {
+                    show_invite_form.set(true);
+                }
+            },
+            on_invite_pubkey_change: move |v| invite_pubkey.set(v),
+            on_invite_role_change: move |v| invite_role.set(v),
+            on_invite_member: {
+                let app = app.clone();
+                move |(pubkey, role): (String, MemberRole)| {
+                    app.invite_member(pubkey, role);
+                }
+            },
+            on_copy_share_info: move |text: String| {
+                let _ = arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&text));
+            },
+            on_dismiss_share_info: move |_| {
+                app_for_dismiss.state.sync().share_info().set(None);
+                app_for_dismiss.state.sync().invite_status().set(None);
+                show_invite_form.set(false);
+                invite_pubkey.set(String::new());
+                invite_role.set(MemberRole::Member);
+            },
         }
     }
 }
