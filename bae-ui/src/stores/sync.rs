@@ -48,6 +48,19 @@ pub struct ShareInfo {
     pub invitee_pubkey: String,
 }
 
+/// A release shared with us via a share grant (display-only).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SharedReleaseDisplay {
+    pub grant_id: String,
+    pub release_id: String,
+    pub from_library_id: String,
+    pub from_user_pubkey: String,
+    pub bucket: String,
+    pub region: String,
+    pub endpoint: Option<String>,
+    pub expires: Option<String>,
+}
+
 /// Sync status state for the UI.
 #[derive(Clone, Debug, Default, PartialEq, Store)]
 pub struct SyncState {
@@ -85,4 +98,8 @@ pub struct SyncState {
     pub removing_member: bool,
     /// Error from a member removal attempt.
     pub remove_member_error: Option<String>,
+
+    // Shared releases
+    /// Releases shared with us via accepted share grants.
+    pub shared_releases: Vec<SharedReleaseDisplay>,
 }

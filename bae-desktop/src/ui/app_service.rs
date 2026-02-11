@@ -1516,6 +1516,69 @@ impl AppService {
     }
 
     // =========================================================================
+    // Shared Release Methods
+    // =========================================================================
+
+    /// Load accepted share grants from the database and update the store.
+    pub fn load_shared_releases(&self) {
+        let state = self.state;
+        let library_manager = self.library_manager.clone();
+
+        spawn(async move {
+            match bae_core::sync::shared_release::list_shared_releases(
+                library_manager.get().database(),
+            )
+            .await
+            {
+                Ok(releases) => {
+                    let display: Vec<bae_ui::stores::SharedReleaseDisplay> = releases
+                        .into_iter()
+                        .map(|r| bae_ui::stores::SharedReleaseDisplay {
+                            grant_id: r.grant_id,
+                            release_id: r.release_id,
+                            from_library_id: r.from_library_id,
+                            from_user_pubkey: r.from_user_pubkey,
+                            bucket: r.bucket,
+                            region: r.region,
+                            endpoint: r.endpoint,
+                            expires: r.expires,
+                        })
+                        .collect();
+                    state.sync().shared_releases().set(display);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load shared releases: {e}");
+                }
+            }
+        });
+    }
+
+    /// Remove a shared release grant from the local database.
+    pub fn revoke_shared_release(&self, grant_id: String) {
+        let state = self.state;
+        let library_manager = self.library_manager.clone();
+
+        spawn(async move {
+            match bae_core::sync::shared_release::revoke_grant(
+                library_manager.get().database(),
+                &grant_id,
+            )
+            .await
+            {
+                Ok(()) => {
+                    // Remove from store directly.
+                    let mut releases = state.sync().shared_releases().read().clone();
+                    releases.retain(|r| r.grant_id != grant_id);
+                    state.sync().shared_releases().set(releases);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to revoke shared release: {e}");
+                }
+            }
+        });
+    }
+
+    // =========================================================================
     // Storage Profile Methods
     // =========================================================================
 
