@@ -4,8 +4,8 @@
 //! bae-desktop (real import) and bae-mocks (design tool).
 
 use crate::display_types::{
-    CategorizedFileInfo, DetectedCandidate, FolderMetadata, IdentifyMode, MatchCandidate,
-    SearchSource, SearchTab, SelectedCover,
+    CandidateTrack, CategorizedFileInfo, DetectedCandidate, FolderMetadata, IdentifyMode,
+    MatchCandidate, SearchSource, SearchTab, SelectedCover,
 };
 use dioxus::prelude::*;
 
@@ -57,7 +57,7 @@ pub enum PrefetchState {
     /// Full release fetch in progress
     Fetching,
     /// Track count matches local files
-    Valid,
+    Valid { tracks: Vec<CandidateTrack> },
     /// Track count mismatch
     TrackCountMismatch {
         release_tracks: usize,
@@ -351,11 +351,13 @@ impl IdentifyingState {
             }
             CandidateEvent::ConfirmExactMatch => {
                 // Only transition if prefetch validated successfully
-                if !matches!(self.exact_match_prefetch, Some(PrefetchState::Valid)) {
-                    return CandidateState::Identifying(self);
-                }
+                let tracks = match &self.exact_match_prefetch {
+                    Some(PrefetchState::Valid { tracks }) => tracks.clone(),
+                    _ => return CandidateState::Identifying(self),
+                };
                 if let Some(idx) = self.selected_match_index {
-                    if let Some(candidate) = self.auto_matches.get(idx).cloned() {
+                    if let Some(mut candidate) = self.auto_matches.get(idx).cloned() {
+                        candidate.tracks = tracks;
                         let source_disc_id = match &self.mode {
                             IdentifyMode::MultipleExactMatches(id) => Some(id.clone()),
                             _ => None,
@@ -386,12 +388,17 @@ impl IdentifyingState {
             CandidateEvent::ExactMatchPrefetchComplete { index, result } => {
                 let mut state = self;
                 if state.selected_match_index == Some(index) {
-                    let should_auto_confirm =
-                        state.exact_match_confirm_pending && matches!(result, PrefetchState::Valid);
+                    let should_auto_confirm = state.exact_match_confirm_pending
+                        && matches!(result, PrefetchState::Valid { .. });
                     state.exact_match_prefetch = Some(result);
                     state.exact_match_confirm_pending = false;
                     if should_auto_confirm {
-                        if let Some(candidate) = state.auto_matches.get(index).cloned() {
+                        if let Some(mut candidate) = state.auto_matches.get(index).cloned() {
+                            if let Some(PrefetchState::Valid { tracks }) =
+                                &state.exact_match_prefetch
+                            {
+                                candidate.tracks = tracks.clone();
+                            }
                             let source_disc_id = match &state.mode {
                                 IdentifyMode::MultipleExactMatches(id) => Some(id.clone()),
                                 _ => None,
@@ -459,7 +466,8 @@ impl IdentifyingState {
                     state.mode = IdentifyMode::ManualSearch;
                 } else if matches.len() == 1 {
                     // Single match — auto-confirm, but keep in auto_matches
-                    // so "view exact matches" works if user goes back
+                    // so "view exact matches" works if user goes back.
+                    // Tracks are pre-populated by the desktop layer before dispatch.
                     let candidate = matches[0].clone();
                     let selected_cover = default_cover(&candidate, &state.files);
                     return CandidateState::Confirming(Box::new(ConfirmingState {
@@ -569,13 +577,16 @@ impl IdentifyingState {
                 // Only apply if the index still matches the selected result
                 if tab.selected_result_index == Some(index) {
                     let should_auto_confirm =
-                        tab.confirm_pending && matches!(result, PrefetchState::Valid);
+                        tab.confirm_pending && matches!(result, PrefetchState::Valid { .. });
                     tab.prefetch_state = Some(result);
                     tab.confirm_pending = false;
                     if should_auto_confirm {
                         // Auto-transition to Confirming
                         let tab = state.search_state.current_tab_state();
-                        if let Some(candidate) = tab.search_results.get(index).cloned() {
+                        if let Some(mut candidate) = tab.search_results.get(index).cloned() {
+                            if let Some(PrefetchState::Valid { tracks }) = &tab.prefetch_state {
+                                candidate.tracks = tracks.clone();
+                            }
                             let selected_cover = default_cover(&candidate, &state.files);
                             return CandidateState::Confirming(Box::new(ConfirmingState {
                                 files: state.files,
@@ -603,11 +614,13 @@ impl IdentifyingState {
                 let state = self;
                 let tab = state.search_state.current_tab_state();
                 // Only transition if prefetch validated successfully
-                if !matches!(tab.prefetch_state, Some(PrefetchState::Valid)) {
-                    return CandidateState::Identifying(state);
-                }
+                let tracks = match &tab.prefetch_state {
+                    Some(PrefetchState::Valid { tracks }) => tracks.clone(),
+                    _ => return CandidateState::Identifying(state),
+                };
                 if let Some(idx) = tab.selected_result_index {
-                    if let Some(candidate) = tab.search_results.get(idx).cloned() {
+                    if let Some(mut candidate) = tab.search_results.get(idx).cloned() {
+                        candidate.tracks = tracks;
                         let selected_cover = default_cover(&candidate, &state.files);
                         return CandidateState::Confirming(Box::new(ConfirmingState {
                             files: state.files,

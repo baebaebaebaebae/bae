@@ -2,7 +2,7 @@
 
 use crate::components::icons::{ImageIcon, RefreshIcon};
 use crate::components::{Button, ButtonSize, ButtonVariant};
-use crate::display_types::MatchCandidate;
+use crate::display_types::{CandidateTrack, MatchCandidate};
 use crate::stores::import::PrefetchState;
 use dioxus::prelude::*;
 
@@ -178,6 +178,35 @@ pub fn MatchItemView(
                             onclick: move |_| on_confirm.call(()),
                             "{confirm_button_text}"
                         }
+                    }
+                }
+            }
+
+            // Track listing (shown when selected and prefetch returned tracks)
+            if is_selected {
+                if let Some(PrefetchState::Valid { tracks }) = &prefetch_state {
+                    if !tracks.is_empty() {
+                        TrackListingCompact { tracks: tracks.clone() }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Compact track listing for display in match items and confirmation views
+#[component]
+pub fn TrackListingCompact(tracks: Vec<CandidateTrack>) -> Element {
+    rsx! {
+        div { class: "mt-2 ml-7 border-t border-gray-700/50 pt-2",
+            div { class: "grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-0.5 text-xs text-gray-400",
+                for track in tracks.iter() {
+                    span { class: "text-gray-500 tabular-nums text-right", "{track.position}" }
+                    span { class: "truncate", "{track.title}" }
+                    if let Some(ref dur) = track.duration {
+                        span { class: "text-gray-500 tabular-nums", "{dur}" }
+                    } else {
+                        span {}
                     }
                 }
             }

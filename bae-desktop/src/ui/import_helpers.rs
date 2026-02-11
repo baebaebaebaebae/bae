@@ -15,7 +15,7 @@ use bae_core::musicbrainz::{
     lookup_by_discid, search_releases_with_params, ExternalUrls, MbRelease, ReleaseSearchParams,
 };
 use bae_ui::display_types::{
-    AudioContentInfo, CategorizedFileInfo, FolderMetadata as DisplayFolderMetadata,
+    AudioContentInfo, CandidateTrack, CategorizedFileInfo, FolderMetadata as DisplayFolderMetadata,
     MatchCandidate as DisplayMatchCandidate, MatchSourceType, SearchSource, SelectedCover,
 };
 use bae_ui::stores::import::CandidateEvent;
@@ -120,7 +120,75 @@ pub fn to_display_candidate(candidate: &MatchCandidate) -> DisplayMatchCandidate
         discogs_release_id,
         discogs_master_id,
         existing_album_id: None,
+        tracks: vec![],
     }
+}
+
+// ============================================================================
+// Track extraction helpers
+// ============================================================================
+
+/// Extract tracks from a Discogs release for UI display.
+///
+/// Filters out heading entries (those with empty position).
+pub fn extract_tracks_from_discogs(release: &DiscogsRelease) -> Vec<CandidateTrack> {
+    release
+        .tracklist
+        .iter()
+        .filter(|t| !t.position.is_empty())
+        .map(|t| CandidateTrack {
+            position: t.position.clone(),
+            title: t.title.clone(),
+            duration: t.duration.clone(),
+        })
+        .collect()
+}
+
+/// Extract tracks from a MusicBrainz release JSON response for UI display.
+///
+/// Iterates `media[].tracks[]`, extracting position, title, and length (ms -> mm:ss).
+pub fn extract_tracks_from_mb_json(json: &serde_json::Value) -> Vec<CandidateTrack> {
+    let Some(media) = json.get("media").and_then(|m| m.as_array()) else {
+        return vec![];
+    };
+
+    media
+        .iter()
+        .filter_map(|medium| medium.get("tracks").and_then(|t| t.as_array()))
+        .flatten()
+        .map(|track| {
+            let position = track
+                .get("position")
+                .and_then(|p| p.as_u64())
+                .map(|p| p.to_string())
+                .or_else(|| {
+                    track
+                        .get("number")
+                        .and_then(|n| n.as_str())
+                        .map(String::from)
+                })
+                .unwrap_or_default();
+
+            let title = track
+                .get("title")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let duration = track.get("length").and_then(|l| l.as_u64()).map(|ms| {
+                let total_secs = ms / 1000;
+                let mins = total_secs / 60;
+                let secs = total_secs % 60;
+                format!("{}:{:02}", mins, secs)
+            });
+
+            CandidateTrack {
+                position,
+                title,
+                duration,
+            }
+        })
+        .collect()
 }
 
 // ============================================================================
@@ -237,7 +305,15 @@ async fn handle_discid_lookup_result(
         core_candidates.iter().map(to_display_candidate).collect();
 
     if display_candidates.len() == 1 {
-        DiscIdLookupResult::SingleMatch(Box::new(display_candidates.into_iter().next().unwrap()))
+        let mut candidate = display_candidates.into_iter().next().unwrap();
+        // Single disc ID match — fetch full release for track listing.
+        // No track count validation needed: disc ID inherently guarantees a match.
+        if let Some(ref mb_id) = candidate.musicbrainz_release_id {
+            if let Ok((json, _)) = fetch_mb_release_for_validation(mb_id).await {
+                candidate.tracks = extract_tracks_from_mb_json(&json);
+            }
+        }
+        DiscIdLookupResult::SingleMatch(Box::new(candidate))
     } else {
         DiscIdLookupResult::MultipleMatches(display_candidates)
     }

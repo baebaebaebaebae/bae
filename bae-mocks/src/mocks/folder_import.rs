@@ -375,6 +375,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             discogs_release_id: None,
             discogs_master_id: None,
             existing_album_id: None,
+            tracks: vec![],
         },
         MatchCandidate {
             title: "Neon Frequencies (Deluxe)".to_string(),
@@ -393,6 +394,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             discogs_release_id: None,
             discogs_master_id: None,
             existing_album_id: None,
+            tracks: vec![],
         },
     ];
 
@@ -563,6 +565,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                         discogs_release_id: None,
                         discogs_master_id: None,
                         existing_album_id: None,
+                        tracks: vec![],
                     }),
                 selected_cover: selected_cover(),
                 selected_profile_id: selected_profile_id(),

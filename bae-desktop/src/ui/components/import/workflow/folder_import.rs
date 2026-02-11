@@ -3,14 +3,15 @@
 use crate::ui::app_service::use_app;
 use crate::ui::import_helpers::{
     build_caa_client, check_candidates_for_duplicates, check_cover_art, confirm_and_start_import,
-    count_local_audio_files, fetch_discogs_release_for_validation, fetch_mb_release_for_validation,
-    lookup_discid, search_by_barcode, search_by_catalog_number, search_general, DiscIdLookupResult,
+    count_local_audio_files, extract_tracks_from_discogs, extract_tracks_from_mb_json,
+    fetch_discogs_release_for_validation, fetch_mb_release_for_validation, lookup_discid,
+    search_by_barcode, search_by_catalog_number, search_general, DiscIdLookupResult,
 };
 use crate::ui::Route;
 use bae_core::discogs::DiscogsRelease;
 use bae_ui::components::import::FolderImportView;
 use bae_ui::display_types::{
-    MatchCandidate, MatchSourceType, SearchSource, SearchTab, SelectedCover,
+    CandidateTrack, MatchCandidate, MatchSourceType, SearchSource, SearchTab, SelectedCover,
 };
 use bae_ui::stores::import::ImportStateStoreExt;
 use bae_ui::stores::import::{CandidateEvent, PrefetchState};
@@ -89,7 +90,7 @@ pub fn FolderImport() -> Element {
         move |_: MatchCandidate| {
             let prefetch = app.state.import().read().get_exact_match_prefetch_state();
             match prefetch {
-                Some(PrefetchState::Valid) => {
+                Some(PrefetchState::Valid { .. }) => {
                     app.state
                         .import()
                         .write()
@@ -317,7 +318,7 @@ pub fn FolderImport() -> Element {
         move |_candidate: bae_ui::display_types::MatchCandidate| {
             let prefetch = app.state.import().read().get_current_prefetch_state();
             match prefetch {
-                Some(PrefetchState::Valid) => {
+                Some(PrefetchState::Valid { .. }) => {
                     app.state
                         .import()
                         .write()
@@ -694,14 +695,13 @@ async fn spawn_prefetch_for_search_result(
     let result = prefetch_and_validate(&candidate, local_file_count, &app.key_service).await;
 
     // Cache the Discogs release if we got one
-    if let PrefetchValidationResult::DiscogsValid(release) = &result {
+    if let PrefetchValidationResult::DiscogsValid(release, _) = &result {
         cached_discogs_release.set(Some(release.as_ref().clone()));
     }
 
     let prefetch_state = match result {
-        PrefetchValidationResult::Valid | PrefetchValidationResult::DiscogsValid(_) => {
-            PrefetchState::Valid
-        }
+        PrefetchValidationResult::Valid(tracks)
+        | PrefetchValidationResult::DiscogsValid(_, tracks) => PrefetchState::Valid { tracks },
         PrefetchValidationResult::TrackCountMismatch {
             release_tracks,
             local_files,
@@ -755,9 +755,8 @@ async fn spawn_prefetch_for_exact_match(app: &AppService, index: usize) {
     let result = prefetch_and_validate(&candidate, local_file_count, &app.key_service).await;
 
     let prefetch_state = match result {
-        PrefetchValidationResult::Valid | PrefetchValidationResult::DiscogsValid(_) => {
-            PrefetchState::Valid
-        }
+        PrefetchValidationResult::Valid(tracks)
+        | PrefetchValidationResult::DiscogsValid(_, tracks) => PrefetchState::Valid { tracks },
         PrefetchValidationResult::TrackCountMismatch {
             release_tracks,
             local_files,
@@ -778,8 +777,8 @@ async fn spawn_prefetch_for_exact_match(app: &AppService, index: usize) {
 }
 
 enum PrefetchValidationResult {
-    Valid,
-    DiscogsValid(Box<DiscogsRelease>),
+    Valid(Vec<CandidateTrack>),
+    DiscogsValid(Box<DiscogsRelease>, Vec<CandidateTrack>),
     TrackCountMismatch {
         release_tracks: usize,
         local_files: usize,
@@ -810,7 +809,8 @@ async fn prefetch_and_validate(
             {
                 Ok((release, track_count)) => {
                     if track_count == local_file_count {
-                        PrefetchValidationResult::DiscogsValid(Box::new(release))
+                        let tracks = extract_tracks_from_discogs(&release);
+                        PrefetchValidationResult::DiscogsValid(Box::new(release), tracks)
                     } else {
                         PrefetchValidationResult::TrackCountMismatch {
                             release_tracks: track_count,
@@ -829,9 +829,10 @@ async fn prefetch_and_validate(
             };
 
             match fetch_mb_release_for_validation(release_id).await {
-                Ok((_json, track_count)) => {
+                Ok((json, track_count)) => {
                     if track_count == local_file_count {
-                        PrefetchValidationResult::Valid
+                        let tracks = extract_tracks_from_mb_json(&json);
+                        PrefetchValidationResult::Valid(tracks)
                     } else {
                         PrefetchValidationResult::TrackCountMismatch {
                             release_tracks: track_count,
