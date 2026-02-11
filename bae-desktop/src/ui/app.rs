@@ -66,6 +66,7 @@ pub fn launch_app(context: super::app_context::AppContext) {
         torrent_manager: context.torrent_manager.clone(),
         key_service: context.key_service.clone(),
         image_server: context.image_server.clone(),
+        user_keypair: context.user_keypair.clone(),
     };
     #[cfg(not(feature = "torrent"))]
     let services = super::app_context::AppServices {
@@ -76,6 +77,7 @@ pub fn launch_app(context: super::app_context::AppContext) {
         cache: context.cache.clone(),
         key_service: context.key_service.clone(),
         image_server: context.image_server.clone(),
+        user_keypair: context.user_keypair.clone(),
     };
 
     LaunchBuilder::desktop()

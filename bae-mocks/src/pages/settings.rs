@@ -61,6 +61,8 @@ pub fn Settings() -> Element {
                         ],
                         syncing: false,
                         error: None,
+                        user_pubkey: Some("a1b2c3d4e5f67890abcdef1234567890a1b2c3d4e5f67890abcdef1234567890".to_string()),
+                        on_copy_pubkey: |_| {},
                     }
                 },
                 SettingsTab::Discogs => rsx! {

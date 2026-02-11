@@ -19,7 +19,7 @@ use bae_core::config;
 use bae_core::db::{DbStorageProfile, ImportStatus, StorageLocation};
 use bae_core::image_server::ImageServerHandle;
 use bae_core::import::{self, ImportProgress};
-use bae_core::keys::KeyService;
+use bae_core::keys::{KeyService, UserKeypair};
 use bae_core::library::{LibraryEvent, SharedLibraryManager};
 use bae_core::playback::{self, PlaybackProgress};
 #[cfg(feature = "torrent")]
@@ -29,7 +29,7 @@ use bae_ui::stores::{
     ActiveImport, ActiveImportsUiStateStoreExt, AlbumDetailStateStoreExt, AppState,
     AppStateStoreExt, ArtistDetailStateStoreExt, ConfigStateStoreExt, ImportOperationStatus,
     LibraryStateStoreExt, PlaybackStatus, PlaybackUiStateStoreExt, PrepareStep,
-    StorageProfilesStateStoreExt,
+    StorageProfilesStateStoreExt, SyncStateStoreExt,
 };
 use bae_ui::StorageProfile;
 use dioxus::prelude::*;
@@ -63,6 +63,8 @@ pub struct AppService {
     pub key_service: KeyService,
     /// Image server connection handle
     pub image_server: ImageServerHandle,
+    /// User's Ed25519 keypair for signing and key exchange
+    pub user_keypair: Option<UserKeypair>,
 }
 
 impl AppService {
@@ -80,6 +82,7 @@ impl AppService {
                 torrent_manager: services.torrent_manager.clone(),
                 key_service: services.key_service.clone(),
                 image_server: services.image_server.clone(),
+                user_keypair: services.user_keypair.clone(),
             }
         }
         #[cfg(not(feature = "torrent"))]
@@ -93,6 +96,7 @@ impl AppService {
                 cache: services.cache.clone(),
                 key_service: services.key_service.clone(),
                 image_server: services.image_server.clone(),
+                user_keypair: services.user_keypair.clone(),
             }
         }
     }
@@ -445,6 +449,13 @@ impl AppService {
 
     /// Load config into Store
     fn load_config(&self) {
+        // Populate user identity in sync store
+        let user_pubkey = self
+            .user_keypair
+            .as_ref()
+            .map(|kp| hex::encode(kp.public_key));
+        self.state.sync().user_pubkey().set(user_pubkey);
+
         let config = &self.config;
         self.state
             .config()

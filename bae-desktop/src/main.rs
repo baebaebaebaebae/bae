@@ -131,6 +131,21 @@ fn main() {
         }
     }
 
+    // Load or generate user Ed25519 keypair (global identity for sync signing and invitations)
+    let user_keypair = match key_service.get_or_create_user_keypair() {
+        Ok(kp) => {
+            info!(
+                "User keypair loaded (pubkey: {}...)",
+                &hex::encode(kp.public_key)[..8]
+            );
+            Some(kp)
+        }
+        Err(e) => {
+            error!("Failed to load/create user keypair: {e}");
+            None
+        }
+    };
+
     // If config says we have an encryption key but it's missing from the keyring,
     // show the unlock screen so the user can paste their recovery key.
     if config.encryption_key_stored {
@@ -273,6 +288,7 @@ fn main() {
         cache: cache_manager.clone(),
         key_service,
         image_server,
+        user_keypair,
     };
 
     // Initialize auto-updater (checks for updates on launch)

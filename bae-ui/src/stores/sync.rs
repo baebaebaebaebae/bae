@@ -22,4 +22,6 @@ pub struct SyncState {
     pub syncing: bool,
     /// Last sync error message, if any.
     pub error: Option<String>,
+    /// User's Ed25519 public key (hex-encoded). None if no keypair exists.
+    pub user_pubkey: Option<String>,
 }

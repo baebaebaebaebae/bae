@@ -17,6 +17,7 @@ pub enum KeyError {
 ///
 /// This is a global identity (not per-library) so attestations accumulate
 /// under one pubkey across all libraries.
+#[derive(Clone)]
 pub struct UserKeypair {
     pub signing_key: [u8; sodium_ffi::SIGN_SECRETKEYBYTES], // Ed25519 secret key (64 bytes)
     pub public_key: [u8; sodium_ffi::SIGN_PUBLICKEYBYTES],  // Ed25519 public key (32 bytes)

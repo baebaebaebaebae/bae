@@ -1,6 +1,7 @@
 //! Sync status section view
 
-use crate::components::{SettingsCard, SettingsSection};
+use crate::components::icons::{CheckIcon, CopyIcon};
+use crate::components::{ChromelessButton, SettingsCard, SettingsSection};
 use crate::stores::DeviceActivityInfo;
 use dioxus::prelude::*;
 
@@ -18,10 +19,48 @@ pub fn SyncSectionView(
     syncing: bool,
     /// Last sync error, if any.
     error: Option<String>,
+    /// User's Ed25519 public key (hex). None if no keypair exists.
+    user_pubkey: Option<String>,
+    /// Called when the user clicks the copy button on their public key.
+    on_copy_pubkey: EventHandler<()>,
 ) -> Element {
+    let mut copied = use_signal(|| false);
+
+    let handle_copy = move |_| {
+        on_copy_pubkey.call(());
+        copied.set(true);
+        spawn(async move {
+            sleep_ms(2000).await;
+            copied.set(false);
+        });
+    };
+
     rsx! {
         SettingsSection {
             h2 { class: "text-xl font-semibold text-white", "Sync" }
+
+            // Your identity
+            if let Some(ref pubkey) = user_pubkey {
+                SettingsCard {
+                    h3 { class: "text-lg font-medium text-white mb-4", "Your identity" }
+                    div { class: "flex items-center gap-3",
+                        span { class: "text-gray-400 font-mono text-sm truncate",
+                            {truncate_pubkey(pubkey)}
+                        }
+                        ChromelessButton {
+                            class: Some("text-gray-400 hover:text-white transition-colors".to_string()),
+                            title: Some("Copy public key to clipboard".to_string()),
+                            aria_label: Some("Copy public key to clipboard".to_string()),
+                            onclick: handle_copy,
+                            if *copied.read() {
+                                CheckIcon { class: "w-4 h-4 text-green-400" }
+                            } else {
+                                CopyIcon { class: "w-4 h-4" }
+                            }
+                        }
+                    }
+                }
+            }
 
             SettingsCard {
                 h3 { class: "text-lg font-medium text-white mb-4", "Status" }
@@ -76,6 +115,15 @@ pub fn SyncSectionView(
     }
 }
 
+/// Truncate a hex-encoded public key for display: first 8 and last 8 characters.
+fn truncate_pubkey(key: &str) -> String {
+    if key.len() > 20 {
+        format!("{}...{}", &key[..8], &key[key.len() - 8..])
+    } else {
+        key.to_string()
+    }
+}
+
 /// Format a device ID for display: show first 8 characters.
 fn short_device_id(id: &str) -> String {
     let clean = id.replace('-', "");
@@ -125,4 +173,14 @@ fn format_relative_time(rfc3339: &str) -> String {
     } else {
         format!("{days} days ago")
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn sleep_ms(ms: u64) {
+    gloo_timers::future::TimeoutFuture::new(ms as u32).await;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn sleep_ms(ms: u64) {
+    tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
 }
