@@ -1,16 +1,27 @@
-//! Sync status section view
+//! Sync status and configuration section view
 
 use crate::components::icons::{CheckIcon, CopyIcon};
-use crate::components::{ChromelessButton, SettingsCard, SettingsSection};
+use crate::components::{
+    Button, ButtonSize, ButtonVariant, ChromelessButton, SettingsCard, SettingsSection, TextInput,
+    TextInputSize, TextInputType,
+};
 use crate::stores::DeviceActivityInfo;
 use dioxus::prelude::*;
 
-/// Sync status section view (pure, props-based).
-///
-/// Displays the current sync state: when we last synced, whether a sync
-/// is in progress, and what other devices have been doing.
+/// Data bundle for sync bucket configuration fields (avoids 5 separate EventHandler props for save).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SyncBucketConfig {
+    pub bucket: String,
+    pub region: String,
+    pub endpoint: String,
+    pub access_key: String,
+    pub secret_key: String,
+}
+
+/// Sync status and configuration section view (pure, props-based).
 #[component]
 pub fn SyncSectionView(
+    // --- Status props ---
     /// When this device last synced (RFC 3339). None if never synced.
     last_sync_time: Option<String>,
     /// Other devices' sync activity.
@@ -23,6 +34,53 @@ pub fn SyncSectionView(
     user_pubkey: Option<String>,
     /// Called when the user clicks the copy button on their public key.
     on_copy_pubkey: EventHandler<()>,
+
+    // --- Config display props ---
+    /// Current configured bucket name (from store). None if not configured.
+    sync_bucket: Option<String>,
+    /// Current configured region (from store).
+    sync_region: Option<String>,
+    /// Current configured endpoint (from store).
+    sync_endpoint: Option<String>,
+    /// Whether sync is fully configured (bucket + region + credentials).
+    sync_configured: bool,
+
+    // --- Edit state props ---
+    /// Whether currently editing the sync config.
+    is_editing: bool,
+    /// Edit field: bucket name.
+    edit_bucket: String,
+    /// Edit field: region.
+    edit_region: String,
+    /// Edit field: endpoint.
+    edit_endpoint: String,
+    /// Edit field: access key.
+    edit_access_key: String,
+    /// Edit field: secret key.
+    edit_secret_key: String,
+    /// Whether a save is in progress.
+    is_saving: bool,
+    /// Error from a save attempt.
+    save_error: Option<String>,
+
+    // --- Test connection state ---
+    /// Whether a connection test is in progress.
+    is_testing: bool,
+    /// Success message from a connection test.
+    test_success: Option<String>,
+    /// Error message from a connection test.
+    test_error: Option<String>,
+
+    // --- Callbacks ---
+    on_edit_start: EventHandler<()>,
+    on_cancel_edit: EventHandler<()>,
+    on_save_config: EventHandler<SyncBucketConfig>,
+    on_test_connection: EventHandler<()>,
+    on_bucket_change: EventHandler<String>,
+    on_region_change: EventHandler<String>,
+    on_endpoint_change: EventHandler<String>,
+    on_access_key_change: EventHandler<String>,
+    on_secret_key_change: EventHandler<String>,
 ) -> Element {
     let mut copied = use_signal(|| false);
 
@@ -34,6 +92,11 @@ pub fn SyncSectionView(
             copied.set(false);
         });
     };
+
+    let has_required_fields = !edit_bucket.is_empty()
+        && !edit_region.is_empty()
+        && !edit_access_key.is_empty()
+        && !edit_secret_key.is_empty();
 
     rsx! {
         SettingsSection {
@@ -62,6 +125,7 @@ pub fn SyncSectionView(
                 }
             }
 
+            // Sync status card
             SettingsCard {
                 h3 { class: "text-lg font-medium text-white mb-4", "Status" }
                 div { class: "space-y-3",
@@ -76,6 +140,19 @@ pub fn SyncSectionView(
                                 {format_relative_time(ts).as_str()}
                             } else {
                                 "Never"
+                            }
+                        }
+                    }
+
+                    div { class: "flex justify-between items-center",
+                        span { class: "text-gray-400", "Sync bucket" }
+                        if sync_configured {
+                            span { class: "px-3 py-1 bg-green-900 text-green-300 rounded-full text-sm",
+                                "Configured"
+                            }
+                        } else {
+                            span { class: "px-3 py-1 bg-gray-700 text-gray-400 rounded-full text-sm",
+                                "Not configured"
                             }
                         }
                     }
@@ -108,6 +185,193 @@ pub fn SyncSectionView(
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            // Sync bucket configuration card
+            SettingsCard {
+                div { class: "flex items-center justify-between mb-4",
+                    div {
+                        h3 { class: "text-lg font-medium text-white", "Sync Bucket" }
+                        p { class: "text-sm text-gray-400 mt-1",
+                            "S3-compatible bucket for syncing your library across devices"
+                        }
+                    }
+                    if !is_editing {
+                        Button {
+                            variant: ButtonVariant::Secondary,
+                            size: ButtonSize::Small,
+                            onclick: move |_| on_edit_start.call(()),
+                            if sync_configured {
+                                "Edit"
+                            } else {
+                                "Configure"
+                            }
+                        }
+                    }
+                }
+
+                if is_editing {
+                    div { class: "space-y-4",
+                        div {
+                            label { class: "block text-sm font-medium text-gray-400 mb-2",
+                                "Bucket"
+                            }
+                            TextInput {
+                                value: edit_bucket.to_string(),
+                                on_input: move |v| on_bucket_change.call(v),
+                                size: TextInputSize::Medium,
+                                input_type: TextInputType::Text,
+                                placeholder: "my-sync-bucket",
+                            }
+                        }
+
+                        div {
+                            label { class: "block text-sm font-medium text-gray-400 mb-2",
+                                "Region"
+                            }
+                            TextInput {
+                                value: edit_region.to_string(),
+                                on_input: move |v| on_region_change.call(v),
+                                size: TextInputSize::Medium,
+                                input_type: TextInputType::Text,
+                                placeholder: "us-east-1",
+                            }
+                        }
+
+                        div {
+                            label { class: "block text-sm font-medium text-gray-400 mb-2",
+                                "Endpoint (optional)"
+                            }
+                            TextInput {
+                                value: edit_endpoint.to_string(),
+                                on_input: move |v| on_endpoint_change.call(v),
+                                size: TextInputSize::Medium,
+                                input_type: TextInputType::Text,
+                                placeholder: "https://s3.example.com",
+                            }
+                        }
+
+                        div {
+                            label { class: "block text-sm font-medium text-gray-400 mb-2",
+                                "Access Key"
+                            }
+                            TextInput {
+                                value: edit_access_key.to_string(),
+                                on_input: move |v| on_access_key_change.call(v),
+                                size: TextInputSize::Medium,
+                                input_type: TextInputType::Text,
+                                placeholder: "AKIA...",
+                            }
+                        }
+
+                        div {
+                            label { class: "block text-sm font-medium text-gray-400 mb-2",
+                                "Secret Key"
+                            }
+                            TextInput {
+                                value: edit_secret_key.to_string(),
+                                on_input: move |v| on_secret_key_change.call(v),
+                                size: TextInputSize::Medium,
+                                input_type: TextInputType::Password,
+                                placeholder: "Secret key",
+                            }
+                        }
+
+                        if let Some(ref err) = save_error {
+                            div { class: "p-3 bg-red-900/30 border border-red-700 rounded-lg text-sm text-red-300",
+                                "{err}"
+                            }
+                        }
+
+                        // Test connection result
+                        if let Some(ref msg) = test_success {
+                            div { class: "p-3 bg-green-900/30 border border-green-700 rounded-lg text-sm text-green-300",
+                                "{msg}"
+                            }
+                        }
+
+                        if let Some(ref err) = test_error {
+                            div { class: "p-3 bg-red-900/30 border border-red-700 rounded-lg text-sm text-red-300",
+                                "{err}"
+                            }
+                        }
+
+                        div { class: "flex gap-3",
+                            Button {
+                                variant: ButtonVariant::Primary,
+                                size: ButtonSize::Medium,
+                                disabled: !has_required_fields || is_saving,
+                                loading: is_saving,
+                                onclick: {
+                                    let config = SyncBucketConfig {
+                                        bucket: edit_bucket.to_string(),
+                                        region: edit_region.to_string(),
+                                        endpoint: edit_endpoint.to_string(),
+                                        access_key: edit_access_key.to_string(),
+                                        secret_key: edit_secret_key.to_string(),
+                                    };
+                                    move |_| on_save_config.call(config.clone())
+                                },
+                                if is_saving {
+                                    "Saving..."
+                                } else {
+                                    "Save"
+                                }
+                            }
+                            Button {
+                                variant: ButtonVariant::Secondary,
+                                size: ButtonSize::Medium,
+                                disabled: !has_required_fields || is_testing,
+                                loading: is_testing,
+                                onclick: move |_| on_test_connection.call(()),
+                                if is_testing {
+                                    "Testing..."
+                                } else {
+                                    "Test Connection"
+                                }
+                            }
+                            Button {
+                                variant: ButtonVariant::Secondary,
+                                size: ButtonSize::Medium,
+                                onclick: move |_| on_cancel_edit.call(()),
+                                "Cancel"
+                            }
+                        }
+                    }
+                } else if sync_configured {
+                    // Show current config summary
+                    div { class: "space-y-2 text-sm",
+                        if let Some(ref bucket) = sync_bucket {
+                            div { class: "flex justify-between",
+                                span { class: "text-gray-400", "Bucket" }
+                                span { class: "text-gray-200 font-mono", "{bucket}" }
+                            }
+                        }
+                        if let Some(ref region) = sync_region {
+                            div { class: "flex justify-between",
+                                span { class: "text-gray-400", "Region" }
+                                span { class: "text-gray-200 font-mono", "{region}" }
+                            }
+                        }
+                        if let Some(ref endpoint) = sync_endpoint {
+                            div { class: "flex justify-between",
+                                span { class: "text-gray-400", "Endpoint" }
+                                span { class: "text-gray-200 font-mono", "{endpoint}" }
+                            }
+                        }
+                    }
+                } else {
+                    p { class: "text-sm text-gray-500",
+                        "No sync bucket configured. Click Configure to set up syncing."
+                    }
+                }
+
+                div { class: "mt-6 p-4 bg-gray-700/50 rounded-lg",
+                    p { class: "text-sm text-gray-400",
+                        "The sync bucket must be created externally (e.g. in your S3 provider's console). "
+                        "bae uses this bucket to sync library metadata across your devices."
                     }
                 }
             }

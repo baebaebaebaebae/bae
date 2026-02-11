@@ -505,6 +505,24 @@ impl AppService {
             .config()
             .torrent_max_uploads_per_torrent()
             .set(config.torrent_max_uploads_per_torrent);
+
+        // Sync config
+        self.state
+            .sync()
+            .sync_bucket()
+            .set(config.sync_s3_bucket.clone());
+        self.state
+            .sync()
+            .sync_region()
+            .set(config.sync_s3_region.clone());
+        self.state
+            .sync()
+            .sync_endpoint()
+            .set(config.sync_s3_endpoint.clone());
+        self.state
+            .sync()
+            .sync_configured()
+            .set(config.sync_enabled(&self.key_service));
     }
 
     /// Load active imports from database
@@ -963,6 +981,77 @@ impl AppService {
             .config()
             .torrent_max_uploads_per_torrent()
             .set(new_config.torrent_max_uploads_per_torrent);
+
+        // Sync config might have changed via save_config too
+        self.state
+            .sync()
+            .sync_bucket()
+            .set(new_config.sync_s3_bucket.clone());
+        self.state
+            .sync()
+            .sync_region()
+            .set(new_config.sync_s3_region.clone());
+        self.state
+            .sync()
+            .sync_endpoint()
+            .set(new_config.sync_s3_endpoint.clone());
+        self.state
+            .sync()
+            .sync_configured()
+            .set(new_config.sync_enabled(&self.key_service));
+    }
+
+    // =========================================================================
+    // Sync Config Methods
+    // =========================================================================
+
+    /// Save sync bucket configuration to config.yaml and credentials to keyring.
+    /// Updates the store with the new values.
+    pub fn save_sync_config(&self, config_data: bae_ui::SyncBucketConfig) -> Result<(), String> {
+        let state = self.state;
+        let key_service = self.key_service.clone();
+        let mut new_config = self.config.clone();
+
+        new_config.sync_s3_bucket = Some(config_data.bucket.clone());
+        new_config.sync_s3_region = Some(config_data.region.clone());
+        new_config.sync_s3_endpoint = if config_data.endpoint.is_empty() {
+            None
+        } else {
+            Some(config_data.endpoint.clone())
+        };
+
+        // Save to disk
+        new_config
+            .save()
+            .map_err(|e| format!("Failed to save config: {}", e))?;
+
+        // Save credentials to keyring
+        key_service
+            .set_sync_access_key(&config_data.access_key)
+            .map_err(|e| format!("Failed to save access key: {}", e))?;
+        key_service
+            .set_sync_secret_key(&config_data.secret_key)
+            .map_err(|e| format!("Failed to save secret key: {}", e))?;
+
+        // Update store
+        state
+            .sync()
+            .sync_bucket()
+            .set(new_config.sync_s3_bucket.clone());
+        state
+            .sync()
+            .sync_region()
+            .set(new_config.sync_s3_region.clone());
+        state
+            .sync()
+            .sync_endpoint()
+            .set(new_config.sync_s3_endpoint.clone());
+        state
+            .sync()
+            .sync_configured()
+            .set(new_config.sync_enabled(&key_service));
+
+        Ok(())
     }
 
     // =========================================================================

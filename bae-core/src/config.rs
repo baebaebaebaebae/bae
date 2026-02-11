@@ -101,6 +101,17 @@ pub struct ConfigYaml {
     pub subsonic_enabled: bool,
     /// Subsonic server port
     pub subsonic_port: Option<u16>,
+
+    // Sync bucket S3 configuration (credentials stored in keyring)
+    /// S3 bucket name for changeset sync
+    #[serde(default)]
+    pub sync_s3_bucket: Option<String>,
+    /// S3 region for sync bucket
+    #[serde(default)]
+    pub sync_s3_region: Option<String>,
+    /// S3 endpoint for sync bucket (for S3-compatible services)
+    #[serde(default)]
+    pub sync_s3_endpoint: Option<String>,
 }
 
 /// Metadata about a discovered library (for the library switcher UI)
@@ -146,6 +157,12 @@ pub struct Config {
     pub network_participation: ParticipationMode,
     pub subsonic_enabled: bool,
     pub subsonic_port: u16,
+    /// S3 bucket name for changeset sync
+    pub sync_s3_bucket: Option<String>,
+    /// S3 region for sync bucket
+    pub sync_s3_region: Option<String>,
+    /// S3 endpoint for sync bucket (for S3-compatible services)
+    pub sync_s3_endpoint: Option<String>,
 }
 
 impl Config {
@@ -209,6 +226,15 @@ impl Config {
         let torrent_bind_interface = std::env::var("BAE_TORRENT_BIND_INTERFACE")
             .ok()
             .filter(|s| !s.is_empty());
+        let sync_s3_bucket = std::env::var("BAE_SYNC_S3_BUCKET")
+            .ok()
+            .filter(|s| !s.is_empty());
+        let sync_s3_region = std::env::var("BAE_SYNC_S3_REGION")
+            .ok()
+            .filter(|s| !s.is_empty());
+        let sync_s3_endpoint = std::env::var("BAE_SYNC_S3_ENDPOINT")
+            .ok()
+            .filter(|s| !s.is_empty());
 
         Self {
             library_id,
@@ -231,6 +257,9 @@ impl Config {
             network_participation: ParticipationMode::Off,
             subsonic_enabled: true,
             subsonic_port: 4533,
+            sync_s3_bucket,
+            sync_s3_region,
+            sync_s3_endpoint,
         }
     }
 
@@ -319,11 +348,22 @@ impl Config {
             network_participation: yaml_config.network_participation,
             subsonic_enabled: yaml_config.subsonic_enabled,
             subsonic_port: yaml_config.subsonic_port.unwrap_or(4533),
+            sync_s3_bucket: yaml_config.sync_s3_bucket,
+            sync_s3_region: yaml_config.sync_s3_region,
+            sync_s3_endpoint: yaml_config.sync_s3_endpoint,
         }
     }
 
     pub fn is_dev_mode() -> bool {
         std::env::var("BAE_DEV_MODE").is_ok() || std::path::Path::new(".env").exists()
+    }
+
+    /// Whether sync is configured: bucket, region, and keyring credentials all present.
+    pub fn sync_enabled(&self, key_service: &crate::keys::KeyService) -> bool {
+        self.sync_s3_bucket.is_some()
+            && self.sync_s3_region.is_some()
+            && key_service.get_sync_access_key().is_some()
+            && key_service.get_sync_secret_key().is_some()
     }
 
     pub fn save(&self) -> Result<(), ConfigError> {
@@ -349,6 +389,15 @@ impl Config {
         new_values.insert("BAE_DEVICE_ID", self.device_id.clone());
         if let Some(iface) = &self.torrent_bind_interface {
             new_values.insert("BAE_TORRENT_BIND_INTERFACE", iface.clone());
+        }
+        if let Some(bucket) = &self.sync_s3_bucket {
+            new_values.insert("BAE_SYNC_S3_BUCKET", bucket.clone());
+        }
+        if let Some(region) = &self.sync_s3_region {
+            new_values.insert("BAE_SYNC_S3_REGION", region.clone());
+        }
+        if let Some(endpoint) = &self.sync_s3_endpoint {
+            new_values.insert("BAE_SYNC_S3_ENDPOINT", endpoint.clone());
         }
 
         let mut found = std::collections::HashSet::new();
@@ -405,6 +454,9 @@ impl Config {
             network_participation: self.network_participation,
             subsonic_enabled: self.subsonic_enabled,
             subsonic_port: Some(self.subsonic_port),
+            sync_s3_bucket: self.sync_s3_bucket.clone(),
+            sync_s3_region: self.sync_s3_region.clone(),
+            sync_s3_endpoint: self.sync_s3_endpoint.clone(),
         };
         std::fs::write(
             self.library_dir.config_path(),
@@ -448,6 +500,9 @@ impl Config {
             network_participation: ParticipationMode::Off,
             subsonic_enabled: true,
             subsonic_port: 4533,
+            sync_s3_bucket: None,
+            sync_s3_region: None,
+            sync_s3_endpoint: None,
         };
 
         match key_service.get_or_create_encryption_key() {
@@ -702,6 +757,9 @@ mod tests {
             network_participation: ParticipationMode::Off,
             subsonic_enabled: true,
             subsonic_port: 4533,
+            sync_s3_bucket: None,
+            sync_s3_region: None,
+            sync_s3_endpoint: None,
         }
     }
 

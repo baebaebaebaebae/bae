@@ -24,4 +24,14 @@ pub struct SyncState {
     pub error: Option<String>,
     /// User's Ed25519 public key (hex-encoded). None if no keypair exists.
     pub user_pubkey: Option<String>,
+
+    // Sync bucket configuration (mirrors Config, for UI display)
+    /// S3 bucket name for sync.
+    pub sync_bucket: Option<String>,
+    /// S3 region for sync bucket.
+    pub sync_region: Option<String>,
+    /// S3 endpoint for sync bucket.
+    pub sync_endpoint: Option<String>,
+    /// Whether sync is fully configured (bucket + region + credentials present).
+    pub sync_configured: bool,
 }

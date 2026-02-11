@@ -384,6 +384,9 @@ async fn do_restore(
         network_participation: bae_core::sync::participation::ParticipationMode::Off,
         subsonic_enabled: false,
         subsonic_port: 4533,
+        sync_s3_bucket: None,
+        sync_s3_region: None,
+        sync_s3_endpoint: None,
     };
     config.save_to_config_yaml()?;
     bae_core::config::Config::add_known_library(&library_dir)?;
