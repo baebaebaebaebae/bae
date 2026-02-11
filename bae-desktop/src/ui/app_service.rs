@@ -446,6 +446,7 @@ impl AppService {
         let library_manager = self.library_manager.clone();
         let imgs = self.image_server.clone();
         let library_dir = self.config.library_dir.clone();
+        let key_service = self.key_service.clone();
 
         // Spawn a debounced AlbumsChanged forwarder that sends on the trigger channel.
         let mut library_events_rx = library_manager.get().subscribe_events();
@@ -481,6 +482,7 @@ impl AppService {
                 &library_manager,
                 &imgs,
                 &library_dir,
+                &key_service,
                 &mut trigger_rx,
             )
             .await;
@@ -1069,6 +1071,12 @@ impl AppService {
     // =========================================================================
     // Sync Config Methods
     // =========================================================================
+
+    pub fn trigger_sync(&self) {
+        if let Some(ref sh) = self.sync_handle {
+            let _ = sh.sync_trigger.try_send(());
+        }
+    }
 
     /// Save sync bucket configuration to config.yaml and credentials to keyring.
     /// Updates the store with the new values.
@@ -2050,6 +2058,7 @@ async fn run_sync_loop(
     library_manager: &SharedLibraryManager,
     imgs: &ImageServerHandle,
     library_dir: &LibraryDir,
+    key_service: &KeyService,
     trigger_rx: &mut tokio::sync::mpsc::Receiver<()>,
 ) {
     let db = library_manager.get().database();
@@ -2138,9 +2147,31 @@ async fn run_sync_loop(
                     let _ = db.set_sync_state("snapshot_seq", &ss.to_string()).await;
                 }
 
-                // If remote changes were applied, reload the library UI
+                // If remote changes were applied, reload the UI and notify subscribers
                 if sync_outcome.changesets_applied > 0 {
                     load_library(state, library_manager, imgs).await;
+
+                    // Refresh album detail if currently viewing one
+                    let album_id = state
+                        .album_detail()
+                        .album()
+                        .read()
+                        .as_ref()
+                        .map(|a| a.id.clone());
+                    let release_id = state.album_detail().selected_release_id().read().clone();
+                    if let Some(aid) = album_id {
+                        load_album_detail(
+                            state,
+                            library_manager,
+                            &aid,
+                            release_id.as_deref(),
+                            imgs,
+                            key_service,
+                        )
+                        .await;
+                    }
+
+                    library_manager.get().notify_albums_changed();
                 }
 
                 // Check snapshot policy
