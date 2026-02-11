@@ -967,6 +967,45 @@ impl AppService {
         });
     }
 
+    /// Create a share grant for a release and display the result in the store.
+    ///
+    /// The grant is a self-contained JSON token the user copies and sends
+    /// to the recipient out-of-band.
+    pub fn create_share_grant(&self, release_id: &str, recipient_pubkey_hex: &str) {
+        let state = self.state;
+        let library_manager = self.library_manager.clone();
+        let key_service = self.key_service.clone();
+        let config = self.config.clone();
+        let user_keypair = self.user_keypair.clone();
+        let release_id = release_id.to_string();
+        let recipient_pubkey_hex = recipient_pubkey_hex.to_string();
+
+        // Clear previous results
+        state.album_detail().share_grant_json().set(None);
+        state.album_detail().share_error().set(None);
+
+        spawn(async move {
+            let result = create_share_grant_async(
+                &library_manager,
+                &key_service,
+                &config,
+                user_keypair.as_ref(),
+                &release_id,
+                &recipient_pubkey_hex,
+            )
+            .await;
+
+            match result {
+                Ok(json) => {
+                    state.album_detail().share_grant_json().set(Some(json));
+                }
+                Err(e) => {
+                    state.album_detail().share_error().set(Some(e));
+                }
+            }
+        });
+    }
+
     // =========================================================================
     // Artist Detail Methods
     // =========================================================================
@@ -1941,6 +1980,8 @@ async fn load_album_detail(
     state.album_detail().transfer_error().set(None);
     state.album_detail().remote_covers().set(vec![]);
     state.album_detail().loading_remote_covers().set(false);
+    state.album_detail().share_grant_json().set(None);
+    state.album_detail().share_error().set(None);
 
     state.album_detail().loading().set(false);
 }
@@ -2868,4 +2909,68 @@ async fn load_membership_from_bucket(
         .collect();
 
     Ok(members)
+}
+
+/// Create a share grant JSON token for a release.
+async fn create_share_grant_async(
+    library_manager: &SharedLibraryManager,
+    key_service: &KeyService,
+    config: &config::Config,
+    user_keypair: Option<&UserKeypair>,
+    release_id: &str,
+    recipient_pubkey_hex: &str,
+) -> Result<String, String> {
+    let keypair = user_keypair
+        .ok_or("No user keypair configured. Set up your identity in Settings first.")?;
+
+    let encryption_service = library_manager
+        .get()
+        .encryption_service()
+        .cloned()
+        .ok_or("Encryption is not configured.")?;
+
+    // Look up the release's storage profile.
+    let profile = library_manager
+        .get()
+        .database()
+        .get_storage_profile_for_release(release_id)
+        .await
+        .map_err(|e| format!("Failed to look up storage profile: {e}"))?
+        .ok_or("Release is not on a managed storage profile.")?;
+
+    // Must be cloud.
+    if profile.location != StorageLocation::Cloud {
+        return Err("Release must be on a cloud storage profile to share.".to_string());
+    }
+
+    let bucket = profile
+        .cloud_bucket
+        .as_deref()
+        .ok_or("Storage profile has no bucket configured.")?;
+    let region = profile
+        .cloud_region
+        .as_deref()
+        .ok_or("Storage profile has no region configured.")?;
+    let endpoint = profile.cloud_endpoint.as_deref();
+
+    // Read S3 credentials from keyring.
+    let access_key = key_service.get_profile_access_key(&profile.id);
+    let secret_key = key_service.get_profile_secret_key(&profile.id);
+
+    let grant = bae_core::sync::share_grant::create_share_grant(
+        keypair,
+        recipient_pubkey_hex,
+        &encryption_service,
+        &config.library_id,
+        release_id,
+        bucket,
+        region,
+        endpoint,
+        access_key.as_deref(),
+        secret_key.as_deref(),
+        None, // no expiry for v1
+    )
+    .map_err(|e| format!("{e}"))?;
+
+    serde_json::to_string_pretty(&grant).map_err(|e| format!("Failed to serialize grant: {e}"))
 }

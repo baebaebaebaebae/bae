@@ -22,8 +22,11 @@ pub fn ReleaseTabsSection(
     export_error: Signal<Option<String>>,
     on_view_files: EventHandler<String>,
     on_view_storage: EventHandler<String>,
+    on_share: EventHandler<String>,
     on_delete_release: EventHandler<String>,
     on_export: EventHandler<String>,
+    /// Whether the current release is on cloud storage (share requires cloud)
+    is_on_cloud: bool,
     // Optional: torrent info per release (keyed by release_id)
     #[props(default)] torrent_info: std::collections::HashMap<String, ReleaseTorrentInfo>,
     // Optional: torrent action callbacks
@@ -61,6 +64,11 @@ pub fn ReleaseTabsSection(
                                     let release_id = release_id.clone();
                                     move |_| on_view_storage.call(release_id.clone())
                                 },
+                                on_share: {
+                                    let release_id = release_id.clone();
+                                    move |_| on_share.call(release_id.clone())
+                                },
+                                is_on_cloud,
                                 on_export: {
                                     let release_id = release_id.clone();
                                     move |_| on_export.call(release_id.clone())
@@ -100,6 +108,8 @@ fn ReleaseTab(
     torrent: ReleaseTorrentInfo,
     on_view_files: EventHandler<()>,
     on_view_storage: EventHandler<()>,
+    on_share: EventHandler<()>,
+    is_on_cloud: bool,
     on_export: EventHandler<()>,
     on_delete: EventHandler<()>,
     #[props(default)] on_start_seeding: Option<EventHandler<()>>,
@@ -187,6 +197,16 @@ fn ReleaseTab(
                         on_view_storage.call(());
                     },
                     "Storage"
+                }
+                if is_on_cloud {
+                    MenuItem {
+                        disabled: is_deleting() || is_exporting(),
+                        onclick: move |_| {
+                            show_release_dropdown.set(None);
+                            on_share.call(());
+                        },
+                        "Share"
+                    }
                 }
                 if torrent.has_torrent {
                     if torrent.is_seeding {

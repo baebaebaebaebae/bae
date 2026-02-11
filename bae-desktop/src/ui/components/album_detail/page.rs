@@ -272,6 +272,14 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
         }
     });
 
+    // Share grant callback
+    let on_create_share_grant = EventHandler::new({
+        let app = app.clone();
+        move |(release_id, recipient_pubkey): (String, String)| {
+            app.create_share_grant(&release_id, &recipient_pubkey);
+        }
+    });
+
     // Available storage profiles for transfer
     let available_profiles = app.state.storage_profiles().profiles().read().clone();
 
@@ -319,6 +327,7 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
                 on_eject,
                 on_fetch_remote_covers,
                 on_select_cover,
+                on_create_share_grant,
                 available_profiles,
             }
         } else {

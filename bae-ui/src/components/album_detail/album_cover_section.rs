@@ -20,8 +20,11 @@ pub fn AlbumCoverSection(
     on_delete_album: EventHandler<String>,
     on_view_release_info: EventHandler<String>,
     on_view_storage: EventHandler<String>,
+    on_share: EventHandler<String>,
     on_open_gallery: EventHandler<String>,
     on_change_cover: EventHandler<String>,
+    /// Whether the current release is on cloud storage (share requires cloud)
+    is_on_cloud: bool,
 ) -> Element {
     let mut show_dropdown = use_signal(|| false);
     let is_open: ReadSignal<bool> = show_dropdown.into();
@@ -112,6 +115,19 @@ pub fn AlbumCoverSection(
                                 }
                             },
                             "Storage"
+                        }
+                        if is_on_cloud {
+                            MenuItem {
+                                disabled: is_deleting || is_exporting,
+                                onclick: {
+                                    let release_id = release_id.clone();
+                                    move |_| {
+                                        show_dropdown.set(false);
+                                        on_share.call(release_id.clone());
+                                    }
+                                },
+                                "Share"
+                            }
                         }
                         MenuItem {
                             disabled: is_deleting || is_exporting,
