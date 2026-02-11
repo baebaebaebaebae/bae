@@ -10,6 +10,7 @@ pub mod forward_lookup;
 pub mod hlc;
 pub mod invite;
 pub mod membership;
+pub mod participation;
 pub mod pull;
 #[cfg(test)]
 mod pull_tests;

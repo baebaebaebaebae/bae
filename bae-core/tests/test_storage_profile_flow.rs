@@ -350,6 +350,7 @@ fn create_test_release(album_id: &str) -> DbRelease {
         country: None,
         barcode: None,
         import_status: ImportStatus::Queued,
+        private: false,
         created_at: now,
         updated_at: now,
     }

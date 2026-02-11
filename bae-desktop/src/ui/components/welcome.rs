@@ -381,6 +381,7 @@ async fn do_restore(
         torrent_max_connections_per_torrent: None,
         torrent_max_uploads: None,
         torrent_max_uploads_per_torrent: None,
+        network_participation: bae_core::sync::participation::ParticipationMode::Off,
         subsonic_enabled: false,
         subsonic_port: 4533,
     };
