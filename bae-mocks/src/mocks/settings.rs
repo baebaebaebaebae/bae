@@ -1,7 +1,7 @@
 //! Settings mock component
 
 use super::framework::{ControlRegistryBuilder, MockPage, MockPanel};
-use bae_ui::stores::DeviceActivityInfo;
+use bae_ui::stores::{DeviceActivityInfo, Member, MemberRole};
 use bae_ui::{
     AboutSectionView, BitTorrentSectionView, BitTorrentSettings, DiscogsSectionView, LibraryInfo,
     LibrarySectionView, SettingsTab, SettingsView, StorageLocation, StorageProfile,
@@ -96,6 +96,9 @@ pub fn SettingsMock(initial_state: Option<String>) -> Element {
                             error: None,
                             user_pubkey: Some("a1b2c3d4e5f67890abcdef1234567890a1b2c3d4e5f67890abcdef1234567890".to_string()),
                             on_copy_pubkey: |_| {},
+                            members: mock_members(),
+                            is_owner: true,
+                            on_remove_member: |_| {},
                             on_sync_now: |_| {},
                             sync_bucket: Some("my-sync-bucket".to_string()),
                             sync_region: Some("us-east-1".to_string()),
@@ -218,6 +221,23 @@ fn mock_libraries() -> Vec<LibraryInfo> {
             name: Some("Jazz Collection".to_string()),
             path: "/Users/demo/.bae/libraries/def-456".to_string(),
             is_active: false,
+        },
+    ]
+}
+
+fn mock_members() -> Vec<Member> {
+    vec![
+        Member {
+            pubkey: "a1b2c3d4e5f67890abcdef1234567890a1b2c3d4e5f67890abcdef1234567890".to_string(),
+            display_name: "a1b2...7890".to_string(),
+            role: MemberRole::Owner,
+            is_self: true,
+        },
+        Member {
+            pubkey: "ff00112233445566778899aabbccddeeff00112233445566778899aabbccddee".to_string(),
+            display_name: "ff00...ddee".to_string(),
+            role: MemberRole::Member,
+            is_self: false,
         },
     ]
 }

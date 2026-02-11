@@ -28,8 +28,8 @@ use bae_ui::display_types::{QueueItem, TrackImportState};
 use bae_ui::stores::{
     ActiveImport, ActiveImportsUiStateStoreExt, AlbumDetailStateStoreExt, AppState,
     AppStateStoreExt, ArtistDetailStateStoreExt, ConfigStateStoreExt, DeviceActivityInfo,
-    ImportOperationStatus, LibraryStateStoreExt, PlaybackStatus, PlaybackUiStateStoreExt,
-    PrepareStep, StorageProfilesStateStoreExt, SyncStateStoreExt,
+    ImportOperationStatus, LibraryStateStoreExt, Member, MemberRole, PlaybackStatus,
+    PlaybackUiStateStoreExt, PrepareStep, StorageProfilesStateStoreExt, SyncStateStoreExt,
 };
 use bae_ui::StorageProfile;
 use dioxus::prelude::*;
@@ -1078,6 +1078,33 @@ impl AppService {
         }
     }
 
+    /// Download membership entries from the sync bucket, build the membership
+    /// chain, and update the store with the current members list.
+    pub fn load_membership(&self) {
+        let Some(sync_handle) = self.sync_handle.clone() else {
+            return;
+        };
+
+        let user_pubkey = self
+            .user_keypair
+            .as_ref()
+            .map(|kp| hex::encode(kp.public_key));
+        let state = self.state;
+
+        spawn(async move {
+            let bucket: &dyn bae_core::sync::bucket::SyncBucketClient = &*sync_handle.bucket_client;
+
+            match load_membership_from_bucket(bucket, user_pubkey.as_deref()).await {
+                Ok(members) => {
+                    state.sync().members().set(members);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load membership: {e}");
+                }
+            }
+        });
+    }
+
     /// Save sync bucket configuration to config.yaml and credentials to keyring.
     /// Updates the store with the new values.
     pub fn save_sync_config(&self, config_data: bae_ui::SyncBucketConfig) -> Result<(), String> {
@@ -1987,8 +2014,10 @@ pub fn use_app() -> AppService {
 // =============================================================================
 
 use bae_core::library_dir::LibraryDir;
+use bae_core::sync::attribution::AttributionMap;
 use bae_core::sync::bucket::SyncBucketClient;
 use bae_core::sync::hlc::Timestamp;
+use bae_core::sync::membership::{MemberRole as CoreMemberRole, MembershipChain, MembershipEntry};
 use bae_core::sync::service::SyncService;
 use bae_core::sync::session::SyncSession;
 use bae_core::sync::status::build_sync_status;
@@ -2141,6 +2170,13 @@ async fn run_sync_loop(
                 state.sync().other_devices().set(other_devices);
                 state.sync().syncing().set(false);
                 state.sync().error().set(None);
+
+                // Refresh membership list from bucket
+                let user_pubkey_hex = hex::encode(user_keypair.public_key);
+                match load_membership_from_bucket(bucket, Some(&user_pubkey_hex)).await {
+                    Ok(members) => state.sync().members().set(members),
+                    Err(e) => tracing::warn!("Failed to load membership after sync: {e}"),
+                }
 
                 // Persist snapshot_seq (local_seq is persisted in run_sync_cycle after push)
                 if let Some(ss) = snapshot_seq {
@@ -2449,4 +2485,59 @@ async fn run_sync_cycle(
         status,
         changesets_applied: sync_result.pull.changesets_applied,
     })
+}
+
+/// Download membership entries from the bucket and build the display member list.
+///
+/// Returns an empty Vec if no membership chain exists (solo library).
+async fn load_membership_from_bucket(
+    bucket: &dyn SyncBucketClient,
+    user_pubkey: Option<&str>,
+) -> Result<Vec<Member>, String> {
+    let entry_keys = bucket
+        .list_membership_entries()
+        .await
+        .map_err(|e| format!("Failed to list membership entries: {e}"))?;
+
+    if entry_keys.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut raw_entries = Vec::new();
+    for (author, seq) in &entry_keys {
+        let data = bucket
+            .get_membership_entry(author, *seq)
+            .await
+            .map_err(|e| format!("Failed to get membership entry {author}/{seq}: {e}"))?;
+
+        let entry: MembershipEntry = serde_json::from_slice(&data)
+            .map_err(|e| format!("Failed to parse membership entry {author}/{seq}: {e}"))?;
+        raw_entries.push(entry);
+    }
+
+    let chain = MembershipChain::from_entries(raw_entries)
+        .map_err(|e| format!("Invalid membership chain: {e}"))?;
+
+    let attribution = AttributionMap::from_membership_chain(&chain);
+    let current = chain.current_members();
+
+    let members = current
+        .into_iter()
+        .map(|(pubkey, role)| {
+            let display_name = attribution.display_name(&pubkey);
+            let is_self = user_pubkey.is_some_and(|pk| pk == pubkey);
+            let ui_role = match role {
+                CoreMemberRole::Owner => MemberRole::Owner,
+                CoreMemberRole::Member => MemberRole::Member,
+            };
+            Member {
+                pubkey,
+                display_name,
+                role: ui_role,
+                is_self,
+            }
+        })
+        .collect();
+
+    Ok(members)
 }
