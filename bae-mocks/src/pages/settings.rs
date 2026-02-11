@@ -23,7 +23,6 @@ pub fn Settings() -> Element {
                         libraries: mock_libraries(),
                         on_switch: |_| {},
                         on_create: |_| {},
-                        on_add_existing: |_| {},
                         on_join: |_| {},
                         on_rename: |_| {},
                         on_remove: |_| {},
@@ -209,7 +208,7 @@ fn mock_libraries() -> Vec<LibraryInfo> {
         LibraryInfo {
             id: "ghi-789".to_string(),
             name: None,
-            path: "/Volumes/External/bae-library".to_string(),
+            path: "/Users/demo/.bae/libraries/ghi-789".to_string(),
             is_active: false,
         },
     ]

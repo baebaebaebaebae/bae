@@ -44,7 +44,6 @@ pub fn SettingsMock(initial_state: Option<String>) -> Element {
                             libraries: mock_libraries(),
                             on_switch: |_| {},
                             on_create: |_| {},
-                            on_add_existing: |_| {},
                             on_join: |_| {},
                             on_rename: |_| {},
                             on_remove: |_| {},

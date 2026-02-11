@@ -89,56 +89,6 @@ pub fn LibrarySection() -> Element {
         }
     };
 
-    let on_add_existing = {
-        let app = app.clone();
-        move |_| {
-            let config = app.config.clone();
-            spawn(async move {
-                let picked = rfd::AsyncFileDialog::new()
-                    .set_title("Choose a folder containing a bae library")
-                    .pick_folder()
-                    .await;
-
-                let folder = match picked {
-                    Some(f) => f,
-                    None => return,
-                };
-
-                let path = PathBuf::from(folder.path());
-                let config_path = path.join("config.yaml");
-
-                if !config_path.exists() {
-                    error!("Selected folder has no config.yaml: {}", path.display());
-                    return;
-                }
-
-                if let Err(e) = Config::add_known_library(&path) {
-                    error!("Failed to register library: {e}");
-                    return;
-                }
-
-                // Read the added library's UUID and switch to it
-                let target_id = match Config::read_library_id(&path) {
-                    Ok(id) => id,
-                    Err(e) => {
-                        error!("Failed to read library ID: {e}");
-                        return;
-                    }
-                };
-
-                let mut config = config;
-                config.library_id = target_id;
-                if let Err(e) = config.save_active_library() {
-                    error!("Failed to save active library: {e}");
-                    return;
-                }
-
-                info!("Added and switching to existing library");
-                super::super::welcome::relaunch();
-            });
-        }
-    };
-
     let on_join_start = move |_| {
         // Reset join form state and show the form
         join_bucket.set(String::new());
@@ -211,8 +161,8 @@ pub fn LibrarySection() -> Element {
 
     let on_remove = move |path: String| {
         let library_path = PathBuf::from(&path);
-        if let Err(e) = Config::remove_known_library(&library_path) {
-            error!("Failed to remove library: {e}");
+        if let Err(e) = std::fs::remove_dir_all(&library_path) {
+            error!("Failed to remove library directory: {e}");
             return;
         }
 
@@ -244,7 +194,6 @@ pub fn LibrarySection() -> Element {
                 libraries: libraries.read().clone(),
                 on_switch,
                 on_create,
-                on_add_existing,
                 on_join: on_join_start,
                 on_rename,
                 on_remove,
@@ -486,9 +435,6 @@ async fn bootstrap_library(
     config
         .save_to_config_yaml()
         .map_err(|e| format!("Failed to save config: {e}"))?;
-
-    Config::add_known_library(library_dir)
-        .map_err(|e| format!("Failed to register library: {e}"))?;
 
     info!("Joined shared library: {}", library_dir.display());
 
