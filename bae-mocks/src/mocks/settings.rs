@@ -100,6 +100,8 @@ pub fn SettingsMock(initial_state: Option<String>) -> Element {
                             members: mock_members(),
                             is_owner: true,
                             on_remove_member: |_| {},
+                            is_removing_member: false,
+                            removing_member_error: None,
                             on_sync_now: |_| {},
                             sync_bucket: Some("my-sync-bucket".to_string()),
                             sync_region: Some("us-east-1".to_string()),

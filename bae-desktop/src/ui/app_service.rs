@@ -1297,6 +1297,136 @@ impl AppService {
         });
     }
 
+    /// Remove a member from the shared library.
+    ///
+    /// Downloads the membership chain, calls `revoke_member()` (which creates a
+    /// Remove entry, generates a new encryption key, re-wraps for remaining
+    /// members, and deletes the revoked member's wrapped key), persists the new
+    /// key to keyring, updates the shared EncryptionService, and reloads the
+    /// member list.
+    ///
+    /// Progress and errors are written to `state.sync().removing_member()` and
+    /// `state.sync().remove_member_error()`.
+    pub fn remove_member(&self, revokee_pubkey: String) {
+        let Some(sync_handle) = self.sync_handle.clone() else {
+            self.state
+                .sync()
+                .remove_member_error()
+                .set(Some("Sync is not configured".to_string()));
+            return;
+        };
+
+        let Some(ref user_keypair) = self.user_keypair else {
+            self.state
+                .sync()
+                .remove_member_error()
+                .set(Some("No user keypair available".to_string()));
+            return;
+        };
+
+        let state = self.state;
+        let keypair = user_keypair.clone();
+        let user_pubkey_hex = hex::encode(keypair.public_key);
+        let hlc = sync_handle.hlc.clone();
+        let key_service = self.key_service.clone();
+        let config = self.config.clone();
+
+        state.sync().removing_member().set(true);
+        state.sync().remove_member_error().set(None);
+
+        spawn(async move {
+            let bucket: &dyn SyncBucketClient = &*sync_handle.bucket_client;
+
+            let result: Result<(), String> = async {
+                // Download existing membership entries and build the chain.
+                let entry_keys = bucket
+                    .list_membership_entries()
+                    .await
+                    .map_err(|e| format!("Failed to list membership entries: {e}"))?;
+
+                if entry_keys.is_empty() {
+                    return Err("No membership chain exists".to_string());
+                }
+
+                let mut raw_entries = Vec::new();
+                for (author, seq) in &entry_keys {
+                    let data = bucket
+                        .get_membership_entry(author, *seq)
+                        .await
+                        .map_err(|e| {
+                            format!("Failed to get membership entry {author}/{seq}: {e}")
+                        })?;
+                    let entry: MembershipEntry = serde_json::from_slice(&data).map_err(|e| {
+                        format!("Failed to parse membership entry {author}/{seq}: {e}")
+                    })?;
+                    raw_entries.push(entry);
+                }
+
+                let mut chain = MembershipChain::from_entries(raw_entries)
+                    .map_err(|e| format!("Invalid membership chain: {e}"))?;
+
+                // Revoke the member (creates Remove entry, rotates key, re-wraps).
+                let revoke_ts = hlc.now().to_string();
+                let new_key = bae_core::sync::invite::revoke_member(
+                    bucket,
+                    &mut chain,
+                    &keypair,
+                    &revokee_pubkey,
+                    &revoke_ts,
+                )
+                .await
+                .map_err(|e| format!("Failed to revoke member: {e}"))?;
+
+                // Persist the new encryption key to keyring.
+                let new_key_hex = hex::encode(new_key);
+                key_service
+                    .set_encryption_key(&new_key_hex)
+                    .map_err(|e| format!("Failed to persist new encryption key: {e}"))?;
+
+                // Update the shared encryption service (visible to sync loop + bucket client).
+                sync_handle.update_encryption_key(new_key);
+
+                // Update config fingerprint and persist so startup won't reject the new key.
+                let new_fingerprint = {
+                    let enc = sync_handle.encryption.read().unwrap();
+                    enc.fingerprint()
+                };
+                let mut updated_config = config.clone();
+                updated_config.encryption_key_fingerprint = Some(new_fingerprint);
+                if let Err(e) = updated_config.save_to_config_yaml() {
+                    tracing::error!("Failed to save config after key rotation: {e}");
+                }
+
+                tracing::info!(
+                    "Revoked member {}... and rotated encryption key",
+                    &revokee_pubkey[..revokee_pubkey.len().min(16)]
+                );
+
+                Ok(())
+            }
+            .await;
+
+            match result {
+                Ok(()) => {
+                    // Reload the member list.
+                    let bucket: &dyn SyncBucketClient = &*sync_handle.bucket_client;
+
+                    match load_membership_from_bucket(bucket, Some(&user_pubkey_hex)).await {
+                        Ok(members) => state.sync().members().set(members),
+                        Err(e) => {
+                            tracing::warn!("Failed to reload membership after revocation: {e}")
+                        }
+                    }
+                }
+                Err(e) => {
+                    state.sync().remove_member_error().set(Some(e));
+                }
+            }
+
+            state.sync().removing_member().set(false);
+        });
+    }
+
     /// Save sync bucket configuration to config.yaml and credentials to keyring.
     /// Updates the store with the new values.
     pub fn save_sync_config(&self, config_data: bae_ui::SyncBucketConfig) -> Result<(), String> {
@@ -2289,7 +2419,6 @@ async fn run_sync_loop(
     let device_id = &sync_handle.device_id;
     let bucket: &dyn SyncBucketClient = &*sync_handle.bucket_client;
     let hlc = &sync_handle.hlc;
-    let encryption = &sync_handle.encryption;
     let sync_service = SyncService::new(device_id.clone());
 
     // Load persisted sync state
@@ -2419,13 +2548,17 @@ async fn run_sync_loop(
                     tracing::info!("Snapshot policy triggered, creating snapshot");
 
                     let temp_dir = std::env::temp_dir();
-                    match unsafe {
-                        bae_core::sync::snapshot::create_snapshot(
-                            sync_handle.raw_db(),
-                            &temp_dir,
-                            encryption,
-                        )
-                    } {
+                    let snapshot_result = {
+                        let enc = sync_handle.encryption.read().unwrap();
+                        unsafe {
+                            bae_core::sync::snapshot::create_snapshot(
+                                sync_handle.raw_db(),
+                                &temp_dir,
+                                &enc,
+                            )
+                        }
+                    };
+                    match snapshot_result {
                         Ok(encrypted) => {
                             match bae_core::sync::snapshot::push_snapshot(
                                 bucket, encrypted, device_id, local_seq,

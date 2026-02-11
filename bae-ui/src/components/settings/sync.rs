@@ -76,8 +76,12 @@ pub fn SyncSectionView(
     members: Vec<Member>,
     /// Whether the current user is an owner (controls visibility of invite/remove).
     is_owner: bool,
-    /// Called when the user clicks "Remove" on a member. Carries the member's pubkey.
+    /// Called when the user confirms removal of a member. Carries the member's pubkey.
     on_remove_member: EventHandler<String>,
+    /// Whether a member removal operation is in progress.
+    is_removing_member: bool,
+    /// Error from a member removal attempt.
+    removing_member_error: Option<String>,
 
     // --- Invite props ---
     /// Whether the invite form is open.
@@ -119,6 +123,7 @@ pub fn SyncSectionView(
 ) -> Element {
     let mut copied = use_signal(|| false);
     let mut share_copied = use_signal(|| false);
+    let mut confirming_remove_pubkey = use_signal(|| Option::<String>::None);
 
     let handle_copy = move |_| {
         on_copy_pubkey.call(());
@@ -262,6 +267,7 @@ pub fn SyncSectionView(
                     if !members.is_empty() {
                         {
                             let owner_count = members.iter().filter(|m| m.role == MemberRole::Owner).count();
+                            let confirming = confirming_remove_pubkey.read().clone();
                             rsx! {
                                 div { class: "space-y-2",
                                     for member in members.iter() {
@@ -269,34 +275,80 @@ pub fn SyncSectionView(
                                             let can_remove = is_owner && !member.is_self
                                                 && !(member.role == MemberRole::Owner && owner_count <= 1);
                                             let pubkey = member.pubkey.clone();
+                                            let is_confirming = confirming.as_deref() == Some(&member.pubkey);
+                                            let is_this_removing = is_confirming && is_removing_member;
                                             rsx! {
-                                                div { key: "{member.pubkey}", class: "flex justify-between items-center py-1.5",
-                                                    div { class: "flex items-center gap-3 min-w-0",
-                                                        span { class: "text-gray-200 text-sm truncate",
-                                                            "{member.display_name}"
-                                                            if member.is_self {
-                                                                span { class: "text-gray-500 ml-1", "(you)" }
+                                                div { key: "{member.pubkey}", class: "py-1.5",
+                                                    div { class: "flex justify-between items-center",
+                                                        div { class: "flex items-center gap-3 min-w-0",
+                                                            span { class: "text-gray-200 text-sm truncate",
+                                                                "{member.display_name}"
+                                                                if member.is_self {
+                                                                    span { class: "text-gray-500 ml-1", "(you)" }
+                                                                }
+                                                            }
+                                                            match member.role {
+                                                                MemberRole::Owner => rsx! {
+                                                                    span { class: "px-2 py-0.5 bg-amber-900/60 text-amber-300 rounded text-xs font-medium flex-shrink-0",
+                                                                        "Owner"
+                                                                    }
+                                                                },
+                                                                MemberRole::Member => rsx! {
+                                                                    span { class: "px-2 py-0.5 bg-gray-700 text-gray-400 rounded text-xs font-medium flex-shrink-0",
+                                                                        "Member"
+                                                                    }
+                                                                },
                                                             }
                                                         }
-                                                        match member.role {
-                                                            MemberRole::Owner => rsx! {
-                                                                span { class: "px-2 py-0.5 bg-amber-900/60 text-amber-300 rounded text-xs font-medium flex-shrink-0",
-                                                                    "Owner"
-                                                                }
-                                                            },
-                                                            MemberRole::Member => rsx! {
-                                                                span { class: "px-2 py-0.5 bg-gray-700 text-gray-400 rounded text-xs font-medium flex-shrink-0",
-                                                                    "Member"
-                                                                }
-                                                            },
+                                                        if can_remove && !is_confirming {
+                                                            Button {
+                                                                variant: ButtonVariant::Secondary,
+                                                                size: ButtonSize::Small,
+                                                                onclick: move |_| confirming_remove_pubkey.set(Some(pubkey.clone())),
+                                                                "Remove"
+                                                            }
                                                         }
                                                     }
-                                                    if can_remove {
-                                                        Button {
-                                                            variant: ButtonVariant::Secondary,
-                                                            size: ButtonSize::Small,
-                                                            onclick: move |_| on_remove_member.call(pubkey.clone()),
-                                                            "Remove"
+                                                    if is_confirming {
+                                                        div { class: "mt-2 p-3 bg-red-900/20 border border-red-800 rounded-lg",
+                                                            p { class: "text-sm text-gray-300 mb-3",
+                                                                "Remove {member.display_name}? This will rotate the encryption key."
+                                                            }
+
+        
+                
+        
+
+                                                            if let Some(ref err) = removing_member_error {
+                                                                div { class: "text-sm text-red-400 mb-3", "{err}" }
+                                                            }
+                
+                                                            div { class: "flex gap-2",
+                                                                {
+                                                                    let confirm_pubkey = member.pubkey.clone();
+                                                                    rsx! {
+                                                                        Button {
+                                                                            variant: ButtonVariant::Danger,
+                                                                            size: ButtonSize::Small,
+                                                                            disabled: is_this_removing,
+                                                                            loading: is_this_removing,
+                                                                            onclick: move |_| on_remove_member.call(confirm_pubkey.clone()),
+                                                                            if is_this_removing {
+                                                                                "Removing..."
+                                                                            } else {
+                                                                                "Confirm"
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                                Button {
+                                                                    variant: ButtonVariant::Secondary,
+                                                                    size: ButtonSize::Small,
+                                                                    disabled: is_this_removing,
+                                                                    onclick: move |_| confirming_remove_pubkey.set(None),
+                                                                    "Cancel"
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -402,7 +454,6 @@ pub fn SyncSectionView(
                             let share_text = format_share_text(info);
                             rsx! {
                                 div { class: "mt-4 pt-4 border-t border-gray-700",
-
                                     h4 { class: "text-sm font-medium text-gray-300 mb-3", "Share these details with the invitee" }
                                     div { class: "p-3 bg-gray-700/50 rounded-lg space-y-2 text-sm",
                                         div { class: "flex justify-between",
@@ -424,6 +475,7 @@ pub fn SyncSectionView(
                                             span { class: "text-gray-200 font-mono", {truncate_pubkey(&info.invitee_pubkey)} }
                                         }
                                     }
+
         
                                     div { class: "flex gap-3 mt-3",
                                         Button {

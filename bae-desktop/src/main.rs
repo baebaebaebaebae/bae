@@ -489,7 +489,6 @@ async fn create_sync_handle(
         bucket_client,
         hlc,
         config.device_id.clone(),
-        encryption.clone(),
         raw_db,
         session,
         sync_trigger_tx,

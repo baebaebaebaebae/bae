@@ -69,6 +69,10 @@ pub fn SyncSection() -> Element {
     let mut invite_pubkey = use_signal(String::new);
     let mut invite_role = use_signal(|| MemberRole::Member);
 
+    // --- Remove member state from store ---
+    let is_removing_member = *app.state.sync().removing_member().read();
+    let removing_member_error = app.state.sync().remove_member_error().read().clone();
+
     // Clone app for each closure that needs it
     let app_for_sync = app.clone();
     let app_for_edit = app.clone();
@@ -76,6 +80,7 @@ pub fn SyncSection() -> Element {
     let app_for_test = app.clone();
     let app_for_invite = app.clone();
     let app_for_dismiss = app.clone();
+    let app_for_remove = app.clone();
 
     rsx! {
         SyncSectionView {
@@ -88,7 +93,11 @@ pub fn SyncSection() -> Element {
             on_copy_pubkey: copy_pubkey,
             members,
             is_owner,
-            on_remove_member: |_pubkey: String| {},
+            on_remove_member: move |pubkey: String| {
+                app_for_remove.remove_member(pubkey);
+            },
+            is_removing_member,
+            removing_member_error,
             on_sync_now: move |_| app_for_sync.trigger_sync(),
 
             // Config display
