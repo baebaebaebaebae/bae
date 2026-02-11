@@ -3,8 +3,53 @@ use crate::cloud_storage::CloudStorage;
 use crate::encryption::EncryptionService;
 use crate::library::LibraryManager;
 use crate::playback::{PcmSource, PlaybackError};
+use crate::sync::shared_release::SharedRelease;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
+
+/// Resolved shared release storage: S3 client, encryption service, and storage key.
+pub struct SharedReleaseStorage {
+    pub storage: Arc<dyn CloudStorage>,
+    pub encryption: Arc<EncryptionService>,
+    pub storage_key: String,
+}
+
+/// Build an S3 client and encryption service from a resolved shared release.
+pub async fn create_shared_release_storage(
+    shared: SharedRelease,
+    file_id: &str,
+) -> Result<SharedReleaseStorage, PlaybackError> {
+    let access_key = shared.s3_access_key.ok_or_else(|| {
+        PlaybackError::cloud(crate::cloud_storage::CloudStorageError::Config(
+            "Shared release missing S3 access key".into(),
+        ))
+    })?;
+    let secret_key = shared.s3_secret_key.ok_or_else(|| {
+        PlaybackError::cloud(crate::cloud_storage::CloudStorageError::Config(
+            "Shared release missing S3 secret key".into(),
+        ))
+    })?;
+
+    let s3_config = crate::cloud_storage::S3Config {
+        bucket_name: shared.bucket,
+        region: shared.region,
+        access_key_id: access_key,
+        secret_access_key: secret_key,
+        endpoint_url: shared.endpoint,
+    };
+    let storage = crate::cloud_storage::S3CloudStorage::new_with_bucket_creation(s3_config, false)
+        .await
+        .map_err(PlaybackError::cloud)?;
+    let storage: Arc<dyn CloudStorage> = Arc::new(storage);
+    let encryption = Arc::new(EncryptionService::from_key(shared.release_key));
+    let storage_key = crate::storage::storage_path(file_id);
+
+    Ok(SharedReleaseStorage {
+        storage,
+        encryption,
+        storage_key,
+    })
+}
 
 /// Read a track's audio file and decode to PCM for playback.
 ///
@@ -101,11 +146,64 @@ pub async fn load_track_audio(
             encrypted_data
         }
     } else {
-        // Local file - read directly from source_path
-        debug!("Reading from local file: {}", source_path);
-        tokio::fs::read(source_path)
+        // No cloud storage passed in — check if this is a shared release
+        let shared = match crate::sync::shared_release::resolve_release(
+            library_manager.database(),
+            &track.release_id,
+        )
+        .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(
+                    "Failed to resolve shared release for {}: {e}",
+                    track.release_id
+                );
+                None
+            }
+        };
+
+        if let Some(shared) = shared {
+            let srs = create_shared_release_storage(shared, &audio_file.id).await?;
+
+            debug!("Downloading shared release file: {}", srs.storage_key);
+
+            // Check cache first
+            let cache_key = format!("file:{}", audio_file.id);
+            let encrypted_data = match cache.get(&cache_key).await {
+                Ok(Some(cached_data)) => {
+                    debug!("Cache hit for shared file: {}", audio_file.id);
+                    cached_data
+                }
+                Ok(None) | Err(_) => {
+                    debug!("Cache miss - downloading shared file: {}", audio_file.id);
+                    let data = srs
+                        .storage
+                        .download(&srs.storage_key)
+                        .await
+                        .map_err(PlaybackError::cloud)?;
+
+                    if let Err(e) = cache.put(&cache_key, &data).await {
+                        warn!("Failed to cache file (non-fatal): {}", e);
+                    }
+                    data
+                }
+            };
+
+            // Shared releases are always encrypted with the per-release key
+            let enc = srs.encryption;
+            tokio::task::spawn_blocking(move || {
+                enc.decrypt(&encrypted_data).map_err(PlaybackError::decrypt)
+            })
             .await
-            .map_err(|e| PlaybackError::io(format!("Failed to read file: {}", e)))?
+            .map_err(PlaybackError::task)??
+        } else {
+            // Local file - read directly from source_path
+            debug!("Reading from local file: {}", source_path);
+            tokio::fs::read(source_path)
+                .await
+                .map_err(|e| PlaybackError::io(format!("Failed to read file: {}", e)))?
+        }
     };
 
     debug!("Read {} bytes of audio data", file_data.len());
