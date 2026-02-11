@@ -3,50 +3,63 @@ title: Local Files
 description: Import music from your computer
 ---
 
-Import music files you already have on your computer.
+Import FLAC files you already have on your computer. Point bae at a folder, match it to a release, and it's in your library.
 
 ## Supported formats
 
-bae supports common audio formats:
+bae currently supports **FLAC** -- both individual files and CUE+FLAC disc images.
 
-- **Lossless**: FLAC, WAV, AIFF, ALAC
-- **Lossy**: MP3, AAC, OGG, Opus
+| Layout | What it looks like |
+|--------|-------------------|
+| File per track | `01 - Song.flac`, `02 - Song.flac`, ... |
+| CUE+FLAC | `album.cue` + `album.flac` (single file, split by cue sheet) |
+| Multi-disc CUE+FLAC | `CD1/disc1.cue` + `CD1/disc1.flac`, `CD2/...` |
 
-## How to import
+## How it works
 
-1. Click **Import** in the sidebar
-2. Select **Local Files**
-3. Choose a folder containing an album
-4. bae scans and identifies the tracks
+1. Click **Import** in the sidebar and select **Local Files**
+2. Pick a folder containing an album
 
-## Metadata matching
+bae scans the folder, detects audio files and artwork, and moves to the identify step.
 
-After scanning, bae shows potential matches from:
+### Identify
 
-- **Discogs** - Great for vinyl releases, credits, and catalog numbers
-- **MusicBrainz** - Comprehensive database with detailed track info
+bae needs to match your files to a known release so it can pull in proper metadata. A few ways this happens:
 
-Select the release that best matches your files. bae uses this to:
+- **Disc ID** -- if your files came with a CUE sheet containing a disc ID, bae looks it up on MusicBrainz automatically. This often finds an exact match with no manual effort.
+- **Manual search** -- search by artist and album name, barcode, or catalog number across both MusicBrainz and Discogs.
 
-- Download album artwork
-- Fill in artist, album, genre, year
-- Get track names and durations
-- Store release-specific info (barcode, label, etc.)
+When you select a result, bae checks that the release's track count matches your local files. If there's a mismatch, the result is flagged and you can't accidentally import the wrong release.
+
+### Confirm
+
+Once matched, you see the full track listing alongside your files. This is where you:
+
+- **Pick artwork** -- bae fetches cover art from MusicBrainz's Cover Art Archive and Discogs. If your folder has image files (cover.jpg, front.png, etc.), those show up too. Choose whichever looks best.
+- **Choose storage** -- select a [storage profile](/storage/profiles) or leave as self-managed. This determines whether bae copies the files or just indexes them in place.
+
+Hit **Import** and bae pulls in the metadata, stores the files according to your choice, and the release appears in your library.
+
+## Metadata
+
+Matching to a release gives bae everything it needs:
+
+- Track names, disc numbers, durations
+- Artist, album, year, genre
+- Label, catalog number, barcode
+- Cover artwork from multiple sources
+
+All of this comes from MusicBrainz and Discogs -- bae doesn't read embedded tags from your files.
 
 ## Storage options
 
-When importing, you choose how bae stores the files:
+You pick how bae handles the files during the confirm step:
 
-- **bae-managed storage**: bae copies files to your configured storage location (local folder or cloud)
-- **Self-managed**: bae indexes your existing files without moving them
+- **bae-managed** -- bae copies files to a local folder or uploads to cloud storage (encrypted). Your originals stay untouched.
+- **Self-managed** -- bae records where the files are without copying anything. Zero duplication, but no encryption or sync.
 
-If using bae-managed storage, you select a [storage profile](/storage/profiles) during import. This determines where files are copied and whether they're encrypted.
-
-Your original files are always left untouched.
-
-See [Storage Overview](/storage/overview) for more on storage options.
+See [Storage Overview](/storage/overview) for the full comparison.
 
 ## Bulk import
 
-You can select a folder containing multiple albums. bae will scan recursively and let you import each album individually.
-
+Select a parent folder and bae scans recursively. Each album-sized subfolder becomes a separate import candidate -- scan once, import them one by one.
