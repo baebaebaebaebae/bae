@@ -333,22 +333,6 @@ pub fn SyncSectionView(
                                                                 "Remove {member.display_name}? This will rotate the encryption key."
                                                             }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
                                                             if let Some(ref err) = removing_member_error {
                                                                 div { class: "text-sm text-red-400 mb-3", "{err}" }
                                                             }
@@ -505,10 +489,6 @@ pub fn SyncSectionView(
                                             span { class: "text-gray-200 font-mono", {truncate_pubkey(&info.invitee_pubkey)} }
                                         }
                                     }
-
-
-
-
 
                                     div { class: "flex gap-3 mt-3",
                                         Button {
