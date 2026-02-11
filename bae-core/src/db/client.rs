@@ -122,6 +122,29 @@ impl Database {
         self.writer()
     }
 
+    /// Extract the raw `sqlite3*` pointer from the dedicated write connection.
+    ///
+    /// The pointer is stable for the lifetime of this `Database` because the
+    /// write connection is heap-allocated inside the `Arc` and never moved.
+    /// Cache the returned pointer and use it for `SyncSession::start()` and
+    /// `pull_changes()` without re-extracting each time.
+    ///
+    /// # Safety
+    /// The caller must ensure:
+    /// - The `Database` outlives any use of the returned pointer.
+    /// - The pointer is only used for SQLite session extension operations
+    ///   (which are compatible with the connection being locked/unlocked by
+    ///   other code, since the session operates at the C level).
+    pub async fn raw_write_handle(&self) -> Result<*mut libsqlite3_sys::sqlite3, sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
+        let mut handle = conn
+            .lock_handle()
+            .await
+            .map_err(|e| sqlx::Error::Protocol(format!("Failed to lock sqlite handle: {e}")))?;
+        let ptr = handle.as_raw_handle().as_ptr();
+        Ok(ptr)
+    }
+
     /// Create a consistent snapshot of the database at the given path.
     /// Uses VACUUM INTO which copies without blocking the connection pool.
     pub async fn vacuum_into(&self, path: &str) -> Result<(), sqlx::Error> {

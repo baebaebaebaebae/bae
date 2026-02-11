@@ -189,6 +189,20 @@ fn main() {
     };
     let library_manager = create_library_manager(database.clone(), encryption_service.clone());
 
+    // Initialize sync infrastructure if sync is configured and encryption is enabled
+    let sync_handle = if config.sync_enabled(&key_service) {
+        if let Some(ref enc) = encryption_service {
+            runtime_handle.block_on(create_sync_handle(&config, &key_service, &database, enc))
+        } else {
+            info!(
+                "Sync is configured but encryption is not enabled — skipping sync initialization"
+            );
+            None
+        }
+    } else {
+        None
+    };
+
     // Ensure the home storage profile and manifest.json exist (idempotent, runs every startup)
     runtime_handle.block_on(ensure_home_profile(
         &library_manager,
@@ -289,6 +303,7 @@ fn main() {
         key_service,
         image_server,
         user_keypair,
+        sync_handle,
     };
 
     // Initialize auto-updater (checks for updates on launch)
@@ -403,6 +418,83 @@ async fn start_subsonic_server(
     if let Err(e) = axum::serve(listener, app).await {
         error!("Subsonic server error: {}", e);
     }
+}
+
+/// Create the sync handle if sync bucket credentials and configuration are available.
+///
+/// Extracts the raw sqlite3 write handle, creates the S3 bucket client, HLC,
+/// and starts the initial sync session. Returns None if any step fails.
+async fn create_sync_handle(
+    config: &config::Config,
+    key_service: &KeyService,
+    database: &Database,
+    encryption: &encryption::EncryptionService,
+) -> Option<ui::app_context::SyncHandle> {
+    use bae_core::sync::hlc::Hlc;
+    use bae_core::sync::s3_bucket::S3SyncBucketClient;
+    use bae_core::sync::session::SyncSession;
+
+    let bucket = config.sync_s3_bucket.as_ref()?;
+    let region = config.sync_s3_region.as_ref()?;
+    let endpoint = config.sync_s3_endpoint.clone();
+    let access_key = key_service.get_sync_access_key()?;
+    let secret_key = key_service.get_sync_secret_key()?;
+
+    let bucket_client = match S3SyncBucketClient::new(
+        bucket.clone(),
+        region.clone(),
+        endpoint,
+        access_key,
+        secret_key,
+        encryption.clone(),
+    )
+    .await
+    {
+        Ok(client) => client,
+        Err(e) => {
+            error!("Failed to create sync bucket client: {e}");
+            return None;
+        }
+    };
+
+    let raw_db = match database.raw_write_handle().await {
+        Ok(ptr) => ptr,
+        Err(e) => {
+            error!("Failed to extract raw write handle for sync: {e}");
+            return None;
+        }
+    };
+
+    // Start the initial sync session to begin recording changes
+    let session = match unsafe { SyncSession::start(raw_db) } {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Failed to start initial sync session: {e}");
+            return None;
+        }
+    };
+
+    let hlc = Hlc::new(config.device_id.clone());
+
+    // Channel for manual sync trigger (Phase 5d). Capacity of 1 is sufficient
+    // since multiple triggers collapse into one sync cycle.
+    let (sync_trigger_tx, sync_trigger_rx) = tokio::sync::mpsc::channel::<()>(1);
+
+    info!(
+        "Sync initialized (bucket: {bucket}, device: {})",
+        config.device_id
+    );
+
+    Some(ui::app_context::SyncHandle::new(
+        bucket_client,
+        hlc,
+        config.device_id.clone(),
+        encryption.clone(),
+        raw_db,
+        session,
+        sync_trigger_tx,
+        sync_trigger_rx,
+    ))
 }
 
 /// Create torrent client options from application config

@@ -193,6 +193,12 @@ pub struct Session {
     raw: *mut ffi::sqlite3_session,
 }
 
+// SAFETY: The sqlite3_session is a heap-allocated C structure with no thread
+// affinity. It's safe to move between threads as long as it's only accessed
+// from one thread at a time (which is guaranteed by the sync loop's sequential
+// access pattern and the write connection's Mutex).
+unsafe impl Send for Session {}
+
 impl Session {
     /// Create a new session on the given database connection, tracking
     /// the "main" database.

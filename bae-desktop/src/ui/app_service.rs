@@ -27,15 +27,15 @@ use bae_core::torrent;
 use bae_ui::display_types::{QueueItem, TrackImportState};
 use bae_ui::stores::{
     ActiveImport, ActiveImportsUiStateStoreExt, AlbumDetailStateStoreExt, AppState,
-    AppStateStoreExt, ArtistDetailStateStoreExt, ConfigStateStoreExt, ImportOperationStatus,
-    LibraryStateStoreExt, PlaybackStatus, PlaybackUiStateStoreExt, PrepareStep,
-    StorageProfilesStateStoreExt, SyncStateStoreExt,
+    AppStateStoreExt, ArtistDetailStateStoreExt, ConfigStateStoreExt, DeviceActivityInfo,
+    ImportOperationStatus, LibraryStateStoreExt, PlaybackStatus, PlaybackUiStateStoreExt,
+    PrepareStep, StorageProfilesStateStoreExt, SyncStateStoreExt,
 };
 use bae_ui::StorageProfile;
 use dioxus::prelude::*;
 use std::collections::HashMap;
 
-use super::app_context::AppServices;
+use super::app_context::{AppServices, SyncHandle};
 
 /// Main application service that encapsulates state and backend coordination.
 ///
@@ -65,6 +65,8 @@ pub struct AppService {
     pub image_server: ImageServerHandle,
     /// User's Ed25519 keypair for signing and key exchange
     pub user_keypair: Option<UserKeypair>,
+    /// Sync infrastructure handle (present when sync is configured and encryption is enabled).
+    pub sync_handle: Option<SyncHandle>,
 }
 
 impl AppService {
@@ -83,6 +85,7 @@ impl AppService {
                 key_service: services.key_service.clone(),
                 image_server: services.image_server.clone(),
                 user_keypair: services.user_keypair.clone(),
+                sync_handle: services.sync_handle.clone(),
             }
         }
         #[cfg(not(feature = "torrent"))]
@@ -97,6 +100,7 @@ impl AppService {
                 key_service: services.key_service.clone(),
                 image_server: services.image_server.clone(),
                 user_keypair: services.user_keypair.clone(),
+                sync_handle: services.sync_handle.clone(),
             }
         }
     }
@@ -111,6 +115,7 @@ impl AppService {
         self.subscribe_import_progress();
         self.subscribe_library_events();
         self.subscribe_folder_scan_events();
+        self.subscribe_sync_events();
         self.load_initial_data();
         self.process_pending_deletions();
     }
@@ -419,6 +424,66 @@ impl AppService {
 
         spawn(async move {
             consume_scan_events(app_service, rx).await;
+        });
+    }
+
+    /// Start the background sync loop if sync is configured.
+    ///
+    /// Runs periodic sync cycles: push local changes, pull remote changes,
+    /// update cursors, and refresh the UI. Triggered by a 30-second timer,
+    /// manual trigger (Phase 5d), or AlbumsChanged events (debounced).
+    fn subscribe_sync_events(&self) {
+        let Some(sync_handle) = self.sync_handle.clone() else {
+            return;
+        };
+
+        let Some(user_keypair) = self.user_keypair.clone() else {
+            tracing::warn!("Sync is configured but no user keypair — skipping sync loop");
+            return;
+        };
+
+        let state = self.state;
+        let library_manager = self.library_manager.clone();
+        let imgs = self.image_server.clone();
+        let library_dir = self.config.library_dir.clone();
+
+        // Spawn a debounced AlbumsChanged forwarder that sends on the trigger channel.
+        let mut library_events_rx = library_manager.get().subscribe_events();
+        let trigger_tx = sync_handle.sync_trigger.clone();
+
+        spawn(async move {
+            loop {
+                match library_events_rx.recv().await {
+                    Ok(LibraryEvent::AlbumsChanged) => {
+                        // Debounce: wait 2 seconds, then drain any events that
+                        // arrived during the sleep so we fire only once per burst.
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        while library_events_rx.try_recv().is_ok() {}
+                        let _ = trigger_tx.try_send(());
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                }
+            }
+        });
+
+        // Spawn the main sync loop
+        spawn(async move {
+            let Some(mut trigger_rx) = sync_handle.take_trigger_rx().await else {
+                tracing::error!("Sync trigger receiver already taken");
+                return;
+            };
+
+            run_sync_loop(
+                &sync_handle,
+                &user_keypair,
+                &state,
+                &library_manager,
+                &imgs,
+                &library_dir,
+                &mut trigger_rx,
+            )
+            .await;
         });
     }
 
@@ -1907,4 +1972,450 @@ fn handle_import_progress(state: &Store<AppState>, event: ImportProgress) {
 /// Hook to access the AppService from any component
 pub fn use_app() -> AppService {
     use_context::<AppService>()
+}
+
+// =============================================================================
+// Background Sync Loop
+// =============================================================================
+
+use bae_core::library_dir::LibraryDir;
+use bae_core::sync::bucket::SyncBucketClient;
+use bae_core::sync::hlc::Timestamp;
+use bae_core::sync::service::SyncService;
+use bae_core::sync::session::SyncSession;
+use bae_core::sync::status::build_sync_status;
+
+/// Path for staging outgoing changeset bytes that survived a push failure.
+fn staging_path(library_dir: &LibraryDir) -> std::path::PathBuf {
+    library_dir.join("sync_staging.bin")
+}
+
+/// Stage outgoing changeset bytes to disk before pushing, so they can be
+/// retried if the push fails.
+fn stage_changeset(library_dir: &LibraryDir, packed: &[u8]) {
+    if let Err(e) = std::fs::write(staging_path(library_dir), packed) {
+        tracing::error!("Failed to stage outgoing changeset: {e}");
+    }
+}
+
+/// Clear the staged changeset after a successful push.
+fn clear_staged_changeset(library_dir: &LibraryDir) {
+    let _ = std::fs::remove_file(staging_path(library_dir));
+}
+
+/// Read a previously staged changeset (if any) for retry.
+fn read_staged_changeset(library_dir: &LibraryDir) -> Option<Vec<u8>> {
+    let path = staging_path(library_dir);
+    if path.exists() {
+        match std::fs::read(&path) {
+            Ok(data) if !data.is_empty() => Some(data),
+            Ok(_) => {
+                clear_staged_changeset(library_dir);
+                None
+            }
+            Err(e) => {
+                tracing::warn!("Failed to read staged changeset: {e}");
+                clear_staged_changeset(library_dir);
+                None
+            }
+        }
+    } else {
+        None
+    }
+}
+
+/// Push a changeset to the sync bucket and update the device head.
+async fn push_changeset(
+    bucket: &dyn SyncBucketClient,
+    device_id: &str,
+    seq: u64,
+    packed: Vec<u8>,
+    snapshot_seq: Option<u64>,
+    timestamp: &str,
+) -> Result<(), bae_core::sync::bucket::BucketError> {
+    bucket.put_changeset(device_id, seq, packed).await?;
+
+    bucket
+        .put_head(device_id, seq, snapshot_seq, timestamp)
+        .await?;
+
+    Ok(())
+}
+
+/// The main sync loop. Runs until the trigger channel closes.
+async fn run_sync_loop(
+    sync_handle: &SyncHandle,
+    user_keypair: &UserKeypair,
+    state: &Store<AppState>,
+    library_manager: &SharedLibraryManager,
+    imgs: &ImageServerHandle,
+    library_dir: &LibraryDir,
+    trigger_rx: &mut tokio::sync::mpsc::Receiver<()>,
+) {
+    let db = library_manager.get().database();
+    let device_id = &sync_handle.device_id;
+    let bucket: &dyn SyncBucketClient = &*sync_handle.bucket_client;
+    let hlc = &sync_handle.hlc;
+    let encryption = &sync_handle.encryption;
+    let sync_service = SyncService::new(device_id.clone());
+
+    // Load persisted sync state
+    let mut local_seq = db
+        .get_sync_state("local_seq")
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    let mut snapshot_seq: Option<u64> = db
+        .get_sync_state("snapshot_seq")
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse::<u64>().ok());
+
+    let mut last_snapshot_time: Option<chrono::DateTime<chrono::Utc>> = db
+        .get_sync_state("last_snapshot_time")
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| chrono::DateTime::parse_from_rfc3339(&v).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc));
+
+    // If there's a staged changeset from a previous failed push, retry it first
+    let mut staged_seq: Option<u64> = db
+        .get_sync_state("staged_seq")
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse::<u64>().ok());
+
+    // Run an initial sync after a short delay to avoid racing with app startup
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+    loop {
+        // Run a sync cycle
+        let result = run_sync_cycle(
+            sync_handle,
+            &sync_service,
+            user_keypair,
+            state,
+            db,
+            bucket,
+            hlc,
+            device_id,
+            library_dir,
+            &mut local_seq,
+            &mut snapshot_seq,
+            &mut staged_seq,
+        )
+        .await;
+
+        match result {
+            Ok(sync_outcome) => {
+                let now = chrono::Utc::now().to_rfc3339();
+
+                // Update sync status in the store
+                let other_devices: Vec<DeviceActivityInfo> = sync_outcome
+                    .status
+                    .other_devices
+                    .iter()
+                    .map(|d| DeviceActivityInfo {
+                        device_id: d.device_id.clone(),
+                        last_seq: d.last_seq,
+                        last_sync: d.last_sync.clone(),
+                    })
+                    .collect();
+
+                state.sync().last_sync_time().set(Some(now.clone()));
+                state.sync().other_devices().set(other_devices);
+                state.sync().syncing().set(false);
+                state.sync().error().set(None);
+
+                // Persist snapshot_seq (local_seq is persisted in run_sync_cycle after push)
+                if let Some(ss) = snapshot_seq {
+                    let _ = db.set_sync_state("snapshot_seq", &ss.to_string()).await;
+                }
+
+                // If remote changes were applied, reload the library UI
+                if sync_outcome.changesets_applied > 0 {
+                    load_library(state, library_manager, imgs).await;
+                }
+
+                // Check snapshot policy
+                let hours_since = last_snapshot_time.map(|t| {
+                    let elapsed = chrono::Utc::now().signed_duration_since(t);
+                    elapsed.num_hours().max(0) as u64
+                });
+
+                if bae_core::sync::snapshot::should_create_snapshot(
+                    local_seq,
+                    snapshot_seq,
+                    hours_since,
+                ) {
+                    tracing::info!("Snapshot policy triggered, creating snapshot");
+
+                    let temp_dir = std::env::temp_dir();
+                    match unsafe {
+                        bae_core::sync::snapshot::create_snapshot(
+                            sync_handle.raw_db(),
+                            &temp_dir,
+                            encryption,
+                        )
+                    } {
+                        Ok(encrypted) => {
+                            match bae_core::sync::snapshot::push_snapshot(
+                                bucket, encrypted, device_id, local_seq,
+                            )
+                            .await
+                            {
+                                Ok(()) => {
+                                    snapshot_seq = Some(local_seq);
+                                    last_snapshot_time = Some(chrono::Utc::now());
+
+                                    let _ = db
+                                        .set_sync_state("snapshot_seq", &local_seq.to_string())
+                                        .await;
+                                    let _ = db
+                                        .set_sync_state(
+                                            "last_snapshot_time",
+                                            &chrono::Utc::now().to_rfc3339(),
+                                        )
+                                        .await;
+
+                                    tracing::info!(local_seq, "Snapshot created and pushed");
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Failed to push snapshot: {e}");
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to create snapshot: {e}");
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+                tracing::warn!("Sync cycle failed: {error_msg}");
+
+                state.sync().syncing().set(false);
+                state.sync().error().set(Some(error_msg));
+            }
+        }
+
+        // Wait for next trigger: 30-second timer or manual trigger
+        tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {}
+            msg = trigger_rx.recv() => {
+                if msg.is_none() {
+                    // Channel closed, stop the loop
+                    tracing::info!("Sync trigger channel closed, stopping sync loop");
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// Outcome of a successful sync cycle.
+struct SyncOutcome {
+    status: bae_core::sync::status::SyncStatus,
+    changesets_applied: u64,
+}
+
+/// Run a single sync cycle: grab changeset, push, pull, restart session.
+async fn run_sync_cycle(
+    sync_handle: &SyncHandle,
+    sync_service: &SyncService,
+    user_keypair: &UserKeypair,
+    state: &Store<AppState>,
+    db: &bae_core::db::Database,
+    bucket: &dyn SyncBucketClient,
+    hlc: &bae_core::sync::hlc::Hlc,
+    device_id: &str,
+    library_dir: &LibraryDir,
+    local_seq: &mut u64,
+    snapshot_seq: &mut Option<u64>,
+    staged_seq: &mut Option<u64>,
+) -> Result<SyncOutcome, String> {
+    state.sync().syncing().set(true);
+
+    // If there's a staged changeset from a previous failed push, retry it first
+    if let Some(seq) = *staged_seq {
+        if let Some(staged_data) = read_staged_changeset(library_dir) {
+            let timestamp = hlc.now().to_string();
+
+            tracing::info!(seq, "Retrying staged changeset push");
+
+            match push_changeset(
+                bucket,
+                device_id,
+                seq,
+                staged_data,
+                *snapshot_seq,
+                &timestamp,
+            )
+            .await
+            {
+                Ok(()) => {
+                    tracing::info!(seq, "Staged changeset push succeeded");
+                    clear_staged_changeset(library_dir);
+                    *staged_seq = None;
+                    *local_seq = seq;
+                    let _ = db.set_sync_state("local_seq", &seq.to_string()).await;
+                    let _ = db.set_sync_state("staged_seq", "").await;
+                }
+                Err(e) => {
+                    // Push still failing -- leave staged data for next cycle
+                    return Err(format!("Staged changeset push failed: {e}"));
+                }
+            }
+        } else {
+            // Staging file is gone but staged_seq is set -- clear the stale state
+            *staged_seq = None;
+            let _ = db.set_sync_state("staged_seq", "").await;
+        }
+    }
+
+    // Load current cursors from DB
+    let cursors = db
+        .get_all_sync_cursors()
+        .await
+        .map_err(|e| format!("Failed to load sync cursors: {e}"))?;
+
+    // Take the current session from the sync handle.
+    // If no session exists (shouldn't happen, but handle gracefully), create a new one.
+    let session = match sync_handle.session.lock().await.take() {
+        Some(s) => s,
+        None => {
+            tracing::warn!("Sync session was None, creating a new one");
+            unsafe { SyncSession::start(sync_handle.raw_db()) }
+                .map_err(|e| format!("Failed to create replacement sync session: {e}"))?
+        }
+    };
+
+    let timestamp = hlc.now().to_string();
+
+    // Run the core sync cycle: grab changeset, drop session, pull remote changes
+    let sync_result = unsafe {
+        sync_service
+            .sync(
+                sync_handle.raw_db(),
+                session,
+                *local_seq,
+                &cursors,
+                bucket,
+                &timestamp,
+                "background sync",
+                user_keypair,
+                None, // membership_chain: solo/legacy library for now
+            )
+            .await
+    };
+
+    let sync_result = match sync_result {
+        Ok(r) => r,
+        Err(e) => {
+            // Try to restart the session even if the cycle failed
+            match unsafe { SyncSession::start(sync_handle.raw_db()) } {
+                Ok(new_session) => {
+                    *sync_handle.session.lock().await = Some(new_session);
+                }
+                Err(session_err) => {
+                    tracing::error!("Failed to restart sync session after error: {session_err}");
+                }
+            }
+            return Err(format!("Sync cycle error: {e}"));
+        }
+    };
+
+    // Handle outgoing changeset (push)
+    if let Some(outgoing) = &sync_result.outgoing {
+        let seq = outgoing.seq;
+
+        // Stage before pushing so bytes survive a push failure
+        stage_changeset(library_dir, &outgoing.packed);
+        *staged_seq = Some(seq);
+        let _ = db.set_sync_state("staged_seq", &seq.to_string()).await;
+
+        match push_changeset(
+            bucket,
+            device_id,
+            seq,
+            outgoing.packed.clone(),
+            *snapshot_seq,
+            &timestamp,
+        )
+        .await
+        {
+            Ok(()) => {
+                clear_staged_changeset(library_dir);
+                *staged_seq = None;
+                *local_seq = seq;
+                let _ = db.set_sync_state("local_seq", &seq.to_string()).await;
+                let _ = db.set_sync_state("staged_seq", "").await;
+
+                tracing::info!(seq, "Pushed changeset");
+            }
+            Err(e) => {
+                tracing::warn!(seq, "Push failed, changeset staged for retry: {e}");
+                // staged_seq is already set; it will be retried next cycle
+            }
+        }
+    }
+
+    // Persist updated cursors
+    for (cursor_device_id, cursor_seq) in &sync_result.updated_cursors {
+        if let Err(e) = db.set_sync_cursor(cursor_device_id, *cursor_seq).await {
+            tracing::warn!(
+                device_id = cursor_device_id,
+                seq = cursor_seq,
+                "Failed to persist sync cursor: {e}"
+            );
+        }
+    }
+
+    // Update HLC with max remote timestamp from pull results
+    let max_remote_ts = sync_result
+        .pull
+        .remote_heads
+        .iter()
+        .filter(|h| h.device_id != device_id)
+        .filter_map(|h| h.last_sync.as_deref())
+        .filter_map(|ts_str| {
+            // The last_sync field is RFC 3339, not HLC format.
+            // Parse the wall clock time and create a Timestamp for HLC update.
+            chrono::DateTime::parse_from_rfc3339(ts_str)
+                .ok()
+                .map(|dt| dt.timestamp_millis().max(0) as u64)
+        })
+        .max();
+
+    if let Some(remote_millis) = max_remote_ts {
+        let remote_ts = Timestamp::new(remote_millis, 0, "remote".to_string());
+        hlc.update(&remote_ts);
+    }
+
+    // Start a new sync session
+    match unsafe { SyncSession::start(sync_handle.raw_db()) } {
+        Ok(new_session) => {
+            *sync_handle.session.lock().await = Some(new_session);
+        }
+        Err(e) => {
+            tracing::error!("Failed to start new sync session: {e}");
+            return Err(format!("Failed to restart sync session: {e}"));
+        }
+    }
+
+    // Build sync status from remote heads
+    let now = chrono::Utc::now().to_rfc3339();
+    let status = build_sync_status(&sync_result.pull.remote_heads, device_id, Some(&now));
+
+    Ok(SyncOutcome {
+        status,
+        changesets_applied: sync_result.pull.changesets_applied,
+    })
 }
