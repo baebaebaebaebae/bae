@@ -31,6 +31,23 @@ pub struct Member {
     pub is_self: bool,
 }
 
+/// Status of an invite operation.
+#[derive(Clone, Debug, PartialEq)]
+pub enum InviteStatus {
+    Sending,
+    Success,
+    Error(String),
+}
+
+/// Bucket coordinates to share with an invitee after a successful invite.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShareInfo {
+    pub bucket: String,
+    pub region: String,
+    pub endpoint: Option<String>,
+    pub invitee_pubkey: String,
+}
+
 /// Sync status state for the UI.
 #[derive(Clone, Debug, Default, PartialEq, Store)]
 pub struct SyncState {
@@ -56,4 +73,10 @@ pub struct SyncState {
     pub sync_endpoint: Option<String>,
     /// Whether sync is fully configured (bucket + region + credentials present).
     pub sync_configured: bool,
+
+    // Invite flow state
+    /// Current invite operation status.
+    pub invite_status: Option<InviteStatus>,
+    /// Share info shown after a successful invite.
+    pub share_info: Option<ShareInfo>,
 }

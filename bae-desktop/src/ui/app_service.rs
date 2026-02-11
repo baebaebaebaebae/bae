@@ -1105,6 +1105,184 @@ impl AppService {
         });
     }
 
+    /// Invite a new member to the shared library.
+    ///
+    /// If no membership chain exists yet, bootstraps the founder entry first.
+    /// Creates the invitation (membership entry + wrapped key), uploads to the
+    /// bucket, and refreshes the member list in the store.
+    pub fn invite_member(&self, invitee_pubkey_hex: String, role: MemberRole) {
+        let Some(sync_handle) = self.sync_handle.clone() else {
+            self.state
+                .sync()
+                .invite_status()
+                .set(Some(bae_ui::stores::InviteStatus::Error(
+                    "Sync is not configured".to_string(),
+                )));
+            return;
+        };
+
+        let Some(ref user_keypair) = self.user_keypair else {
+            self.state
+                .sync()
+                .invite_status()
+                .set(Some(bae_ui::stores::InviteStatus::Error(
+                    "No user keypair available".to_string(),
+                )));
+            return;
+        };
+
+        let encryption_key_hex = match self.key_service.get_encryption_key() {
+            Some(k) => k,
+            None => {
+                self.state
+                    .sync()
+                    .invite_status()
+                    .set(Some(bae_ui::stores::InviteStatus::Error(
+                        "Encryption key not configured".to_string(),
+                    )));
+                return;
+            }
+        };
+
+        let state = self.state;
+        let keypair = user_keypair.clone();
+        let user_pubkey_hex = hex::encode(keypair.public_key);
+        let hlc = sync_handle.hlc.clone();
+        let config = self.config.clone();
+
+        state
+            .sync()
+            .invite_status()
+            .set(Some(bae_ui::stores::InviteStatus::Sending));
+
+        spawn(async move {
+            let bucket: &dyn SyncBucketClient = &*sync_handle.bucket_client;
+
+            let result: Result<(), String> = async {
+                // Parse the encryption key from hex.
+                let key_bytes: [u8; 32] = hex::decode(&encryption_key_hex)
+                    .map_err(|e| format!("Invalid encryption key hex: {e}"))?
+                    .try_into()
+                    .map_err(|_| "Encryption key wrong length".to_string())?;
+
+                // Download existing membership entries.
+                let entry_keys = bucket
+                    .list_membership_entries()
+                    .await
+                    .map_err(|e| format!("Failed to list membership entries: {e}"))?;
+
+                let mut chain = if entry_keys.is_empty() {
+                    // No membership chain yet -- bootstrap with a founder entry.
+                    let mut founder = MembershipEntry {
+                        action: MembershipAction::Add,
+                        user_pubkey: user_pubkey_hex.clone(),
+                        role: CoreMemberRole::Owner,
+                        timestamp: hlc.now().to_string(),
+                        author_pubkey: String::new(),
+                        signature: String::new(),
+                    };
+
+                    sign_membership_entry(&mut founder, &keypair);
+
+                    let mut chain = MembershipChain::new();
+                    chain
+                        .add_entry(founder.clone())
+                        .map_err(|e| format!("Failed to create founder entry: {e}"))?;
+
+                    // Upload the founder entry to the bucket.
+                    let founder_bytes = serde_json::to_vec(&founder)
+                        .map_err(|e| format!("Failed to serialize founder entry: {e}"))?;
+                    bucket
+                        .put_membership_entry(&user_pubkey_hex, 1, founder_bytes)
+                        .await
+                        .map_err(|e| format!("Failed to upload founder entry: {e}"))?;
+
+                    tracing::info!("Bootstrapped membership chain with founder entry");
+
+                    chain
+                } else {
+                    // Build chain from existing entries.
+                    let mut raw_entries = Vec::new();
+                    for (author, seq) in &entry_keys {
+                        let data =
+                            bucket
+                                .get_membership_entry(author, *seq)
+                                .await
+                                .map_err(|e| {
+                                    format!("Failed to get membership entry {author}/{seq}: {e}")
+                                })?;
+                        let entry: MembershipEntry =
+                            serde_json::from_slice(&data).map_err(|e| {
+                                format!("Failed to parse membership entry {author}/{seq}: {e}")
+                            })?;
+                        raw_entries.push(entry);
+                    }
+
+                    MembershipChain::from_entries(raw_entries)
+                        .map_err(|e| format!("Invalid membership chain: {e}"))?
+                };
+
+                // Convert UI role to core role.
+                let core_role = match role {
+                    MemberRole::Owner => CoreMemberRole::Owner,
+                    MemberRole::Member => CoreMemberRole::Member,
+                };
+
+                // Create the invitation (validates chain, wraps key, uploads).
+                let invite_ts = hlc.now().to_string();
+
+                bae_core::sync::invite::create_invitation(
+                    bucket,
+                    &mut chain,
+                    &keypair,
+                    &invitee_pubkey_hex,
+                    core_role,
+                    &key_bytes,
+                    &invite_ts,
+                )
+                .await
+                .map_err(|e| format!("Failed to create invitation: {e}"))?;
+
+                tracing::info!("Invited member {}", &invitee_pubkey_hex[..16]);
+
+                Ok(())
+            }
+            .await;
+
+            match result {
+                Ok(()) => {
+                    state
+                        .sync()
+                        .invite_status()
+                        .set(Some(bae_ui::stores::InviteStatus::Success));
+
+                    // Set share info for the UI.
+                    state
+                        .sync()
+                        .share_info()
+                        .set(Some(bae_ui::stores::ShareInfo {
+                            bucket: config.sync_s3_bucket.clone().unwrap_or_default(),
+                            region: config.sync_s3_region.clone().unwrap_or_default(),
+                            endpoint: config.sync_s3_endpoint.clone(),
+                            invitee_pubkey: invitee_pubkey_hex,
+                        }));
+
+                    // Reload the member list.
+                    match load_membership_from_bucket(bucket, Some(&user_pubkey_hex)).await {
+                        Ok(members) => state.sync().members().set(members),
+                        Err(e) => tracing::warn!("Failed to reload membership after invite: {e}"),
+                    }
+                }
+                Err(e) => {
+                    state
+                        .sync()
+                        .invite_status()
+                        .set(Some(bae_ui::stores::InviteStatus::Error(e)));
+                }
+            }
+        });
+    }
+
     /// Save sync bucket configuration to config.yaml and credentials to keyring.
     /// Updates the store with the new values.
     pub fn save_sync_config(&self, config_data: bae_ui::SyncBucketConfig) -> Result<(), String> {
@@ -2017,7 +2195,10 @@ use bae_core::library_dir::LibraryDir;
 use bae_core::sync::attribution::AttributionMap;
 use bae_core::sync::bucket::SyncBucketClient;
 use bae_core::sync::hlc::Timestamp;
-use bae_core::sync::membership::{MemberRole as CoreMemberRole, MembershipChain, MembershipEntry};
+use bae_core::sync::membership::{
+    sign_membership_entry, MemberRole as CoreMemberRole, MembershipAction, MembershipChain,
+    MembershipEntry,
+};
 use bae_core::sync::service::SyncService;
 use bae_core::sync::session::SyncSession;
 use bae_core::sync::status::build_sync_status;
