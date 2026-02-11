@@ -1147,6 +1147,17 @@ impl AppService {
         let state = self.state;
         let keypair = user_keypair.clone();
         let user_pubkey_hex = hex::encode(keypair.public_key);
+
+        if invitee_pubkey_hex == user_pubkey_hex {
+            state
+                .sync()
+                .invite_status()
+                .set(Some(bae_ui::stores::InviteStatus::Error(
+                    "Cannot invite yourself".to_string(),
+                )));
+            return;
+        }
+
         let hlc = sync_handle.hlc.clone();
         let config = self.config.clone();
 
@@ -1243,7 +1254,10 @@ impl AppService {
                 .await
                 .map_err(|e| format!("Failed to create invitation: {e}"))?;
 
-                tracing::info!("Invited member {}", &invitee_pubkey_hex[..16]);
+                tracing::info!(
+                    "Invited member {}...",
+                    &invitee_pubkey_hex[..invitee_pubkey_hex.len().min(16)]
+                );
 
                 Ok(())
             }
