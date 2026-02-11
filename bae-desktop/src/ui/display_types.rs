@@ -27,7 +27,7 @@ pub fn artist_from_db_ref(db: &DbArtist, imgs: &ImageServerHandle) -> Artist {
     Artist {
         id: db.id.clone(),
         name: db.name.clone(),
-        image_url: Some(imgs.image_url(&db.id)),
+        image_url: imgs.image_url_if_exists(&db.id),
     }
 }
 
