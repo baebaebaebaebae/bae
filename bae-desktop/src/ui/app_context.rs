@@ -8,7 +8,7 @@ use bae_core::cache;
 use bae_core::config;
 use bae_core::image_server::ImageServerHandle;
 use bae_core::import;
-use bae_core::keys::KeyService;
+use bae_core::keys::{KeyService, UserKeypair};
 use bae_core::library::SharedLibraryManager;
 use bae_core::playback;
 #[cfg(feature = "torrent")]
@@ -38,6 +38,8 @@ pub struct AppServices {
     pub key_service: KeyService,
     /// Image server connection handle
     pub image_server: ImageServerHandle,
+    /// User's Ed25519 keypair for signing and key exchange
+    pub user_keypair: Option<UserKeypair>,
 }
 
 #[derive(Clone)]
@@ -51,4 +53,5 @@ pub struct AppContext {
     pub torrent_manager: torrent::LazyTorrentManager,
     pub key_service: KeyService,
     pub image_server: ImageServerHandle,
+    pub user_keypair: Option<UserKeypair>,
 }
