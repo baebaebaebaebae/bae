@@ -1,4 +1,5 @@
 use crate::library_dir::LibraryDir;
+use crate::sync::participation::{default_participation, ParticipationMode};
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
@@ -91,6 +92,10 @@ pub struct ConfigYaml {
     pub torrent_max_uploads: Option<i32>,
     /// Max upload slots per torrent. None = disabled/unlimited.
     pub torrent_max_uploads_per_torrent: Option<i32>,
+    /// Discovery network participation mode (off, attestations_only, full).
+    /// Controls whether this library announces releases on the DHT and shares attestations.
+    #[serde(default = "default_participation")]
+    pub network_participation: ParticipationMode,
     /// Enable the Subsonic API server
     #[serde(default = "default_true")]
     pub subsonic_enabled: bool,
@@ -138,6 +143,7 @@ pub struct Config {
     pub torrent_max_connections_per_torrent: Option<i32>,
     pub torrent_max_uploads: Option<i32>,
     pub torrent_max_uploads_per_torrent: Option<i32>,
+    pub network_participation: ParticipationMode,
     pub subsonic_enabled: bool,
     pub subsonic_port: u16,
 }
@@ -222,6 +228,7 @@ impl Config {
             torrent_max_connections_per_torrent: None,
             torrent_max_uploads: None,
             torrent_max_uploads_per_torrent: None,
+            network_participation: ParticipationMode::Off,
             subsonic_enabled: true,
             subsonic_port: 4533,
         }
@@ -309,6 +316,7 @@ impl Config {
             torrent_max_connections_per_torrent: yaml_config.torrent_max_connections_per_torrent,
             torrent_max_uploads: yaml_config.torrent_max_uploads,
             torrent_max_uploads_per_torrent: yaml_config.torrent_max_uploads_per_torrent,
+            network_participation: yaml_config.network_participation,
             subsonic_enabled: yaml_config.subsonic_enabled,
             subsonic_port: yaml_config.subsonic_port.unwrap_or(4533),
         }
@@ -394,6 +402,7 @@ impl Config {
             torrent_max_connections_per_torrent: self.torrent_max_connections_per_torrent,
             torrent_max_uploads: self.torrent_max_uploads,
             torrent_max_uploads_per_torrent: self.torrent_max_uploads_per_torrent,
+            network_participation: self.network_participation,
             subsonic_enabled: self.subsonic_enabled,
             subsonic_port: Some(self.subsonic_port),
         };
@@ -436,6 +445,7 @@ impl Config {
             torrent_max_connections_per_torrent: None,
             torrent_max_uploads: None,
             torrent_max_uploads_per_torrent: None,
+            network_participation: ParticipationMode::Off,
             subsonic_enabled: true,
             subsonic_port: 4533,
         };
@@ -689,6 +699,7 @@ mod tests {
             torrent_max_connections_per_torrent: None,
             torrent_max_uploads: None,
             torrent_max_uploads_per_torrent: None,
+            network_participation: ParticipationMode::Off,
             subsonic_enabled: true,
             subsonic_port: 4533,
         }
@@ -706,6 +717,22 @@ mod tests {
         let yaml = "library_id: abc-123\n";
         let config: ConfigYaml = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.library_id, "abc-123");
+        // network_participation defaults to Off when absent
+        assert_eq!(config.network_participation, ParticipationMode::Off);
+    }
+
+    #[test]
+    fn config_yaml_parses_network_participation() {
+        let yaml = "library_id: abc-123\nnetwork_participation: full\n";
+        let config: ConfigYaml = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.network_participation, ParticipationMode::Full);
+
+        let yaml = "library_id: abc-123\nnetwork_participation: attestations_only\n";
+        let config: ConfigYaml = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(
+            config.network_participation,
+            ParticipationMode::AttestationsOnly
+        );
     }
 
     #[test]

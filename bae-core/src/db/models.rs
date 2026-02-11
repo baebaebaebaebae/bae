@@ -175,6 +175,9 @@ pub struct DbRelease {
     /// Barcode
     pub barcode: Option<String>,
     pub import_status: ImportStatus,
+    /// When true, this release is excluded from discovery network participation
+    /// (no DHT announces, no attestation sharing).
+    pub private: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -454,6 +457,7 @@ impl DbRelease {
             country: None,
             barcode: None,
             import_status: ImportStatus::Queued,
+            private: false,
             created_at: now,
             updated_at: now,
         }
@@ -479,6 +483,7 @@ impl DbRelease {
             country: release.country.clone(),
             barcode: None,
             import_status: ImportStatus::Queued,
+            private: false,
             created_at: now,
             updated_at: now,
         }
@@ -502,6 +507,7 @@ impl DbRelease {
             country: release.country.clone(),
             barcode: release.barcode.clone(),
             import_status: ImportStatus::Queued,
+            private: false,
             created_at: now,
             updated_at: now,
         }

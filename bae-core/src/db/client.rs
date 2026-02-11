@@ -895,6 +895,7 @@ impl Database {
                 country: row.get("country"),
                 barcode: row.get("barcode"),
                 import_status: row.get("import_status"),
+                private: row.get("private"),
                 updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
                     .with_timezone(&Utc),
@@ -2347,5 +2348,35 @@ impl Database {
             signature: row.get("signature"),
             created_at: row.get("created_at"),
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Release privacy
+    // -------------------------------------------------------------------------
+
+    /// Set the private flag on a release.
+    pub async fn set_release_private(
+        &self,
+        release_id: &str,
+        private: bool,
+    ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
+        sqlx::query("UPDATE releases SET private = ?, _updated_at = ? WHERE id = ?")
+            .bind(private)
+            .bind(Utc::now().to_rfc3339())
+            .bind(release_id)
+            .execute(&mut *conn)
+            .await?;
+        Ok(())
+    }
+
+    /// Check whether a release is marked as private.
+    /// Returns false if the release does not exist.
+    pub async fn is_release_private(&self, release_id: &str) -> Result<bool, sqlx::Error> {
+        let row = sqlx::query("SELECT private FROM releases WHERE id = ?")
+            .bind(release_id)
+            .fetch_optional(&self.inner.read_pool)
+            .await?;
+        Ok(row.map(|r| r.get::<bool, _>("private")).unwrap_or(false))
     }
 }

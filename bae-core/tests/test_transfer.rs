@@ -72,6 +72,7 @@ async fn create_album_and_release(db: &Database) -> (String, String) {
         country: None,
         barcode: None,
         import_status: ImportStatus::Complete,
+        private: false,
         created_at: now,
         updated_at: now,
     };
