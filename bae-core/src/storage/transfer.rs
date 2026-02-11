@@ -5,14 +5,12 @@
 //! deferred cleanup.
 
 use crate::cloud_storage::CloudStorage;
-use crate::content_type::ContentType;
 use crate::db::{DbFile, DbReleaseStorage, DbStorageProfile, StorageLocation};
 use crate::encryption::EncryptionService;
 use crate::keys::KeyService;
 use crate::library::SharedLibraryManager;
 use crate::library_dir::LibraryDir;
-use crate::storage::{create_storage_reader, ReleaseStorage, ReleaseStorageImpl};
-use std::collections::HashMap;
+use crate::storage::{create_storage_reader, ReleaseStorageImpl};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -223,20 +221,9 @@ async fn do_transfer(
         });
     }
 
-    // Save audio_format → file links before deleting old files.
-    // After delete (ON DELETE SET NULL), file_id becomes NULL and we re-link.
-    let af_links = mgr.get_audio_format_file_links(release_id).await?;
-    let old_file_to_name: HashMap<String, String> = old_files
-        .iter()
-        .map(|f| (f.id.clone(), f.original_filename.clone()))
-        .collect();
-
-    // 3. Write files to destination
+    // 3. Write files to destination, updating existing records in place
     match &target {
         TransferTarget::Profile(dest_profile) => {
-            mgr.delete_files_for_release(release_id).await?;
-            mgr.delete_release_storage(release_id).await?;
-
             let database = Arc::new(mgr.database().clone());
 
             #[cfg(feature = "test-utils")]
@@ -266,16 +253,22 @@ async fn do_transfer(
             )
             .await?;
 
-            for (i, (filename, data)) in file_data.iter().enumerate() {
-                let total_files = file_data.len();
+            let encryption_scheme = if dest_profile.encrypted {
+                "xchacha20poly1305"
+            } else {
+                "none"
+            };
+
+            for (i, file) in old_files.iter().enumerate() {
+                let data = &file_data[i].1;
+                let total_files = old_files.len();
                 let tx_clone = tx.clone();
                 let rid = release_id.to_string();
-                let fname = filename.clone();
+                let fname = file.original_filename.clone();
 
-                storage
-                    .write_file(
-                        release_id,
-                        filename,
+                let (new_source_path, nonce) = storage
+                    .store_bytes(
+                        &file.id,
                         data,
                         Box::new(move |bytes_written, total_bytes| {
                             let percent = if total_bytes > 0 {
@@ -293,65 +286,48 @@ async fn do_transfer(
                         }),
                     )
                     .await?;
+
+                mgr.update_file_source_path(
+                    &file.id,
+                    &new_source_path,
+                    nonce.as_deref(),
+                    encryption_scheme,
+                )
+                .await?;
             }
 
-            // Link release to new profile
+            // Update release → profile link
+            mgr.delete_release_storage(release_id).await?;
+
             let release_storage = DbReleaseStorage::new(release_id, &dest_profile.id);
             mgr.insert_release_storage(&release_storage).await?;
         }
         TransferTarget::Eject(target_dir) => {
-            // Write files to target directory as plain files
             tokio::fs::create_dir_all(target_dir).await?;
 
-            for (i, (filename, data)) in file_data.iter().enumerate() {
-                let dest_path = target_dir.join(filename);
+            for (i, file) in old_files.iter().enumerate() {
+                let data = &file_data[i].1;
+                let dest_path = target_dir.join(&file.original_filename);
                 tokio::fs::write(&dest_path, data).await?;
+
+                mgr.update_file_source_path(
+                    &file.id,
+                    &dest_path.display().to_string(),
+                    None,
+                    "none",
+                )
+                .await?;
 
                 let _ = tx.send(TransferProgress::FileProgress {
                     release_id: release_id.to_string(),
                     file_index: i,
                     total_files: file_data.len(),
-                    filename: filename.clone(),
+                    filename: file.original_filename.clone(),
                     percent: 100,
                 });
             }
 
-            mgr.delete_files_for_release(release_id).await?;
             mgr.delete_release_storage(release_id).await?;
-
-            for (filename, data) in &file_data {
-                let dest_path = target_dir.join(filename);
-                let ext = Path::new(filename)
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("bin")
-                    .to_lowercase();
-                let mut db_file = DbFile::new(
-                    release_id,
-                    filename,
-                    data.len() as i64,
-                    ContentType::from_extension(&ext),
-                );
-                db_file.source_path = Some(dest_path.display().to_string());
-                mgr.add_file(&db_file).await?;
-            }
-        }
-    }
-
-    // Re-link audio_formats to the new files (file_id was set to NULL by ON DELETE SET NULL)
-    if !af_links.is_empty() {
-        let new_files = mgr.get_files_for_release(release_id).await?;
-        let name_to_new_id: HashMap<&str, &str> = new_files
-            .iter()
-            .map(|f| (f.original_filename.as_str(), f.id.as_str()))
-            .collect();
-
-        for (af_id, old_file_id) in &af_links {
-            if let Some(filename) = old_file_to_name.get(old_file_id) {
-                if let Some(new_file_id) = name_to_new_id.get(filename.as_str()) {
-                    mgr.set_audio_format_file_id(af_id, new_file_id).await?;
-                }
-            }
         }
     }
 

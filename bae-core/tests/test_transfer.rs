@@ -452,9 +452,9 @@ async fn test_eject_from_local_profile() {
     assert_eq!(pending.len(), original_files.len());
 }
 
-/// Transfer re-links audio_format.file_id to the new files after transfer.
+/// Transfer preserves audio_format.file_id since file records are updated in place.
 #[tokio::test]
-async fn test_transfer_relinks_audio_format_file_ids() {
+async fn test_transfer_preserves_audio_format_file_ids() {
     tracing_init();
 
     let temp = TempDir::new().unwrap();
@@ -504,14 +504,6 @@ async fn test_transfer_relinks_audio_format_file_ids() {
     .with_file_id(&db_file.id);
     db.insert_audio_format(&af).await.unwrap();
 
-    // Verify audio_format points to original file
-    let af_before = db
-        .get_audio_format_by_track_id(&track.id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(af_before.file_id.as_deref(), Some(db_file.id.as_str()));
-
     // Create destination profile and transfer
     let dest_profile =
         DbStorageProfile::new_local("Local Storage", storage_dir.to_str().unwrap(), false);
@@ -533,30 +525,33 @@ async fn test_transfer_relinks_audio_format_file_ids() {
         .iter()
         .any(|e| matches!(e, TransferProgress::Complete { .. })));
 
-    // Verify audio_format is re-linked to the new file
+    // File ID unchanged — file record was updated in place, not deleted/recreated
     let af_after = db
         .get_audio_format_by_track_id(&track.id)
         .await
         .unwrap()
         .unwrap();
-    assert!(
-        af_after.file_id.is_some(),
-        "audio_format.file_id should be re-linked after transfer"
-    );
-    assert_ne!(
+    assert_eq!(
         af_after.file_id.as_deref(),
         Some(db_file.id.as_str()),
-        "file_id should point to the new file, not the old one"
+        "audio_format.file_id should be unchanged after transfer"
     );
 
-    // Verify the new file_id points to a valid file in the new storage
-    let new_file = shared_mgr
+    // The file record's source_path should now point to the new storage
+    let file_after = shared_mgr
         .get()
-        .get_file_by_id(af_after.file_id.as_ref().unwrap())
+        .get_file_by_id(&db_file.id)
         .await
+        .unwrap()
         .unwrap();
-    assert!(new_file.is_some(), "New file should exist in DB");
-    assert_eq!(new_file.unwrap().original_filename, "track1.flac");
+    assert!(
+        file_after
+            .source_path
+            .as_ref()
+            .unwrap()
+            .contains(storage_dir.to_str().unwrap()),
+        "File source_path should point to new storage"
+    );
 }
 
 /// Transfer with no files should fail gracefully.

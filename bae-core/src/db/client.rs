@@ -1154,43 +1154,27 @@ impl Database {
         }
     }
 
-    /// Get audio_format file links for a release: (audio_format_id, file_id) pairs.
-    /// Only returns rows where file_id is set.
-    pub async fn get_audio_format_file_links(
+    /// Update source_path (and encryption fields) on an existing file record.
+    pub async fn update_file_source_path(
         &self,
-        release_id: &str,
-    ) -> Result<Vec<(String, String)>, sqlx::Error> {
-        let rows = sqlx::query(
-            r#"
-            SELECT af.id, af.file_id
-            FROM audio_formats af
-            JOIN tracks t ON t.id = af.track_id
-            WHERE t.release_id = ? AND af.file_id IS NOT NULL
-            "#,
-        )
-        .bind(release_id)
-        .fetch_all(&self.inner.read_pool)
-        .await?;
-
-        Ok(rows
-            .iter()
-            .map(|r| (r.get("id"), r.get("file_id")))
-            .collect())
-    }
-
-    /// Update the file_id on an audio_format row.
-    pub async fn set_audio_format_file_id(
-        &self,
-        audio_format_id: &str,
         file_id: &str,
+        source_path: &str,
+        encryption_nonce: Option<&[u8]>,
+        encryption_scheme: &str,
     ) -> Result<(), sqlx::Error> {
         let mut conn = self.writer()?.lock().await;
-        sqlx::query("UPDATE audio_formats SET file_id = ?, _updated_at = ? WHERE id = ?")
-            .bind(file_id)
-            .bind(chrono::Utc::now().to_rfc3339())
-            .bind(audio_format_id)
-            .execute(&mut *conn)
-            .await?;
+        sqlx::query(
+            r#"UPDATE release_files
+               SET source_path = ?, encryption_nonce = ?, encryption_scheme = ?, _updated_at = ?
+               WHERE id = ?"#,
+        )
+        .bind(source_path)
+        .bind(encryption_nonce)
+        .bind(encryption_scheme)
+        .bind(chrono::Utc::now().to_rfc3339())
+        .bind(file_id)
+        .execute(&mut *conn)
+        .await?;
         Ok(())
     }
 
@@ -1959,16 +1943,6 @@ impl Database {
     pub async fn delete_release_storage(&self, release_id: &str) -> Result<(), sqlx::Error> {
         let mut conn = self.writer()?.lock().await;
         sqlx::query("DELETE FROM release_storage WHERE release_id = ?")
-            .bind(release_id)
-            .execute(&mut *conn)
-            .await?;
-        Ok(())
-    }
-
-    /// Delete all file records for a release
-    pub async fn delete_files_for_release(&self, release_id: &str) -> Result<(), sqlx::Error> {
-        let mut conn = self.writer()?.lock().await;
-        sqlx::query("DELETE FROM release_files WHERE release_id = ?")
             .bind(release_id)
             .execute(&mut *conn)
             .await?;

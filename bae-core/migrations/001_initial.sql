@@ -128,7 +128,7 @@ CREATE TABLE audio_formats (
     bits_per_sample INTEGER NOT NULL,
     seektable_json TEXT NOT NULL,
     audio_data_start INTEGER NOT NULL,
-    file_id TEXT REFERENCES release_files(id),
+    file_id TEXT REFERENCES release_files(id) ON DELETE SET NULL,
     _updated_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY (track_id) REFERENCES tracks (id) ON DELETE CASCADE

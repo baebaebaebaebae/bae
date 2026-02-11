@@ -248,26 +248,17 @@ impl LibraryManager {
         Ok(self.database.get_audio_format_by_track_id(track_id).await?)
     }
 
-    /// Get audio_format file links for a release: (audio_format_id, file_id) pairs.
-    pub async fn get_audio_format_file_links(
+    /// Update source_path (and encryption fields) on an existing file record.
+    pub async fn update_file_source_path(
         &self,
-        release_id: &str,
-    ) -> Result<Vec<(String, String)>, LibraryError> {
-        Ok(self
-            .database
-            .get_audio_format_file_links(release_id)
-            .await?)
-    }
-
-    /// Update the file_id on an audio_format row.
-    pub async fn set_audio_format_file_id(
-        &self,
-        audio_format_id: &str,
         file_id: &str,
+        source_path: &str,
+        encryption_nonce: Option<&[u8]>,
+        encryption_scheme: &str,
     ) -> Result<(), LibraryError> {
         Ok(self
             .database
-            .set_audio_format_file_id(audio_format_id, file_id)
+            .update_file_source_path(file_id, source_path, encryption_nonce, encryption_scheme)
             .await?)
     }
 
@@ -680,11 +671,6 @@ impl LibraryManager {
     /// Delete release storage link
     pub async fn delete_release_storage(&self, release_id: &str) -> Result<(), LibraryError> {
         Ok(self.database.delete_release_storage(release_id).await?)
-    }
-
-    /// Delete all file records for a release
-    pub async fn delete_files_for_release(&self, release_id: &str) -> Result<(), LibraryError> {
-        Ok(self.database.delete_files_for_release(release_id).await?)
     }
 
     /// Insert release storage link

@@ -102,6 +102,73 @@ impl ReleaseStorageImpl {
         }
     }
 
+    /// Write bytes to storage without creating a DB record.
+    ///
+    /// Uses the given `file_id` for the hash-based storage path.
+    /// Returns `(source_path, encryption_nonce)`.
+    pub async fn store_bytes(
+        &self,
+        file_id: &str,
+        data: &[u8],
+        on_progress: ProgressCallback,
+    ) -> Result<(String, Option<Vec<u8>>), StorageError> {
+        use tokio::io::AsyncWriteExt;
+
+        let total_bytes = data.len();
+        on_progress(0, total_bytes);
+
+        let data_to_store = self.encrypt_if_needed(data)?;
+
+        let nonce = if self.profile.encrypted && data_to_store.len() >= 24 {
+            Some(data_to_store[..24].to_vec())
+        } else {
+            None
+        };
+
+        let rel_path = storage_path(file_id);
+
+        let source_path = match self.profile.location {
+            StorageLocation::Local => {
+                let path = PathBuf::from(&self.profile.location_path).join(&rel_path);
+                if let Some(parent) = path.parent() {
+                    tokio::fs::create_dir_all(parent).await?;
+                }
+
+                let batch_size = 1_048_576;
+                let file = tokio::fs::File::create(&path).await?;
+                let mut writer = tokio::io::BufWriter::new(file);
+                let mut bytes_written = 0usize;
+
+                for chunk in data_to_store.chunks(batch_size) {
+                    writer.write_all(chunk).await?;
+                    bytes_written += chunk.len();
+
+                    let progress_bytes = if data_to_store.len() != data.len() {
+                        (bytes_written as f64 * data.len() as f64 / data_to_store.len() as f64)
+                            as usize
+                    } else {
+                        bytes_written
+                    };
+                    on_progress(progress_bytes.min(total_bytes), total_bytes);
+                }
+
+                writer.flush().await?;
+                path.display().to_string()
+            }
+            StorageLocation::Cloud => {
+                let cloud = self.cloud.as_ref().ok_or(StorageError::NotConfigured)?;
+                let storage_location = cloud
+                    .upload(&rel_path, &data_to_store)
+                    .await
+                    .map_err(|e| StorageError::Cloud(e.to_string()))?;
+                on_progress(total_bytes, total_bytes);
+                storage_location
+            }
+        };
+
+        Ok((source_path, nonce))
+    }
+
     /// Encrypt data if encryption is enabled
     fn encrypt_if_needed(&self, data: &[u8]) -> Result<Vec<u8>, StorageError> {
         if !self.profile.encrypted {
