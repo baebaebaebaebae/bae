@@ -150,8 +150,8 @@ impl CueFlacProcessor {
         Self::extract_flac_headers_from_data(&file_data)
     }
 
-    /// Extract FLAC headers from data, omitting the embedded seektable.
-    fn extract_flac_headers_from_data(file_data: &[u8]) -> Result<FlacHeaders, CueFlacError> {
+    /// Extract FLAC headers from in-memory data, omitting the embedded seektable.
+    pub fn extract_flac_headers_from_data(file_data: &[u8]) -> Result<FlacHeaders, CueFlacError> {
         if file_data.len() < 4 || &file_data[0..4] != b"fLaC" {
             return Err(CueFlacError::Flac("Invalid FLAC signature".to_string()));
         }
@@ -221,8 +221,8 @@ impl CueFlacProcessor {
         Self::analyze_flac_data(&file_data)
     }
 
-    /// Analyze FLAC data and extract metadata
-    fn analyze_flac_data(file_data: &[u8]) -> Result<FlacInfo, CueFlacError> {
+    /// Analyze in-memory FLAC data and extract metadata.
+    pub fn analyze_flac_data(file_data: &[u8]) -> Result<FlacInfo, CueFlacError> {
         if file_data.len() < 4 || &file_data[0..4] != b"fLaC" {
             return Err(CueFlacError::Flac("Invalid FLAC signature".to_string()));
         }

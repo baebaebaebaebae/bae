@@ -1185,6 +1185,112 @@ impl Database {
         Ok(())
     }
 
+    /// Insert multiple files in a single transaction.
+    pub async fn batch_insert_files(&self, files: &[DbFile]) -> Result<(), sqlx::Error> {
+        if files.is_empty() {
+            return Ok(());
+        }
+        let mut conn = self.writer()?.lock().await;
+        let mut tx = conn.begin().await?;
+
+        for file in files {
+            sqlx::query(
+                r#"
+                INSERT INTO release_files (
+                    id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, encryption_scheme, _updated_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&file.id)
+            .bind(&file.release_id)
+            .bind(&file.original_filename)
+            .bind(file.file_size)
+            .bind(file.content_type.as_str())
+            .bind(&file.source_path)
+            .bind(&file.encryption_nonce)
+            .bind(file.encryption_scheme.as_str())
+            .bind(file.updated_at.to_rfc3339())
+            .bind(file.created_at.to_rfc3339())
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Atomically finalize an import: insert audio formats, mark tracks complete,
+    /// mark release complete, and update import status in a single transaction.
+    pub async fn finalize_import(
+        &self,
+        audio_formats: &[DbAudioFormat],
+        track_ids: &[&str],
+        release_id: &str,
+        import_id: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
+        let mut tx = conn.begin().await?;
+        let now = Utc::now().to_rfc3339();
+
+        for af in audio_formats {
+            sqlx::query(
+                r#"
+                INSERT INTO audio_formats (
+                    id, track_id, content_type, flac_headers, needs_headers, start_byte_offset, end_byte_offset, pregap_ms, frame_offset_samples, exact_sample_count, sample_rate, bits_per_sample, seektable_json, audio_data_start, file_id, _updated_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&af.id)
+            .bind(&af.track_id)
+            .bind(af.content_type.as_str())
+            .bind(&af.flac_headers)
+            .bind(af.needs_headers)
+            .bind(af.start_byte_offset)
+            .bind(af.end_byte_offset)
+            .bind(af.pregap_ms)
+            .bind(af.frame_offset_samples)
+            .bind(af.exact_sample_count)
+            .bind(af.sample_rate)
+            .bind(af.bits_per_sample)
+            .bind(&af.seektable_json)
+            .bind(af.audio_data_start)
+            .bind(&af.file_id)
+            .bind(af.updated_at.to_rfc3339())
+            .bind(af.created_at.to_rfc3339())
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        for track_id in track_ids {
+            sqlx::query("UPDATE tracks SET import_status = ?, _updated_at = ? WHERE id = ?")
+                .bind(ImportStatus::Complete)
+                .bind(&now)
+                .bind(track_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        sqlx::query("UPDATE releases SET import_status = ?, _updated_at = ? WHERE id = ?")
+            .bind(ImportStatus::Complete)
+            .bind(&now)
+            .bind(release_id)
+            .execute(&mut *tx)
+            .await?;
+
+        if let Some(import_id) = import_id {
+            let now_ts = Utc::now().timestamp();
+            sqlx::query("UPDATE imports SET status = ?, updated_at = ? WHERE id = ?")
+                .bind(ImportOperationStatus::Complete.as_str())
+                .bind(now_ts)
+                .bind(import_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Delete a release by ID
     ///
     /// This will cascade delete all related records:

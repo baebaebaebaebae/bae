@@ -7,7 +7,7 @@ use crate::content_type::ContentType;
 use crate::db::DbAlbum;
 #[cfg(feature = "cd-rip")]
 use crate::db::DbTrack;
-use crate::db::{Database, DbFile, DbRelease, DbStorageProfile, ImportOperationStatus};
+use crate::db::{Database, DbFile, DbRelease, DbStorageProfile};
 use crate::encryption::EncryptionService;
 use crate::import::folder_scanner::scan_for_candidates_with_callback;
 #[cfg(feature = "torrent")]
@@ -28,6 +28,9 @@ use crate::storage::{ReleaseStorage, ReleaseStorageImpl};
 use crate::torrent::LazyTorrentManager;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+/// Map from filename to vec of (track_id, start_byte, end_byte) for progress reporting
+type TrackProgressMap = HashMap<String, Vec<(String, i64, i64)>>;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 #[cfg(any(feature = "torrent", feature = "cd-rip"))]
@@ -53,6 +56,17 @@ fn calculate_track_percent(bytes_written: usize, start_byte: i64, end_byte: i64)
             ((written_for_track * 100) / track_size) as u8
         }
     }
+}
+
+/// Pre-analyzed CUE/FLAC data for a single FLAC file.
+///
+/// Built once during import and reused for both progress tracking and metadata persistence,
+/// avoiding redundant file reads.
+struct CueFlacAnalysis {
+    metadata: CueFlacMetadata,
+    flac_headers: Vec<u8>,
+    flac_info: crate::cue_flac::FlacInfo,
+    dense_seektable: Vec<crate::audio_codec::SeekEntry>,
 }
 
 /// Import service that orchestrates the album import workflow
@@ -577,65 +591,103 @@ impl ImportService {
         .map_err(|e| format!("Failed to create storage: {}", e))
     }
 
+    /// Analyze CUE/FLAC files once and cache the results for reuse.
+    ///
+    /// Uses in-memory file data when available (storage imports where files are already read),
+    /// falling back to reading from disk (none-storage imports).
+    fn analyze_cue_flac(
+        cue_flac_metadata: &HashMap<PathBuf, CueFlacMetadata>,
+        file_data: Option<&[(String, Vec<u8>, PathBuf)]>,
+    ) -> Result<HashMap<PathBuf, CueFlacAnalysis>, String> {
+        use crate::cue_flac::CueFlacProcessor;
+
+        let mut result = HashMap::new();
+        for (flac_path, metadata) in cue_flac_metadata {
+            // Try to find data from already-read files, otherwise read from disk
+            let data = if let Some(files) = file_data {
+                let filename = flac_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                files
+                    .iter()
+                    .find(|(name, _, _)| name == filename)
+                    .map(|(_, data, _)| data.clone())
+            } else {
+                None
+            };
+
+            let data = match data {
+                Some(d) => d,
+                None => std::fs::read(flac_path)
+                    .map_err(|e| format!("Failed to read FLAC {:?}: {}", flac_path, e))?,
+            };
+
+            let flac_info = CueFlacProcessor::analyze_flac_data(&data)
+                .map_err(|e| format!("Failed to analyze FLAC {:?}: {}", flac_path, e))?;
+            let flac_headers = CueFlacProcessor::extract_flac_headers_from_data(&data)
+                .map_err(|e| format!("Failed to extract FLAC headers {:?}: {}", flac_path, e))?;
+            let dense_seektable = CueFlacProcessor::build_dense_seektable(&data, &flac_info);
+
+            result.insert(
+                flac_path.clone(),
+                CueFlacAnalysis {
+                    metadata: metadata.clone(),
+                    flac_headers: flac_headers.headers,
+                    flac_info,
+                    dense_seektable: dense_seektable.entries,
+                },
+            );
+        }
+
+        Ok(result)
+    }
+
     /// Build a map from filename to track progress info for progress reporting.
     ///
     /// For CUE/FLAC: calculates byte ranges for each track within the shared FLAC file.
     /// For one-file-per-track: each track spans the entire file (0 to file_size).
     ///
     /// Returns: HashMap<filename, Vec<(track_id, start_byte, end_byte)>>
-    async fn build_track_progress_map(
-        &self,
+    fn build_track_progress_map(
         tracks_to_files: &[TrackFile],
         file_data: &[(String, Vec<u8>, PathBuf)],
-        cue_flac_metadata: &Option<HashMap<PathBuf, CueFlacMetadata>>,
-    ) -> Result<HashMap<String, Vec<(String, i64, i64)>>, String> {
+        cue_flac_analysis: &HashMap<PathBuf, CueFlacAnalysis>,
+    ) -> Result<TrackProgressMap, String> {
         use crate::cue_flac::CueFlacProcessor;
 
-        let mut result: HashMap<String, Vec<(String, i64, i64)>> = HashMap::new();
+        let mut result: TrackProgressMap = HashMap::new();
         let file_sizes: HashMap<&str, usize> = file_data
             .iter()
             .map(|(name, data, _)| (name.as_str(), data.len()))
             .collect();
 
-        if let Some(ref cue_metadata) = cue_flac_metadata {
-            for (flac_path, metadata) in cue_metadata {
-                let filename = flac_path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .ok_or_else(|| format!("Invalid FLAC path: {:?}", flac_path))?
-                    .to_string();
+        for (flac_path, analysis) in cue_flac_analysis {
+            let filename = flac_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| format!("Invalid FLAC path: {:?}", flac_path))?
+                .to_string();
 
-                // Read file and build dense seektable for accurate byte ranges
-                let file_data = std::fs::read(flac_path)
-                    .map_err(|e| format!("Failed to read FLAC {:?}: {}", flac_path, e))?;
-                let flac_info = CueFlacProcessor::analyze_flac(flac_path)
-                    .map_err(|e| format!("Failed to analyze FLAC {:?}: {}", flac_path, e))?;
-                let dense_seektable =
-                    CueFlacProcessor::build_dense_seektable(&file_data, &flac_info);
+            let flac_tracks: Vec<_> = tracks_to_files
+                .iter()
+                .filter(|tf| &tf.file_path == flac_path)
+                .collect();
 
-                let flac_tracks: Vec<_> = tracks_to_files
-                    .iter()
-                    .filter(|tf| &tf.file_path == flac_path)
-                    .collect();
-
-                let mut track_infos = Vec::new();
-                for (i, cue_track) in metadata.cue_sheet.tracks.iter().enumerate() {
-                    if let Some(track_file) = flac_tracks.get(i) {
-                        let audio_start_ms = cue_track.audio_start_ms();
-                        let (start_byte, end_byte, _, _) = CueFlacProcessor::find_track_byte_range(
-                            audio_start_ms,
-                            cue_track.end_time_ms,
-                            &dense_seektable.entries,
-                            flac_info.sample_rate,
-                            flac_info.total_samples,
-                            flac_info.audio_data_start,
-                            flac_info.audio_data_end,
-                        );
-                        track_infos.push((track_file.db_track_id.clone(), start_byte, end_byte));
-                    }
+            let mut track_infos = Vec::new();
+            for (i, cue_track) in analysis.metadata.cue_sheet.tracks.iter().enumerate() {
+                if let Some(track_file) = flac_tracks.get(i) {
+                    let audio_start_ms = cue_track.audio_start_ms();
+                    let (start_byte, end_byte, _, _) = CueFlacProcessor::find_track_byte_range(
+                        audio_start_ms,
+                        cue_track.end_time_ms,
+                        &analysis.dense_seektable,
+                        analysis.flac_info.sample_rate,
+                        analysis.flac_info.total_samples,
+                        analysis.flac_info.audio_data_start,
+                        analysis.flac_info.audio_data_end,
+                    );
+                    track_infos.push((track_file.db_track_id.clone(), start_byte, end_byte));
                 }
-                result.insert(filename, track_infos);
             }
+            result.insert(filename, track_infos);
         }
 
         for track_file in tracks_to_files {
@@ -659,6 +711,59 @@ impl ImportService {
         }
 
         Ok(result)
+    }
+
+    /// Finalize an import: persist audio formats, mark tracks/release complete,
+    /// update import status, and send progress notifications.
+    ///
+    /// All DB writes are done in a single atomic transaction. Progress events
+    /// are sent after the transaction commits.
+    async fn finalize_import(
+        &self,
+        release_id: &str,
+        track_ids: &[&str],
+        audio_formats: Vec<crate::db::DbAudioFormat>,
+        discovered_files: &[DiscoveredFile],
+        album_id: &str,
+        cover_image_path: Option<&Path>,
+        remote_cover_set: bool,
+        import_id: Option<&str>,
+    ) -> Result<(), String> {
+        let library_manager = self.library_manager.get();
+
+        // Create image records (filesystem operations, done before the DB transaction)
+        self.create_image_records(
+            release_id,
+            album_id,
+            discovered_files,
+            library_manager,
+            cover_image_path,
+            remote_cover_set,
+        )
+        .await?;
+
+        // Atomic DB transaction: audio formats + track completion + release completion + import status
+        library_manager
+            .finalize_import(&audio_formats, track_ids, release_id, import_id)
+            .await
+            .map_err(|e| format!("Failed to finalize import: {}", e))?;
+
+        // Send progress notifications after successful commit
+        for track_id in track_ids {
+            let _ = self.progress_tx.send(ImportProgress::Complete {
+                id: track_id.to_string(),
+                release_id: Some(release_id.to_string()),
+                import_id: import_id.map(|s| s.to_string()),
+            });
+        }
+
+        let _ = self.progress_tx.send(ImportProgress::Complete {
+            id: release_id.to_string(),
+            release_id: None,
+            import_id: import_id.map(|s| s.to_string()),
+        });
+
+        Ok(())
     }
 
     /// Import files using the storage trait.
@@ -715,9 +820,15 @@ impl ImportService {
             file_data.push((filename, data, file.path.clone()));
         }
 
-        let file_to_tracks = self
-            .build_track_progress_map(tracks_to_files, &file_data, &cue_flac_metadata)
-            .await?;
+        // Analyze CUE/FLAC files once, reuse for progress tracking and metadata
+        let cue_flac_analysis = if let Some(ref metadata) = cue_flac_metadata {
+            Self::analyze_cue_flac(metadata, Some(&file_data))?
+        } else {
+            HashMap::new()
+        };
+
+        let file_to_tracks =
+            Self::build_track_progress_map(tracks_to_files, &file_data, &cue_flac_analysis)?;
         let release_total_bytes: usize = file_data.iter().map(|(_, data, _)| data.len()).sum();
         let mut release_bytes_written = 0usize;
 
@@ -787,47 +898,26 @@ impl ImportService {
             .map(|f| (f.original_filename, f.id))
             .collect();
 
-        // Persist track metadata
-        self.persist_track_metadata(tracks_to_files, cue_flac_metadata, &file_ids)
-            .await?;
+        // Build audio format records
+        let audio_formats =
+            Self::build_audio_formats(tracks_to_files, &cue_flac_analysis, &file_ids)?;
 
-        self.create_image_records(
+        let track_ids: Vec<&str> = tracks_to_files
+            .iter()
+            .map(|tf| tf.db_track_id.as_str())
+            .collect();
+
+        self.finalize_import(
             &db_release.id,
-            &db_release.album_id,
+            &track_ids,
+            audio_formats,
             discovered_files,
-            library_manager,
+            &db_release.album_id,
             cover_image_path,
             remote_cover_set,
+            Some(import_id),
         )
         .await?;
-
-        for track_file in tracks_to_files {
-            library_manager
-                .mark_track_complete(&track_file.db_track_id)
-                .await
-                .map_err(|e| format!("Failed to mark track complete: {}", e))?;
-            let _ = self.progress_tx.send(ImportProgress::Complete {
-                id: track_file.db_track_id.clone(),
-                release_id: Some(db_release.id.clone()),
-                import_id: Some(import_id.to_string()),
-            });
-        }
-
-        library_manager
-            .mark_release_complete(&db_release.id)
-            .await
-            .map_err(|e| format!("Failed to mark release complete: {}", e))?;
-
-        let _ = self
-            .database
-            .update_import_status(import_id, ImportOperationStatus::Complete)
-            .await;
-
-        let _ = self.progress_tx.send(ImportProgress::Complete {
-            id: db_release.id.clone(),
-            release_id: None,
-            import_id: Some(import_id.to_string()),
-        });
 
         info!("Storage import complete for release {}", db_release.id);
         Ok(())
@@ -1035,58 +1125,22 @@ impl ImportService {
         filename.to_string()
     }
 
-    /// Persist track metadata (audio format info for playback).
+    /// Build audio format records for all tracks.
     ///
-    /// `file_ids` maps original filename -> DbFile.id for linking audio_format to file.
-    async fn persist_track_metadata(
-        &self,
+    /// Uses pre-analyzed CUE/FLAC data when available. For standalone FLAC files,
+    /// reads and analyzes them (these aren't in the CUE/FLAC analysis cache since
+    /// they're one-file-per-track, not CUE-based).
+    ///
+    /// Returns the audio formats to be inserted in a batch transaction.
+    fn build_audio_formats(
         tracks_to_files: &[TrackFile],
-        cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
+        cue_flac_analysis: &HashMap<PathBuf, CueFlacAnalysis>,
         file_ids: &HashMap<String, String>,
-    ) -> Result<(), String> {
-        use crate::cue_flac::{CueFlacProcessor, FlacInfo};
+    ) -> Result<Vec<crate::db::DbAudioFormat>, String> {
+        use crate::cue_flac::CueFlacProcessor;
         use crate::db::DbAudioFormat;
 
-        let library_manager = self.library_manager.get();
-
-        // Build CUE/FLAC data if present (metadata, flac headers, flac info, dense seektable)
-        #[allow(clippy::type_complexity)]
-        let cue_flac_data: HashMap<
-            PathBuf,
-            (
-                CueFlacMetadata,
-                Vec<u8>,
-                FlacInfo,
-                Vec<crate::audio_codec::SeekEntry>,
-            ),
-        > = if let Some(ref cue_metadata) = cue_flac_metadata {
-            let mut data = HashMap::new();
-            for (flac_path, metadata) in cue_metadata {
-                let flac_headers = CueFlacProcessor::extract_flac_headers(flac_path)
-                    .map_err(|e| format!("Failed to extract FLAC headers: {}", e))?;
-
-                // Read file once, analyze and build dense seektable
-                let file_data = std::fs::read(flac_path)
-                    .map_err(|e| format!("Failed to read FLAC file: {}", e))?;
-                let flac_info = CueFlacProcessor::analyze_flac(flac_path)
-                    .map_err(|e| format!("Failed to analyze FLAC: {}", e))?;
-                let dense_seektable =
-                    CueFlacProcessor::build_dense_seektable(&file_data, &flac_info);
-
-                data.insert(
-                    flac_path.clone(),
-                    (
-                        metadata.clone(),
-                        flac_headers.headers,
-                        flac_info,
-                        dense_seektable.entries,
-                    ),
-                );
-            }
-            data
-        } else {
-            HashMap::new()
-        };
+        let mut audio_formats = Vec::new();
 
         // Track which CUE track index we're on for each FLAC file
         let mut track_indices: HashMap<PathBuf, usize> = HashMap::new();
@@ -1100,21 +1154,24 @@ impl ImportService {
                 .to_lowercase();
             let audio_content_type = ContentType::from_extension(&ext);
 
-            if let Some((metadata, flac_headers, flac_info, dense_seektable)) =
-                cue_flac_data.get(&track_file.file_path)
-            {
+            if let Some(analysis) = cue_flac_analysis.get(&track_file.file_path) {
                 // Get current track index for this FLAC file
                 let track_idx = *track_indices.get(&track_file.file_path).unwrap_or(&0);
                 track_indices.insert(track_file.file_path.clone(), track_idx + 1);
 
                 // Look up CUE track timing
-                let cue_track = metadata.cue_sheet.tracks.get(track_idx).ok_or_else(|| {
-                    format!(
-                        "CUE track index {} out of bounds for {}",
-                        track_idx,
-                        track_file.file_path.display()
-                    )
-                })?;
+                let cue_track = analysis
+                    .metadata
+                    .cue_sheet
+                    .tracks
+                    .get(track_idx)
+                    .ok_or_else(|| {
+                        format!(
+                            "CUE track index {} out of bounds for {}",
+                            track_idx,
+                            track_file.file_path.display()
+                        )
+                    })?;
 
                 let audio_start_ms = cue_track.audio_start_ms();
                 let pregap_ms = if cue_track.pregap_duration_ms() > 0 {
@@ -1128,11 +1185,11 @@ impl ImportService {
                     CueFlacProcessor::find_track_byte_range(
                         audio_start_ms,
                         cue_track.end_time_ms,
-                        dense_seektable,
-                        flac_info.sample_rate,
-                        flac_info.total_samples,
-                        flac_info.audio_data_start,
-                        flac_info.audio_data_end,
+                        &analysis.dense_seektable,
+                        analysis.flac_info.sample_rate,
+                        analysis.flac_info.total_samples,
+                        analysis.flac_info.audio_data_start,
+                        analysis.flac_info.audio_data_end,
                     );
 
                 // Create per-track adjusted seektable for seek support.
@@ -1144,23 +1201,25 @@ impl ImportService {
                 let end_byte_u64 = end_byte as u64;
 
                 // Find the first sample in our track range to use as baseline
-                let first_track_sample = dense_seektable
+                let first_track_sample = analysis
+                    .dense_seektable
                     .iter()
                     .find(|e| {
-                        let abs_byte = flac_info.audio_data_start + e.byte;
+                        let abs_byte = analysis.flac_info.audio_data_start + e.byte;
                         abs_byte >= start_byte_u64
                     })
                     .map(|e| e.sample)
                     .unwrap_or(0);
 
-                let track_seektable: Vec<crate::audio_codec::SeekEntry> = dense_seektable
+                let track_seektable: Vec<crate::audio_codec::SeekEntry> = analysis
+                    .dense_seektable
                     .iter()
                     .filter(|e| {
-                        let abs_byte = flac_info.audio_data_start + e.byte;
+                        let abs_byte = analysis.flac_info.audio_data_start + e.byte;
                         abs_byte >= start_byte_u64 && abs_byte < end_byte_u64
                     })
                     .map(|e| {
-                        let abs_byte = flac_info.audio_data_start + e.byte;
+                        let abs_byte = analysis.flac_info.audio_data_start + e.byte;
                         crate::audio_codec::SeekEntry {
                             sample: e.sample.saturating_sub(first_track_sample),
                             byte: abs_byte - start_byte_u64,
@@ -1182,23 +1241,20 @@ impl ImportService {
                 let audio_format = DbAudioFormat::new_with_byte_offsets(
                     &track_file.db_track_id,
                     ContentType::Flac,
-                    Some(flac_headers.clone()),
+                    Some(analysis.flac_headers.clone()),
                     true, // needs_headers for CUE/FLAC
                     start_byte,
                     end_byte,
                     pregap_ms,
                     Some(frame_offset_samples),
                     Some(exact_sample_count),
-                    flac_info.sample_rate as i64,
-                    flac_info.bits_per_sample as i64,
+                    analysis.flac_info.sample_rate as i64,
+                    analysis.flac_info.bits_per_sample as i64,
                     seektable_json,
-                    flac_info.audio_data_start as i64,
+                    analysis.flac_info.audio_data_start as i64,
                 )
                 .with_file_id(file_id.as_deref().unwrap_or(""));
-                library_manager
-                    .add_audio_format(&audio_format)
-                    .await
-                    .map_err(|e| format!("Failed to insert audio format: {}", e))?;
+                audio_formats.push(audio_format);
             } else {
                 // For regular FLAC files (not CUE), extract headers and seektable for seek support
                 if audio_content_type != ContentType::Flac {
@@ -1208,22 +1264,18 @@ impl ImportService {
                     ));
                 }
 
-                let flac_headers =
-                    crate::cue_flac::CueFlacProcessor::extract_flac_headers(&track_file.file_path)
-                        .ok()
-                        .map(|h| h.headers);
-
-                // Analyze FLAC to get sample rate and build seektable
+                // Read once, analyze from data
                 let file_data = std::fs::read(&track_file.file_path)
                     .map_err(|e| format!("Failed to read FLAC file: {}", e))?;
 
-                let flac_info =
-                    crate::cue_flac::CueFlacProcessor::analyze_flac(&track_file.file_path)
-                        .map_err(|e| format!("Failed to analyze FLAC: {}", e))?;
+                let flac_headers = CueFlacProcessor::extract_flac_headers_from_data(&file_data)
+                    .ok()
+                    .map(|h| h.headers);
 
-                let seektable = crate::cue_flac::CueFlacProcessor::build_dense_seektable(
-                    &file_data, &flac_info,
-                );
+                let flac_info = CueFlacProcessor::analyze_flac_data(&file_data)
+                    .map_err(|e| format!("Failed to analyze FLAC: {}", e))?;
+
+                let seektable = CueFlacProcessor::build_dense_seektable(&file_data, &flac_info);
                 let seektable_json = serde_json::to_string(&seektable.entries)
                     .map_err(|e| format!("Failed to serialize seektable: {}", e))?;
 
@@ -1246,14 +1298,11 @@ impl ImportService {
                     flac_info.audio_data_start as i64,
                 )
                 .with_file_id(file_id.as_deref().unwrap_or(""));
-                library_manager
-                    .add_audio_format(&audio_format)
-                    .await
-                    .map_err(|e| format!("Failed to insert audio format: {}", e))?;
+                audio_formats.push(audio_format);
             }
         }
 
-        Ok(())
+        Ok(audio_formats)
     }
 
     /// Import for None storage: just record file paths, no storage management.
@@ -1296,9 +1345,11 @@ impl ImportService {
             map
         };
 
+        // Build file records and insert in a single batch
+        let mut db_files: Vec<DbFile> = Vec::with_capacity(total_files);
         let mut file_ids: HashMap<String, String> = HashMap::new();
 
-        for (idx, file) in discovered_files.iter().enumerate() {
+        for file in discovered_files.iter() {
             let filename = file
                 .path
                 .file_name()
@@ -1323,10 +1374,17 @@ impl ImportService {
             )
             .with_source_path(source_path);
             file_ids.insert(filename.to_string(), db_file.id.clone());
-            library_manager
-                .add_file(&db_file)
-                .await
-                .map_err(|e| format!("Failed to add file record: {}", e))?;
+            db_files.push(db_file);
+        }
+
+        library_manager
+            .batch_add_files(&db_files)
+            .await
+            .map_err(|e| format!("Failed to add file records: {}", e))?;
+
+        // Send progress for each file
+        for (idx, file) in discovered_files.iter().enumerate() {
+            let filename = file.path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
             if let Some(track_ids) = file_to_tracks.get(filename) {
                 for track_id in track_ids {
@@ -1347,55 +1405,36 @@ impl ImportService {
                 import_id: Some(import_id.to_string()),
             });
 
-            info!(
-                "Recorded file {}/{}: {} -> {}",
-                idx + 1,
-                total_files,
-                filename,
-                source_path
-            );
+            info!("Recorded file {}/{}: {}", idx + 1, total_files, filename);
         }
 
-        self.persist_track_metadata(tracks_to_files, cue_flac_metadata, &file_ids)
-            .await?;
+        // Analyze CUE/FLAC files once for metadata
+        let cue_flac_analysis = if let Some(ref metadata) = cue_flac_metadata {
+            Self::analyze_cue_flac(metadata, None)?
+        } else {
+            HashMap::new()
+        };
 
-        for track_file in tracks_to_files {
-            library_manager
-                .mark_track_complete(&track_file.db_track_id)
-                .await
-                .map_err(|e| format!("Failed to mark track complete: {}", e))?;
-            let _ = self.progress_tx.send(ImportProgress::Complete {
-                id: track_file.db_track_id.clone(),
-                release_id: Some(db_release.id.clone()),
-                import_id: Some(import_id.to_string()),
-            });
-        }
+        // Build audio format records
+        let audio_formats =
+            Self::build_audio_formats(tracks_to_files, &cue_flac_analysis, &file_ids)?;
 
-        self.create_image_records(
+        let track_ids: Vec<&str> = tracks_to_files
+            .iter()
+            .map(|tf| tf.db_track_id.as_str())
+            .collect();
+
+        self.finalize_import(
             &db_release.id,
-            &db_release.album_id,
+            &track_ids,
+            audio_formats,
             discovered_files,
-            library_manager,
+            &db_release.album_id,
             cover_image_path,
             remote_cover_set,
+            Some(import_id),
         )
         .await?;
-
-        library_manager
-            .mark_release_complete(&db_release.id)
-            .await
-            .map_err(|e| format!("Failed to mark release complete: {}", e))?;
-
-        let _ = self
-            .database
-            .update_import_status(import_id, ImportOperationStatus::Complete)
-            .await;
-
-        let _ = self.progress_tx.send(ImportProgress::Complete {
-            id: db_release.id.clone(),
-            release_id: None,
-            import_id: Some(import_id.to_string()),
-        });
 
         info!("None storage import complete for release {}", db_release.id);
         Ok(())
@@ -1504,7 +1543,9 @@ impl ImportService {
             total_files
         );
 
-        for (idx, file) in discovered_files.iter().enumerate() {
+        // Build and batch-insert file records
+        let mut db_files: Vec<DbFile> = Vec::with_capacity(total_files);
+        for file in discovered_files.iter() {
             let filename = file
                 .path
                 .file_name()
@@ -1528,17 +1569,22 @@ impl ImportService {
                 ContentType::from_extension(&ext),
             )
             .with_source_path(source_path);
-            library_manager
-                .add_file(&db_file)
-                .await
-                .map_err(|e| format!("Failed to add file record: {}", e))?;
+            db_files.push(db_file);
+        }
+
+        library_manager
+            .batch_add_files(&db_files)
+            .await
+            .map_err(|e| format!("Failed to add file records: {}", e))?;
+
+        for (idx, file) in discovered_files.iter().enumerate() {
+            let filename = file.path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
             info!(
-                "Recorded temp file {}/{}: {} -> {}",
+                "Recorded temp file {}/{}: {}",
                 idx + 1,
                 total_files,
-                filename,
-                source_path
+                filename
             );
 
             let release_percent = ((idx + 1) * 100 / total_files.max(1)) as u8;
@@ -1546,18 +1592,6 @@ impl ImportService {
                 id: db_release.id.clone(),
                 percent: release_percent,
                 phase: Some(ImportPhase::Store),
-                import_id: None,
-            });
-        }
-
-        for track_file in &tracks_to_files {
-            library_manager
-                .mark_track_complete(&track_file.db_track_id)
-                .await
-                .map_err(|e| format!("Failed to mark track complete: {}", e))?;
-            let _ = self.progress_tx.send(ImportProgress::Complete {
-                id: track_file.db_track_id.clone(),
-                release_id: Some(db_release.id.clone()),
                 import_id: None,
             });
         }
@@ -1570,26 +1604,23 @@ impl ImportService {
             false
         };
 
-        self.create_image_records(
+        // No audio format metadata for torrent none-storage imports
+        let track_ids: Vec<&str> = tracks_to_files
+            .iter()
+            .map(|tf| tf.db_track_id.as_str())
+            .collect();
+
+        self.finalize_import(
             &db_release.id,
-            &db_release.album_id,
+            &track_ids,
+            Vec::new(),
             &discovered_files,
-            library_manager,
+            &db_release.album_id,
             cover_image_path.as_deref(),
             remote_cover_set,
+            None,
         )
         .await?;
-
-        library_manager
-            .mark_release_complete(&db_release.id)
-            .await
-            .map_err(|e| format!("Failed to mark release complete: {}", e))?;
-
-        let _ = self.progress_tx.send(ImportProgress::Complete {
-            id: db_release.id.clone(),
-            release_id: None,
-            import_id: None,
-        });
 
         info!(
             "Torrent None storage import complete for '{}' (files in temp: {:?})",
@@ -1969,7 +2000,9 @@ impl ImportService {
 
         info!("CD ripping completed, {} tracks ripped", rip_results.len());
 
-        for (idx, result) in rip_results.iter().enumerate() {
+        // Build and batch-insert file records
+        let mut db_files: Vec<DbFile> = Vec::with_capacity(rip_results.len());
+        for result in &rip_results {
             let filename = result
                 .output_path
                 .file_name()
@@ -1985,42 +2018,45 @@ impl ImportService {
 
             let db_file = DbFile::new(&db_release.id, filename, file_size, ContentType::Flac)
                 .with_source_path(source_path);
-            library_manager
-                .add_file(&db_file)
-                .await
-                .map_err(|e| format!("Failed to add file record: {}", e))?;
-
-            info!(
-                "Recorded ripped file {}/{}: {} -> {}",
-                idx + 1,
-                rip_results.len(),
-                filename,
-                source_path
-            );
-        }
-
-        for track in &db_tracks {
-            library_manager
-                .mark_track_complete(&track.id)
-                .await
-                .map_err(|e| format!("Failed to mark track complete: {}", e))?;
-            let _ = self.progress_tx.send(ImportProgress::Complete {
-                id: track.id.clone(),
-                release_id: Some(db_release.id.clone()),
-                import_id: None,
-            });
+            db_files.push(db_file);
         }
 
         library_manager
-            .mark_release_complete(&db_release.id)
+            .batch_add_files(&db_files)
             .await
-            .map_err(|e| format!("Failed to mark release complete: {}", e))?;
+            .map_err(|e| format!("Failed to add file records: {}", e))?;
 
-        let _ = self.progress_tx.send(ImportProgress::Complete {
-            id: db_release.id.clone(),
-            release_id: None,
-            import_id: None,
-        });
+        for (idx, result) in rip_results.iter().enumerate() {
+            let filename = result
+                .output_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown.flac");
+
+            info!(
+                "Recorded ripped file {}/{}: {}",
+                idx + 1,
+                rip_results.len(),
+                filename
+            );
+        }
+
+        // Build discovered_files for image records (empty: CD rip has no images in temp dir)
+        let discovered_files: Vec<DiscoveredFile> = Vec::new();
+        let track_ids: Vec<&str> = db_tracks.iter().map(|t| t.id.as_str()).collect();
+
+        // No audio format metadata for CD none-storage imports
+        self.finalize_import(
+            &db_release.id,
+            &track_ids,
+            Vec::new(),
+            &discovered_files,
+            &db_release.album_id,
+            _cover_image_path,
+            false,
+            None,
+        )
+        .await?;
 
         info!(
             "CD none-storage import complete for '{}'. Files at: {:?}",

@@ -114,20 +114,6 @@ impl LibraryManager {
             .await?;
         Ok(())
     }
-    /// Mark track as complete after successful import
-    pub async fn mark_track_complete(&self, track_id: &str) -> Result<(), LibraryError> {
-        self.database
-            .update_track_status(track_id, ImportStatus::Complete)
-            .await?;
-        Ok(())
-    }
-    /// Mark track as failed if import errors
-    pub async fn mark_track_failed(&self, track_id: &str) -> Result<(), LibraryError> {
-        self.database
-            .update_track_status(track_id, ImportStatus::Failed)
-            .await?;
-        Ok(())
-    }
     /// Update track duration
     pub async fn update_track_duration(
         &self,
@@ -136,13 +122,6 @@ impl LibraryManager {
     ) -> Result<(), LibraryError> {
         self.database
             .update_track_duration(track_id, duration_ms)
-            .await?;
-        Ok(())
-    }
-    /// Mark release as complete after successful import
-    pub async fn mark_release_complete(&self, release_id: &str) -> Result<(), LibraryError> {
-        self.database
-            .update_release_status(release_id, ImportStatus::Complete)
             .await?;
         Ok(())
     }
@@ -159,11 +138,27 @@ impl LibraryManager {
         Ok(())
     }
 
-    /// Add audio format for a track
-    pub async fn add_audio_format(&self, audio_format: &DbAudioFormat) -> Result<(), LibraryError> {
-        self.database.insert_audio_format(audio_format).await?;
+    /// Add multiple files in a single transaction
+    pub async fn batch_add_files(&self, files: &[DbFile]) -> Result<(), LibraryError> {
+        self.database.batch_insert_files(files).await?;
         Ok(())
     }
+
+    /// Atomically finalize an import: insert audio formats, mark tracks complete,
+    /// mark release complete, and update import status.
+    pub async fn finalize_import(
+        &self,
+        audio_formats: &[DbAudioFormat],
+        track_ids: &[&str],
+        release_id: &str,
+        import_id: Option<&str>,
+    ) -> Result<(), LibraryError> {
+        self.database
+            .finalize_import(audio_formats, track_ids, release_id, import_id)
+            .await?;
+        Ok(())
+    }
+
     /// Insert torrent metadata
     pub async fn insert_torrent(&self, torrent: &DbTorrent) -> Result<(), LibraryError> {
         self.database.insert_torrent(torrent).await?;
