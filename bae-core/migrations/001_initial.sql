@@ -189,7 +189,7 @@ CREATE TABLE storage_profiles (
 
 CREATE TABLE release_storage (
     id TEXT PRIMARY KEY,
-    release_id TEXT NOT NULL,
+    release_id TEXT NOT NULL UNIQUE,
     storage_profile_id TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY (release_id) REFERENCES releases (id) ON DELETE CASCADE,

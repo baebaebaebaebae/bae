@@ -248,17 +248,16 @@ impl LibraryManager {
         Ok(self.database.get_audio_format_by_track_id(track_id).await?)
     }
 
-    /// Update source_path (and encryption fields) on an existing file record.
-    pub async fn update_file_source_path(
+    /// Batch-update source_path (and encryption fields) on existing file records.
+    ///
+    /// All updates are applied in a single transaction.
+    pub async fn batch_update_file_source_paths(
         &self,
-        file_id: &str,
-        source_path: &str,
-        encryption_nonce: Option<&[u8]>,
-        encryption_scheme: &str,
+        updates: &[(&str, &str, Option<&[u8]>, &str)],
     ) -> Result<(), LibraryError> {
         Ok(self
             .database
-            .update_file_source_path(file_id, source_path, encryption_nonce, encryption_scheme)
+            .batch_update_file_source_paths(updates)
             .await?)
     }
 
@@ -673,15 +672,12 @@ impl LibraryManager {
         Ok(self.database.delete_release_storage(release_id).await?)
     }
 
-    /// Insert release storage link
-    pub async fn insert_release_storage(
+    /// Set release storage link (insert or replace atomically)
+    pub async fn set_release_storage(
         &self,
         release_storage: &crate::db::DbReleaseStorage,
     ) -> Result<(), LibraryError> {
-        Ok(self
-            .database
-            .insert_release_storage(release_storage)
-            .await?)
+        Ok(self.database.set_release_storage(release_storage).await?)
     }
 
     /// Insert a new import operation record

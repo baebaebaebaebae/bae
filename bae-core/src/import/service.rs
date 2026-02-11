@@ -689,7 +689,7 @@ impl ImportService {
 
         let release_storage = crate::db::DbReleaseStorage::new(&db_release.id, &storage_profile.id);
         self.database
-            .insert_release_storage(&release_storage)
+            .set_release_storage(&release_storage)
             .await
             .map_err(|e| format!("Failed to link release to storage profile: {}", e))?;
 

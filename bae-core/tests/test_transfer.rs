@@ -139,7 +139,7 @@ async fn create_profile_files(
 
     // Link release to profile
     let rs = DbReleaseStorage::new(release_id, &profile.id);
-    db.insert_release_storage(&rs).await.unwrap();
+    db.set_release_storage(&rs).await.unwrap();
 
     result
 }

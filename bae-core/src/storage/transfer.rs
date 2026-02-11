@@ -5,7 +5,7 @@
 //! deferred cleanup.
 
 use crate::cloud_storage::CloudStorage;
-use crate::db::{DbFile, DbReleaseStorage, DbStorageProfile, StorageLocation};
+use crate::db::{DbFile, DbReleaseStorage, DbStorageProfile, EncryptionScheme, StorageLocation};
 use crate::encryption::EncryptionService;
 use crate::keys::KeyService;
 use crate::library::SharedLibraryManager;
@@ -253,11 +253,9 @@ async fn do_transfer(
             )
             .await?;
 
-            let encryption_scheme = if dest_profile.encrypted {
-                "xchacha20poly1305"
-            } else {
-                "none"
-            };
+            // Write all bytes to storage first, collecting new paths
+            let mut file_updates: Vec<(String, Option<Vec<u8>>)> =
+                Vec::with_capacity(old_files.len());
 
             for (i, file) in old_files.iter().enumerate() {
                 let data = &file_data[i].1;
@@ -287,36 +285,38 @@ async fn do_transfer(
                     )
                     .await?;
 
-                mgr.update_file_source_path(
-                    &file.id,
-                    &new_source_path,
-                    nonce.as_deref(),
-                    encryption_scheme,
-                )
-                .await?;
+                file_updates.push((new_source_path, nonce));
             }
 
-            // Update release → profile link
-            mgr.delete_release_storage(release_id).await?;
+            // Batch-update all file records + release storage link atomically
+            let updates: Vec<(&str, &str, Option<&[u8]>, &str)> = old_files
+                .iter()
+                .zip(file_updates.iter())
+                .map(|(file, (path, nonce))| {
+                    (
+                        file.id.as_str(),
+                        path.as_str(),
+                        nonce.as_deref(),
+                        file.encryption_scheme.as_str(),
+                    )
+                })
+                .collect();
+            mgr.batch_update_file_source_paths(&updates).await?;
 
             let release_storage = DbReleaseStorage::new(release_id, &dest_profile.id);
-            mgr.insert_release_storage(&release_storage).await?;
+            mgr.set_release_storage(&release_storage).await?;
         }
         TransferTarget::Eject(target_dir) => {
             tokio::fs::create_dir_all(target_dir).await?;
+
+            // Write all files to target directory first
+            let mut dest_paths: Vec<String> = Vec::with_capacity(old_files.len());
 
             for (i, file) in old_files.iter().enumerate() {
                 let data = &file_data[i].1;
                 let dest_path = target_dir.join(&file.original_filename);
                 tokio::fs::write(&dest_path, data).await?;
-
-                mgr.update_file_source_path(
-                    &file.id,
-                    &dest_path.display().to_string(),
-                    None,
-                    "none",
-                )
-                .await?;
+                dest_paths.push(dest_path.display().to_string());
 
                 let _ = tx.send(TransferProgress::FileProgress {
                     release_id: release_id.to_string(),
@@ -326,6 +326,15 @@ async fn do_transfer(
                     percent: 100,
                 });
             }
+
+            // Batch-update all file records atomically
+            let scheme = EncryptionScheme::Master.as_str();
+            let updates: Vec<(&str, &str, Option<&[u8]>, &str)> = old_files
+                .iter()
+                .zip(dest_paths.iter())
+                .map(|(file, path)| (file.id.as_str(), path.as_str(), None, scheme))
+                .collect();
+            mgr.batch_update_file_source_paths(&updates).await?;
 
             mgr.delete_release_storage(release_id).await?;
         }
