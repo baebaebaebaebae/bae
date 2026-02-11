@@ -868,6 +868,7 @@ dependencies = [
  "libcdio-sys",
  "libsqlite3-sys",
  "nom",
+ "rand 0.9.2",
  "rayon",
  "regex",
  "reqwest",
