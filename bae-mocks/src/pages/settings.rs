@@ -24,6 +24,7 @@ pub fn Settings() -> Element {
                         on_switch: |_| {},
                         on_create: |_| {},
                         on_add_existing: |_| {},
+                        on_join: |_| {},
                         on_rename: |_| {},
                         on_remove: |_| {},
                     }
