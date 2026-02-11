@@ -214,6 +214,7 @@ async fn handle_discid_lookup_result(
             cover_art::fetch_cover_art_for_mb_release(
                 mb_release,
                 &external_urls,
+                None,
                 discogs_client.as_ref(),
             )
         })
