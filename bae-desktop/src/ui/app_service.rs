@@ -455,8 +455,10 @@ impl AppService {
             loop {
                 match library_events_rx.recv().await {
                     Ok(LibraryEvent::AlbumsChanged) => {
-                        // Debounce: wait 2 seconds, then trigger sync
+                        // Debounce: wait 2 seconds, then drain any events that
+                        // arrived during the sleep so we fire only once per burst.
                         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        while library_events_rx.try_recv().is_ok() {}
                         let _ = trigger_tx.try_send(());
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -2131,9 +2133,7 @@ async fn run_sync_loop(
                 state.sync().syncing().set(false);
                 state.sync().error().set(None);
 
-                // Persist sync state
-                let _ = db.set_sync_state("local_seq", &local_seq.to_string()).await;
-
+                // Persist snapshot_seq (local_seq is persisted in run_sync_cycle after push)
                 if let Some(ss) = snapshot_seq {
                     let _ = db.set_sync_state("snapshot_seq", &ss.to_string()).await;
                 }
@@ -2355,6 +2355,7 @@ async fn run_sync_cycle(
                 clear_staged_changeset(library_dir);
                 *staged_seq = None;
                 *local_seq = seq;
+                let _ = db.set_sync_state("local_seq", &seq.to_string()).await;
                 let _ = db.set_sync_state("staged_seq", "").await;
 
                 tracing::info!(seq, "Pushed changeset");
@@ -2389,7 +2390,7 @@ async fn run_sync_cycle(
             // Parse the wall clock time and create a Timestamp for HLC update.
             chrono::DateTime::parse_from_rfc3339(ts_str)
                 .ok()
-                .map(|dt| dt.timestamp_millis() as u64)
+                .map(|dt| dt.timestamp_millis().max(0) as u64)
         })
         .max();
 
