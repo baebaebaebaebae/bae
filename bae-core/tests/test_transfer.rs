@@ -11,7 +11,8 @@ mod support;
 
 use bae_core::content_type::ContentType;
 use bae_core::db::{
-    Database, DbAlbum, DbFile, DbRelease, DbReleaseStorage, DbStorageProfile, ImportStatus,
+    Database, DbAlbum, DbAudioFormat, DbFile, DbRelease, DbReleaseStorage, DbStorageProfile,
+    DbTrack, ImportStatus,
 };
 use bae_core::keys::KeyService;
 use bae_core::library::LibraryManager;
@@ -449,6 +450,113 @@ async fn test_eject_from_local_profile() {
     // Verify old files queued for deletion
     let pending = read_pending_deletions(&library_path).await;
     assert_eq!(pending.len(), original_files.len());
+}
+
+/// Transfer re-links audio_format.file_id to the new files after transfer.
+#[tokio::test]
+async fn test_transfer_relinks_audio_format_file_ids() {
+    tracing_init();
+
+    let temp = TempDir::new().unwrap();
+    let source_dir = temp.path().join("source");
+    let storage_dir = temp.path().join("storage");
+    let library_path = temp.path().join("library");
+    tokio::fs::create_dir_all(&source_dir).await.unwrap();
+    tokio::fs::create_dir_all(&storage_dir).await.unwrap();
+    tokio::fs::create_dir_all(&library_path).await.unwrap();
+
+    let (db, mgr) = setup_db(&temp).await;
+    let (_album_id, release_id) = create_album_and_release(&db).await;
+
+    // Create a self-managed FLAC file
+    let file_path = source_dir.join("track1.flac");
+    tokio::fs::write(&file_path, b"flac-data").await.unwrap();
+    let mut db_file = DbFile::new(&release_id, "track1.flac", 9, ContentType::Flac);
+    db_file.source_path = Some(file_path.display().to_string());
+    mgr.add_file(&db_file).await.unwrap();
+
+    // Create a track and audio_format linked to the file
+    let now = Utc::now();
+    let track = DbTrack {
+        id: Uuid::new_v4().to_string(),
+        release_id: release_id.clone(),
+        title: "Track One".to_string(),
+        disc_number: None,
+        track_number: Some(1),
+        duration_ms: Some(180000),
+        discogs_position: None,
+        import_status: ImportStatus::Complete,
+        updated_at: now,
+        created_at: now,
+    };
+    db.insert_track(&track).await.unwrap();
+
+    let af = DbAudioFormat::new(
+        &track.id,
+        ContentType::Flac,
+        None,
+        false,
+        44100,
+        16,
+        "[]".to_string(),
+        0,
+    )
+    .with_file_id(&db_file.id);
+    db.insert_audio_format(&af).await.unwrap();
+
+    // Verify audio_format points to original file
+    let af_before = db
+        .get_audio_format_by_track_id(&track.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(af_before.file_id.as_deref(), Some(db_file.id.as_str()));
+
+    // Create destination profile and transfer
+    let dest_profile =
+        DbStorageProfile::new_local("Local Storage", storage_dir.to_str().unwrap(), false);
+    db.insert_storage_profile(&dest_profile).await.unwrap();
+
+    let shared_mgr = bae_core::library::SharedLibraryManager::new(mgr);
+    let service = TransferService::new(
+        shared_mgr.clone(),
+        None,
+        LibraryDir::new(library_path.clone()),
+        KeyService::new(true, "test".to_string()),
+    );
+    let rx = service.transfer(
+        release_id.clone(),
+        TransferTarget::Profile(dest_profile.clone()),
+    );
+    let events = collect_progress(rx).await;
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, TransferProgress::Complete { .. })));
+
+    // Verify audio_format is re-linked to the new file
+    let af_after = db
+        .get_audio_format_by_track_id(&track.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        af_after.file_id.is_some(),
+        "audio_format.file_id should be re-linked after transfer"
+    );
+    assert_ne!(
+        af_after.file_id.as_deref(),
+        Some(db_file.id.as_str()),
+        "file_id should point to the new file, not the old one"
+    );
+
+    // Verify the new file_id points to a valid file in the new storage
+    let new_file = shared_mgr
+        .get()
+        .get_file_by_id(af_after.file_id.as_ref().unwrap())
+        .await
+        .unwrap();
+    assert!(new_file.is_some(), "New file should exist in DB");
+    assert_eq!(new_file.unwrap().original_filename, "track1.flac");
 }
 
 /// Transfer with no files should fail gracefully.

@@ -1153,6 +1153,47 @@ impl Database {
             Ok(None)
         }
     }
+
+    /// Get audio_format file links for a release: (audio_format_id, file_id) pairs.
+    /// Only returns rows where file_id is set.
+    pub async fn get_audio_format_file_links(
+        &self,
+        release_id: &str,
+    ) -> Result<Vec<(String, String)>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT af.id, af.file_id
+            FROM audio_formats af
+            JOIN tracks t ON t.id = af.track_id
+            WHERE t.release_id = ? AND af.file_id IS NOT NULL
+            "#,
+        )
+        .bind(release_id)
+        .fetch_all(&self.inner.read_pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|r| (r.get("id"), r.get("file_id")))
+            .collect())
+    }
+
+    /// Update the file_id on an audio_format row.
+    pub async fn set_audio_format_file_id(
+        &self,
+        audio_format_id: &str,
+        file_id: &str,
+    ) -> Result<(), sqlx::Error> {
+        let mut conn = self.writer()?.lock().await;
+        sqlx::query("UPDATE audio_formats SET file_id = ?, _updated_at = ? WHERE id = ?")
+            .bind(file_id)
+            .bind(chrono::Utc::now().to_rfc3339())
+            .bind(audio_format_id)
+            .execute(&mut *conn)
+            .await?;
+        Ok(())
+    }
+
     /// Delete a release by ID
     ///
     /// This will cascade delete all related records:

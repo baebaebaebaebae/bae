@@ -12,6 +12,7 @@ use crate::keys::KeyService;
 use crate::library::SharedLibraryManager;
 use crate::library_dir::LibraryDir;
 use crate::storage::{create_storage_reader, ReleaseStorage, ReleaseStorageImpl};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -222,10 +223,17 @@ async fn do_transfer(
         });
     }
 
+    // Save audio_format → file links before deleting old files.
+    // After delete (ON DELETE SET NULL), file_id becomes NULL and we re-link.
+    let af_links = mgr.get_audio_format_file_links(release_id).await?;
+    let old_file_to_name: HashMap<String, String> = old_files
+        .iter()
+        .map(|f| (f.id.clone(), f.original_filename.clone()))
+        .collect();
+
     // 3. Write files to destination
     match &target {
         TransferTarget::Profile(dest_profile) => {
-            // Delete old file records first (new ones will be created by write_file)
             mgr.delete_files_for_release(release_id).await?;
             mgr.delete_release_storage(release_id).await?;
 
@@ -308,8 +316,6 @@ async fn do_transfer(
                 });
             }
 
-            // Update DB: remove storage link and file records, create new file records
-            // pointing to the ejected location
             mgr.delete_files_for_release(release_id).await?;
             mgr.delete_release_storage(release_id).await?;
 
@@ -328,6 +334,23 @@ async fn do_transfer(
                 );
                 db_file.source_path = Some(dest_path.display().to_string());
                 mgr.add_file(&db_file).await?;
+            }
+        }
+    }
+
+    // Re-link audio_formats to the new files (file_id was set to NULL by ON DELETE SET NULL)
+    if !af_links.is_empty() {
+        let new_files = mgr.get_files_for_release(release_id).await?;
+        let name_to_new_id: HashMap<&str, &str> = new_files
+            .iter()
+            .map(|f| (f.original_filename.as_str(), f.id.as_str()))
+            .collect();
+
+        for (af_id, old_file_id) in &af_links {
+            if let Some(filename) = old_file_to_name.get(old_file_id) {
+                if let Some(new_file_id) = name_to_new_id.get(filename.as_str()) {
+                    mgr.set_audio_format_file_id(af_id, new_file_id).await?;
+                }
             }
         }
     }

@@ -247,6 +247,30 @@ impl LibraryManager {
     ) -> Result<Option<DbAudioFormat>, LibraryError> {
         Ok(self.database.get_audio_format_by_track_id(track_id).await?)
     }
+
+    /// Get audio_format file links for a release: (audio_format_id, file_id) pairs.
+    pub async fn get_audio_format_file_links(
+        &self,
+        release_id: &str,
+    ) -> Result<Vec<(String, String)>, LibraryError> {
+        Ok(self
+            .database
+            .get_audio_format_file_links(release_id)
+            .await?)
+    }
+
+    /// Update the file_id on an audio_format row.
+    pub async fn set_audio_format_file_id(
+        &self,
+        audio_format_id: &str,
+        file_id: &str,
+    ) -> Result<(), LibraryError> {
+        Ok(self
+            .database
+            .set_audio_format_file_id(audio_format_id, file_id)
+            .await?)
+    }
+
     /// Get release ID for a track
     pub async fn get_release_id_for_track(&self, track_id: &str) -> Result<String, LibraryError> {
         let track = self
