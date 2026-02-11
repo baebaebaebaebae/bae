@@ -39,7 +39,7 @@ use cpal::traits::StreamTrait;
 use std::collections::VecDeque;
 use std::sync::{mpsc, Arc, Mutex};
 use tokio::sync::mpsc as tokio_mpsc;
-use tracing::{error, info, trace};
+use tracing::{error, info, trace, warn};
 
 /// Playback commands sent to the service
 #[derive(Debug, Clone)]
@@ -203,6 +203,9 @@ struct PreparedTrack {
     /// Encryption nonce (24 bytes) for efficient encrypted range requests.
     /// Stored in DB at import time, used during seek to avoid fetching nonce from cloud.
     encryption_nonce: Option<Vec<u8>>,
+    /// Per-release encryption service for shared releases.
+    /// When set, seek operations use this instead of the library-level encryption service.
+    encryption_override: Option<Arc<EncryptionService>>,
 }
 
 /// Fetch track metadata, create buffer, start reading audio data.
@@ -281,22 +284,65 @@ async fn prepare_track(
         end_byte,
     };
 
-    // Create appropriate data reader based on storage profile
-    // Also capture cloud storage info for seek support
+    // Create appropriate data reader based on storage profile.
+    // Also capture cloud storage info for seek support.
+    // encryption_override is set for shared releases (per-release key instead of library key).
     type ReaderInfo = (
         Box<dyn AudioDataReader>,
         bool,
         Option<Arc<dyn CloudStorage>>,
         bool,
+        Option<Arc<EncryptionService>>,
     );
-    let (reader, is_local_storage, cloud_storage, cloud_encrypted): ReaderInfo =
+    let (reader, is_local_storage, cloud_storage, cloud_encrypted, encryption_override): ReaderInfo =
         match &storage_profile {
-            None => (
-                Box::new(LocalFileReader::new(read_config)),
-                true,
-                None,
-                false,
-            ),
+            None => {
+                // No local storage profile — check if this is a shared release
+                let shared = match crate::sync::shared_release::resolve_release(
+                    library_manager.database(),
+                    &track.release_id,
+                )
+                .await
+                {
+                    Ok(s) => s,
+                    Err(e) => {
+                        warn!("Failed to resolve shared release for {}: {e}", track.release_id);
+                        None
+                    }
+                };
+
+                if let Some(shared) = shared {
+                    use crate::playback::track_loader::create_shared_release_storage;
+                    let srs = create_shared_release_storage(shared, file_id).await?;
+
+                    // Override path to storage key layout for the sharer's bucket
+                    let shared_read_config = AudioReadConfig {
+                        path: srs.storage_key,
+                        ..read_config
+                    };
+
+                    (
+                        Box::new(CloudStorageReader::new(
+                            shared_read_config,
+                            srs.storage.clone(),
+                            Some(srs.encryption.clone()),
+                            true,
+                        )) as Box<dyn AudioDataReader>,
+                        false,
+                        Some(srs.storage),
+                        true,
+                        Some(srs.encryption),
+                    )
+                } else {
+                    (
+                        Box::new(LocalFileReader::new(read_config)),
+                        true,
+                        None,
+                        false,
+                        None,
+                    )
+                }
+            }
             Some(profile)
                 if !profile.encrypted && profile.location == crate::db::StorageLocation::Local =>
             {
@@ -305,6 +351,7 @@ async fn prepare_track(
                     true,
                     None,
                     false,
+                    None,
                 )
             }
             Some(profile) => {
@@ -322,6 +369,7 @@ async fn prepare_track(
                     false,
                     Some(storage),
                     encrypted,
+                    None,
                 )
             }
         };
@@ -341,6 +389,13 @@ async fn prepare_track(
         .map(|ms| std::time::Duration::from_millis(ms as u64))
         .unwrap_or(std::time::Duration::from_secs(300));
 
+    // For shared releases, source_path must be the storage key layout
+    let source_path = if encryption_override.is_some() {
+        crate::storage::storage_path(file_id)
+    } else {
+        source_path
+    };
+
     Ok(PreparedTrack {
         track,
         buffer,
@@ -358,6 +413,7 @@ async fn prepare_track(
         cloud_storage,
         cloud_encrypted,
         encryption_nonce: audio_file.encryption_nonce,
+        encryption_override,
     })
 }
 
@@ -1448,16 +1504,16 @@ impl PlaybackService {
 
         // Create a new cloud reader at the seek position
         if let Some(storage) = &prepared.cloud_storage {
+            // Shared releases carry their own per-release encryption service
+            let enc = prepared.encryption_override.clone().or_else(|| {
+                self.encryption_service
+                    .as_ref()
+                    .map(|e| Arc::new(e.clone()))
+            });
+
             let reader = Box::new(
-                CloudStorageReader::new(
-                    config,
-                    storage.clone(),
-                    self.encryption_service
-                        .as_ref()
-                        .map(|e| Arc::new(e.clone())),
-                    prepared.cloud_encrypted,
-                )
-                .with_encryption_nonce(prepared.encryption_nonce.clone()),
+                CloudStorageReader::new(config, storage.clone(), enc, prepared.cloud_encrypted)
+                    .with_encryption_nonce(prepared.encryption_nonce.clone()),
             );
             reader.start_reading(seek_buffer.clone());
         } else {
