@@ -19,6 +19,7 @@ pub fn LibrarySectionView(
     on_switch: EventHandler<String>,
     on_create: EventHandler<()>,
     on_add_existing: EventHandler<()>,
+    on_join: EventHandler<()>,
     on_rename: EventHandler<(String, String)>,
     on_remove: EventHandler<String>,
 ) -> Element {
@@ -57,6 +58,11 @@ pub fn LibrarySectionView(
                         class: "px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded-md transition-colors",
                         onclick: move |_| on_add_existing.call(()),
                         "Add Existing..."
+                    }
+                    button {
+                        class: "px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded-md transition-colors",
+                        onclick: move |_| on_join.call(()),
+                        "Join Shared..."
                     }
                 }
             }
