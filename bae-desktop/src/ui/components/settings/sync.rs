@@ -109,9 +109,18 @@ pub fn SyncSection() -> Element {
             on_save_config: move |config: SyncBucketConfig| {
                 is_saving.set(true);
                 save_error.set(None);
-                app_for_save.save_sync_config(config);
-                is_saving.set(false);
-                is_editing.set(false);
+                let app = app_for_save.clone();
+                spawn(async move {
+                    match app.save_sync_config(config) {
+                        Ok(()) => {
+                            is_editing.set(false);
+                        }
+                        Err(e) => {
+                            save_error.set(Some(e));
+                        }
+                    }
+                    is_saving.set(false);
+                });
             },
             on_test_connection: move |_| {
                 let library_manager = app_for_test.library_manager.clone();

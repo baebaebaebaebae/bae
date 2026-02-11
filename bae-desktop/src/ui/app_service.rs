@@ -1007,7 +1007,7 @@ impl AppService {
 
     /// Save sync bucket configuration to config.yaml and credentials to keyring.
     /// Updates the store with the new values.
-    pub fn save_sync_config(&self, config_data: bae_ui::SyncBucketConfig) {
+    pub fn save_sync_config(&self, config_data: bae_ui::SyncBucketConfig) -> Result<(), String> {
         let state = self.state;
         let key_service = self.key_service.clone();
         let mut new_config = self.config.clone();
@@ -1021,20 +1021,17 @@ impl AppService {
         };
 
         // Save to disk
-        if let Err(e) = new_config.save() {
-            tracing::error!("Failed to save sync config: {}", e);
-            return;
-        }
+        new_config
+            .save()
+            .map_err(|e| format!("Failed to save config: {}", e))?;
 
         // Save credentials to keyring
-        if let Err(e) = key_service.set_sync_access_key(&config_data.access_key) {
-            tracing::error!("Failed to save sync access key: {}", e);
-            return;
-        }
-        if let Err(e) = key_service.set_sync_secret_key(&config_data.secret_key) {
-            tracing::error!("Failed to save sync secret key: {}", e);
-            return;
-        }
+        key_service
+            .set_sync_access_key(&config_data.access_key)
+            .map_err(|e| format!("Failed to save access key: {}", e))?;
+        key_service
+            .set_sync_secret_key(&config_data.secret_key)
+            .map_err(|e| format!("Failed to save secret key: {}", e))?;
 
         // Update store
         state
@@ -1053,6 +1050,8 @@ impl AppService {
             .sync()
             .sync_configured()
             .set(new_config.sync_enabled(&key_service));
+
+        Ok(())
     }
 
     // =========================================================================

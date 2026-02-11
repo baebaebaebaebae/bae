@@ -226,6 +226,15 @@ impl Config {
         let torrent_bind_interface = std::env::var("BAE_TORRENT_BIND_INTERFACE")
             .ok()
             .filter(|s| !s.is_empty());
+        let sync_s3_bucket = std::env::var("BAE_SYNC_S3_BUCKET")
+            .ok()
+            .filter(|s| !s.is_empty());
+        let sync_s3_region = std::env::var("BAE_SYNC_S3_REGION")
+            .ok()
+            .filter(|s| !s.is_empty());
+        let sync_s3_endpoint = std::env::var("BAE_SYNC_S3_ENDPOINT")
+            .ok()
+            .filter(|s| !s.is_empty());
 
         Self {
             library_id,
@@ -248,9 +257,9 @@ impl Config {
             network_participation: ParticipationMode::Off,
             subsonic_enabled: true,
             subsonic_port: 4533,
-            sync_s3_bucket: None,
-            sync_s3_region: None,
-            sync_s3_endpoint: None,
+            sync_s3_bucket,
+            sync_s3_region,
+            sync_s3_endpoint,
         }
     }
 
@@ -380,6 +389,15 @@ impl Config {
         new_values.insert("BAE_DEVICE_ID", self.device_id.clone());
         if let Some(iface) = &self.torrent_bind_interface {
             new_values.insert("BAE_TORRENT_BIND_INTERFACE", iface.clone());
+        }
+        if let Some(bucket) = &self.sync_s3_bucket {
+            new_values.insert("BAE_SYNC_S3_BUCKET", bucket.clone());
+        }
+        if let Some(region) = &self.sync_s3_region {
+            new_values.insert("BAE_SYNC_S3_REGION", region.clone());
+        }
+        if let Some(endpoint) = &self.sync_s3_endpoint {
+            new_values.insert("BAE_SYNC_S3_ENDPOINT", endpoint.clone());
         }
 
         let mut found = std::collections::HashSet::new();
