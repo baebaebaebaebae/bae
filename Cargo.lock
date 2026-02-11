@@ -906,6 +906,7 @@ dependencies = [
  "dispatch",
  "futures",
  "hex",
+ "libsqlite3-sys",
  "objc",
  "reqwest",
  "rfd",

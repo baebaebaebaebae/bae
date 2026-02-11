@@ -35,7 +35,7 @@ use bae_ui::StorageProfile;
 use dioxus::prelude::*;
 use std::collections::HashMap;
 
-use super::app_context::AppServices;
+use super::app_context::{AppServices, SyncHandle};
 
 /// Main application service that encapsulates state and backend coordination.
 ///
@@ -65,6 +65,10 @@ pub struct AppService {
     pub image_server: ImageServerHandle,
     /// User's Ed25519 keypair for signing and key exchange
     pub user_keypair: Option<UserKeypair>,
+    /// Sync infrastructure handle (present when sync is configured and encryption is enabled).
+    /// Used by Phase 5c (background sync loop).
+    #[allow(dead_code)]
+    pub sync_handle: Option<SyncHandle>,
 }
 
 impl AppService {
@@ -83,6 +87,7 @@ impl AppService {
                 key_service: services.key_service.clone(),
                 image_server: services.image_server.clone(),
                 user_keypair: services.user_keypair.clone(),
+                sync_handle: services.sync_handle.clone(),
             }
         }
         #[cfg(not(feature = "torrent"))]
@@ -97,6 +102,7 @@ impl AppService {
                 key_service: services.key_service.clone(),
                 image_server: services.image_server.clone(),
                 user_keypair: services.user_keypair.clone(),
+                sync_handle: services.sync_handle.clone(),
             }
         }
     }
