@@ -1,6 +1,7 @@
 //! Confirmation view component
 
 use super::gallery_lightbox::{GalleryItem, GalleryItemContent, GalleryLightbox};
+use super::match_item::TrackListingCompact;
 use super::shared::ImportErrorDisplayView;
 use crate::components::icons::{CheckIcon, ImageIcon, PencilIcon};
 use crate::components::{
@@ -192,6 +193,11 @@ pub fn ConfirmationView(
                         "Change"
                     }
                 }
+            }
+
+            // Track listing
+            if !candidate.tracks.is_empty() {
+                TrackListingCompact { tracks: candidate.tracks.clone() }
             }
 
             // Import error (between release card and action row)

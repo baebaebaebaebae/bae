@@ -240,6 +240,14 @@ impl SearchSource {
     }
 }
 
+/// A track from a remote release (MusicBrainz or Discogs)
+#[derive(Clone, Debug, PartialEq)]
+pub struct CandidateTrack {
+    pub position: String,
+    pub title: String,
+    pub duration: Option<String>,
+}
+
 /// Match candidate source type
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MatchSourceType {
@@ -274,6 +282,8 @@ pub struct MatchCandidate {
     pub discogs_master_id: Option<String>,
     /// ID of existing album in library (duplicate detection)
     pub existing_album_id: Option<String>,
+    /// Tracks from the full release (populated after prefetch)
+    pub tracks: Vec<CandidateTrack>,
 }
 
 /// Detected folder metadata for UI display

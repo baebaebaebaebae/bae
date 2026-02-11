@@ -30,7 +30,7 @@ pub use file_list::FileListView;
 pub use folder_import::{FolderImportView, FolderImportViewProps};
 pub use gallery_lightbox::{GalleryItem, GalleryItemContent, GalleryLightbox};
 pub use manual_search_panel::ManualSearchPanelView;
-pub use match_item::MatchItemView;
+pub use match_item::{MatchItemView, TrackListingCompact};
 pub use match_results_panel::MatchResultsPanel;
 pub use metadata_display::MetadataDisplayView;
 pub use multiple_exact_matches::MultipleExactMatchesView;
