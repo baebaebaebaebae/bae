@@ -1,7 +1,7 @@
 //! Settings mock component
 
 use super::framework::{ControlRegistryBuilder, MockPage, MockPanel};
-use bae_ui::stores::{DeviceActivityInfo, Member, MemberRole};
+use bae_ui::stores::{DeviceActivityInfo, Member, MemberRole, SharedReleaseDisplay};
 use bae_ui::{
     AboutSectionView, BitTorrentSectionView, BitTorrentSettings, DiscogsSectionView, LibraryInfo,
     LibrarySectionView, SettingsTab, SettingsView, StorageLocation, StorageProfile,
@@ -138,6 +138,13 @@ pub fn SettingsMock(initial_state: Option<String>) -> Element {
                             on_invite_member: |_| {},
                             on_copy_share_info: |_| {},
                             on_dismiss_share_info: |_| {},
+                            shared_releases: mock_shared_releases(),
+                            accept_grant_text: String::new(),
+                            is_accepting_grant: false,
+                            accept_grant_error: None,
+                            on_accept_grant_text_change: |_| {},
+                            on_accept_grant: |_| {},
+                            on_revoke_shared_release: |_| {},
                         }
                     },
                     SettingsTab::Discogs => rsx! {
@@ -252,6 +259,33 @@ fn mock_members() -> Vec<Member> {
             display_name: "ff00...ddee".to_string(),
             role: MemberRole::Member,
             is_self: false,
+        },
+    ]
+}
+
+fn mock_shared_releases() -> Vec<SharedReleaseDisplay> {
+    vec![
+        SharedReleaseDisplay {
+            grant_id: "grant-001".to_string(),
+            release_id: "rel-abc123".to_string(),
+            from_library_id: "lib-xyz789".to_string(),
+            from_user_pubkey: "ff00112233445566778899aabbccddeeff00112233445566778899aabbccddee"
+                .to_string(),
+            bucket: "shared-music-bucket".to_string(),
+            region: "us-east-1".to_string(),
+            endpoint: None,
+            expires: Some("2026-06-01T00:00:00Z".to_string()),
+        },
+        SharedReleaseDisplay {
+            grant_id: "grant-002".to_string(),
+            release_id: "rel-def456".to_string(),
+            from_library_id: "lib-uvw321".to_string(),
+            from_user_pubkey: "aabbccddeeff00112233445566778899aabbccddeeff0011223344556677889900"
+                .to_string(),
+            bucket: "another-bucket".to_string(),
+            region: "eu-west-1".to_string(),
+            endpoint: Some("https://s3.example.com".to_string()),
+            expires: None,
         },
     ]
 }
