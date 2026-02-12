@@ -841,6 +841,7 @@ dependencies = [
  "aws-sdk-s3",
  "axum 0.7.9",
  "bae-common",
+ "base64",
  "bincode",
  "bindgen 0.69.5",
  "cc",
