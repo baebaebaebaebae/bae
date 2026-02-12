@@ -94,6 +94,28 @@ impl ContentType {
         }
     }
 
+    /// File extension for this content type (e.g., "flac", "mp3").
+    pub fn file_extension(&self) -> &str {
+        match self {
+            Self::Flac => "flac",
+            Self::Mpeg => "mp3",
+            Self::Ogg => "ogg",
+            Self::Wav => "wav",
+            Self::Aac => "aac",
+            Self::Mp4Audio => "m4a",
+            Self::Jpeg => "jpg",
+            Self::Png => "png",
+            Self::Gif => "gif",
+            Self::Webp => "webp",
+            Self::Bmp => "bmp",
+            Self::Svg => "svg",
+            Self::PlainText => "txt",
+            Self::Pdf => "pdf",
+            Self::OctetStream => "bin",
+            Self::Other(_) => "bin",
+        }
+    }
+
     pub fn is_audio(&self) -> bool {
         matches!(
             self,
