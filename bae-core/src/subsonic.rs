@@ -3,14 +3,17 @@ use crate::library::SharedLibraryManager;
 use crate::library_dir::LibraryDir;
 use crate::storage::create_storage_reader;
 use axum::{
+    body::Body,
     extract::{Query, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     routing::get,
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
+use tokio_util::io::ReaderStream;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, warn};
 /// Subsonic API server state
@@ -351,27 +354,184 @@ async fn get_cover_art(
     }
 }
 
+/// What kind of audio source we resolved for a track.
+enum TrackAudioSource {
+    /// Local unencrypted file with no byte-range processing needed.
+    /// Can be streamed directly from disk without loading into memory.
+    DirectFile {
+        path: PathBuf,
+        content_type: crate::content_type::ContentType,
+    },
+    /// Processed audio data (decrypted, byte-range sliced, headers prepended).
+    /// Already in memory, serve as a single body.
+    Buffered {
+        data: Vec<u8>,
+        content_type: crate::content_type::ContentType,
+    },
+}
+
+/// Pre-fetched DB data needed to stream a track.
+struct TrackLookup {
+    audio_format: crate::db::DbAudioFormat,
+    storage_profile: Option<crate::db::DbStorageProfile>,
+    audio_file: crate::db::DbFile,
+}
+
+/// Fetch all DB data needed to stream a track (audio_format, track, storage_profile, file).
+async fn lookup_track(
+    library_manager: &SharedLibraryManager,
+    track_id: &str,
+) -> Result<TrackLookup, Box<dyn std::error::Error + Send + Sync>> {
+    let audio_format = library_manager
+        .get()
+        .get_audio_format_by_track_id(track_id)
+        .await
+        .map_err(|e| format!("Database error: {}", e))?
+        .ok_or_else(|| format!("No audio format found for track {}", track_id))?;
+
+    let track = library_manager
+        .get()
+        .get_track(track_id)
+        .await
+        .map_err(|e| format!("Database error: {}", e))?
+        .ok_or_else(|| format!("Track not found: {}", track_id))?;
+
+    let storage_profile = library_manager
+        .get()
+        .get_storage_profile_for_release(&track.release_id)
+        .await
+        .map_err(|e| format!("Database error: {}", e))?;
+
+    let audio_file = match &audio_format.file_id {
+        Some(file_id) => library_manager
+            .get()
+            .get_file_by_id(file_id)
+            .await
+            .map_err(|e| format!("Database error: {}", e))?
+            .ok_or_else(|| format!("Audio file not found: {}", file_id))?,
+        None => {
+            warn!(
+                "Track {} has no file_id, falling back to release file scan",
+                track_id
+            );
+
+            let files = library_manager
+                .get()
+                .get_files_for_release(&track.release_id)
+                .await
+                .map_err(|e| format!("Database error: {}", e))?;
+
+            files
+                .into_iter()
+                .find(|f| f.content_type.is_audio())
+                .ok_or_else(|| format!("No audio file found for track {}", track_id))?
+        }
+    };
+
+    Ok(TrackLookup {
+        audio_format,
+        storage_profile,
+        audio_file,
+    })
+}
+
+/// Resolve how to serve a track's audio: either stream directly from a local
+/// file or fall back to the full buffer-and-process pipeline.
+async fn resolve_track_audio(
+    state: &SubsonicState,
+    track_id: &str,
+) -> Result<TrackAudioSource, Box<dyn std::error::Error + Send + Sync>> {
+    let lookup = lookup_track(&state.library_manager, track_id).await?;
+
+    let is_encrypted = lookup
+        .storage_profile
+        .as_ref()
+        .map(|p| p.encrypted)
+        .unwrap_or(false);
+    let is_cloud = lookup
+        .storage_profile
+        .as_ref()
+        .map(|p| p.location == crate::db::StorageLocation::Cloud)
+        .unwrap_or(false);
+    let needs_byte_slicing = lookup.audio_format.start_byte_offset.is_some()
+        && lookup.audio_format.end_byte_offset.is_some();
+    let needs_headers =
+        lookup.audio_format.needs_headers && lookup.audio_format.flac_headers.is_some();
+
+    // Fast path: local, unencrypted, no processing needed -> stream from disk
+    if !is_encrypted && !is_cloud && !needs_byte_slicing && !needs_headers {
+        if let Some(source_path) = &lookup.audio_file.source_path {
+            debug!("Fast path: streaming directly from {}", source_path);
+            return Ok(TrackAudioSource::DirectFile {
+                path: PathBuf::from(source_path),
+                content_type: lookup.audio_format.content_type,
+            });
+        }
+    }
+
+    // Slow path: need decryption, byte-range slicing, or header prepend
+    debug!(
+        "Buffered path: encrypted={}, cloud={}, byte_slicing={}, headers={}",
+        is_encrypted, is_cloud, needs_byte_slicing, needs_headers
+    );
+
+    let (data, content_type) = buffer_track_audio(state, lookup).await?;
+    Ok(TrackAudioSource::Buffered { data, content_type })
+}
+
 /// Stream a song - read and decrypt audio file from storage
 async fn stream_song(
     Query(params): Query<HashMap<String, String>>,
     State(state): State<SubsonicState>,
-) -> impl IntoResponse {
+) -> Response {
     let song_id = match params.get("id") {
         Some(id) => id.clone(),
         None => {
             return (StatusCode::BAD_REQUEST, "Missing song ID").into_response();
         }
     };
+
     info!("Streaming request for song ID: {}", song_id);
-    match stream_track_audio(&state, &song_id).await {
-        Ok((audio_data, content_type)) => {
-            let content_length = audio_data.len().to_string();
-            let headers = [
-                ("Content-Type", content_type.as_str()),
-                ("Content-Length", &content_length),
-                ("Accept-Ranges", "bytes"),
-            ];
-            (StatusCode::OK, headers, audio_data).into_response()
+
+    match resolve_track_audio(&state, &song_id).await {
+        Ok(TrackAudioSource::DirectFile { path, content_type }) => {
+            match tokio::fs::File::open(&path).await {
+                Ok(file) => {
+                    let metadata = file.metadata().await;
+                    let stream = ReaderStream::new(file);
+                    let body = Body::from_stream(stream);
+
+                    let mut builder = Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", content_type.as_str())
+                        .header("Accept-Ranges", "bytes");
+
+                    if let Ok(meta) = metadata {
+                        builder = builder.header("Content-Length", meta.len().to_string());
+                    }
+
+                    builder.body(body).unwrap()
+                }
+                Err(e) => {
+                    error!("Failed to open file {:?}: {}", path, e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to open file: {}", e),
+                    )
+                        .into_response()
+                }
+            }
+        }
+        Ok(TrackAudioSource::Buffered { data, content_type }) => {
+            let content_length = data.len().to_string();
+
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", content_type.as_str())
+                .header("Content-Length", content_length)
+                .header("Accept-Ranges", "bytes")
+                .body(Body::from(data))
+                .unwrap()
         }
         Err(e) => {
             error!("Streaming error for song {}: {}", song_id, e);
@@ -573,56 +733,22 @@ pub async fn stream_track_audio(
     state: &SubsonicState,
     track_id: &str,
 ) -> Result<(Vec<u8>, crate::content_type::ContentType), Box<dyn std::error::Error + Send + Sync>> {
-    let library_manager = &state.library_manager;
-    info!("Loading audio for track: {}", track_id);
+    let lookup = lookup_track(&state.library_manager, track_id).await?;
+    buffer_track_audio(state, lookup).await
+}
 
-    let audio_format = library_manager
-        .get()
-        .get_audio_format_by_track_id(track_id)
-        .await
-        .map_err(|e| format!("Database error: {}", e))?
-        .ok_or_else(|| format!("No audio format found for track {}", track_id))?;
+/// Read, decrypt, slice, and assemble track audio from pre-fetched DB data.
+async fn buffer_track_audio(
+    state: &SubsonicState,
+    lookup: TrackLookup,
+) -> Result<(Vec<u8>, crate::content_type::ContentType), Box<dyn std::error::Error + Send + Sync>> {
+    let TrackLookup {
+        audio_format,
+        storage_profile,
+        audio_file,
+    } = lookup;
 
-    let track = library_manager
-        .get()
-        .get_track(track_id)
-        .await
-        .map_err(|e| format!("Database error: {}", e))?
-        .ok_or_else(|| format!("Track not found: {}", track_id))?;
-
-    // Get storage profile
-    let storage_profile = library_manager
-        .get()
-        .get_storage_profile_for_release(&track.release_id)
-        .await
-        .map_err(|e| format!("Database error: {}", e))?;
-
-    // Find the audio file for this track using its file_id (precise lookup)
-    let audio_file = match &audio_format.file_id {
-        Some(file_id) => library_manager
-            .get()
-            .get_file_by_id(file_id)
-            .await
-            .map_err(|e| format!("Database error: {}", e))?
-            .ok_or_else(|| format!("Audio file not found: {}", file_id))?,
-        None => {
-            warn!(
-                "Track {} has no file_id, falling back to release file scan",
-                track_id
-            );
-
-            let files = library_manager
-                .get()
-                .get_files_for_release(&track.release_id)
-                .await
-                .map_err(|e| format!("Database error: {}", e))?;
-
-            files
-                .into_iter()
-                .find(|f| f.content_type.is_audio())
-                .ok_or_else(|| format!("No audio file found for track {}", track_id))?
-        }
-    };
+    info!("Loading audio for file: {}", audio_file.id);
 
     // Read file data from source_path
     let source_path = audio_file
