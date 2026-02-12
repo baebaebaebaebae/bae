@@ -574,6 +574,10 @@ impl AppService {
             .config()
             .torrent_max_uploads_per_torrent()
             .set(config.torrent_max_uploads_per_torrent);
+        self.state
+            .config()
+            .share_base_url()
+            .set(config.share_base_url.clone());
 
         // Sync config
         self.state
@@ -1092,6 +1096,10 @@ impl AppService {
             .config()
             .torrent_max_uploads_per_torrent()
             .set(new_config.torrent_max_uploads_per_torrent);
+        self.state
+            .config()
+            .share_base_url()
+            .set(new_config.share_base_url.clone());
 
         // Sync config might have changed via save_config too
         self.state

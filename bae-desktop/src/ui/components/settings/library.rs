@@ -434,6 +434,7 @@ async fn bootstrap_library(
         } else {
             Some(endpoint.to_string())
         },
+        share_base_url: None,
     };
 
     config

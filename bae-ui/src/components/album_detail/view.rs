@@ -46,6 +46,7 @@ pub fn AlbumDetailView(
     on_track_add_next: EventHandler<String>,
     on_track_add_to_queue: EventHandler<String>,
     on_track_export: EventHandler<String>,
+    on_track_copy_share_link: EventHandler<String>,
     on_artist_click: EventHandler<String>,
     on_play_album: EventHandler<Vec<String>>,
     on_add_album_to_queue: EventHandler<Vec<String>>,
@@ -145,6 +146,7 @@ pub fn AlbumDetailView(
                         on_track_add_next,
                         on_track_add_to_queue,
                         on_track_export,
+                        on_track_copy_share_link,
                         on_artist_click,
                     }
                 }
@@ -334,6 +336,7 @@ fn TrackListSection(
     on_track_add_next: EventHandler<String>,
     on_track_add_to_queue: EventHandler<String>,
     on_track_export: EventHandler<String>,
+    on_track_copy_share_link: EventHandler<String>,
     on_artist_click: EventHandler<String>,
 ) -> Element {
     // Use lenses for individual fields - avoids subscribing to track import_state changes
@@ -428,6 +431,7 @@ fn TrackListSection(
                                 on_add_next: on_track_add_next,
                                 on_add_to_queue: on_track_add_to_queue,
                                 on_export: on_track_export,
+                                on_copy_share_link: on_track_copy_share_link,
                                 on_artist_click,
                             }
                         }

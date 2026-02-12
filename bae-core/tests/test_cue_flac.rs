@@ -1493,6 +1493,7 @@ async fn test_subsonic_stream_cue_flac_track2_correct_range() {
         encryption_service: encryption_service.clone(),
         library_dir: LibraryDir::new(db_dir),
         key_service,
+        share_base_url: None,
     };
 
     let (audio_data, content_type) = stream_track_audio(&state, &track2.id)

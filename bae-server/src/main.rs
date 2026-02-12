@@ -69,6 +69,10 @@ struct Args {
     /// When provided, serves the web UI at / alongside the API at /rest/*.
     #[arg(long, env = "BAE_WEB_DIR")]
     web_dir: Option<PathBuf>,
+
+    /// Base URL for share links (e.g. "https://listen.example.com").
+    #[arg(long, env = "BAE_SHARE_BASE_URL")]
+    share_base_url: Option<String>,
 }
 
 fn configure_logging() {
@@ -185,7 +189,13 @@ async fn main() {
     let library_manager =
         SharedLibraryManager::new(LibraryManager::new(database, Some(encryption.clone())));
 
-    let api_router = create_router(library_manager, Some(encryption), library_dir, key_service);
+    let api_router = create_router(
+        library_manager,
+        Some(encryption),
+        library_dir,
+        key_service,
+        args.share_base_url,
+    );
 
     // If --web-dir is provided, serve static files with SPA fallback.
     let app = if let Some(ref web_dir) = args.web_dir {

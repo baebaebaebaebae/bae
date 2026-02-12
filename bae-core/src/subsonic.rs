@@ -24,6 +24,7 @@ pub struct SubsonicState {
     pub encryption_service: Option<crate::encryption::EncryptionService>,
     pub library_dir: LibraryDir,
     pub key_service: crate::keys::KeyService,
+    pub share_base_url: Option<String>,
 }
 /// Common query parameters for Subsonic API
 #[derive(Debug, Deserialize)]
@@ -133,12 +134,14 @@ pub fn create_router(
     encryption_service: Option<crate::encryption::EncryptionService>,
     library_dir: LibraryDir,
     key_service: crate::keys::KeyService,
+    share_base_url: Option<String>,
 ) -> Router {
     let state = SubsonicState {
         library_manager,
         encryption_service,
         library_dir,
         key_service,
+        share_base_url,
     };
     Router::new()
         .route("/rest/ping", get(ping))

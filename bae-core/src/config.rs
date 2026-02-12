@@ -261,6 +261,10 @@ pub struct ConfigYaml {
     /// S3 endpoint for sync bucket (for S3-compatible services)
     #[serde(default)]
     pub sync_s3_endpoint: Option<String>,
+
+    /// Base URL for share links (e.g. "https://listen.example.com")
+    #[serde(default)]
+    pub share_base_url: Option<String>,
 }
 
 /// Metadata about a discovered library (for the library switcher UI)
@@ -308,6 +312,8 @@ pub struct Config {
     pub sync_s3_region: Option<String>,
     /// S3 endpoint for sync bucket (for S3-compatible services)
     pub sync_s3_endpoint: Option<String>,
+    /// Base URL for share links (e.g. "https://listen.example.com")
+    pub share_base_url: Option<String>,
 }
 
 impl Config {
@@ -380,6 +386,9 @@ impl Config {
         let sync_s3_endpoint = std::env::var("BAE_SYNC_S3_ENDPOINT")
             .ok()
             .filter(|s| !s.is_empty());
+        let share_base_url = std::env::var("BAE_SHARE_BASE_URL")
+            .ok()
+            .filter(|s| !s.is_empty());
 
         Self {
             library_id,
@@ -406,6 +415,7 @@ impl Config {
             sync_s3_bucket,
             sync_s3_region,
             sync_s3_endpoint,
+            share_base_url,
         }
     }
 
@@ -500,6 +510,7 @@ impl Config {
             sync_s3_bucket: yaml_config.sync_s3_bucket,
             sync_s3_region: yaml_config.sync_s3_region,
             sync_s3_endpoint: yaml_config.sync_s3_endpoint,
+            share_base_url: yaml_config.share_base_url,
         }
     }
 
@@ -547,6 +558,9 @@ impl Config {
         }
         if let Some(endpoint) = &self.sync_s3_endpoint {
             new_values.insert("BAE_SYNC_S3_ENDPOINT", endpoint.clone());
+        }
+        if let Some(url) = &self.share_base_url {
+            new_values.insert("BAE_SHARE_BASE_URL", url.clone());
         }
 
         let mut found = std::collections::HashSet::new();
@@ -607,6 +621,7 @@ impl Config {
             sync_s3_bucket: self.sync_s3_bucket.clone(),
             sync_s3_region: self.sync_s3_region.clone(),
             sync_s3_endpoint: self.sync_s3_endpoint.clone(),
+            share_base_url: self.share_base_url.clone(),
         };
         std::fs::write(
             self.library_dir.config_path(),
@@ -654,6 +669,7 @@ impl Config {
             sync_s3_bucket: None,
             sync_s3_region: None,
             sync_s3_endpoint: None,
+            share_base_url: None,
         };
 
         match key_service.get_or_create_encryption_key() {
@@ -831,6 +847,7 @@ mod tests {
             sync_s3_bucket: None,
             sync_s3_region: None,
             sync_s3_endpoint: None,
+            share_base_url: None,
         }
     }
 

@@ -388,6 +388,7 @@ async fn do_restore(
         sync_s3_bucket: None,
         sync_s3_region: None,
         sync_s3_endpoint: None,
+        share_base_url: None,
     };
     config.save_to_config_yaml()?;
 
