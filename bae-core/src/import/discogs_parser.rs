@@ -1,14 +1,7 @@
+use super::ParsedAlbum;
 use crate::db::{DbAlbum, DbAlbumArtist, DbArtist, DbRelease, DbTrack};
 use crate::discogs::DiscogsRelease;
 use uuid::Uuid;
-/// Result of parsing a Discogs release into database entities
-pub type ParsedAlbum = (
-    DbAlbum,
-    DbRelease,
-    Vec<DbTrack>,
-    Vec<DbArtist>,
-    Vec<DbAlbumArtist>,
-);
 /// Parse Discogs release metadata into database models including artist information.
 ///
 /// Converts a DiscogsRelease (from the API) into DbAlbum, DbRelease, DbTrack, and artist records
