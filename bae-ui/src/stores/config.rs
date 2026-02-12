@@ -38,4 +38,7 @@ pub struct ConfigState {
     pub torrent_max_uploads: Option<i32>,
     /// Max upload slots per torrent (None = unlimited)
     pub torrent_max_uploads_per_torrent: Option<i32>,
+
+    /// Base URL for share links (e.g. "https://listen.example.com")
+    pub share_base_url: Option<String>,
 }

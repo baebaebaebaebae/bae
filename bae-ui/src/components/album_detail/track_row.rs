@@ -30,6 +30,7 @@ pub fn TrackRow(
     on_add_next: EventHandler<String>,
     on_add_to_queue: EventHandler<String>,
     on_export: EventHandler<String>,
+    on_copy_share_link: EventHandler<String>,
     on_artist_click: EventHandler<String>,
 ) -> Element {
     // Read track data at this leaf level
@@ -179,19 +180,21 @@ pub fn TrackRow(
                     on_export,
                     on_add_next,
                     on_add_to_queue,
+                    on_copy_share_link,
                 }
             }
         }
     }
 }
 
-/// Track context menu (export, play next, add to queue)
+/// Track context menu (export, play next, add to queue, copy share link)
 #[component]
 fn TrackMenu(
     track_id: String,
     on_export: EventHandler<String>,
     on_add_next: EventHandler<String>,
     on_add_to_queue: EventHandler<String>,
+    on_copy_share_link: EventHandler<String>,
 ) -> Element {
     let mut show_menu = use_signal(|| false);
     let is_open: ReadSignal<bool> = show_menu.into();
@@ -249,6 +252,16 @@ fn TrackMenu(
                     }
                 },
                 "Add to Queue"
+            }
+            MenuItem {
+                onclick: {
+                    let track_id = track_id.clone();
+                    move |_| {
+                        show_menu.set(false);
+                        on_copy_share_link.call(track_id.clone());
+                    }
+                },
+                "Copy Share Link"
             }
         }
     }

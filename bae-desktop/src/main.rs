@@ -281,6 +281,7 @@ fn main() {
         let subsonic_bind_address = config.subsonic_bind_address.clone();
         let subsonic_library_dir = config.library_dir.clone();
         let subsonic_key_service = key_service.clone();
+        let subsonic_share_base_url = config.share_base_url.clone();
         runtime_handle.spawn(async move {
             start_subsonic_server(
                 subsonic_library,
@@ -289,6 +290,7 @@ fn main() {
                 subsonic_bind_address,
                 subsonic_library_dir,
                 subsonic_key_service,
+                subsonic_share_base_url,
             )
             .await
         });
@@ -399,6 +401,7 @@ async fn start_subsonic_server(
     bind_address: String,
     library_dir: bae_core::library_dir::LibraryDir,
     key_service: bae_core::keys::KeyService,
+    share_base_url: Option<String>,
 ) {
     info!("Starting Subsonic API server...");
     let app = create_router(
@@ -406,6 +409,7 @@ async fn start_subsonic_server(
         encryption_service,
         library_dir,
         key_service,
+        share_base_url,
     );
     let addr = format!("{}:{}", bind_address, port);
     let listener = match tokio::net::TcpListener::bind(&addr).await {

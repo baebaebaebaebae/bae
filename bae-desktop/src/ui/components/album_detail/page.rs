@@ -12,7 +12,7 @@ use bae_ui::stores::{
 };
 use dioxus::prelude::*;
 use rfd::AsyncFileDialog;
-use tracing::error;
+use tracing::{error, warn};
 
 /// Album detail page showing album info and tracklist
 ///
@@ -124,6 +124,38 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
                     }
                 }
             });
+        }
+    });
+
+    // Copy share link callback
+    let on_track_copy_share_link = EventHandler::new({
+        let library_manager = library_manager.clone();
+        let share_base_url = app.config.share_base_url.clone();
+        move |track_id: String| {
+            let Some(ref base_url) = share_base_url else {
+                warn!("share_base_url not configured, cannot copy share link");
+                return;
+            };
+
+            let Some(encryption) = library_manager.get().encryption_service() else {
+                warn!("Encryption not configured, cannot generate share token");
+                return;
+            };
+
+            match bae_core::share_token::generate_share_token(
+                encryption,
+                bae_core::share_token::ShareKind::Track,
+                &track_id,
+                None,
+            ) {
+                Ok(token) => {
+                    let url = format!("{}/share/{}", base_url, token);
+                    let _ = arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&url));
+                }
+                Err(e) => {
+                    warn!("Failed to generate share token: {e}");
+                }
+            }
         }
     });
 
@@ -320,6 +352,7 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
                 on_track_add_next,
                 on_track_add_to_queue,
                 on_track_export,
+                on_track_copy_share_link,
                 on_artist_click,
                 on_play_album,
                 on_add_album_to_queue,

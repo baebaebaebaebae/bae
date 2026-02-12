@@ -195,6 +195,7 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
                 on_track_add_next: |_| {},
                 on_track_add_to_queue: |_| {},
                 on_track_export: |_| {},
+                on_track_copy_share_link: |_| {},
                 on_artist_click: |_| {},
                 on_play_album: |_| {},
                 on_add_album_to_queue: |_| {},

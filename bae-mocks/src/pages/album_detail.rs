@@ -74,6 +74,7 @@ pub fn AlbumDetail(album_id: String) -> Element {
                 on_track_add_next: |_| {},
                 on_track_add_to_queue: |_| {},
                 on_track_export: |_| {},
+                on_track_copy_share_link: |_| {},
                 on_artist_click: move |artist_id: String| {
                     navigator().push(Route::ArtistDetail { artist_id });
                 },
