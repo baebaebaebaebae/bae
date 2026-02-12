@@ -578,6 +578,14 @@ impl AppService {
             .config()
             .share_base_url()
             .set(config.share_base_url.clone());
+        self.state
+            .config()
+            .share_default_expiry_days()
+            .set(config.share_default_expiry_days);
+        self.state
+            .config()
+            .share_signing_key_version()
+            .set(config.share_signing_key_version);
 
         // Sync config
         self.state
@@ -1100,6 +1108,14 @@ impl AppService {
             .config()
             .share_base_url()
             .set(new_config.share_base_url.clone());
+        self.state
+            .config()
+            .share_default_expiry_days()
+            .set(new_config.share_default_expiry_days);
+        self.state
+            .config()
+            .share_signing_key_version()
+            .set(new_config.share_signing_key_version);
 
         // Sync config might have changed via save_config too
         self.state

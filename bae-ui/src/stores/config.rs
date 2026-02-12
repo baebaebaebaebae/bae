@@ -41,4 +41,8 @@ pub struct ConfigState {
 
     /// Base URL for share links (e.g. "https://listen.example.com")
     pub share_base_url: Option<String>,
+    /// Default expiry in days for share links (None = never expires)
+    pub share_default_expiry_days: Option<u32>,
+    /// Version of the share signing key
+    pub share_signing_key_version: u32,
 }

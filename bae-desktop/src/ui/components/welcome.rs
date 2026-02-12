@@ -389,6 +389,8 @@ async fn do_restore(
         sync_s3_region: None,
         sync_s3_endpoint: None,
         share_base_url: None,
+        share_default_expiry_days: None,
+        share_signing_key_version: 1,
     };
     config.save_to_config_yaml()?;
 

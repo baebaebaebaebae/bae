@@ -184,6 +184,7 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
                 state,
                 tracks,
                 playback,
+                show_share_link: true,
                 on_release_select: move |id| selected_release_id.set(Some(id)),
                 on_album_deleted: |_| {},
                 on_export_release: |_| {},

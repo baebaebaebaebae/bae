@@ -8,7 +8,9 @@ use crate::hmac_utils::{hmac_sign, hmac_verify};
 
 const TOKEN_LEN: usize = 57; // 1 (type) + 16 (UUID) + 8 (expiry) + 32 (HMAC)
 const PAYLOAD_LEN: usize = 25; // 1 (type) + 16 (UUID) + 8 (expiry)
-const SIGNING_INFO: &str = "bae-share-link-v1";
+fn signing_info(version: u32) -> String {
+    format!("bae-share-link-v{}", version)
+}
 
 const TYPE_TRACK: u8 = 0x01;
 const TYPE_ALBUM: u8 = 0x02;
@@ -48,6 +50,7 @@ pub fn generate_share_token(
     kind: ShareKind,
     id: &str,
     expiry: Option<u64>,
+    signing_key_version: u32,
 ) -> Result<String, ShareTokenError> {
     let uuid = Uuid::parse_str(id).map_err(|_| ShareTokenError::InvalidId(id.to_string()))?;
 
@@ -59,7 +62,8 @@ pub fn generate_share_token(
     payload[1..17].copy_from_slice(uuid.as_bytes());
     payload[17..25].copy_from_slice(&expiry.unwrap_or(0).to_be_bytes());
 
-    let signing_key = encryption.derive_key(SIGNING_INFO);
+    let info = signing_info(signing_key_version);
+    let signing_key = encryption.derive_key(&info);
     let signature = hmac_sign(&signing_key, &payload);
 
     let mut token_bytes = Vec::with_capacity(TOKEN_LEN);
@@ -73,6 +77,7 @@ pub fn generate_share_token(
 pub fn validate_share_token(
     encryption: &EncryptionService,
     token: &str,
+    signing_key_version: u32,
 ) -> Result<ShareTokenPayload, ShareTokenError> {
     let bytes = URL_SAFE_NO_PAD
         .decode(token)
@@ -85,7 +90,8 @@ pub fn validate_share_token(
     let payload = &bytes[..PAYLOAD_LEN];
     let signature = &bytes[PAYLOAD_LEN..];
 
-    let signing_key = encryption.derive_key(SIGNING_INFO);
+    let info = signing_info(signing_key_version);
+    let signing_key = encryption.derive_key(&info);
     if !hmac_verify(&signing_key, payload, signature) {
         return Err(ShareTokenError::InvalidSignature);
     }
@@ -136,8 +142,8 @@ mod tests {
         let enc = test_encryption();
         let track_id = Uuid::new_v4().to_string();
 
-        let token = generate_share_token(&enc, ShareKind::Track, &track_id, None).unwrap();
-        let payload = validate_share_token(&enc, &token).unwrap();
+        let token = generate_share_token(&enc, ShareKind::Track, &track_id, None, 1).unwrap();
+        let payload = validate_share_token(&enc, &token, 1).unwrap();
 
         assert_eq!(payload.kind, ShareKind::Track);
         assert_eq!(payload.id, track_id);
@@ -148,8 +154,8 @@ mod tests {
         let enc = test_encryption();
         let album_id = Uuid::new_v4().to_string();
 
-        let token = generate_share_token(&enc, ShareKind::Album, &album_id, None).unwrap();
-        let payload = validate_share_token(&enc, &token).unwrap();
+        let token = generate_share_token(&enc, ShareKind::Album, &album_id, None, 1).unwrap();
+        let payload = validate_share_token(&enc, &token, 1).unwrap();
 
         assert_eq!(payload.kind, ShareKind::Album);
         assert_eq!(payload.id, album_id);
@@ -165,9 +171,9 @@ mod tests {
             .as_secs()
             + 3600; // 1 hour from now
 
-        let token =
-            generate_share_token(&enc, ShareKind::Track, &track_id, Some(future_expiry)).unwrap();
-        let payload = validate_share_token(&enc, &token).unwrap();
+        let token = generate_share_token(&enc, ShareKind::Track, &track_id, Some(future_expiry), 1)
+            .unwrap();
+        let payload = validate_share_token(&enc, &token, 1).unwrap();
 
         assert_eq!(payload.id, track_id);
         assert_eq!(payload.expiry, Some(future_expiry));
@@ -180,8 +186,8 @@ mod tests {
         let past_expiry = 1; // 1 second after epoch -- definitely in the past
 
         let token =
-            generate_share_token(&enc, ShareKind::Track, &track_id, Some(past_expiry)).unwrap();
-        let err = validate_share_token(&enc, &token).unwrap_err();
+            generate_share_token(&enc, ShareKind::Track, &track_id, Some(past_expiry), 1).unwrap();
+        let err = validate_share_token(&enc, &token, 1).unwrap_err();
 
         assert!(matches!(err, ShareTokenError::Expired));
     }
@@ -191,8 +197,8 @@ mod tests {
         let enc = test_encryption();
         let track_id = Uuid::new_v4().to_string();
 
-        let token = generate_share_token(&enc, ShareKind::Track, &track_id, None).unwrap();
-        let payload = validate_share_token(&enc, &token).unwrap();
+        let token = generate_share_token(&enc, ShareKind::Track, &track_id, None, 1).unwrap();
+        let payload = validate_share_token(&enc, &token, 1).unwrap();
 
         assert!(payload.expiry.is_none());
     }
@@ -202,14 +208,14 @@ mod tests {
         let enc = test_encryption();
         let track_id = Uuid::new_v4().to_string();
 
-        let token = generate_share_token(&enc, ShareKind::Track, &track_id, None).unwrap();
+        let token = generate_share_token(&enc, ShareKind::Track, &track_id, None, 1).unwrap();
 
         // Decode, flip a byte, re-encode
         let mut bytes = URL_SAFE_NO_PAD.decode(&token).unwrap();
         bytes[0] ^= 0xFF;
         let tampered = URL_SAFE_NO_PAD.encode(&bytes);
 
-        let err = validate_share_token(&enc, &tampered).unwrap_err();
+        let err = validate_share_token(&enc, &tampered, 1).unwrap_err();
         assert!(matches!(err, ShareTokenError::InvalidSignature));
     }
 
@@ -219,16 +225,25 @@ mod tests {
         let enc_b = EncryptionService::new_with_key(&[0xBB; 32]);
         let track_id = Uuid::new_v4().to_string();
 
-        let token = generate_share_token(&enc_a, ShareKind::Track, &track_id, None).unwrap();
-        let err = validate_share_token(&enc_b, &token).unwrap_err();
+        let token = generate_share_token(&enc_a, ShareKind::Track, &track_id, None, 1).unwrap();
+        let err = validate_share_token(&enc_b, &token, 1).unwrap_err();
 
+        assert!(matches!(err, ShareTokenError::InvalidSignature));
+    }
+
+    #[test]
+    fn test_different_version_rejects() {
+        let enc = test_encryption();
+        let track_id = Uuid::new_v4().to_string();
+        let token = generate_share_token(&enc, ShareKind::Track, &track_id, None, 1).unwrap();
+        let err = validate_share_token(&enc, &token, 2).unwrap_err();
         assert!(matches!(err, ShareTokenError::InvalidSignature));
     }
 
     #[test]
     fn test_invalid_base64() {
         let enc = test_encryption();
-        let err = validate_share_token(&enc, "not valid base64!!!").unwrap_err();
+        let err = validate_share_token(&enc, "not valid base64!!!", 1).unwrap_err();
         assert!(matches!(err, ShareTokenError::InvalidToken));
     }
 
@@ -237,14 +252,14 @@ mod tests {
         let enc = test_encryption();
         // Valid base64 but wrong byte count (only 16 bytes)
         let short = URL_SAFE_NO_PAD.encode([0u8; 16]);
-        let err = validate_share_token(&enc, &short).unwrap_err();
+        let err = validate_share_token(&enc, &short, 1).unwrap_err();
         assert!(matches!(err, ShareTokenError::InvalidToken));
     }
 
     #[test]
     fn test_invalid_id() {
         let enc = test_encryption();
-        let err = generate_share_token(&enc, ShareKind::Track, "not-a-uuid", None).unwrap_err();
+        let err = generate_share_token(&enc, ShareKind::Track, "not-a-uuid", None, 1).unwrap_err();
         assert!(matches!(err, ShareTokenError::InvalidId(_)));
     }
 
@@ -253,18 +268,19 @@ mod tests {
         let enc = test_encryption();
         let track_id = Uuid::new_v4().to_string();
 
-        let token = generate_share_token(&enc, ShareKind::Track, &track_id, None).unwrap();
+        let token = generate_share_token(&enc, ShareKind::Track, &track_id, None, 1).unwrap();
 
         // Decode, change type byte to invalid value, re-sign
         let mut bytes = URL_SAFE_NO_PAD.decode(&token).unwrap();
         bytes[0] = 0xFF; // invalid type
                          // Re-sign with correct key so signature passes
-        let signing_key = enc.derive_key(SIGNING_INFO);
+        let info = signing_info(1);
+        let signing_key = enc.derive_key(&info);
         let new_sig = hmac_sign(&signing_key, &bytes[..PAYLOAD_LEN]);
         bytes[PAYLOAD_LEN..].copy_from_slice(&new_sig);
         let bad_type = URL_SAFE_NO_PAD.encode(&bytes);
 
-        let err = validate_share_token(&enc, &bad_type).unwrap_err();
+        let err = validate_share_token(&enc, &bad_type, 1).unwrap_err();
         assert!(matches!(err, ShareTokenError::InvalidToken));
     }
 }

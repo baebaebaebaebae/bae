@@ -193,6 +193,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_share_signing_version() -> u32 {
+    1
+}
+
 /// YAML config file structure for non-secret settings (per-library)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigYaml {
@@ -264,6 +268,12 @@ pub struct ConfigYaml {
     /// Base URL for share links (e.g. "https://listen.example.com")
     #[serde(default)]
     pub share_base_url: Option<String>,
+    /// Default expiry in days for share links (None = never expires)
+    #[serde(default)]
+    pub share_default_expiry_days: Option<u32>,
+    /// Version of the share signing key (incrementing invalidates all tokens)
+    #[serde(default = "default_share_signing_version")]
+    pub share_signing_key_version: u32,
 }
 
 /// Metadata about a discovered library (for the library switcher UI)
@@ -313,6 +323,10 @@ pub struct Config {
     pub sync_s3_endpoint: Option<String>,
     /// Base URL for share links (e.g. "https://listen.example.com")
     pub share_base_url: Option<String>,
+    /// Default expiry in days for share links (None = never expires)
+    pub share_default_expiry_days: Option<u32>,
+    /// Version of the share signing key (incrementing invalidates all tokens)
+    pub share_signing_key_version: u32,
 }
 
 impl Config {
@@ -487,6 +501,8 @@ impl Config {
             sync_s3_region: yaml_config.sync_s3_region,
             sync_s3_endpoint: yaml_config.sync_s3_endpoint,
             share_base_url: yaml_config.share_base_url,
+            share_default_expiry_days: yaml_config.share_default_expiry_days,
+            share_signing_key_version: yaml_config.share_signing_key_version,
         }
     }
 
@@ -543,6 +559,8 @@ impl Config {
             sync_s3_region: self.sync_s3_region.clone(),
             sync_s3_endpoint: self.sync_s3_endpoint.clone(),
             share_base_url: self.share_base_url.clone(),
+            share_default_expiry_days: self.share_default_expiry_days,
+            share_signing_key_version: self.share_signing_key_version,
         };
         std::fs::write(
             self.library_dir.config_path(),
@@ -591,6 +609,8 @@ impl Config {
             sync_s3_region: None,
             sync_s3_endpoint: None,
             share_base_url: None,
+            share_default_expiry_days: None,
+            share_signing_key_version: 1,
         };
 
         match key_service.get_or_create_encryption_key() {
@@ -755,6 +775,8 @@ mod tests {
             sync_s3_region: None,
             sync_s3_endpoint: None,
             share_base_url: None,
+            share_default_expiry_days: None,
+            share_signing_key_version: 1,
         }
     }
 

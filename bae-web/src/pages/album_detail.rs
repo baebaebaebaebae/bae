@@ -96,6 +96,7 @@ pub fn AlbumDetail(album_id: String) -> Element {
                     state,
                     tracks,
                     playback: playback_display(),
+                    show_share_link: false,
                     on_release_select: |_| {},
                     on_album_deleted: |_| {},
                     on_export_release: |_| {},
