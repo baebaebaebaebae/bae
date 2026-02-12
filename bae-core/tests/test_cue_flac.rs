@@ -1384,6 +1384,236 @@ async fn test_cue_flac_gapless_track_boundary() {
     );
 }
 
+/// Test that subsonic streaming returns the correct byte range for a CUE/FLAC track.
+///
+/// Regression test: stream_track_audio must slice to the track's byte range
+/// before prepending headers. Without this, every track streams the entire file.
+///
+/// Verifies by decoding the streamed audio and comparing samples against ground truth.
+#[tokio::test]
+async fn test_subsonic_stream_cue_flac_track2_correct_range() {
+    use bae_core::audio_codec::decode_audio;
+    use bae_core::cue_flac::CueFlacProcessor;
+    use bae_core::library_dir::LibraryDir;
+    use bae_core::subsonic::{stream_track_audio, SubsonicState};
+
+    tracing_init();
+
+    let temp_root = TempDir::new().expect("temp root");
+    let album_dir = temp_root.path().join("album");
+    let db_dir = temp_root.path().join("db");
+    std::fs::create_dir_all(&album_dir).expect("album dir");
+    std::fs::create_dir_all(&db_dir).expect("db dir");
+
+    copy_cue_flac_fixture_with_seektable(&album_dir);
+
+    let db_file = db_dir.join("test.db");
+    let database = Database::new(db_file.to_str().unwrap())
+        .await
+        .expect("database");
+    let encryption_service = Some(EncryptionService::new_with_key(&[0u8; 32]));
+    let key_service = KeyService::new(true, "test".to_string());
+    let library_manager = LibraryManager::new(database.clone(), test_encryption_service());
+    let shared_library_manager = SharedLibraryManager::new(library_manager.clone());
+    let library_manager = Arc::new(library_manager);
+    let runtime_handle = tokio::runtime::Handle::current();
+    let database_arc = Arc::new(database.clone());
+    let import_handle = ImportService::start(
+        runtime_handle,
+        shared_library_manager.clone(),
+        encryption_service.clone(),
+        database_arc,
+        KeyService::new(true, "test".to_string()),
+        std::env::temp_dir().join("bae-test-covers").into(),
+    );
+
+    let discogs_release = create_test_discogs_release();
+    let import_id = uuid::Uuid::new_v4().to_string();
+    let (_album_id, release_id) = import_handle
+        .send_request(ImportRequest::Folder {
+            import_id,
+            discogs_release: Some(discogs_release),
+            mb_release: None,
+            folder: album_dir.clone(),
+            master_year: 2024,
+            storage_profile_id: None,
+            selected_cover: None,
+        })
+        .await
+        .expect("send request");
+
+    let mut progress_rx = import_handle.subscribe_release(release_id.clone());
+    while let Some(progress) = progress_rx.recv().await {
+        match &progress {
+            ImportProgress::Complete {
+                release_id: rid, ..
+            } if rid.is_none() => break,
+            ImportProgress::Failed { error, .. } => panic!("Import failed: {}", error),
+            _ => {}
+        }
+    }
+
+    let tracks = library_manager
+        .get_tracks(&release_id)
+        .await
+        .expect("get tracks");
+    assert_eq!(tracks.len(), 3, "Should have exactly 3 tracks");
+
+    let track2 = &tracks[1];
+    let track2_format = library_manager
+        .get_audio_format_by_track_id(&track2.id)
+        .await
+        .expect("get track2 format")
+        .expect("track2 should have audio format");
+
+    let track2_start = track2_format
+        .start_byte_offset
+        .expect("track2 should have start offset") as usize;
+    let track2_end = track2_format
+        .end_byte_offset
+        .expect("track2 should have end offset") as usize;
+    let headers_len = track2_format
+        .flac_headers
+        .as_ref()
+        .expect("track2 should have headers")
+        .len();
+
+    info!(
+        "Track 2 '{}': bytes {}..{} ({} bytes), headers {} bytes",
+        track2.title,
+        track2_start,
+        track2_end,
+        track2_end - track2_start,
+        headers_len,
+    );
+
+    // Build SubsonicState and call stream_track_audio
+    let state = SubsonicState {
+        library_manager: shared_library_manager,
+        encryption_service: encryption_service.clone(),
+        library_dir: LibraryDir::new(db_dir),
+        key_service,
+    };
+
+    let (audio_data, content_type) = stream_track_audio(&state, &track2.id)
+        .await
+        .expect("stream_track_audio should succeed");
+
+    info!(
+        "Streamed {} bytes, content_type: {:?}",
+        audio_data.len(),
+        content_type
+    );
+
+    // The returned bytes should be headers + track byte range, NOT headers + entire file
+    let expected_size = headers_len + (track2_end - track2_start);
+    assert_eq!(
+        audio_data.len(),
+        expected_size,
+        "Streamed size should be headers ({}) + track range ({}) = {}, but got {}. \
+         If got {} that means the entire file was returned instead of the track range.",
+        headers_len,
+        track2_end - track2_start,
+        expected_size,
+        audio_data.len(),
+        audio_data.len(),
+    );
+
+    // === GROUND TRUTH ===
+    // Decode the entire FLAC and extract track 2's samples
+    let fixture_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cue_flac");
+    let flac_path = fixture_dir.join("Test Album.flac");
+    let cue_path = fixture_dir.join("Test Album.cue");
+    let flac_data = std::fs::read(&flac_path).expect("read flac");
+
+    let full_decode = decode_audio(&flac_data, None, None).expect("decode full flac");
+    let channels = full_decode.channels as usize;
+    let sample_rate = full_decode.sample_rate;
+
+    let cue_sheet = CueFlacProcessor::parse_cue_sheet(&cue_path).expect("parse cue");
+    let track2_cue = &cue_sheet.tracks[1];
+    let track2_start_ms = track2_cue.audio_start_ms();
+    let track2_start_sample = (track2_start_ms * sample_rate as u64 / 1000) as usize * channels;
+    let truth_samples = &full_decode.samples[track2_start_sample..];
+
+    // === UNDER TEST ===
+    // Decode the streamed audio
+    let streamed_decode = decode_audio(&audio_data, None, None).expect("decode streamed audio");
+    let streamed_samples = &streamed_decode.samples;
+
+    info!(
+        "Streamed decode: {} samples, ground truth from sample {}: {} samples available",
+        streamed_samples.len(),
+        track2_start_sample,
+        truth_samples.len(),
+    );
+
+    // Sanity: streamed audio should be roughly track-length (~10s), not full album (~30s)
+    let streamed_duration_ms =
+        streamed_samples.len() as u64 * 1000 / (sample_rate as u64 * channels as u64);
+
+    info!("Streamed audio duration: ~{}ms", streamed_duration_ms);
+
+    assert!(
+        streamed_duration_ms < 20000,
+        "Streamed audio is {}ms -- too long, expected ~10-12s for track 2. \
+         The entire file is being streamed instead of just the track range.",
+        streamed_duration_ms,
+    );
+
+    // Find the lead-in offset (frame alignment may add samples before track start)
+    let flac_info = CueFlacProcessor::analyze_flac(&flac_path).expect("analyze flac");
+    let dense_seektable = CueFlacProcessor::build_dense_seektable(&flac_data, &flac_info);
+    let seektable_entries = &dense_seektable.entries;
+
+    let start_entry = seektable_entries
+        .iter()
+        .rev()
+        .find(|e| e.sample <= track2_start_ms * sample_rate as u64 / 1000)
+        .expect("find start entry");
+
+    let lead_in_samples =
+        (track2_start_ms * sample_rate as u64 / 1000 - start_entry.sample) as usize * channels;
+
+    // Compare ~1 second of audio after lead-in
+    let compare_count =
+        (sample_rate as usize * channels).min(streamed_samples.len() - lead_in_samples);
+
+    info!(
+        "Comparing {} samples: streamed[{}..] vs truth[0..{}]",
+        compare_count, lead_in_samples, compare_count,
+    );
+
+    let mut mismatches = 0;
+    let mut first_mismatch = None;
+    for i in 0..compare_count {
+        let actual = streamed_samples[lead_in_samples + i];
+        let truth = truth_samples[i];
+        if actual != truth {
+            mismatches += 1;
+            if first_mismatch.is_none() {
+                first_mismatch = Some((i, actual, truth));
+            }
+        }
+    }
+
+    if mismatches > 0 {
+        let (idx, actual, truth) = first_mismatch.unwrap();
+        let offset_ms = idx as f64 / channels as f64 / sample_rate as f64 * 1000.0;
+        panic!(
+            "AUDIO MISMATCH: {} of {} samples differ!\n\
+             First mismatch at index {} ({:.1}ms): actual={}, truth={}\n\
+             stream_track_audio is returning wrong audio for CUE/FLAC track 2.",
+            mismatches, compare_count, idx, offset_ms, actual, truth
+        );
+    }
+
+    info!(
+        "All {} samples match -- stream_track_audio returns correct audio for CUE/FLAC track 2",
+        compare_count,
+    );
+}
+
 /// Discogs release matching the seektable fixture (tests/fixtures/cue_flac/)
 fn create_test_discogs_release() -> DiscogsRelease {
     DiscogsRelease {

@@ -569,7 +569,7 @@ async fn load_album_with_songs(
 }
 /// Stream track audio - read file and decrypt if needed.
 /// Returns audio data and its content type.
-async fn stream_track_audio(
+pub async fn stream_track_audio(
     state: &SubsonicState,
     track_id: &str,
 ) -> Result<(Vec<u8>, crate::content_type::ContentType), Box<dyn std::error::Error + Send + Sync>> {
@@ -667,18 +667,47 @@ async fn stream_track_audio(
         file_data
     };
 
+    // For CUE/FLAC tracks, slice to the track's byte range within the shared file
+    let track_data = match (audio_format.start_byte_offset, audio_format.end_byte_offset) {
+        (Some(start), Some(end)) => {
+            let start = start as usize;
+            let end = end as usize;
+
+            debug!(
+                "Slicing to track byte range: {}..{} ({} bytes of {} total)",
+                start,
+                end,
+                end - start,
+                decrypted.len()
+            );
+
+            decrypted
+                .get(start..end)
+                .ok_or_else(|| {
+                    format!(
+                        "Byte range {}..{} out of bounds for {} byte file",
+                        start,
+                        end,
+                        decrypted.len()
+                    )
+                })?
+                .to_vec()
+        }
+        _ => decrypted,
+    };
+
     // For CUE/FLAC tracks, prepend headers if needed
     let audio_data = if audio_format.needs_headers {
         if let Some(ref headers) = audio_format.flac_headers {
             debug!("Prepending FLAC headers: {} bytes", headers.len());
             let mut complete_audio = headers.clone();
-            complete_audio.extend_from_slice(&decrypted);
+            complete_audio.extend_from_slice(&track_data);
             complete_audio
         } else {
-            decrypted
+            track_data
         }
     } else {
-        decrypted
+        track_data
     };
 
     info!(
