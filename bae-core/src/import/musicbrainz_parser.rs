@@ -106,11 +106,17 @@ fn parse_mb_release_from_json(
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| artist_name.clone());
+                let discogs_artist_id = discogs_release.as_ref().and_then(|dr| {
+                    dr.artists
+                        .iter()
+                        .find(|da| da.name.eq_ignore_ascii_case(&artist_name))
+                        .map(|da| da.id.clone())
+                });
                 let artist = DbArtist {
                     id: Uuid::new_v4().to_string(),
                     name: artist_name,
                     sort_name: Some(sort_name),
-                    discogs_artist_id: None,
+                    discogs_artist_id,
                     bandcamp_artist_id: None,
                     musicbrainz_artist_id: mb_artist_id,
 
