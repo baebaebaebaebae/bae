@@ -1,5 +1,36 @@
+use std::sync::OnceLock;
+use std::time::Duration;
+
 use thiserror::Error;
+use tokio::sync::Mutex;
+use tokio::time::Instant;
 use tracing::{debug, info, warn};
+
+/// Shared HTTP client for all MusicBrainz requests.
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent("bae/1.0 +https://github.com/bae-fm/bae")
+            .build()
+            .expect("Failed to create HTTP client")
+    })
+}
+
+/// Rate limiter ensuring at least 1 second between MusicBrainz API requests.
+fn rate_limiter() -> &'static Mutex<Instant> {
+    static LIMITER: OnceLock<Mutex<Instant>> = OnceLock::new();
+    LIMITER.get_or_init(|| Mutex::new(Instant::now() - Duration::from_secs(1)))
+}
+
+async fn wait_for_rate_limit() {
+    let mut last_request = rate_limiter().lock().await;
+    let elapsed = last_request.elapsed();
+    if elapsed < Duration::from_secs(1) {
+        tokio::time::sleep(Duration::from_secs(1) - elapsed).await;
+    }
+    *last_request = Instant::now();
+}
 /// MusicBrainz release information
 #[derive(Debug, Clone, PartialEq)]
 pub struct MbRelease {
@@ -44,11 +75,10 @@ pub async fn lookup_by_discid(
         "inc=recordings+artist-credits+release-groups+url-rels+labels",
     ));
     debug!("MusicBrainz API request: {}", url_with_params);
-    let client = reqwest::Client::builder()
-        .user_agent("bae/1.0 +https://github.com/hideselfview/bae")
-        .build()
-        .map_err(|e| MusicBrainzError::Api(format!("Failed to create HTTP client: {}", e)))?;
-    let response = client
+
+    wait_for_rate_limit().await;
+
+    let response = http_client()
         .get(url_with_params.as_str())
         .header("Accept", "application/json")
         .send()
@@ -206,11 +236,10 @@ async fn fetch_release_group_with_relations(
     );
     let url_with_params = format!("{}?inc=url-rels", url);
     debug!("Fetching release-group with relations: {}", url_with_params);
-    let client = reqwest::Client::builder()
-        .user_agent("bae/1.0 +https://github.com/hideselfview/bae")
-        .build()
-        .map_err(|e| MusicBrainzError::Api(format!("Failed to create HTTP client: {}", e)))?;
-    let response = client
+
+    wait_for_rate_limit().await;
+
+    let response = http_client()
         .get(&url_with_params)
         .header("Accept", "application/json")
         .send()
@@ -240,11 +269,10 @@ pub async fn lookup_release_by_id(
         url,
     );
     debug!("MusicBrainz API request: {}", url_with_params);
-    let client = reqwest::Client::builder()
-        .user_agent("bae/1.0 +https://github.com/hideselfview/bae")
-        .build()
-        .map_err(|e| MusicBrainzError::Api(format!("Failed to create HTTP client: {}", e)))?;
-    let response = client
+
+    wait_for_rate_limit().await;
+
+    let response = http_client()
         .get(&url_with_params)
         .header("Accept", "application/json")
         .send()
@@ -590,11 +618,10 @@ pub async fn search_releases_with_params(
         "MusicBrainz API request: {}?query={}&limit=25&inc=recordings+artist-credits+release-groups+labels+media+url-rels",
         url, query
     );
-    let client = reqwest::Client::builder()
-        .user_agent("bae/1.0 +https://github.com/hideselfview/bae")
-        .build()
-        .map_err(|e| MusicBrainzError::Api(format!("Failed to create HTTP client: {}", e)))?;
-    let response = client
+
+    wait_for_rate_limit().await;
+
+    let response = http_client()
         .get(url)
         .query(&[
             ("query", query.as_str()),
@@ -766,6 +793,29 @@ mod tests {
         assert_eq!(
             params2.build_query(),
             "artist:\"Another Artist\" AND catno:\"TL-1234\""
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rate_limiter_enforces_spacing() {
+        // First call should return immediately
+        let start = Instant::now();
+        wait_for_rate_limit().await;
+        let first_elapsed = start.elapsed();
+        assert!(
+            first_elapsed < Duration::from_millis(100),
+            "First call should be near-instant, took {:?}",
+            first_elapsed
+        );
+
+        // Second call should wait ~1 second
+        let start = Instant::now();
+        wait_for_rate_limit().await;
+        let second_elapsed = start.elapsed();
+        assert!(
+            second_elapsed >= Duration::from_millis(900),
+            "Second call should wait ~1s, only waited {:?}",
+            second_elapsed
         );
     }
 }
