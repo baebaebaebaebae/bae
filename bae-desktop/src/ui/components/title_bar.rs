@@ -226,7 +226,7 @@ pub fn TitleBar() -> Element {
             on_imports_dropdown_toggle: Some(EventHandler::new(move |_| imports_dropdown_open.toggle())),
             on_imports_dropdown_close: Some(EventHandler::new(move |_| imports_dropdown_open.set(false))),
             imports_dropdown_content: rsx! {
-                ImportsDropdown {}
+                ImportsDropdown { dropdown_open: imports_dropdown_open }
             },
             left_padding,
         }
