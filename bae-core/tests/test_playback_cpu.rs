@@ -132,6 +132,7 @@ fn create_cue_flac_test_album() -> DiscogsRelease {
             },
         ],
         master_id: Some("test-master".to_string()),
+        is_compilation: false,
     }
 }
 

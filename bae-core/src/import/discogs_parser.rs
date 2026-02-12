@@ -22,7 +22,7 @@ pub fn parse_discogs_release(
     release: &DiscogsRelease,
     master_year: u32,
 ) -> Result<ParsedAlbum, String> {
-    let album = DbAlbum::from_discogs_release(release, master_year);
+    let album = DbAlbum::from_discogs_release(release, master_year, release.is_compilation);
     let db_release = DbRelease::from_discogs_release(&album.id, release);
     let mut artists = Vec::new();
     let mut album_artists = Vec::new();

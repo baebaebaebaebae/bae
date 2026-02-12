@@ -219,6 +219,7 @@ fn create_test_album() -> DiscogsRelease {
             },
         ],
         master_id: Some("test-master-123".to_string()),
+        is_compilation: false,
     }
 }
 /// Copy pre-generated FLAC fixtures to test directory
@@ -325,6 +326,7 @@ fn create_cue_flac_test_album() -> DiscogsRelease {
             },
         ],
         master_id: Some("test-master-cue-flac".to_string()),
+        is_compilation: false,
     }
 }
 
@@ -2001,6 +2003,7 @@ impl HighSampleRateTestFixture {
                 duration: Some("0:03".to_string()),
             }],
             master_id: Some("test-master-96khz".to_string()),
+            is_compilation: false,
         };
 
         let import_handle = bae_core::import::ImportService::start(
