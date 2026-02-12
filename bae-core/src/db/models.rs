@@ -131,9 +131,6 @@ pub struct DbAlbum {
     pub bandcamp_album_id: Option<String>,
     /// Release ID whose cover art is used for this album
     pub cover_release_id: Option<String>,
-    /// Cover art URL for immediate display (remote URL)
-    /// Used before import completes and cover_release_id is set
-    pub cover_art_url: Option<String>,
     /// True for "Various Artists" compilation albums
     pub is_compilation: bool,
     pub created_at: DateTime<Utc>,
@@ -373,7 +370,6 @@ impl DbAlbum {
             musicbrainz_release: None,
             bandcamp_album_id: None,
             cover_release_id: None,
-            cover_art_url: None,
             is_compilation: false,
             created_at: now,
             updated_at: now,
@@ -384,11 +380,9 @@ impl DbAlbum {
     ///
     /// master_id and master_year are always provided for releases imported from Discogs.
     /// The master year is used for the album year (not the release year).
-    /// cover_art_url is for immediate display before import completes.
     pub fn from_discogs_release(
         release: &crate::discogs::DiscogsRelease,
         master_year: u32,
-        cover_art_url: Option<String>,
     ) -> Self {
         let now = Utc::now();
         let discogs_release = DiscogsMasterRelease {
@@ -403,18 +397,12 @@ impl DbAlbum {
             musicbrainz_release: None,
             bandcamp_album_id: None,
             cover_release_id: None,
-            cover_art_url,
             is_compilation: false,
             created_at: now,
             updated_at: now,
         }
     }
-    /// cover_art_url is for immediate display before import completes.
-    pub fn from_mb_release(
-        release: &crate::musicbrainz::MbRelease,
-        master_year: u32,
-        cover_art_url: Option<String>,
-    ) -> Self {
+    pub fn from_mb_release(release: &crate::musicbrainz::MbRelease, master_year: u32) -> Self {
         let now = Utc::now();
         let musicbrainz_release = crate::db::MusicBrainzRelease {
             release_group_id: release.release_group_id.clone(),
@@ -433,7 +421,6 @@ impl DbAlbum {
             musicbrainz_release: Some(musicbrainz_release),
             bandcamp_album_id: None,
             cover_release_id: None,
-            cover_art_url,
             is_compilation: false,
             created_at: now,
             updated_at: now,
@@ -1083,7 +1070,7 @@ pub struct AlbumSearchResult {
     pub id: String,
     pub title: String,
     pub year: Option<i32>,
-    pub cover_art_url: Option<String>,
+    pub cover_release_id: Option<String>,
     pub artist_name: String,
 }
 

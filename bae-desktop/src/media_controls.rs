@@ -245,27 +245,23 @@ async fn update_media_metadata(
         }
     };
 
-    let (album_name, cover_release_id, cover_art_url) = match library_manager
+    let (album_name, cover_release_id) = match library_manager
         .get()
         .get_album_id_for_release(&track.release_id)
         .await
     {
         Ok(album_id) => match library_manager.get().get_album_by_id(&album_id).await {
-            Ok(Some(album)) => (
-                Some(album.title),
-                album.cover_release_id,
-                album.cover_art_url,
-            ),
+            Ok(Some(album)) => (Some(album.title), album.cover_release_id),
             Ok(None) => {
                 error!(
                     "Album {} not found for release {}",
                     album_id, track.release_id
                 );
-                (None, None, None)
+                (None, None)
             }
             Err(e) => {
                 error!("Failed to fetch album {}: {}", album_id, e);
-                (None, None, None)
+                (None, None)
             }
         },
         Err(e) => {
@@ -273,13 +269,11 @@ async fn update_media_metadata(
                 "Failed to get album ID for release {}: {}",
                 track.release_id, e
             );
-            (None, None, None)
+            (None, None)
         }
     };
 
-    let cover_url = cover_release_id
-        .map(|rid| imgs.image_url(&rid))
-        .or(cover_art_url);
+    let cover_url = cover_release_id.map(|rid| imgs.image_url(&rid));
     let title = track.title.clone();
     let artist_str = artist_name.as_deref();
     let album_str = album_name.as_deref();

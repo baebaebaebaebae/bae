@@ -78,6 +78,7 @@ pub fn TitleBar() -> Element {
                 }
             } else {
                 let library_manager = library_manager.clone();
+                let imgs = app.image_server.clone();
                 let query = query.clone();
                 spawn(async move {
                     match library_manager.search_library(&query, 5).await {
@@ -100,7 +101,9 @@ pub fn TitleBar() -> Element {
                                         title: a.title,
                                         artist_name: a.artist_name,
                                         year: a.year,
-                                        cover_url: a.cover_art_url,
+                                        cover_url: a
+                                            .cover_release_id
+                                            .map(|rid| imgs.image_url(&rid)),
                                     })
                                     .collect(),
                                 tracks: db_results

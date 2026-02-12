@@ -16,7 +16,6 @@ CREATE TABLE albums (
     year INTEGER,
     bandcamp_album_id TEXT,
     cover_release_id TEXT,
-    cover_art_url TEXT,
     is_compilation BOOLEAN NOT NULL DEFAULT FALSE,
     _updated_at TEXT NOT NULL,
     created_at TEXT NOT NULL

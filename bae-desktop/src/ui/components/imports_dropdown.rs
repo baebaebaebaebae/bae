@@ -20,25 +20,20 @@ pub fn ImportsDropdown(dropdown_open: Signal<bool>) -> Element {
     // Convert to display types
     let display_imports: Vec<DisplayActiveImport> = imports
         .iter()
-        .map(|i| {
-            let cover_url = i.cover_art_url.clone();
-
-            DisplayActiveImport {
-                import_id: i.import_id.clone(),
-                album_title: i.album_title.clone(),
-                artist_name: i.artist_name.clone(),
-                status: match i.status {
-                    ImportOperationStatus::Pending => ImportStatus::Preparing,
-                    ImportOperationStatus::Preparing => ImportStatus::Preparing,
-                    ImportOperationStatus::Importing => ImportStatus::Importing,
-                    ImportOperationStatus::Complete => ImportStatus::Complete,
-                    ImportOperationStatus::Failed => ImportStatus::Failed,
-                },
-                current_step_text: i.current_step.map(|s| format!("{:?}", s)),
-                progress_percent: i.progress_percent,
-                release_id: i.release_id.clone(),
-                cover_url,
-            }
+        .map(|i| DisplayActiveImport {
+            import_id: i.import_id.clone(),
+            album_title: i.album_title.clone(),
+            artist_name: i.artist_name.clone(),
+            status: match i.status {
+                ImportOperationStatus::Pending => ImportStatus::Preparing,
+                ImportOperationStatus::Preparing => ImportStatus::Preparing,
+                ImportOperationStatus::Importing => ImportStatus::Importing,
+                ImportOperationStatus::Complete => ImportStatus::Complete,
+                ImportOperationStatus::Failed => ImportStatus::Failed,
+            },
+            current_step_text: i.current_step.map(|s| format!("{:?}", s)),
+            progress_percent: i.progress_percent,
+            release_id: i.release_id.clone(),
         })
         .collect();
 

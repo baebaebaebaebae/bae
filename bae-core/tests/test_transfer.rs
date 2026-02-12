@@ -53,7 +53,6 @@ async fn create_album_and_release(db: &Database) -> (String, String) {
         musicbrainz_release: None,
         bandcamp_album_id: None,
         cover_release_id: None,
-        cover_art_url: None,
         is_compilation: false,
         created_at: now,
         updated_at: now,

@@ -116,16 +116,8 @@ fn ImportItemView(
                 // Cover art
                 div {
                     class: "flex-shrink-0 w-10 h-10 bg-gray-700 rounded overflow-clip relative",
-                    if let Some(ref url) = import.cover_url {
-                        img {
-                            src: "{url}",
-                            alt: "Album cover",
-                            class: "w-full h-full object-cover",
-                        }
-                    } else {
-                        div { class: "w-full h-full flex items-center justify-center text-gray-500",
-                            ImageIcon { class: "w-5 h-5" }
-                        }
+                    div { class: "w-full h-full flex items-center justify-center text-gray-500",
+                        ImageIcon { class: "w-5 h-5" }
                     }
 
                     // Status badge

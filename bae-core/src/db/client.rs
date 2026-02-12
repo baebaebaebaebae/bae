@@ -353,7 +353,7 @@ impl Database {
         let rows = sqlx::query(
             r#"
             SELECT
-                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
+                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id,
                 a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
@@ -394,7 +394,6 @@ impl Database {
                 musicbrainz_release,
                 bandcamp_album_id: row.get("bandcamp_album_id"),
                 cover_release_id: row.get("cover_release_id"),
-                cover_art_url: row.get("cover_art_url"),
                 is_compilation: row.get("is_compilation"),
                 updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
@@ -444,7 +443,7 @@ impl Database {
         // Search albums by title, with primary artist name
         let album_rows = sqlx::query(
             r#"
-            SELECT a.id, a.title, a.year, a.cover_art_url,
+            SELECT a.id, a.title, a.year, a.cover_release_id,
                    COALESCE(art.name, 'Unknown Artist') as artist_name
             FROM albums a
             LEFT JOIN album_artists aa ON a.id = aa.album_id AND aa.position = 0
@@ -465,7 +464,7 @@ impl Database {
                 id: row.get("id"),
                 title: row.get("title"),
                 year: row.get("year"),
-                cover_art_url: row.get("cover_art_url"),
+                cover_release_id: row.get("cover_release_id"),
                 artist_name: row.get("artist_name"),
             })
             .collect();
@@ -517,8 +516,8 @@ impl Database {
         sqlx::query(
             r#"
             INSERT INTO albums (
-                id, title, year, bandcamp_album_id, cover_release_id, cover_art_url, is_compilation, _updated_at, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, title, year, bandcamp_album_id, cover_release_id, is_compilation, _updated_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&album.id)
@@ -526,7 +525,6 @@ impl Database {
         .bind(album.year)
         .bind(&album.bandcamp_album_id)
         .bind(&album.cover_release_id)
-        .bind(&album.cover_art_url)
         .bind(album.is_compilation)
         .bind(album.updated_at.to_rfc3339())
         .bind(album.created_at.to_rfc3339())
@@ -639,8 +637,8 @@ impl Database {
         sqlx::query(
             r#"
             INSERT INTO albums (
-                id, title, year, bandcamp_album_id, cover_release_id, cover_art_url, is_compilation, _updated_at, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, title, year, bandcamp_album_id, cover_release_id, is_compilation, _updated_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&album.id)
@@ -648,7 +646,6 @@ impl Database {
         .bind(album.year)
         .bind(&album.bandcamp_album_id)
         .bind(&album.cover_release_id)
-        .bind(&album.cover_art_url)
         .bind(album.is_compilation)
         .bind(album.updated_at.to_rfc3339())
         .bind(album.created_at.to_rfc3339())
@@ -790,7 +787,7 @@ impl Database {
         let rows = sqlx::query(
             r#"
             SELECT
-                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
+                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id,
                 a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
@@ -828,7 +825,6 @@ impl Database {
                 musicbrainz_release,
                 bandcamp_album_id: row.get("bandcamp_album_id"),
                 cover_release_id: row.get("cover_release_id"),
-                cover_art_url: row.get("cover_art_url"),
                 is_compilation: row.get("is_compilation"),
                 updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
@@ -845,7 +841,7 @@ impl Database {
         let row = sqlx::query(
             r#"
             SELECT
-                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
+                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id,
                 a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
@@ -883,7 +879,6 @@ impl Database {
                 musicbrainz_release,
                 bandcamp_album_id: row.get("bandcamp_album_id"),
                 cover_release_id: row.get("cover_release_id"),
-                cover_art_url: row.get("cover_art_url"),
                 is_compilation: row.get("is_compilation"),
                 updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
@@ -1349,7 +1344,7 @@ impl Database {
         let query = if master_id.is_some() && release_id.is_some() {
             r#"
             SELECT
-                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
+                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id,
                 a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
@@ -1362,7 +1357,7 @@ impl Database {
         } else if master_id.is_some() {
             r#"
             SELECT
-                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
+                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id,
                 a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
@@ -1375,7 +1370,7 @@ impl Database {
         } else if release_id.is_some() {
             r#"
             SELECT
-                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
+                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id,
                 a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
@@ -1435,7 +1430,6 @@ impl Database {
                 musicbrainz_release,
                 bandcamp_album_id: row.get("bandcamp_album_id"),
                 cover_release_id: row.get("cover_release_id"),
-                cover_art_url: row.get("cover_art_url"),
                 is_compilation: row.get("is_compilation"),
                 updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()
@@ -1458,7 +1452,7 @@ impl Database {
         let query = if release_id.is_some() && release_group_id.is_some() {
             r#"
             SELECT
-                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
+                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id,
                 a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
@@ -1471,7 +1465,7 @@ impl Database {
         } else if release_id.is_some() {
             r#"
             SELECT
-                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
+                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id,
                 a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
@@ -1484,7 +1478,7 @@ impl Database {
         } else if release_group_id.is_some() {
             r#"
             SELECT
-                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, a.cover_art_url,
+                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id,
                 a.is_compilation, a._updated_at, a.created_at,
                 ad.discogs_master_id, ad.discogs_release_id,
                 amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
@@ -1544,7 +1538,6 @@ impl Database {
                 musicbrainz_release,
                 bandcamp_album_id: row.get("bandcamp_album_id"),
                 cover_release_id: row.get("cover_release_id"),
-                cover_art_url: row.get("cover_art_url"),
                 is_compilation: row.get("is_compilation"),
                 updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
                     .unwrap()

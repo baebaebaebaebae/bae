@@ -218,8 +218,7 @@ impl AppService {
                                                 let cover = album
                                                     .cover_release_id
                                                     .as_ref()
-                                                    .map(|rid| imgs.image_url(rid))
-                                                    .or(album.cover_art_url.clone());
+                                                    .map(|rid| imgs.image_url(rid));
                                                 (album.title, cover)
                                             } else {
                                                 ("Unknown Album".to_string(), None)
@@ -315,8 +314,7 @@ impl AppService {
                                         let cover = album
                                             .cover_release_id
                                             .as_ref()
-                                            .map(|rid| imgs.image_url(rid))
-                                            .or(album.cover_art_url.clone());
+                                            .map(|rid| imgs.image_url(rid));
                                         (album.title, cover)
                                     } else {
                                         ("Unknown Album".to_string(), None)
@@ -611,7 +609,6 @@ impl AppService {
                             current_step: None,
                             progress_percent: None,
                             release_id: db.release_id,
-                            cover_art_url: None,
                         })
                         .collect();
                     state.active_imports().imports().set(imports);
@@ -2319,7 +2316,6 @@ fn handle_import_progress(state: &Store<AppState>, event: ImportProgress) {
             step,
             album_title,
             artist_name,
-            cover_art_url,
         } => {
             state.active_imports().imports().with_mut(|list| {
                 if let Some(import) = list.iter_mut().find(|i| i.import_id == import_id) {
@@ -2334,7 +2330,6 @@ fn handle_import_progress(state: &Store<AppState>, event: ImportProgress) {
                         current_step: Some(convert_prepare_step(step)),
                         progress_percent: None,
                         release_id: None,
-                        cover_art_url,
                     });
                 }
             });
