@@ -31,6 +31,7 @@ async fn wait_for_rate_limit() {
     }
     *last_request = Instant::now();
 }
+
 /// MusicBrainz release information
 #[derive(Debug, Clone, PartialEq)]
 pub struct MbRelease {
