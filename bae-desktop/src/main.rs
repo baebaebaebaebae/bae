@@ -82,10 +82,6 @@ fn configure_logging() {
 }
 
 fn is_first_run() -> bool {
-    // In dev mode, Config::from_env() handles everything — no pointer file needed
-    if config::Config::is_dev_mode() {
-        return false;
-    }
     let home_dir = dirs::home_dir().expect("Failed to get home directory");
     !home_dir.join(".bae").join("active-library").exists()
 }

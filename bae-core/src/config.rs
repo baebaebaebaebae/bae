@@ -2,7 +2,6 @@ use crate::library_dir::LibraryDir;
 use crate::sync::participation::{default_participation, ParticipationMode};
 use rand::prelude::IndexedRandom;
 use serde::{Deserialize, Serialize};
-use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use thiserror::Error;
 use tracing::{info, warn};
@@ -320,7 +319,7 @@ impl Config {
     pub fn load() -> Self {
         let dev_mode = std::env::var("BAE_DEV_MODE").is_ok() || dotenvy::dotenv().is_ok();
         if dev_mode {
-            info!("Dev mode activated - loading from .env");
+            info!("Dev mode activated — loading config.yaml with .env overrides");
             Self::from_env()
         } else {
             info!("Production mode - loading from config.yaml");
@@ -329,94 +328,71 @@ impl Config {
     }
 
     fn from_env() -> Self {
-        let env_path = std::path::Path::new(".env");
-        let library_id = match std::env::var("BAE_LIBRARY_ID")
+        // Use the same active-library pointer file as production mode
+        let home_dir = dirs::home_dir().expect("Failed to get home directory");
+        let bae_dir = home_dir.join(".bae");
+        let mut config = Self::load_from_bae_dir(&bae_dir);
+
+        // Overlay dev-specific env vars on top of the config.yaml values
+        if let Some(path) = std::env::var("BAE_LIBRARY_PATH")
             .ok()
             .filter(|s| !s.is_empty())
         {
-            Some(id) => id,
-            None => {
-                let id = uuid::Uuid::new_v4().to_string();
+            config.library_dir = LibraryDir::new(PathBuf::from(path));
+        }
 
-                info!("No BAE_LIBRARY_ID in .env, generated: {}", id);
-                append_to_env_file(env_path, "BAE_LIBRARY_ID", &id);
-                id
-            }
-        };
-        let device_id = match std::env::var("BAE_DEVICE_ID")
-            .ok()
-            .filter(|s| !s.is_empty())
-        {
-            Some(id) => id,
-            None => {
-                let id = uuid::Uuid::new_v4().to_string();
-
-                info!("No BAE_DEVICE_ID in .env, generated: {}", id);
-                append_to_env_file(env_path, "BAE_DEVICE_ID", &id);
-                id
-            }
-        };
-
-        let discogs_key_stored = std::env::var("BAE_DISCOGS_API_KEY")
-            .ok()
-            .filter(|k| !k.is_empty())
-            .is_some();
         let encryption_key_hex = std::env::var("BAE_ENCRYPTION_KEY")
             .ok()
             .filter(|k| !k.is_empty());
-        let encryption_key_stored = encryption_key_hex.is_some();
-        let encryption_key_fingerprint =
-            encryption_key_hex.and_then(|k| crate::encryption::compute_key_fingerprint(&k));
-        let library_dir = LibraryDir::new(match std::env::var("BAE_LIBRARY_PATH").ok() {
-            Some(p) => PathBuf::from(p),
-            None => {
-                let home = dirs::home_dir().expect("Failed to get home directory");
-                home.join(".bae").join("libraries").join(&library_id)
-            }
-        });
-        let torrent_bind_interface = std::env::var("BAE_TORRENT_BIND_INTERFACE")
-            .ok()
-            .filter(|s| !s.is_empty());
-        let sync_s3_bucket = std::env::var("BAE_SYNC_S3_BUCKET")
-            .ok()
-            .filter(|s| !s.is_empty());
-        let sync_s3_region = std::env::var("BAE_SYNC_S3_REGION")
-            .ok()
-            .filter(|s| !s.is_empty());
-        let sync_s3_endpoint = std::env::var("BAE_SYNC_S3_ENDPOINT")
-            .ok()
-            .filter(|s| !s.is_empty());
-        let share_base_url = std::env::var("BAE_SHARE_BASE_URL")
-            .ok()
-            .filter(|s| !s.is_empty());
-
-        Self {
-            library_id,
-            device_id,
-            library_dir,
-            library_name: None,
-            keys_migrated: true,
-            discogs_key_stored,
-            encryption_key_stored,
-            encryption_key_fingerprint,
-            torrent_bind_interface,
-            torrent_listen_port: None,
-            torrent_enable_upnp: true,
-            torrent_enable_natpmp: true,
-            torrent_enable_dht: false,
-            torrent_max_connections: None,
-            torrent_max_connections_per_torrent: None,
-            torrent_max_uploads: None,
-            torrent_max_uploads_per_torrent: None,
-            network_participation: ParticipationMode::Off,
-            subsonic_enabled: true,
-            subsonic_port: 4533,
-            subsonic_bind_address: "127.0.0.1".to_string(),
-            sync_s3_bucket,
-            sync_s3_region,
-            sync_s3_endpoint,
-            share_base_url,
+        if let Some(ref key) = encryption_key_hex {
+            config.encryption_key_stored = true;
+            config.encryption_key_fingerprint = crate::encryption::compute_key_fingerprint(key);
         }
+
+        if std::env::var("BAE_DISCOGS_API_KEY")
+            .ok()
+            .filter(|k| !k.is_empty())
+            .is_some()
+        {
+            config.discogs_key_stored = true;
+        }
+
+        if let Some(v) = std::env::var("BAE_TORRENT_BIND_INTERFACE")
+            .ok()
+            .filter(|s| !s.is_empty())
+        {
+            config.torrent_bind_interface = Some(v);
+        }
+
+        if let Some(v) = std::env::var("BAE_SYNC_S3_BUCKET")
+            .ok()
+            .filter(|s| !s.is_empty())
+        {
+            config.sync_s3_bucket = Some(v);
+        }
+
+        if let Some(v) = std::env::var("BAE_SYNC_S3_REGION")
+            .ok()
+            .filter(|s| !s.is_empty())
+        {
+            config.sync_s3_region = Some(v);
+        }
+
+        if let Some(v) = std::env::var("BAE_SYNC_S3_ENDPOINT")
+            .ok()
+            .filter(|s| !s.is_empty())
+        {
+            config.sync_s3_endpoint = Some(v);
+        }
+
+        if let Some(v) = std::env::var("BAE_SHARE_BASE_URL")
+            .ok()
+            .filter(|s| !s.is_empty())
+        {
+            config.share_base_url = Some(v);
+        }
+
+        config
     }
 
     fn from_config_file() -> Self {
@@ -527,62 +503,7 @@ impl Config {
     }
 
     pub fn save(&self) -> Result<(), ConfigError> {
-        if Self::is_dev_mode() {
-            self.save_to_env()
-        } else {
-            self.save_to_config_yaml()
-        }
-    }
-
-    pub fn save_to_env(&self) -> Result<(), ConfigError> {
-        let env_path = std::path::Path::new(".env");
-        let mut lines: Vec<String> = if env_path.exists() {
-            std::io::BufReader::new(std::fs::File::open(env_path)?)
-                .lines()
-                .collect::<Result<Vec<_>, _>>()?
-        } else {
-            Vec::new()
-        };
-
-        let mut new_values = std::collections::HashMap::new();
-        new_values.insert("BAE_LIBRARY_ID", self.library_id.clone());
-        new_values.insert("BAE_DEVICE_ID", self.device_id.clone());
-        if let Some(iface) = &self.torrent_bind_interface {
-            new_values.insert("BAE_TORRENT_BIND_INTERFACE", iface.clone());
-        }
-        if let Some(bucket) = &self.sync_s3_bucket {
-            new_values.insert("BAE_SYNC_S3_BUCKET", bucket.clone());
-        }
-        if let Some(region) = &self.sync_s3_region {
-            new_values.insert("BAE_SYNC_S3_REGION", region.clone());
-        }
-        if let Some(endpoint) = &self.sync_s3_endpoint {
-            new_values.insert("BAE_SYNC_S3_ENDPOINT", endpoint.clone());
-        }
-        if let Some(url) = &self.share_base_url {
-            new_values.insert("BAE_SHARE_BASE_URL", url.clone());
-        }
-
-        let mut found = std::collections::HashSet::new();
-        for line in &mut lines {
-            if let Some(eq) = line.find('=') {
-                let key = line[..eq].trim().to_string();
-                if let Some(val) = new_values.get(key.as_str()) {
-                    *line = format!("{}={}", key, val);
-                    found.insert(key);
-                }
-            }
-        }
-        for (key, val) in &new_values {
-            if !found.contains(*key) {
-                lines.push(format!("{}={}", key, val));
-            }
-        }
-        let mut file = std::fs::File::create(env_path)?;
-        for line in lines {
-            writeln!(file, "{}", line)?;
-        }
-        Ok(())
+        self.save_to_config_yaml()
     }
 
     /// Save the active library UUID to the global pointer file (~/.bae/active-library).
@@ -802,20 +723,6 @@ fn read_config_yaml(path: &std::path::Path) -> Option<ConfigYaml> {
     serde_yaml::from_str(&content).ok()
 }
 
-/// Append a key=value line to a .env file.
-fn append_to_env_file(path: &std::path::Path, key: &str, value: &str) {
-    use std::fs::OpenOptions;
-
-    match OpenOptions::new().create(true).append(true).open(path) {
-        Ok(mut f) => {
-            let _ = writeln!(f, "{}={}", key, value);
-        }
-        Err(e) => {
-            warn!("Failed to persist {} to {}: {}", key, path.display(), e);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -973,32 +880,6 @@ mod tests {
         std::fs::write(bae_dir.join("active-library"), "some-id").unwrap();
 
         Config::load_from_bae_dir(bae_dir);
-    }
-
-    #[test]
-    fn append_to_env_file_creates_and_appends() {
-        let tmp = TempDir::new().unwrap();
-        let env_path = tmp.path().join(".env");
-
-        append_to_env_file(&env_path, "FOO", "bar");
-        append_to_env_file(&env_path, "BAZ", "qux");
-
-        let content = std::fs::read_to_string(&env_path).unwrap();
-        assert!(content.contains("FOO=bar"));
-        assert!(content.contains("BAZ=qux"));
-    }
-
-    #[test]
-    fn append_to_env_file_preserves_existing_content() {
-        let tmp = TempDir::new().unwrap();
-        let env_path = tmp.path().join(".env");
-        std::fs::write(&env_path, "EXISTING=value\n").unwrap();
-
-        append_to_env_file(&env_path, "NEW_KEY", "new_value");
-
-        let content = std::fs::read_to_string(&env_path).unwrap();
-        assert!(content.starts_with("EXISTING=value\n"));
-        assert!(content.contains("NEW_KEY=new_value"));
     }
 
     #[test]
