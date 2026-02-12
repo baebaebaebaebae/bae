@@ -12,7 +12,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tower_http::cors::CorsLayer;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 /// Subsonic API server state
 #[derive(Clone)]
 pub struct SubsonicState {
@@ -364,10 +364,11 @@ async fn stream_song(
     };
     info!("Streaming request for song ID: {}", song_id);
     match stream_track_audio(&state, &song_id).await {
-        Ok(audio_data) => {
+        Ok((audio_data, content_type)) => {
+            let content_length = audio_data.len().to_string();
             let headers = [
-                ("Content-Type", "audio/flac"),
-                ("Content-Length", &audio_data.len().to_string()),
+                ("Content-Type", content_type.as_str()),
+                ("Content-Length", &content_length),
                 ("Accept-Ranges", "bytes"),
             ];
             (StatusCode::OK, headers, audio_data).into_response()
@@ -515,6 +516,13 @@ async fn load_album_with_songs(
             None
         };
 
+        let track_content_type = library_manager
+            .get()
+            .get_audio_format_by_track_id(&track.id)
+            .await?
+            .map(|af| af.content_type)
+            .unwrap_or(crate::content_type::ContentType::Flac);
+
         songs.push(Song {
             id: track.id,
             title: track.title,
@@ -527,8 +535,8 @@ async fn load_album_with_songs(
             genre: None,
             cover_art: song_cover_art,
             size: None,
-            content_type: crate::content_type::ContentType::Flac.as_str().to_string(),
-            suffix: "flac".to_string(),
+            content_type: track_content_type.as_str().to_string(),
+            suffix: track_content_type.file_extension().to_string(),
             duration: track.duration_ms.map(|ms| (ms / 1000) as i32),
             bit_rate: None,
             path: format!("{}/{}", album_artist_name, db_album.title),
@@ -559,11 +567,12 @@ async fn load_album_with_songs(
         songs } }
     ))
 }
-/// Stream track audio - read file and decrypt if needed
-async fn stream_track_audio(
+/// Stream track audio - read file and decrypt if needed.
+/// Returns audio data and its content type.
+pub async fn stream_track_audio(
     state: &SubsonicState,
     track_id: &str,
-) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(Vec<u8>, crate::content_type::ContentType), Box<dyn std::error::Error + Send + Sync>> {
     let library_manager = &state.library_manager;
     info!("Loading audio for track: {}", track_id);
 
@@ -588,17 +597,32 @@ async fn stream_track_audio(
         .await
         .map_err(|e| format!("Database error: {}", e))?;
 
-    // Find the audio file for this track
-    let files = library_manager
-        .get()
-        .get_files_for_release(&track.release_id)
-        .await
-        .map_err(|e| format!("Database error: {}", e))?;
+    // Find the audio file for this track using its file_id (precise lookup)
+    let audio_file = match &audio_format.file_id {
+        Some(file_id) => library_manager
+            .get()
+            .get_file_by_id(file_id)
+            .await
+            .map_err(|e| format!("Database error: {}", e))?
+            .ok_or_else(|| format!("Audio file not found: {}", file_id))?,
+        None => {
+            warn!(
+                "Track {} has no file_id, falling back to release file scan",
+                track_id
+            );
 
-    let audio_file = files
-        .iter()
-        .find(|f| f.content_type == crate::content_type::ContentType::Flac)
-        .ok_or_else(|| format!("No audio file found for track {}", track_id))?;
+            let files = library_manager
+                .get()
+                .get_files_for_release(&track.release_id)
+                .await
+                .map_err(|e| format!("Database error: {}", e))?;
+
+            files
+                .into_iter()
+                .find(|f| f.content_type.is_audio())
+                .ok_or_else(|| format!("No audio file found for track {}", track_id))?
+        }
+    };
 
     // Read file data from source_path
     let source_path = audio_file
@@ -643,23 +667,52 @@ async fn stream_track_audio(
         file_data
     };
 
+    // For CUE/FLAC tracks, slice to the track's byte range within the shared file
+    let track_data = match (audio_format.start_byte_offset, audio_format.end_byte_offset) {
+        (Some(start), Some(end)) => {
+            let start = start as usize;
+            let end = end as usize;
+
+            debug!(
+                "Slicing to track byte range: {}..{} ({} bytes of {} total)",
+                start,
+                end,
+                end - start,
+                decrypted.len()
+            );
+
+            decrypted
+                .get(start..end)
+                .ok_or_else(|| {
+                    format!(
+                        "Byte range {}..{} out of bounds for {} byte file",
+                        start,
+                        end,
+                        decrypted.len()
+                    )
+                })?
+                .to_vec()
+        }
+        _ => decrypted,
+    };
+
     // For CUE/FLAC tracks, prepend headers if needed
     let audio_data = if audio_format.needs_headers {
         if let Some(ref headers) = audio_format.flac_headers {
             debug!("Prepending FLAC headers: {} bytes", headers.len());
             let mut complete_audio = headers.clone();
-            complete_audio.extend_from_slice(&decrypted);
+            complete_audio.extend_from_slice(&track_data);
             complete_audio
         } else {
-            decrypted
+            track_data
         }
     } else {
-        decrypted
+        track_data
     };
 
     info!(
         "Successfully loaded {} bytes of audio data",
         audio_data.len()
     );
-    Ok(audio_data)
+    Ok((audio_data, audio_format.content_type))
 }
