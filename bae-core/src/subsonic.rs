@@ -1,6 +1,7 @@
 use crate::library::LibraryError;
 use crate::library::SharedLibraryManager;
 use crate::library_dir::LibraryDir;
+use crate::share_token::{validate_share_token, ShareKind, ShareTokenError};
 use crate::storage::create_storage_reader;
 use axum::{
     body::Body,
@@ -146,10 +147,34 @@ pub fn create_router(
         .route("/rest/getAlbumList", get(get_album_list))
         .route("/rest/getAlbum", get(get_album))
         .route("/rest/getCoverArt", get(get_cover_art))
+        .route("/rest/getShareInfo", get(get_share_info))
         .route("/rest/stream", get(stream_song))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
+/// Validate a share token from query params. Returns the payload or an HTTP error response.
+#[allow(clippy::result_large_err)]
+fn validate_token(
+    state: &SubsonicState,
+    token: &str,
+) -> Result<crate::share_token::ShareTokenPayload, Response> {
+    let encryption = state.encryption_service.as_ref().ok_or_else(|| {
+        (
+            StatusCode::FORBIDDEN,
+            "Share tokens require encryption to be configured",
+        )
+            .into_response()
+    })?;
+
+    validate_share_token(encryption, token).map_err(|e| match e {
+        ShareTokenError::Expired => (StatusCode::FORBIDDEN, "Token has expired").into_response(),
+        ShareTokenError::InvalidSignature | ShareTokenError::InvalidToken => {
+            (StatusCode::FORBIDDEN, "Invalid token").into_response()
+        }
+        ShareTokenError::InvalidId(_) => (StatusCode::BAD_REQUEST, "Invalid token").into_response(),
+    })
+}
+
 /// Ping endpoint - basic connectivity test
 /// Ping endpoint - params required by Subsonic API spec but not used for simple health check
 async fn ping(Query(_params): Query<SubsonicQuery>) -> impl IntoResponse {
@@ -299,10 +324,47 @@ async fn get_cover_art(
     Query(params): Query<HashMap<String, String>>,
     State(state): State<SubsonicState>,
 ) -> impl IntoResponse {
-    let album_id = match params.get("id") {
-        Some(id) => id.clone(),
-        None => {
-            return (StatusCode::BAD_REQUEST, "Missing id parameter").into_response();
+    let album_id = if let Some(token) = params.get("shareToken") {
+        let payload = match validate_token(&state, token) {
+            Ok(p) => p,
+            Err(resp) => return resp,
+        };
+
+        let derived_album_id = match payload.kind {
+            ShareKind::Track => {
+                match state
+                    .library_manager
+                    .get()
+                    .get_album_id_for_track(&payload.id)
+                    .await
+                {
+                    Ok(id) => id,
+                    Err(e) => {
+                        error!("Failed to look up album for track: {}", e);
+                        return (StatusCode::NOT_FOUND, "Track not found").into_response();
+                    }
+                }
+            }
+            ShareKind::Album => payload.id,
+        };
+
+        if let Some(id) = params.get("id") {
+            if id != &derived_album_id {
+                return (
+                    StatusCode::FORBIDDEN,
+                    "Token does not match requested album",
+                )
+                    .into_response();
+            }
+        }
+
+        derived_album_id
+    } else {
+        match params.get("id") {
+            Some(id) => id.clone(),
+            None => {
+                return (StatusCode::BAD_REQUEST, "Missing id parameter").into_response();
+            }
         }
     };
 
@@ -351,6 +413,232 @@ async fn get_cover_art(
                 .into_response()
         }
         Err(_) => (StatusCode::NOT_FOUND, "Cover art file not found").into_response(),
+    }
+}
+
+/// Get share info - returns metadata for a shared track or album
+async fn get_share_info(
+    Query(params): Query<HashMap<String, String>>,
+    State(state): State<SubsonicState>,
+) -> Response {
+    let token = match params.get("shareToken") {
+        Some(t) => t.as_str(),
+        None => {
+            return (StatusCode::BAD_REQUEST, "Missing shareToken parameter").into_response();
+        }
+    };
+
+    let payload = match validate_token(&state, token) {
+        Ok(p) => p,
+        Err(resp) => return resp,
+    };
+
+    let lm = state.library_manager.get();
+
+    match payload.kind {
+        ShareKind::Track => {
+            let track = match lm.get_track(&payload.id).await {
+                Ok(Some(t)) => t,
+                Ok(None) => {
+                    return (StatusCode::NOT_FOUND, "Track not found").into_response();
+                }
+                Err(e) => {
+                    error!("Failed to load track: {}", e);
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+                }
+            };
+
+            let album_id = match lm.get_album_id_for_track(&payload.id).await {
+                Ok(id) => id,
+                Err(e) => {
+                    error!("Failed to look up album for track: {}", e);
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+                }
+            };
+
+            let db_album = match lm.get_album_by_id(&album_id).await {
+                Ok(Some(a)) => a,
+                Ok(None) => {
+                    return (StatusCode::NOT_FOUND, "Album not found").into_response();
+                }
+                Err(e) => {
+                    error!("Failed to load album: {}", e);
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+                }
+            };
+
+            let track_artists = lm
+                .get_artists_for_track(&payload.id)
+                .await
+                .unwrap_or_default();
+            let artist_name = if track_artists.is_empty() {
+                let album_artists = lm
+                    .get_artists_for_album(&album_id)
+                    .await
+                    .unwrap_or_default();
+                join_artist_names(&album_artists)
+            } else {
+                join_artist_names(&track_artists)
+            };
+
+            let audio_format = lm
+                .get_audio_format_by_track_id(&payload.id)
+                .await
+                .ok()
+                .flatten();
+
+            let content_type = audio_format
+                .map(|af| af.content_type)
+                .unwrap_or(crate::content_type::ContentType::Flac);
+
+            let cover_art = if db_album.cover_release_id.is_some() {
+                Some(album_id.clone())
+            } else {
+                None
+            };
+
+            let share_info = serde_json::json!({
+                "shareInfo": {
+                    "kind": "track",
+                    "track": {
+                        "id": track.id,
+                        "title": track.title,
+                        "artist": artist_name,
+                        "album": db_album.title,
+                        "albumId": album_id,
+                        "coverArt": cover_art,
+                        "duration": track.duration_ms.map(|ms| ms / 1000),
+                        "contentType": content_type.as_str(),
+                        "suffix": content_type.file_extension(),
+                    }
+                }
+            });
+
+            let response = SubsonicResponse {
+                subsonic_response: SubsonicResponseInner {
+                    status: "ok".to_string(),
+                    version: "1.16.1".to_string(),
+                    data: share_info,
+                },
+            };
+            Json(response).into_response()
+        }
+        ShareKind::Album => {
+            let db_album = match lm.get_album_by_id(&payload.id).await {
+                Ok(Some(a)) => a,
+                Ok(None) => {
+                    return (StatusCode::NOT_FOUND, "Album not found").into_response();
+                }
+                Err(e) => {
+                    error!("Failed to load album: {}", e);
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+                }
+            };
+
+            match load_share_info_album(lm, &db_album).await {
+                Ok(share_info) => {
+                    let response = SubsonicResponse {
+                        subsonic_response: SubsonicResponseInner {
+                            status: "ok".to_string(),
+                            version: "1.16.1".to_string(),
+                            data: share_info,
+                        },
+                    };
+                    Json(response).into_response()
+                }
+                Err(e) => {
+                    error!("Failed to load album share info: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response()
+                }
+            }
+        }
+    }
+}
+
+/// Build share info JSON for an album, including all its songs.
+async fn load_share_info_album(
+    lm: &crate::library::LibraryManager,
+    db_album: &crate::db::DbAlbum,
+) -> Result<serde_json::Value, LibraryError> {
+    let album_artists = lm.get_artists_for_album(&db_album.id).await?;
+    let album_artist_name = join_artist_names(&album_artists);
+
+    let cover_art = if db_album.cover_release_id.is_some() {
+        Some(db_album.id.clone())
+    } else {
+        None
+    };
+
+    // Collect songs from all releases
+    let releases = lm.get_releases_for_album(&db_album.id).await?;
+    let mut songs = Vec::new();
+
+    for release in &releases {
+        let tracks = lm.get_tracks(&release.id).await?;
+        for track in tracks {
+            let track_artists = lm.get_artists_for_track(&track.id).await?;
+            let track_artist_name = if track_artists.is_empty() {
+                album_artist_name.clone()
+            } else {
+                join_artist_names(&track_artists)
+            };
+
+            let track_content_type = lm
+                .get_audio_format_by_track_id(&track.id)
+                .await?
+                .map(|af| af.content_type)
+                .unwrap_or(crate::content_type::ContentType::Flac);
+
+            songs.push(Song {
+                id: track.id,
+                title: track.title,
+                album: db_album.title.clone(),
+                artist: track_artist_name.clone(),
+                album_id: db_album.id.clone(),
+                artist_id: format!("artist_{}", track_artist_name.replace(' ', "_")),
+                track: track.track_number,
+                year: db_album.year,
+                genre: None,
+                cover_art: cover_art.clone(),
+                size: None,
+                content_type: track_content_type.as_str().to_string(),
+                suffix: track_content_type.file_extension().to_string(),
+                duration: track.duration_ms.map(|ms| (ms / 1000) as i32),
+                bit_rate: None,
+                path: format!("{}/{}", album_artist_name, db_album.title),
+            });
+        }
+    }
+
+    let total_duration: u32 = songs.iter().map(|s| s.duration.unwrap_or(0) as u32).sum();
+
+    Ok(serde_json::json!({
+        "shareInfo": {
+            "kind": "album",
+            "album": {
+                "id": db_album.id,
+                "name": db_album.title,
+                "artist": album_artist_name,
+                "year": db_album.year,
+                "coverArt": cover_art,
+                "songCount": songs.len(),
+                "duration": total_duration,
+                "song": songs,
+            }
+        }
+    }))
+}
+
+/// Join artist names into a comma-separated string, defaulting to "Unknown Artist".
+fn join_artist_names(artists: &[crate::db::DbArtist]) -> String {
+    if artists.is_empty() {
+        "Unknown Artist".to_string()
+    } else {
+        artists
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
@@ -484,10 +772,33 @@ async fn stream_song(
     Query(params): Query<HashMap<String, String>>,
     State(state): State<SubsonicState>,
 ) -> Response {
-    let song_id = match params.get("id") {
-        Some(id) => id.clone(),
-        None => {
-            return (StatusCode::BAD_REQUEST, "Missing song ID").into_response();
+    let song_id = if let Some(token) = params.get("shareToken") {
+        let payload = match validate_token(&state, token) {
+            Ok(p) => p,
+            Err(resp) => return resp,
+        };
+
+        if payload.kind != ShareKind::Track {
+            return (StatusCode::BAD_REQUEST, "Token is not for a track").into_response();
+        }
+
+        if let Some(id) = params.get("id") {
+            if id != &payload.id {
+                return (
+                    StatusCode::FORBIDDEN,
+                    "Token does not match requested track",
+                )
+                    .into_response();
+            }
+        }
+
+        payload.id
+    } else {
+        match params.get("id") {
+            Some(id) => id.clone(),
+            None => {
+                return (StatusCode::BAD_REQUEST, "Missing song ID").into_response();
+            }
         }
     };
 
