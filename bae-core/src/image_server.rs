@@ -1,3 +1,4 @@
+use crate::hmac_utils::{hmac_sign, hmac_verify};
 use crate::library::SharedLibraryManager;
 use crate::library_dir::LibraryDir;
 use axum::{
@@ -8,13 +9,9 @@ use axum::{
     routing::get,
     Router,
 };
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
 use std::collections::HashMap;
 use std::path::Path as StdPath;
 use tracing::{debug, warn};
-
-type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Clone)]
 struct ImageServerState {
@@ -119,18 +116,14 @@ pub async fn start_image_server(
 // =============================================================================
 
 fn sign(secret: &[u8; 32], path: &str) -> String {
-    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC can take key of any size");
-    mac.update(path.as_bytes());
-    hex::encode(mac.finalize().into_bytes())
+    hex::encode(hmac_sign(secret, path.as_bytes()))
 }
 
 fn verify(secret: &[u8; 32], path: &str, sig: &str) -> bool {
     let Ok(sig_bytes) = hex::decode(sig) else {
         return false;
     };
-    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC can take key of any size");
-    mac.update(path.as_bytes());
-    mac.verify_slice(&sig_bytes).is_ok()
+    hmac_verify(secret, path.as_bytes(), &sig_bytes)
 }
 
 async fn verify_sig(

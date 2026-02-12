@@ -247,6 +247,9 @@ pub struct ConfigYaml {
     pub subsonic_enabled: bool,
     /// Subsonic server port
     pub subsonic_port: Option<u16>,
+    /// Subsonic server bind address (default: 127.0.0.1, set to 0.0.0.0 for LAN/external access)
+    #[serde(default)]
+    pub subsonic_bind_address: Option<String>,
 
     // Sync bucket S3 configuration (credentials stored in keyring)
     /// S3 bucket name for changeset sync
@@ -297,6 +300,8 @@ pub struct Config {
     pub network_participation: ParticipationMode,
     pub subsonic_enabled: bool,
     pub subsonic_port: u16,
+    /// Subsonic server bind address (default: 127.0.0.1)
+    pub subsonic_bind_address: String,
     /// S3 bucket name for changeset sync
     pub sync_s3_bucket: Option<String>,
     /// S3 region for sync bucket
@@ -397,6 +402,7 @@ impl Config {
             network_participation: ParticipationMode::Off,
             subsonic_enabled: true,
             subsonic_port: 4533,
+            subsonic_bind_address: "127.0.0.1".to_string(),
             sync_s3_bucket,
             sync_s3_region,
             sync_s3_endpoint,
@@ -488,6 +494,9 @@ impl Config {
             network_participation: yaml_config.network_participation,
             subsonic_enabled: yaml_config.subsonic_enabled,
             subsonic_port: yaml_config.subsonic_port.unwrap_or(4533),
+            subsonic_bind_address: yaml_config
+                .subsonic_bind_address
+                .unwrap_or_else(|| "127.0.0.1".to_string()),
             sync_s3_bucket: yaml_config.sync_s3_bucket,
             sync_s3_region: yaml_config.sync_s3_region,
             sync_s3_endpoint: yaml_config.sync_s3_endpoint,
@@ -594,6 +603,7 @@ impl Config {
             network_participation: self.network_participation,
             subsonic_enabled: self.subsonic_enabled,
             subsonic_port: Some(self.subsonic_port),
+            subsonic_bind_address: Some(self.subsonic_bind_address.clone()),
             sync_s3_bucket: self.sync_s3_bucket.clone(),
             sync_s3_region: self.sync_s3_region.clone(),
             sync_s3_endpoint: self.sync_s3_endpoint.clone(),
@@ -640,6 +650,7 @@ impl Config {
             network_participation: ParticipationMode::Off,
             subsonic_enabled: true,
             subsonic_port: 4533,
+            subsonic_bind_address: "127.0.0.1".to_string(),
             sync_s3_bucket: None,
             sync_s3_region: None,
             sync_s3_endpoint: None,
@@ -816,6 +827,7 @@ mod tests {
             network_participation: ParticipationMode::Off,
             subsonic_enabled: true,
             subsonic_port: 4533,
+            subsonic_bind_address: "127.0.0.1".to_string(),
             sync_s3_bucket: None,
             sync_s3_region: None,
             sync_s3_endpoint: None,

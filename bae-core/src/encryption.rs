@@ -440,27 +440,33 @@ impl EncryptionService {
         Ok(plaintext[offset_in_first_chunk..end].to_vec())
     }
 
-    /// Derive a per-release encryption key using HKDF-SHA256.
+    /// Derive a 32-byte key using HKDF-SHA256 with the given info label.
     ///
-    /// The derivation is deterministic: same master key + same release_id always
-    /// produces the same derived key. Different release_ids produce different keys.
+    /// The derivation is deterministic: same master key + same info string always
+    /// produces the same derived key.
     ///
     /// - Salt: `HMAC-SHA256(master_key, "bae-hkdf-salt-v1")`
-    /// - Info: `"bae-release-v1:" + release_id`
-    pub fn derive_release_key(&self, release_id: &str) -> [u8; 32] {
-        // Derive a deterministic salt from the master key
+    /// - IKM: master key
+    /// - Info: caller-provided label
+    pub fn derive_key(&self, info: &str) -> [u8; 32] {
         let mut mac =
             Hmac::<Sha256>::new_from_slice(&self.key).expect("HMAC accepts any key length");
         mac.update(b"bae-hkdf-salt-v1");
         let salt = mac.finalize().into_bytes();
-
-        let info = format!("bae-release-v1:{}", release_id);
 
         let hk = Hkdf::<Sha256>::new(Some(&salt), &self.key);
         let mut okm = [0u8; 32];
         hk.expand(info.as_bytes(), &mut okm)
             .expect("32 bytes is a valid HKDF output length");
         okm
+    }
+
+    /// Derive a per-release encryption key using HKDF-SHA256.
+    ///
+    /// The derivation is deterministic: same master key + same release_id always
+    /// produces the same derived key. Different release_ids produce different keys.
+    pub fn derive_release_key(&self, release_id: &str) -> [u8; 32] {
+        self.derive_key(&format!("bae-release-v1:{}", release_id))
     }
 
     /// Encrypt data using a per-release derived key (chunked XChaCha20-Poly1305).
