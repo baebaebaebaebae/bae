@@ -32,6 +32,19 @@ async fn wait_for_rate_limit() {
     *last_request = Instant::now();
 }
 
+/// Check if the release-group JSON contains "Compilation" in secondary-types
+fn has_compilation_secondary_type(release_group: &serde_json::Value) -> bool {
+    release_group
+        .get("secondary-types")
+        .and_then(|st| st.as_array())
+        .is_some_and(|types| {
+            types.iter().any(|t| {
+                t.as_str()
+                    .is_some_and(|s| s.eq_ignore_ascii_case("compilation"))
+            })
+        })
+}
+
 /// MusicBrainz release information
 #[derive(Debug, Clone, PartialEq)]
 pub struct MbRelease {
@@ -46,6 +59,7 @@ pub struct MbRelease {
     pub label: Option<String>,
     pub catalog_number: Option<String>,
     pub barcode: Option<String>,
+    pub is_compilation: bool,
 }
 /// External URLs extracted from MusicBrainz relationships
 #[derive(Debug, Clone)]
@@ -175,6 +189,9 @@ pub async fn lookup_by_discid(
                         (label_name, catalog)
                     })
                     .unwrap_or((None, None));
+                let is_compilation = release_json
+                    .get("release-group")
+                    .is_some_and(has_compilation_secondary_type);
                 releases.push(MbRelease {
                     release_id: id.to_string(),
                     release_group_id: release_group.to_string(),
@@ -187,6 +204,7 @@ pub async fn lookup_by_discid(
                     label,
                     catalog_number,
                     barcode,
+                    is_compilation,
                 });
                 if external_urls.discogs_master_url.is_none() {
                     if let Some(relations) =
@@ -473,6 +491,9 @@ pub async fn lookup_release_by_id(
             }
         }
     }
+    let is_compilation = json
+        .get("release-group")
+        .is_some_and(has_compilation_secondary_type);
     let release = MbRelease {
         release_id: release_id_str,
         release_group_id,
@@ -485,6 +506,7 @@ pub async fn lookup_release_by_id(
         label,
         catalog_number,
         barcode,
+        is_compilation,
     };
     Ok((release, external_urls, json))
 }
@@ -733,6 +755,9 @@ pub async fn search_releases_with_params(
                     .and_then(|first| first.get("catalog-number"))
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
+                let is_compilation = release_json
+                    .get("release-group")
+                    .is_some_and(has_compilation_secondary_type);
                 releases.push(MbRelease {
                     release_id: id.to_string(),
                     release_group_id,
@@ -745,6 +770,7 @@ pub async fn search_releases_with_params(
                     label,
                     catalog_number,
                     barcode,
+                    is_compilation,
                 });
             }
         }

@@ -383,12 +383,19 @@ impl DbAlbum {
     pub fn from_discogs_release(
         release: &crate::discogs::DiscogsRelease,
         master_year: u32,
+        is_compilation: bool,
     ) -> Self {
         let now = Utc::now();
         let discogs_release = DiscogsMasterRelease {
             master_id: release.master_id.clone(),
             release_id: release.id.clone(),
         };
+        let artist_name = release
+            .artists
+            .first()
+            .map(|a| a.name.as_str())
+            .unwrap_or("");
+        let is_compilation = is_compilation || is_various_artists(artist_name);
         DbAlbum {
             id: Uuid::new_v4().to_string(),
             title: release.title.clone(),
@@ -397,12 +404,16 @@ impl DbAlbum {
             musicbrainz_release: None,
             bandcamp_album_id: None,
             cover_release_id: None,
-            is_compilation: false,
+            is_compilation,
             created_at: now,
             updated_at: now,
         }
     }
-    pub fn from_mb_release(release: &crate::musicbrainz::MbRelease, master_year: u32) -> Self {
+    pub fn from_mb_release(
+        release: &crate::musicbrainz::MbRelease,
+        master_year: u32,
+        is_compilation: bool,
+    ) -> Self {
         let now = Utc::now();
         let musicbrainz_release = crate::db::MusicBrainzRelease {
             release_group_id: release.release_group_id.clone(),
@@ -413,6 +424,7 @@ impl DbAlbum {
             .as_ref()
             .and_then(|d| d.split('-').next().and_then(|y| y.parse::<i32>().ok()))
             .or(Some(master_year as i32));
+        let is_compilation = is_compilation || is_various_artists(&release.artist);
         DbAlbum {
             id: Uuid::new_v4().to_string(),
             title: release.title.clone(),
@@ -421,12 +433,19 @@ impl DbAlbum {
             musicbrainz_release: Some(musicbrainz_release),
             bandcamp_album_id: None,
             cover_release_id: None,
-            is_compilation: false,
+            is_compilation,
             created_at: now,
             updated_at: now,
         }
     }
 }
+
+/// Check if an artist name indicates a "Various Artists" compilation
+fn is_various_artists(name: &str) -> bool {
+    let lower = name.trim().to_lowercase();
+    lower == "various" || lower == "various artists"
+}
+
 impl DbRelease {
     #[cfg(test)]
     pub fn new_test(album_id: &str, release_id: &str) -> Self {

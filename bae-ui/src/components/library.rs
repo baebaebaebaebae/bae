@@ -449,11 +449,18 @@ fn derive_artist_list(
     items
 }
 
-/// Group a sorted list of artists by their first letter (# for non-alpha)
+/// Group a sorted list of artists by their first letter (# for non-alpha).
+/// "Various Artists" goes into its own group at the end instead of under "V".
 fn group_artists_by_letter(items: Vec<ArtistListItem>) -> Vec<ArtistGroup> {
     let mut groups: Vec<ArtistGroup> = Vec::new();
+    let mut various_artists: Vec<ArtistListItem> = Vec::new();
 
     for item in items {
+        if item.artist.name.eq_ignore_ascii_case("various artists") {
+            various_artists.push(item);
+            continue;
+        }
+
         let first_char = item
             .artist
             .name
@@ -478,6 +485,13 @@ fn group_artists_by_letter(items: Vec<ArtistListItem>) -> Vec<ArtistGroup> {
         groups.push(ArtistGroup {
             letter,
             artists: vec![item],
+        });
+    }
+
+    if !various_artists.is_empty() {
+        groups.push(ArtistGroup {
+            letter: "Various Artists".to_string(),
+            artists: various_artists,
         });
     }
 

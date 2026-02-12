@@ -77,6 +77,7 @@ struct ReleaseResponse {
 #[derive(Debug, Deserialize)]
 struct Format {
     name: String,
+    descriptions: Option<Vec<String>>,
 }
 #[derive(Debug, Deserialize)]
 struct Image {
@@ -234,18 +235,21 @@ impl DiscogsClient {
             let labels = release.labels.unwrap_or_default();
             let label_names: Vec<String> = labels.iter().map(|l| l.name.clone()).collect();
             let catno = labels.first().and_then(|l| l.catno.clone());
+
+            let formats = release.formats.unwrap_or_default();
+            let is_compilation = formats.iter().any(|f| {
+                f.descriptions.as_ref().is_some_and(|descs| {
+                    descs.iter().any(|d| d.eq_ignore_ascii_case("compilation"))
+                })
+            });
+
             Ok(DiscogsRelease {
                 id: release.id.to_string(),
                 title: release.title,
                 year: release.year,
                 genre: release.genres.unwrap_or_default(),
                 style: release.styles.unwrap_or_default(),
-                format: release
-                    .formats
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|f| f.name)
-                    .collect(),
+                format: formats.into_iter().map(|f| f.name).collect(),
                 country: release.country,
                 label: label_names,
                 catno,
@@ -254,6 +258,7 @@ impl DiscogsClient {
                 artists,
                 tracklist,
                 master_id,
+                is_compilation,
             })
         } else if response.status() == 404 {
             Err(DiscogsError::NotFound)

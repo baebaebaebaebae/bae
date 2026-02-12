@@ -61,14 +61,15 @@ fn parse_mb_release_from_json(
     discogs_release: Option<crate::discogs::DiscogsRelease>,
 ) -> Result<ParsedMbAlbum, String> {
     let album = if let Some(ref discogs_rel) = discogs_release {
-        let mut album = DbAlbum::from_mb_release(mb_release, master_year);
+        let mut album =
+            DbAlbum::from_mb_release(mb_release, master_year, mb_release.is_compilation);
         album.discogs_release = Some(crate::db::DiscogsMasterRelease {
             master_id: discogs_rel.master_id.clone(),
             release_id: discogs_rel.id.clone(),
         });
         album
     } else {
-        DbAlbum::from_mb_release(mb_release, master_year)
+        DbAlbum::from_mb_release(mb_release, master_year, mb_release.is_compilation)
     };
     let db_release = DbRelease::from_mb_release(&album.id, mb_release);
     let mut artists = Vec::new();

@@ -660,6 +660,7 @@ fn create_test_discogs_release() -> DiscogsRelease {
             },
         ],
         master_id: Some("test-master-storage".to_string()),
+        is_compilation: false,
     }
 }
 

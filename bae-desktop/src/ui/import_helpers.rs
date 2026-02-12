@@ -837,6 +837,9 @@ pub async fn confirm_and_start_import(
                     label: candidate.label.clone(),
                     catalog_number: candidate.catalog_number.clone(),
                     barcode: None,
+                    // The full release is re-fetched in fetch_and_parse_mb_release,
+                    // which reads is_compilation from the API response.
+                    is_compilation: false,
                 };
 
                 ImportRequest::Folder {
