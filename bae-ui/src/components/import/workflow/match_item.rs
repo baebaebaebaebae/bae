@@ -1,6 +1,8 @@
 //! Match item view component
 
-use crate::components::icons::{ImageIcon, RefreshIcon};
+use crate::components::icons::{
+    ChevronDownIcon, ChevronRightIcon, ImageIcon, LoaderIcon, RefreshIcon,
+};
 use crate::components::{Button, ButtonSize, ButtonVariant};
 use crate::display_types::{CandidateTrack, MatchCandidate};
 use crate::stores::import::PrefetchState;
@@ -12,12 +14,22 @@ pub fn MatchItemView(
     candidate: MatchCandidate,
     is_selected: bool,
     prefetch_state: Option<PrefetchState>,
+    confirm_pending: bool,
     on_select: EventHandler<()>,
     on_confirm: EventHandler<()>,
     on_retry_cover: EventHandler<()>,
     on_view_in_library: EventHandler<String>,
     confirm_button_text: &'static str,
 ) -> Element {
+    let mut expanded = use_signal(|| false);
+
+    // Reset expanded when item is deselected
+    use_effect(move || {
+        if !is_selected {
+            expanded.set(false);
+        }
+    });
+
     let is_duplicate = candidate.existing_album_id.is_some();
 
     let border_class = if is_duplicate {
@@ -58,7 +70,6 @@ pub fn MatchItemView(
         prefetch_state,
         Some(PrefetchState::TrackCountMismatch { .. }) | Some(PrefetchState::FetchFailed(_))
     );
-    let is_fetching = matches!(prefetch_state, Some(PrefetchState::Fetching));
     let button_disabled = is_mismatch;
 
     rsx! {
@@ -174,7 +185,7 @@ pub fn MatchItemView(
                             variant: ButtonVariant::Primary,
                             size: ButtonSize::Small,
                             disabled: button_disabled,
-                            loading: is_fetching,
+                            loading: confirm_pending,
                             onclick: move |_| on_confirm.call(()),
                             "{confirm_button_text}"
                         }
@@ -182,12 +193,53 @@ pub fn MatchItemView(
                 }
             }
 
-            // Track listing (shown when selected and prefetch returned tracks)
-            if is_selected {
-                if let Some(PrefetchState::Valid { tracks }) = &prefetch_state {
-                    if !tracks.is_empty() {
-                        TrackListingCompact { tracks: tracks.clone() }
+            // Expand/collapse track listing toggle (only when selected, not on error states)
+            if is_selected && !is_mismatch {
+                match &prefetch_state {
+                    Some(PrefetchState::Valid { tracks }) if !tracks.is_empty() => {
+                        let track_count = tracks.len();
+                        let tracks = tracks.clone();
+                        rsx! {
+                            button {
+                                class: "flex items-center gap-1 text-xs text-gray-400 hover:text-gray-300 transition-colors ml-7 mt-1",
+                                onclick: move |e| {
+                                    e.stop_propagation();
+                                    expanded.toggle();
+                                },
+                                if *expanded.read() {
+                                    ChevronDownIcon { class: "w-3 h-3" }
+                                } else {
+                                    ChevronRightIcon { class: "w-3 h-3" }
+                                }
+                                "{track_count} tracks"
+                            }
+                            if *expanded.read() {
+                                TrackListingCompact { tracks }
+                            }
+                        }
                     }
+                    Some(PrefetchState::Fetching) | None => rsx! {
+                        button {
+                            class: "flex items-center gap-1 text-xs text-gray-400 hover:text-gray-300 transition-colors ml-7 mt-1",
+                            onclick: move |e| {
+                                e.stop_propagation();
+                                expanded.toggle();
+                            },
+                            if *expanded.read() {
+                                ChevronDownIcon { class: "w-3 h-3" }
+                            } else {
+                                ChevronRightIcon { class: "w-3 h-3" }
+                            }
+                            "Tracks"
+                        }
+                        if *expanded.read() {
+                            p { class: "text-xs text-gray-500 flex items-center gap-1.5 mt-1.5 ml-11",
+                                LoaderIcon { class: "w-3 h-3 animate-spin" }
+                                "Loading tracks..."
+                            }
+                        }
+                    },
+                    _ => rsx! {},
                 }
             }
         }

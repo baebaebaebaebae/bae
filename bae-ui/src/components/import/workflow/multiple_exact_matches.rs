@@ -24,21 +24,23 @@ pub fn MultipleExactMatchesView(
     let candidate_states = state.candidate_states().read().clone();
     let candidate_state = current_key.as_ref().and_then(|k| candidate_states.get(k));
 
-    let (candidates, selected_index, disc_id, prefetch_state) = match candidate_state {
-        Some(CandidateState::Identifying(is)) => {
-            let disc_id = match &is.mode {
-                IdentifyMode::MultipleExactMatches(id) => Some(id.clone()),
-                _ => None,
-            };
-            (
-                is.auto_matches.clone(),
-                is.selected_match_index,
-                disc_id,
-                is.exact_match_prefetch.clone(),
-            )
-        }
-        _ => (vec![], None, None, None),
-    };
+    let (candidates, selected_index, disc_id, prefetch_state, confirm_pending) =
+        match candidate_state {
+            Some(CandidateState::Identifying(is)) => {
+                let disc_id = match &is.mode {
+                    IdentifyMode::MultipleExactMatches(id) => Some(id.clone()),
+                    _ => None,
+                };
+                (
+                    is.auto_matches.clone(),
+                    is.selected_match_index,
+                    disc_id,
+                    is.exact_match_prefetch.clone(),
+                    is.exact_match_confirm_pending,
+                )
+            }
+            _ => (vec![], None, None, None, false),
+        };
 
     if candidates.is_empty() {
         return rsx! {};
@@ -71,6 +73,7 @@ pub fn MultipleExactMatchesView(
                 candidates,
                 selected_index,
                 prefetch_state,
+                confirm_pending,
                 on_select: move |index| on_select.call(index),
                 on_confirm: move |candidate| on_confirm.call(candidate),
                 on_retry_cover: move |_| {},
