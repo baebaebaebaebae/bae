@@ -12,7 +12,7 @@ use bae_ui::stores::{
 };
 use dioxus::prelude::*;
 use rfd::AsyncFileDialog;
-use tracing::{error, warn};
+use tracing::error;
 
 /// Album detail page showing album info and tracklist
 ///
@@ -127,33 +127,70 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
         }
     });
 
+    // Toast state for share link feedback
+    let mut success_toast = use_signal(|| None::<String>);
+    let mut error_toast_msg = use_signal(|| None::<String>);
+    let mut toast_gen = use_signal(|| 0u32);
+
+    // Auto-dismiss success toast after 3 seconds
+    use_effect(move || {
+        if success_toast().is_some() {
+            let gen = toast_gen();
+            spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                if toast_gen() == gen {
+                    success_toast.set(None);
+                }
+            });
+        }
+    });
+
     // Copy share link callback
     let on_track_copy_share_link = EventHandler::new({
         let library_manager = library_manager.clone();
         let share_base_url = app.config.share_base_url.clone();
+        let share_default_expiry_days = app.config.share_default_expiry_days;
+        let share_signing_key_version = app.config.share_signing_key_version;
         move |track_id: String| {
             let Some(ref base_url) = share_base_url else {
-                warn!("share_base_url not configured, cannot copy share link");
+                error_toast_msg.set(Some("Share base URL not configured".to_string()));
                 return;
             };
 
             let Some(encryption) = library_manager.get().encryption_service() else {
-                warn!("Encryption not configured, cannot generate share token");
+                error_toast_msg.set(Some("Encryption not configured".to_string()));
                 return;
             };
+
+            let expiry = share_default_expiry_days.map(|days| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system clock before UNIX epoch")
+                    .as_secs()
+                    + u64::from(days) * 86400
+            });
 
             match bae_core::share_token::generate_share_token(
                 encryption,
                 bae_core::share_token::ShareKind::Track,
                 &track_id,
-                None,
+                expiry,
+                share_signing_key_version,
             ) {
                 Ok(token) => {
                     let url = format!("{}/share/{}", base_url, token);
-                    let _ = arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&url));
+                    match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&url)) {
+                        Ok(()) => {
+                            toast_gen.set(toast_gen() + 1);
+                            success_toast.set(Some("Link copied".to_string()));
+                        }
+                        Err(e) => {
+                            error_toast_msg.set(Some(format!("Failed to copy: {e}")));
+                        }
+                    }
                 }
                 Err(e) => {
-                    warn!("Failed to generate share token: {e}");
+                    error_toast_msg.set(Some(format!("Failed to generate link: {e}")));
                 }
             }
         }
@@ -341,6 +378,7 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
                 state,
                 tracks,
                 playback: playback_display(),
+                show_share_link: app.config.share_base_url.is_some(),
                 on_release_select,
                 on_album_deleted,
                 on_export_release,
@@ -365,6 +403,19 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
             }
         } else {
             AlbumDetailLoading {}
+        }
+
+        if let Some(ref msg) = success_toast() {
+            bae_ui::SuccessToast {
+                message: msg.clone(),
+                on_dismiss: move |_| success_toast.set(None),
+            }
+        }
+        if let Some(ref msg) = error_toast_msg() {
+            bae_ui::ErrorToast {
+                message: msg.clone(),
+                on_dismiss: move |_| error_toast_msg.set(None),
+            }
         }
     }
 }

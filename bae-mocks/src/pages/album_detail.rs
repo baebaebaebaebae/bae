@@ -63,6 +63,7 @@ pub fn AlbumDetail(album_id: String) -> Element {
                 state,
                 tracks,
                 playback: PlaybackDisplay::Stopped,
+                show_share_link: true,
                 on_release_select: |_release_id: String| {},
                 on_album_deleted: |_| {},
                 on_export_release: |_| {},

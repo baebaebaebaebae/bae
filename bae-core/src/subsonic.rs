@@ -25,6 +25,7 @@ pub struct SubsonicState {
     pub library_dir: LibraryDir,
     pub key_service: crate::keys::KeyService,
     pub share_base_url: Option<String>,
+    pub share_signing_key_version: u32,
 }
 /// Common query parameters for Subsonic API
 #[derive(Debug, Deserialize)]
@@ -135,6 +136,7 @@ pub fn create_router(
     library_dir: LibraryDir,
     key_service: crate::keys::KeyService,
     share_base_url: Option<String>,
+    share_signing_key_version: u32,
 ) -> Router {
     let state = SubsonicState {
         library_manager,
@@ -142,6 +144,7 @@ pub fn create_router(
         library_dir,
         key_service,
         share_base_url,
+        share_signing_key_version,
     };
     Router::new()
         .route("/rest/ping", get(ping))
@@ -169,7 +172,7 @@ fn validate_token(
             .into_response()
     })?;
 
-    validate_share_token(encryption, token).map_err(|e| match e {
+    validate_share_token(encryption, token, state.share_signing_key_version).map_err(|e| match e {
         ShareTokenError::Expired => (StatusCode::FORBIDDEN, "Token has expired").into_response(),
         ShareTokenError::InvalidSignature | ShareTokenError::InvalidToken => {
             (StatusCode::FORBIDDEN, "Invalid token").into_response()

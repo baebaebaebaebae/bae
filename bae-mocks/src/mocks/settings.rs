@@ -29,6 +29,11 @@ pub fn SettingsMock(initial_state: Option<String>) -> Element {
     let mut subsonic_edit_enabled = use_signal(|| true);
     let mut subsonic_edit_port = use_signal(|| "4533".to_string());
 
+    // Share link state
+    let mut share_editing = use_signal(|| false);
+    let mut share_edit_base_url = use_signal(|| "https://listen.example.com".to_string());
+    let mut share_edit_expiry: Signal<Option<u32>> = use_signal(|| Some(30));
+
     rsx! {
         MockPanel {
             current_mock: MockPage::Settings,
@@ -213,6 +218,21 @@ pub fn SettingsMock(initial_state: Option<String>) -> Element {
                             on_save: move |_| subsonic_editing.set(false),
                             on_enabled_change: move |v| subsonic_edit_enabled.set(v),
                             on_port_change: move |v| subsonic_edit_port.set(v),
+                            share_base_url: "https://listen.example.com".to_string(),
+                            share_is_editing: *share_editing.read(),
+                            share_edit_base_url: share_edit_base_url.read().clone(),
+                            share_default_expiry_days: Some(30),
+                            share_edit_expiry_days: *share_edit_expiry.read(),
+                            share_signing_key_version: 1,
+                            share_is_saving: false,
+                            share_has_changes: false,
+                            share_save_error: None,
+                            on_share_edit_start: move |_| share_editing.set(true),
+                            on_share_cancel: move |_| share_editing.set(false),
+                            on_share_save: move |_| share_editing.set(false),
+                            on_share_base_url_change: move |v| share_edit_base_url.set(v),
+                            on_share_expiry_change: move |v| share_edit_expiry.set(v),
+                            on_share_rotate_key: |_| {},
                         }
                     },
                     SettingsTab::About => rsx! {

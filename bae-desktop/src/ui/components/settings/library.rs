@@ -435,6 +435,8 @@ async fn bootstrap_library(
             Some(endpoint.to_string())
         },
         share_base_url: None,
+        share_default_expiry_days: None,
+        share_signing_key_version: 1,
     };
 
     config

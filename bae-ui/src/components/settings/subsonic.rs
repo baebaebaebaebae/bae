@@ -1,6 +1,8 @@
 //! Subsonic section view
 
-use crate::components::{Button, ButtonSize, ButtonVariant, SettingsCard, SettingsSection};
+use crate::components::{
+    Button, ButtonSize, ButtonVariant, Select, SelectOption, SettingsCard, SettingsSection,
+};
 use dioxus::prelude::*;
 
 /// Subsonic section view
@@ -25,6 +27,29 @@ pub fn SubsonicSectionView(
     on_save: EventHandler<()>,
     on_enabled_change: EventHandler<bool>,
     on_port_change: EventHandler<String>,
+    /// Base URL for share links
+    share_base_url: String,
+    /// Whether share link settings are being edited
+    share_is_editing: bool,
+    /// Temporary value while editing share base URL
+    share_edit_base_url: String,
+    /// Default expiry days (None = never)
+    share_default_expiry_days: Option<u32>,
+    /// Editing value for expiry days
+    share_edit_expiry_days: Option<u32>,
+    /// Signing key version
+    share_signing_key_version: u32,
+    /// State flags for share settings
+    share_is_saving: bool,
+    share_has_changes: bool,
+    share_save_error: Option<String>,
+    /// Callbacks for share settings
+    on_share_edit_start: EventHandler<()>,
+    on_share_cancel: EventHandler<()>,
+    on_share_save: EventHandler<()>,
+    on_share_base_url_change: EventHandler<String>,
+    on_share_expiry_change: EventHandler<Option<u32>>,
+    on_share_rotate_key: EventHandler<()>,
 ) -> Element {
     rsx! {
         SettingsSection {
@@ -138,6 +163,140 @@ pub fn SubsonicSectionView(
                         "Connect your mobile app to "
                         span { class: "font-mono text-indigo-400", "http://YOUR_IP:{port}" }
                         " (or use localhost for the same device)."
+                    }
+                }
+            }
+
+            SettingsCard {
+                div { class: "flex items-center justify-between mb-4",
+                    h3 { class: "text-lg font-medium text-white", "Share Links" }
+                    if !share_is_editing {
+                        Button {
+                            variant: ButtonVariant::Secondary,
+                            size: ButtonSize::Small,
+                            onclick: move |_| on_share_edit_start.call(()),
+                            "Edit"
+                        }
+                    }
+                }
+
+                if share_is_editing {
+                    div { class: "space-y-4",
+                        div { class: "flex items-center gap-4",
+                            label { class: "text-sm text-gray-400 w-32", "Base URL:" }
+                            input {
+                                r#type: "text",
+                                class: "flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                                placeholder: "https://listen.example.com",
+                                value: "{share_edit_base_url}",
+                                oninput: move |e| on_share_base_url_change.call(e.value()),
+                            }
+                        }
+                        div { class: "flex items-center gap-4",
+                            label { class: "text-sm text-gray-400 w-32", "Default expiry:" }
+                            Select {
+                                value: match share_edit_expiry_days {
+                                    Some(7) => "7".to_string(),
+                                    Some(30) => "30".to_string(),
+                                    Some(90) => "90".to_string(),
+                                    Some(other) => other.to_string(),
+                                    None => "never".to_string(),
+                                },
+                                onchange: move |val: String| {
+                                    let days = match val.as_str() {
+                                        "never" => None,
+                                        v => v.parse().ok(),
+                                    };
+                                    on_share_expiry_change.call(days);
+                                },
+                                SelectOption {
+                                    value: "7".to_string(),
+                                    label: "7 days".to_string(),
+                                }
+                                SelectOption {
+                                    value: "30".to_string(),
+                                    label: "30 days".to_string(),
+                                }
+                                SelectOption {
+                                    value: "90".to_string(),
+                                    label: "90 days".to_string(),
+                                }
+                                SelectOption {
+                                    value: "never".to_string(),
+                                    label: "Never".to_string(),
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(ref error) = share_save_error {
+                        div { class: "p-3 bg-red-900/30 border border-red-700 rounded-lg text-sm text-red-300",
+                            "{error}"
+                        }
+                    }
+
+                    div { class: "flex gap-3",
+                        Button {
+                            variant: ButtonVariant::Primary,
+                            size: ButtonSize::Medium,
+                            disabled: !share_has_changes || share_is_saving,
+                            loading: share_is_saving,
+                            onclick: move |_| on_share_save.call(()),
+                            if share_is_saving {
+                                "Saving..."
+                            } else {
+                                "Save Changes"
+                            }
+                        }
+                        Button {
+                            variant: ButtonVariant::Secondary,
+                            size: ButtonSize::Medium,
+                            onclick: move |_| on_share_cancel.call(()),
+                            "Cancel"
+                        }
+                    }
+                } else {
+                    div { class: "space-y-2 text-sm",
+                        div { class: "flex items-center gap-2",
+                            span { class: "text-gray-400", "Base URL:" }
+                            if share_base_url.is_empty() {
+                                span { class: "text-gray-500 italic", "Not configured" }
+                            } else {
+                                span { class: "text-indigo-400 font-mono", "{share_base_url}" }
+                            }
+                        }
+                        div { class: "flex items-center gap-2",
+                            span { class: "text-gray-400", "Default expiry:" }
+                            span { class: "text-white",
+                                match share_default_expiry_days {
+                                    Some(7) => "7 days",
+                                    Some(30) => "30 days",
+                                    Some(90) => "90 days",
+                                    Some(_) => "Custom",
+                                    None => "Never",
+                                }
+                            }
+                        }
+                        div { class: "flex items-center gap-2",
+                            span { class: "text-gray-400", "Signing key version:" }
+                            span { class: "text-white font-mono", "{share_signing_key_version}" }
+                        }
+                    }
+                }
+
+                div { class: "mt-4 pt-4 border-t border-gray-700",
+                    div { class: "flex items-center justify-between",
+                        div {
+                            p { class: "text-sm text-gray-400",
+                                "Invalidate all outstanding share links by rotating the signing key."
+                            }
+                        }
+                        Button {
+                            variant: ButtonVariant::Secondary,
+                            size: ButtonSize::Small,
+                            onclick: move |_| on_share_rotate_key.call(()),
+                            "Rotate Key"
+                        }
                     }
                 }
             }

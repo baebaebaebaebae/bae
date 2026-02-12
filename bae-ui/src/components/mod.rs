@@ -21,6 +21,7 @@ pub mod resizable_panel;
 pub mod segmented_control;
 pub mod select;
 pub mod settings;
+pub mod success_toast;
 pub mod text_input;
 pub mod text_link;
 pub mod title_bar;
@@ -77,6 +78,7 @@ pub use settings::{
     SettingsTab, SettingsView, StorageLocation, StorageProfile, StorageProfileEditorView,
     StorageProfilesSectionView, SubsonicSectionView, SyncBucketConfig, SyncSectionView,
 };
+pub use success_toast::SuccessToast;
 pub use text_input::{TextInput, TextInputSize, TextInputType};
 pub use text_link::TextLink;
 pub use title_bar::{
