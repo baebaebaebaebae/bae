@@ -644,8 +644,13 @@ fn ShareGrantDialogWrapper(
 #[component]
 fn GalleryLightboxWrapper(state: ReadStore<AlbumDetailState>, show: Signal<bool>) -> Element {
     let images = state.images().read().clone();
+    let cover_url = state
+        .album()
+        .read()
+        .as_ref()
+        .and_then(|a| a.cover_url.clone());
 
-    let gallery_items: Vec<GalleryItem> = images
+    let image_items: Vec<GalleryItem> = images
         .iter()
         .map(|img| GalleryItem {
             label: img.filename.clone(),
@@ -656,7 +661,28 @@ fn GalleryLightboxWrapper(state: ReadStore<AlbumDetailState>, show: Signal<bool>
         })
         .collect();
 
-    let initial_index = 0;
+    // If the cover is already a release image, select it; otherwise prepend it.
+    let (gallery_items, initial_index) = if let Some(ref url) = cover_url {
+        if let Some(idx) = image_items.iter().position(|item| {
+            matches!(
+                &item.content,
+                GalleryItemContent::Image { url: item_url, .. } if item_url == url
+            )
+        }) {
+            (image_items, idx)
+        } else {
+            let cover_item = GalleryItem {
+                label: "Cover".to_string(),
+                content: GalleryItemContent::Image {
+                    url: url.clone(),
+                    thumbnail_url: url.clone(),
+                },
+            };
+            (std::iter::once(cover_item).chain(image_items).collect(), 0)
+        }
+    } else {
+        (image_items, 0)
+    };
 
     // Always render — visibility controlled by signal (see gallery_lightbox module docs)
     let is_open: ReadSignal<bool> = show.into();
