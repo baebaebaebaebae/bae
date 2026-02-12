@@ -644,8 +644,13 @@ fn ShareGrantDialogWrapper(
 #[component]
 fn GalleryLightboxWrapper(state: ReadStore<AlbumDetailState>, show: Signal<bool>) -> Element {
     let images = state.images().read().clone();
+    let cover_url = state
+        .album()
+        .read()
+        .as_ref()
+        .and_then(|a| a.cover_url.clone());
 
-    let gallery_items: Vec<GalleryItem> = images
+    let image_items: Vec<GalleryItem> = images
         .iter()
         .map(|img| GalleryItem {
             label: img.filename.clone(),
@@ -656,21 +661,31 @@ fn GalleryLightboxWrapper(state: ReadStore<AlbumDetailState>, show: Signal<bool>
         })
         .collect();
 
-    let initial_index = 0;
+    // Prepend the cover as the first item so clicking album art opens to it
+    let gallery_items = if let Some(url) = cover_url {
+        let cover_item = GalleryItem {
+            label: "Cover".to_string(),
+            content: GalleryItemContent::Image {
+                url: url.clone(),
+                thumbnail_url: url,
+            },
+        };
+        std::iter::once(cover_item).chain(image_items).collect()
+    } else {
+        image_items
+    };
 
     // Always render — visibility controlled by signal (see gallery_lightbox module docs)
     let is_open: ReadSignal<bool> = show.into();
-
-    let selected: Option<usize> = None;
 
     rsx! {
         GalleryLightbox {
             is_open,
             items: gallery_items,
-            initial_index,
+            initial_index: 0,
             on_close: move |_| show.set(false),
             on_navigate: move |_: usize| {},
-            selected_index: selected,
+            selected_index: None,
             on_select: move |_: usize| {},
         }
     }
