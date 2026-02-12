@@ -11,12 +11,11 @@ use dioxus::prelude::*;
 
 /// Dropdown content showing list of active imports with progress
 #[component]
-pub fn ImportsDropdown() -> Element {
+pub fn ImportsDropdown(dropdown_open: Signal<bool>) -> Element {
     let app = use_app();
     let active_imports_store = app.state.active_imports();
     let imports_store = active_imports_store.imports();
     let imports = imports_store.read();
-    let navigator = use_navigator();
 
     // Convert to display types
     let display_imports: Vec<DisplayActiveImport> = imports
@@ -54,13 +53,26 @@ pub fn ImportsDropdown() -> Element {
             imports: display_imports,
             on_import_click: {
                 let release_ids = release_ids.clone();
+                let app = app.clone();
                 move |import_id: String| {
                     if let Some(Some(rid)) = release_ids.get(&import_id) {
-                        navigator
-                            .push(Route::AlbumDetail {
-                                album_id: rid.clone(),
-                                release_id: String::new(),
-                            });
+                        let rid = rid.clone();
+                        let library_manager = app.library_manager.clone();
+                        let mut dropdown_open = dropdown_open;
+                        spawn(async move {
+                            if let Ok(album_id) = library_manager
+                                .get()
+                                .get_album_id_for_release(&rid)
+                                .await
+                            {
+                                dropdown_open.set(false);
+                                navigator()
+                                    .push(Route::AlbumDetail {
+                                        album_id,
+                                        release_id: rid,
+                                    });
+                            }
+                        });
                     }
                 }
             },
