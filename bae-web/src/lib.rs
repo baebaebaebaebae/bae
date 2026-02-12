@@ -3,7 +3,7 @@ pub mod pages;
 pub mod playback;
 
 use dioxus::prelude::*;
-use pages::{AlbumDetail, AppLayout, Library};
+use pages::{AlbumDetail, AppLayout, Library, ShareView};
 
 pub const FAVICON: Asset = asset!("/assets/favicon.ico");
 pub const MAIN_CSS: Asset = asset!("/assets/main.css");
@@ -15,10 +15,13 @@ pub const FLOATING_UI_DOM: Asset = asset!("/assets/floating-ui.dom.min.js");
 #[rustfmt::skip]
 pub enum Route {
     #[layout(AppLayout)]
-    #[route("/")]
-    Library {},
-    #[route("/album/:album_id")]
-    AlbumDetail { album_id: String },
+        #[route("/")]
+        Library {},
+        #[route("/album/:album_id")]
+        AlbumDetail { album_id: String },
+    // ShareView is outside AppLayout — standalone page with no nav/sidebar/queue
+    #[route("/share/:token")]
+    ShareView { token: String },
 }
 
 #[component]
