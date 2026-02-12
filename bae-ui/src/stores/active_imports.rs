@@ -34,8 +34,6 @@ pub struct ActiveImport {
     pub current_step: Option<PrepareStep>,
     pub progress_percent: Option<u8>,
     pub release_id: Option<String>,
-    /// External cover art URL (ephemeral, shown during import)
-    pub cover_art_url: Option<String>,
 }
 
 /// UI state for active imports (shown in toolbar dropdown)

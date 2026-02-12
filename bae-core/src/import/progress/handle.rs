@@ -206,7 +206,6 @@ mod tests {
             step: PrepareStep::ParsingMetadata,
             album_title: "Test".to_string(),
             artist_name: "Artist".to_string(),
-            cover_art_url: None,
         },),);
     }
     #[test]
@@ -255,7 +254,6 @@ mod tests {
             step: PrepareStep::ParsingMetadata,
             album_title: "Test".to_string(),
             artist_name: "Artist".to_string(),
-            cover_art_url: None,
         },),);
     }
     #[test]
@@ -268,21 +266,18 @@ mod tests {
             step: PrepareStep::ParsingMetadata,
             album_title: "Test".to_string(),
             artist_name: "Artist".to_string(),
-            cover_art_url: None,
         },),);
         assert!(filter.matches(&ImportProgress::Preparing {
             import_id: "import-1".to_string(),
             step: PrepareStep::DownloadingCoverArt,
             album_title: "Test".to_string(),
             artist_name: "Artist".to_string(),
-            cover_art_url: None,
         },),);
         assert!(!filter.matches(&ImportProgress::Preparing {
             import_id: "import-2".to_string(),
             step: PrepareStep::ParsingMetadata,
             album_title: "Test".to_string(),
             artist_name: "Artist".to_string(),
-            cover_art_url: None,
         },),);
     }
     #[test]
@@ -332,14 +327,12 @@ mod tests {
             step: PrepareStep::ParsingMetadata,
             album_title: "Test".to_string(),
             artist_name: "Artist".to_string(),
-            cover_art_url: None,
         },),);
         assert!(filter.matches(&ImportProgress::Preparing {
             import_id: "import-2".to_string(),
             step: PrepareStep::DownloadingCoverArt,
             album_title: "Test".to_string(),
             artist_name: "Artist".to_string(),
-            cover_art_url: None,
         },),);
         assert!(filter.matches(&ImportProgress::Started {
             id: "release-1".to_string(),
@@ -395,7 +388,6 @@ mod tests {
                 step,
                 album_title: "Test".to_string(),
                 artist_name: "Artist".to_string(),
-                cover_art_url: None,
             };
             let filter = SubscriptionFilter::Import {
                 import_id: "test".to_string(),

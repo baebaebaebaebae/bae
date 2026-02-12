@@ -1,6 +1,5 @@
 use crate::db::{DbAlbum, DbAlbumArtist, DbArtist, DbRelease, DbTrack};
 use crate::discogs::DiscogsClient;
-use crate::import::cover_art::fetch_cover_art_for_mb_release;
 use crate::musicbrainz::lookup_release_by_id;
 use crate::retry::retry_with_backoff;
 use tracing::{info, warn};
@@ -19,11 +18,9 @@ pub type ParsedMbAlbum = (
 /// fetches Discogs data to populate both discogs_release and musicbrainz_release fields
 /// in DbAlbum, enabling cross-source duplicate detection.
 ///
-/// cover_art_url: Optional cover art URL that was already fetched during detection phase
 pub async fn fetch_and_parse_mb_release(
     release_id: &str,
     master_year: u32,
-    cover_art_url: Option<String>,
     discogs_client: Option<&DiscogsClient>,
 ) -> Result<ParsedMbAlbum, String> {
     let (mb_release, external_urls, json) =
@@ -52,39 +49,26 @@ pub async fn fetch_and_parse_mb_release(
         }
         _ => None,
     };
-    let cover_art = if cover_art_url.is_none() {
-        fetch_cover_art_for_mb_release(
-            &mb_release,
-            &external_urls,
-            discogs_release.as_ref(),
-            discogs_client,
-        )
-        .await
-    } else {
-        cover_art_url
-    };
-    parse_mb_release_from_json(&json, &mb_release, master_year, discogs_release, cover_art)
+    parse_mb_release_from_json(&json, &mb_release, master_year, discogs_release)
 }
 /// Parse MusicBrainz release JSON into database models
 ///
 /// discogs_release: Optional Discogs release data to populate both fields in DbAlbum
-/// cover_art_url: Cover art URL for immediate display before import completes
 fn parse_mb_release_from_json(
     json: &serde_json::Value,
     mb_release: &crate::musicbrainz::MbRelease,
     master_year: u32,
     discogs_release: Option<crate::discogs::DiscogsRelease>,
-    cover_art_url: Option<String>,
 ) -> Result<ParsedMbAlbum, String> {
     let album = if let Some(ref discogs_rel) = discogs_release {
-        let mut album = DbAlbum::from_mb_release(mb_release, master_year, cover_art_url);
+        let mut album = DbAlbum::from_mb_release(mb_release, master_year);
         album.discogs_release = Some(crate::db::DiscogsMasterRelease {
             master_id: discogs_rel.master_id.clone(),
             release_id: discogs_rel.id.clone(),
         });
         album
     } else {
-        DbAlbum::from_mb_release(mb_release, master_year, cover_art_url)
+        DbAlbum::from_mb_release(mb_release, master_year)
     };
     let db_release = DbRelease::from_mb_release(&album.id, mb_release);
     let mut artists = Vec::new();

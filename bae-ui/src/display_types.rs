@@ -183,7 +183,6 @@ pub struct ActiveImport {
     pub current_step_text: Option<String>,
     pub progress_percent: Option<u8>,
     pub release_id: Option<String>,
-    pub cover_url: Option<String>,
 }
 
 // ============================================================================

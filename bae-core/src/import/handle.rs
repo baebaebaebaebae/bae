@@ -216,16 +216,10 @@ impl ImportServiceHandle {
             return Err("No release provided".to_string());
         };
 
-        let cover_art_url = match &selected_cover {
-            Some(CoverSelection::Remote(url)) => Some(url.clone()),
-            _ => None,
-        };
-
         let emit_preparing = {
             let import_id = import_id.clone();
             let album_title = album_title.clone();
             let artist_name = artist_name.clone();
-            let cover_art_url = cover_art_url.clone();
             let progress_tx = self.progress_tx.clone();
             move |step: PrepareStep| {
                 let _ = progress_tx.send(ImportProgress::Preparing {
@@ -233,7 +227,6 @@ impl ImportServiceHandle {
                     step,
                     album_title: album_title.clone(),
                     artist_name: artist_name.clone(),
-                    cover_art_url: cover_art_url.clone(),
                 });
             }
         };
@@ -241,17 +234,12 @@ impl ImportServiceHandle {
         let (db_album, db_release, db_tracks, artists, album_artists) =
             if let Some(ref discogs_rel) = discogs_release {
                 use crate::import::discogs_parser::parse_discogs_release;
-                parse_discogs_release(discogs_rel, master_year, cover_art_url.clone())?
+                parse_discogs_release(discogs_rel, master_year)?
             } else if let Some(ref mb_rel) = mb_release {
                 use crate::import::musicbrainz_parser::fetch_and_parse_mb_release;
                 let discogs_client = get_discogs_client(&self.key_service);
-                fetch_and_parse_mb_release(
-                    &mb_rel.release_id,
-                    master_year,
-                    cover_art_url.clone(),
-                    discogs_client.as_ref(),
-                )
-                .await?
+                fetch_and_parse_mb_release(&mb_rel.release_id, master_year, discogs_client.as_ref())
+                    .await?
             } else {
                 return Err("No release provided".to_string());
             };
@@ -412,11 +400,6 @@ impl ImportServiceHandle {
         let library_manager = self.library_manager.get();
         let torrent_source_for_request = torrent_source.clone();
 
-        let cover_art_url = match &selected_cover {
-            Some(CoverSelection::Remote(url)) => Some(url.clone()),
-            _ => None,
-        };
-
         info!(
             "Torrent import: {} ({} pieces, {} bytes)",
             torrent_metadata.torrent_name,
@@ -426,17 +409,12 @@ impl ImportServiceHandle {
         let (db_album, db_release, db_tracks, artists, album_artists) =
             if let Some(ref discogs_rel) = discogs_release {
                 use crate::import::discogs_parser::parse_discogs_release;
-                parse_discogs_release(discogs_rel, master_year, cover_art_url.clone())?
+                parse_discogs_release(discogs_rel, master_year)?
             } else if let Some(ref mb_rel) = mb_release {
                 use crate::import::musicbrainz_parser::fetch_and_parse_mb_release;
                 let discogs_client = get_discogs_client(&self.key_service);
-                fetch_and_parse_mb_release(
-                    &mb_rel.release_id,
-                    master_year,
-                    cover_art_url.clone(),
-                    discogs_client.as_ref(),
-                )
-                .await?
+                fetch_and_parse_mb_release(&mb_rel.release_id, master_year, discogs_client.as_ref())
+                    .await?
             } else {
                 return Err("No release provided".to_string());
             };
@@ -522,11 +500,6 @@ impl ImportServiceHandle {
         }
         let library_manager = self.library_manager.get();
 
-        let cover_art_url = match &selected_cover {
-            Some(CoverSelection::Remote(url)) => Some(url.clone()),
-            _ => None,
-        };
-
         use crate::cd::CdDrive;
         let drive = CdDrive {
             device_path: drive_path.clone(),
@@ -537,16 +510,11 @@ impl ImportServiceHandle {
             .map_err(|e| format!("Failed to read CD TOC: {}", e))?;
         let (db_album, db_release, db_tracks, artists, album_artists) =
             if let Some(ref discogs_rel) = discogs_release {
-                parse_discogs_release(discogs_rel, master_year, cover_art_url.clone())?
+                parse_discogs_release(discogs_rel, master_year)?
             } else if let Some(ref mb_rel) = mb_release {
                 let discogs_client = get_discogs_client(&self.key_service);
-                fetch_and_parse_mb_release(
-                    &mb_rel.release_id,
-                    master_year,
-                    cover_art_url.clone(),
-                    discogs_client.as_ref(),
-                )
-                .await?
+                fetch_and_parse_mb_release(&mb_rel.release_id, master_year, discogs_client.as_ref())
+                    .await?
             } else {
                 return Err("No release provided".to_string());
             };

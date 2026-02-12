@@ -114,7 +114,6 @@ fn mock_active_imports() -> Vec<ActiveImport> {
             current_step_text: None,
             progress_percent: Some(65),
             release_id: None,
-            cover_url: Some("/covers/glass-harbor_pacific-standard.png".to_string()),
         },
         ActiveImport {
             import_id: "imp-2".to_string(),
@@ -124,7 +123,6 @@ fn mock_active_imports() -> Vec<ActiveImport> {
             current_step_text: None,
             progress_percent: None,
             release_id: Some("release-3".to_string()),
-            cover_url: Some("/covers/apartment-garden_grow-light.png".to_string()),
         },
         ActiveImport {
             import_id: "imp-3".to_string(),
@@ -134,7 +132,6 @@ fn mock_active_imports() -> Vec<ActiveImport> {
             current_step_text: Some("Parsing metadata...".to_string()),
             progress_percent: None,
             release_id: None,
-            cover_url: None,
         },
     ]
 }

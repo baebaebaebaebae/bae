@@ -32,7 +32,6 @@ fn mock_active_imports() -> Vec<ActiveImport> {
             current_step_text: None,
             progress_percent: Some(67),
             release_id: Some("release-1".to_string()),
-            cover_url: Some("/covers/the-midnight-signal_neon-frequencies.png".to_string()),
         },
         ActiveImport {
             import_id: "import-2".to_string(),
@@ -42,7 +41,6 @@ fn mock_active_imports() -> Vec<ActiveImport> {
             current_step_text: Some("Downloading cover art...".to_string()),
             progress_percent: None,
             release_id: None,
-            cover_url: None,
         },
         ActiveImport {
             import_id: "import-3".to_string(),
@@ -52,7 +50,6 @@ fn mock_active_imports() -> Vec<ActiveImport> {
             current_step_text: None,
             progress_percent: Some(100),
             release_id: Some("release-3".to_string()),
-            cover_url: Some("/covers/velvet-mathematics_proof-by-induction.png".to_string()),
         },
     ]
 }

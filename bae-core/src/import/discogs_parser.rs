@@ -16,15 +16,13 @@ pub type ParsedAlbum = (
 /// generates IDs, and links all entities together.
 ///
 /// master_year is always provided and used for the album year (not the release year).
-/// cover_art_url is for immediate display before import completes.
 ///
 /// Returns: (album, release, tracks, artists, album_artists)
 pub fn parse_discogs_release(
     release: &DiscogsRelease,
     master_year: u32,
-    cover_art_url: Option<String>,
 ) -> Result<ParsedAlbum, String> {
-    let album = DbAlbum::from_discogs_release(release, master_year, cover_art_url);
+    let album = DbAlbum::from_discogs_release(release, master_year);
     let db_release = DbRelease::from_discogs_release(&album.id, release);
     let mut artists = Vec::new();
     let mut album_artists = Vec::new();
