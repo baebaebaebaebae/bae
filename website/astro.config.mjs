@@ -25,6 +25,7 @@ export default defineConfig({
 					label: 'Importing Music',
 					items: [
 						{ label: 'Local Files', slug: 'importing/local-files' },
+						{ label: 'Data Sources', slug: 'importing/data-sources' },
 					],
 				},
 				{
