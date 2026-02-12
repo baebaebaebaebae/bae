@@ -544,6 +544,10 @@ impl AppService {
             .set(config.subsonic_port);
         self.state
             .config()
+            .subsonic_bind_address()
+            .set(config.subsonic_bind_address.clone());
+        self.state
+            .config()
             .torrent_bind_interface()
             .set(config.torrent_bind_interface.clone());
         self.state
@@ -1056,6 +1060,10 @@ impl AppService {
             .config()
             .subsonic_port()
             .set(new_config.subsonic_port);
+        self.state
+            .config()
+            .subsonic_bind_address()
+            .set(new_config.subsonic_bind_address.clone());
         self.state
             .config()
             .torrent_bind_interface()

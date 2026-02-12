@@ -384,6 +384,7 @@ async fn do_restore(
         network_participation: bae_core::sync::participation::ParticipationMode::Off,
         subsonic_enabled: false,
         subsonic_port: 4533,
+        subsonic_bind_address: "127.0.0.1".to_string(),
         sync_s3_bucket: None,
         sync_s3_region: None,
         sync_s3_endpoint: None,

@@ -426,6 +426,7 @@ async fn bootstrap_library(
         network_participation: bae_core::sync::participation::ParticipationMode::Off,
         subsonic_enabled: true,
         subsonic_port: 4533,
+        subsonic_bind_address: "127.0.0.1".to_string(),
         sync_s3_bucket: Some(bucket.to_string()),
         sync_s3_region: Some(region.to_string()),
         sync_s3_endpoint: if endpoint.is_empty() {
