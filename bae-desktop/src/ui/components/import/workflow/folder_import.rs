@@ -3,7 +3,7 @@
 use crate::ui::app_service::use_app;
 use crate::ui::import_helpers::{
     build_caa_client, check_candidates_for_duplicates, check_cover_art, confirm_and_start_import,
-    count_local_audio_files, extract_tracks_from_discogs, extract_tracks_from_mb_json,
+    count_local_audio_files, extract_tracks_from_discogs, extract_tracks_from_mb_response,
     fetch_discogs_release_for_validation, fetch_mb_release_for_validation, lookup_discid,
     search_by_barcode, search_by_catalog_number, search_general, DiscIdLookupResult,
 };
@@ -829,9 +829,9 @@ async fn prefetch_and_validate(
             };
 
             match fetch_mb_release_for_validation(release_id).await {
-                Ok((json, track_count)) => {
+                Ok((response, track_count)) => {
                     if track_count == local_file_count {
-                        let tracks = extract_tracks_from_mb_json(&json);
+                        let tracks = extract_tracks_from_mb_response(&response);
                         PrefetchValidationResult::Valid(tracks)
                     } else {
                         PrefetchValidationResult::TrackCountMismatch {

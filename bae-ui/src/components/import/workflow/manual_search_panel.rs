@@ -90,6 +90,10 @@ pub fn ManualSearchPanelView(
         .unwrap_or_default();
     let selected = tab_state.as_ref().and_then(|t| t.selected_result_index);
     let prefetch_state = tab_state.as_ref().and_then(|t| t.prefetch_state.clone());
+    let confirm_pending = tab_state
+        .as_ref()
+        .map(|t| t.confirm_pending)
+        .unwrap_or(false);
 
     rsx! {
         div { class: "flex-1 flex flex-col p-5 space-y-4",
@@ -290,6 +294,7 @@ pub fn ManualSearchPanelView(
                     candidates,
                     selected_index: selected,
                     prefetch_state,
+                    confirm_pending,
                     on_select: move |index| on_match_select.call(index),
                     on_confirm,
                     on_retry_cover,

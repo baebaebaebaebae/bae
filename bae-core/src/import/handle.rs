@@ -1,13 +1,12 @@
+use super::ParsedAlbum;
 use crate::cue_flac::CueFlacProcessor;
 #[cfg(feature = "torrent")]
 use crate::db::DbTorrent;
 use crate::db::{Database, DbImport, ImportOperationStatus};
 use crate::discogs::{DiscogsClient, DiscogsRelease};
-#[cfg(feature = "cd-rip")]
-use crate::import::discogs_parser::parse_discogs_release;
+use crate::import::discogs_parser;
 use crate::import::folder_scanner::DetectedCandidate;
-#[cfg(feature = "cd-rip")]
-use crate::import::musicbrainz_parser::fetch_and_parse_mb_release;
+use crate::import::musicbrainz_parser;
 use crate::import::progress::ImportProgressHandle;
 use crate::import::track_to_file_mapper::map_tracks_to_files;
 #[cfg(feature = "torrent")]
@@ -231,18 +230,9 @@ impl ImportServiceHandle {
             }
         };
         emit_preparing(PrepareStep::ParsingMetadata);
-        let (db_album, db_release, db_tracks, artists, album_artists) =
-            if let Some(ref discogs_rel) = discogs_release {
-                use crate::import::discogs_parser::parse_discogs_release;
-                parse_discogs_release(discogs_rel, master_year)?
-            } else if let Some(ref mb_rel) = mb_release {
-                use crate::import::musicbrainz_parser::fetch_and_parse_mb_release;
-                let discogs_client = get_discogs_client(&self.key_service);
-                fetch_and_parse_mb_release(&mb_rel.release_id, master_year, discogs_client.as_ref())
-                    .await?
-            } else {
-                return Err("No release provided".to_string());
-            };
+        let (db_album, db_release, db_tracks, artists, album_artists) = self
+            .resolve_metadata(discogs_release.as_ref(), mb_release.as_ref(), master_year)
+            .await?;
 
         // Download remote cover art bytes early (fail fast on network errors)
         let remote_cover_data = if let Some(CoverSelection::Remote(ref url)) = selected_cover {
@@ -406,18 +396,9 @@ impl ImportServiceHandle {
             torrent_metadata.num_pieces,
             torrent_metadata.total_size_bytes
         );
-        let (db_album, db_release, db_tracks, artists, album_artists) =
-            if let Some(ref discogs_rel) = discogs_release {
-                use crate::import::discogs_parser::parse_discogs_release;
-                parse_discogs_release(discogs_rel, master_year)?
-            } else if let Some(ref mb_rel) = mb_release {
-                use crate::import::musicbrainz_parser::fetch_and_parse_mb_release;
-                let discogs_client = get_discogs_client(&self.key_service);
-                fetch_and_parse_mb_release(&mb_rel.release_id, master_year, discogs_client.as_ref())
-                    .await?
-            } else {
-                return Err("No release provided".to_string());
-            };
+        let (db_album, db_release, db_tracks, artists, album_artists) = self
+            .resolve_metadata(discogs_release.as_ref(), mb_release.as_ref(), master_year)
+            .await?;
         let temp_dir = std::env::temp_dir();
         let discovered_files: Vec<DiscoveredFile> = torrent_metadata
             .file_list
@@ -508,16 +489,9 @@ impl ImportServiceHandle {
         let toc = drive
             .read_toc()
             .map_err(|e| format!("Failed to read CD TOC: {}", e))?;
-        let (db_album, db_release, db_tracks, artists, album_artists) =
-            if let Some(ref discogs_rel) = discogs_release {
-                parse_discogs_release(discogs_rel, master_year)?
-            } else if let Some(ref mb_rel) = mb_release {
-                let discogs_client = get_discogs_client(&self.key_service);
-                fetch_and_parse_mb_release(&mb_rel.release_id, master_year, discogs_client.as_ref())
-                    .await?
-            } else {
-                return Err("No release provided".to_string());
-            };
+        let (db_album, db_release, db_tracks, artists, album_artists) = self
+            .resolve_metadata(discogs_release.as_ref(), mb_release.as_ref(), master_year)
+            .await?;
         let artist_id_map = find_or_create_artists(library_manager, &artists).await?;
         library_manager
             .insert_album_with_release_and_tracks(&db_album, &db_release, &db_tracks)
@@ -556,6 +530,33 @@ impl ImportServiceHandle {
             .map_err(|_| "Failed to queue validated CD import".to_string())?;
         Ok((album_id, release_id))
     }
+    /// Resolve metadata from either a Discogs release or a MusicBrainz release.
+    ///
+    /// Shared by all import paths (folder, torrent, CD). If a Discogs release is
+    /// provided, parses it directly. If an MB release is provided, fetches the full
+    /// release from the API, optionally cross-references Discogs, then parses into
+    /// DB models.
+    async fn resolve_metadata(
+        &self,
+        discogs_release: Option<&DiscogsRelease>,
+        mb_release: Option<&MbRelease>,
+        master_year: u32,
+    ) -> Result<ParsedAlbum, String> {
+        if let Some(discogs_rel) = discogs_release {
+            discogs_parser::parse_discogs_release(discogs_rel, master_year)
+        } else if let Some(mb_rel) = mb_release {
+            let discogs_client = get_discogs_client(&self.key_service);
+            musicbrainz_parser::fetch_and_parse_mb_release(
+                &mb_rel.release_id,
+                master_year,
+                discogs_client.as_ref(),
+            )
+            .await
+        } else {
+            Err("No release provided".to_string())
+        }
+    }
+
     /// Subscribe to progress updates for a specific release
     /// Returns a filtered receiver that yields only updates for the specified release
     pub fn subscribe_release(

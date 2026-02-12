@@ -11,6 +11,7 @@ pub fn MatchResultsPanel(
     candidates: Vec<MatchCandidate>,
     selected_index: Option<usize>,
     prefetch_state: Option<PrefetchState>,
+    confirm_pending: bool,
     on_select: EventHandler<usize>,
     on_confirm: EventHandler<MatchCandidate>,
     on_retry_cover: EventHandler<usize>,
@@ -30,6 +31,7 @@ pub fn MatchResultsPanel(
                         candidate: candidate.clone(),
                         is_selected: selected_index == Some(index),
                         prefetch_state: if selected_index == Some(index) { prefetch_state.clone() } else { None },
+                        confirm_pending: if selected_index == Some(index) { confirm_pending } else { false },
                         on_select: move |_| on_select.call(index),
                         on_confirm: {
                             let candidate = candidate.clone();

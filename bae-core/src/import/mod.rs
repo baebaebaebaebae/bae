@@ -11,6 +11,18 @@ mod progress;
 mod service;
 mod track_to_file_mapper;
 mod types;
+
+use crate::db::{DbAlbum, DbAlbumArtist, DbArtist, DbRelease, DbTrack};
+
+/// Result of parsing a release (MusicBrainz or Discogs) into database entities
+pub type ParsedAlbum = (
+    DbAlbum,
+    DbRelease,
+    Vec<DbTrack>,
+    Vec<DbArtist>,
+    Vec<DbAlbumArtist>,
+);
+
 pub use discogs_matcher::{rank_discogs_matches, rank_mb_matches, MatchCandidate, MatchSource};
 pub use folder_metadata_detector::{detect_folder_contents, detect_metadata, FolderMetadata};
 pub use folder_scanner::{scan_for_candidates_with_callback, CategorizedFiles, DetectedCandidate};
