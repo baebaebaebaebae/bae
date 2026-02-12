@@ -797,7 +797,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_rate_limiter_enforces_spacing() {
         // First call should return immediately
         let start = Instant::now();
