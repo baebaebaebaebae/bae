@@ -246,11 +246,16 @@ fn TransferActionsSection(
 
     rsx! {
         div { class: "space-y-3",
-            div { class: "text-sm font-medium text-gray-300",
+            div {
+                div { class: "text-sm font-medium text-gray-300",
+                    if is_self_managed {
+                        "Copy to storage"
+                    } else {
+                        "Transfer"
+                    }
+                }
                 if is_self_managed {
-                    "Move to storage"
-                } else {
-                    "Transfer"
+                    div { class: "text-xs text-gray-500 mt-1", "Original files will not be modified" }
                 }
             }
 
