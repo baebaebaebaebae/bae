@@ -10,25 +10,23 @@ bae starts local, scales to cloud, then to collaboration and a decentralized net
 - Files stored locally, plain SQLite DB, no encryption, no key
 - Library lives at `~/.bae/`
 
-### Tier 2: Cloud (two decisions)
+### Tier 2: Cloud (one decision)
 
-Two independent capabilities -- they can be enabled separately or together:
+Sign in with a cloud provider (Google Drive, Dropbox, OneDrive, pCloud) or configure an S3-compatible bucket. This creates your **cloud home** -- a single cloud location that holds everything: changesets, snapshots, images, and your release files. There is exactly one cloud home per library.
 
-**Sync (multi-device):** User configures a sync bucket (S3 credentials + bucket). bae generates an encryption key and stores it in the OS keyring. The sync bucket gets changesets, snapshots, and images -- everything needed for another device to join.
+Consumer clouds are the primary path -- OAuth sign-in, zero configuration, everyone already has an account. S3-compatible providers (Backblaze B2, Cloudflare R2, AWS, MinIO, Wasabi, etc.) are for more technical users who want full control or self-hosting.
 
-**Cloud file storage:** User creates a cloud storage profile (S3 credentials + bucket). Release files can be transferred there. This is separate from sync -- it's just a place to put files. The sync bucket itself can also serve as file storage (simplest setup: one bucket for everything).
+Your cloud home is your default cloud storage. When you import music, files go there. When another device joins, it pulls everything from there. One location, one sign-in.
 
+- bae generates an encryption key and stores it in the OS keyring
 - On macOS, iCloud Keychain syncs the encryption key to other devices automatically
-- Files encrypt on upload, images encrypt in the sync bucket, DB snapshots encrypted for bootstrap
-- The only decisions were "I want sync" and/or "I want cloud storage." Encryption followed automatically.
+- Files encrypt on upload, images encrypt in the cloud home, DB snapshots encrypted for bootstrap
 - The user never typed an encryption key. They might not even know they have one.
 
-### Tier 3: Power user
+### Tier 3: More technical users
 
-- Multiple file storage profiles (different buckets, local + cloud mix)
-  - e.g., fast S3 bucket for music you listen to often, cheap archival storage (S3 Glacier, Backblaze B2) for stuff you rarely access
 - Export/import encryption key manually
-- Run bae-server pointing at the sync bucket
+- Run bae-server pointing at the cloud home
 - Key fingerprint visible in settings for verification
 
 ## What a Library Is
@@ -42,47 +40,135 @@ Desktop manages all libraries under `~/.bae/libraries/`. Each library is a direc
     {uuid}/                    # one directory per library
 ```
 
-On first launch, bae creates the library home. The library home has a `storage_profiles` row in the DB (for file storage -- it holds release files like any other profile).
+On first launch, bae creates the library home.
 
-**`config.yaml`** -- device-specific settings (torrent ports, subsonic config, keyring hint flags, sync bucket configuration, device_id). Not synced. Only at the library home.
+**`config.yaml`** -- device-specific settings (torrent ports, subsonic config, keyring hint flags, cloud home configuration, device_id). Not synced. Only at the library home.
 
 | Data | Tier 1 (local) | Tier 2+ (cloud) |
 |------|----------------|-----------------|
-| library.db | Plain SQLite | Plain locally, encrypted snapshot in sync bucket |
-| Cover art | Plaintext | Encrypted in sync bucket |
-| Release files | On their profile | Encrypted on cloud profiles |
+| library.db | Plain SQLite | Plain locally, encrypted snapshot in cloud home |
+| Cover art | Plaintext | Encrypted in cloud home |
+| Release files | Local in library home | Encrypted in cloud home |
 | Encryption key | N/A | OS keyring (iCloud Keychain) |
 | config.yaml | Local | Local (device-specific, not synced) |
 
-Each library owns its buckets and directories exclusively -- no sharing between libraries.
-
 ## Encryption
 
-One key per library. The key belongs to the library, not to individual storage profiles or the sync bucket. Everything that goes to cloud gets encrypted with it.
+One key per library. Everything that goes to cloud gets encrypted with it.
 
 **Key fingerprint:** SHA-256 of the key, truncated. Stored in `config.yaml`. Lets us detect the wrong key immediately instead of silently producing garbage.
 
 You shouldn't have to think about encryption, keys, or cloud storage until the moment you want cloud. And when you do, encryption just happens -- it's not a feature you configure, it's a consequence of going cloud.
 
+## The CloudHome Trait
+
+The `CloudHome` trait is the core abstraction that makes bae backend-agnostic. Everything above this trait is universal — the sync protocol, encryption, membership chain, cloud home layout, join flow. Everything below it adapts to the specific cloud provider.
+
+### What's universal (above the trait)
+
+- **Cloud home layout**: `changes/`, `heads/`, `snapshot.db.enc`, `images/`, `storage/` — same logical paths regardless of backend
+- **Encryption**: one master key per library, everything encrypted before it leaves the device
+- **Sync protocol**: changesets, snapshots, conflict resolution via LWW — same algorithm everywhere
+- **Membership chain**: append-only log with Ed25519 signatures, encryption key wrapped to each member's pubkey
+- **Join flow**: two-step code exchange (pubkey then invite code) — same ceremony regardless of backend
+
+### What varies (below the trait)
+
+- **Storage API**: how files are actually read/written (S3 API vs Google Drive API vs Dropbox API)
+- **Access management**: how a joiner gets storage access (folder sharing vs credential minting vs manual)
+- **Authentication**: how the joiner authenticates (their own cloud account vs embedded credentials)
+- **Change notifications**: consumer clouds have push notifications, S3 requires polling
+
+### The trait
+
+```rust
+trait CloudHome {
+    // storage — same interface, different API underneath
+    fn write(path, data) -> Result
+    fn read(path) -> Result<Bytes>
+    fn read_range(path, start, end) -> Result<Bytes>
+    fn list(prefix) -> Result<Vec<String>>
+    fn delete(path) -> Result
+    fn exists(path) -> Result<bool>
+
+    // access management — varies by backend
+    fn grant_access(member_email_or_id) -> Result<JoinInfo>
+    fn revoke_access(member_email_or_id) -> Result
+}
+```
+
+Implementations: S3 (via aws-sdk-s3), Google Drive, Dropbox, OneDrive, pCloud (via their REST APIs).
+
+### Storage operations
+
+Every cloud storage service supports basic file operations — the trait normalizes them into one interface:
+
+| Operation | S3 | Google Drive | Dropbox |
+|---|---|---|---|
+| Write | `PutObject` | `files.create` | `files/upload` |
+| Read | `GetObject` | `files.get` (media) | `files/download` |
+| Read byte range | `Range` header | `Range` header | `Range` header |
+| List by prefix | `ListObjectsV2(prefix=)` | `files.list(q=)` on folder | `files/list_folder` |
+| Delete | `DeleteObject` | `files.delete` | `files/delete` |
+| Exists | `HeadObject` | `files.get(fields=id)` | `files/get_metadata` |
+
+Cloud home paths like `changes/{device_id}/{seq}.enc` map to flat object keys on S3 and folder hierarchy on consumer clouds. Same logical paths, different native representations. Callers (sync engine, image uploader, file storage) don't know or care which backend they're talking to.
+
+### Access management
+
+How `grant_access` and `revoke_access` work depends on the backend:
+
+| | Consumer cloud | S3 with minting | S3 without minting |
+|---|---|---|---|
+| **Grant access** | Share folder via provider API (Google Drive `permissions.create`, Dropbox `sharing/add_folder_member`, etc.) | Mint scoped IAM credentials via provider API | Owner creates credentials manually in provider console |
+| **Revoke access** | Unshare folder via provider API | Delete minted credentials | Rotate shared credentials (all-or-nothing) |
+| **Joiner authenticates with** | Their own cloud account (OAuth) | Credentials embedded in invite code | Credentials embedded in invite code |
+| **Per-user scoping** | Yes (provider-native) | Yes (per-user IAM) | No (shared credentials) |
+
+`JoinInfo` is what the joiner needs beyond the encryption key (which is always wrapped to their pubkey via the membership chain):
+- **Consumer cloud**: provider type + folder ID. The joiner signs into their own account; the shared folder is already accessible.
+- **S3**: bucket + region + endpoint + credentials.
+
+### The join flow
+
+The same two-step code exchange regardless of backend:
+
+```
+1. Joiner shares their public key with the owner
+2. Owner's bae:
+   a. Calls grant_access (shares folder or mints credentials)
+   b. Wraps the encryption key to the joiner's pubkey (membership chain)
+   c. Bundles JoinInfo + wrapped key into an invite code
+3. Joiner pastes the invite code
+   a. Consumer cloud: signs into their own account, bae opens the shared folder
+   b. S3: bae uses the embedded credentials
+   c. Both: unwraps the encryption key, pulls snapshot, syncs
+```
+
+The membership chain is the same everywhere -- it's how the encryption key is shared securely (never in the clear). What adapts is the storage access layer.
+
+### Change notifications
+
+Consumer clouds support push-based change notifications (Google Drive `changes.watch`, Dropbox longpoll, OneDrive delta API) which enable faster sync than S3's polling model. The `CloudHome` trait can optionally support a `watch` method for backends that have it.
+
+
 ## Sync
 
 The design has four layers, each building on the previous:
 
-1. **Changeset sync** -- incremental sync via SQLite session extension changesets pushed to a shared sync bucket
+1. **Changeset sync** -- incremental sync via SQLite session extension changesets pushed to a shared cloud home
 2. **Shared libraries** -- multiple users writing to the same library with signed changesets and a membership chain
-3. **Cross-library sharing** -- share individual releases between libraries using derived encryption keys
-4. **Public discovery** -- a decentralized MBID-to-content mapping via the BitTorrent DHT
 
-Each layer is independently useful. A solo user benefits from layer 1. Friends sharing a library use layers 1-2. Sharing a single album uses layer 3. The public network is layer 4.
+Each layer is independently useful. A solo user benefits from layer 1. Friends sharing a library use layers 1-2.
 
 ### Changeset sync (layer 1)
 
-Use the SQLite session extension to capture exactly what changed, push the binary changeset to the sync bucket, pull and apply on other devices with a conflict handler. No coordination server. The sync bucket is a library-level concept -- one S3 bucket per library, configured in `config.yaml`, separate from storage profiles (which just hold release files).
+Use the SQLite session extension to capture exactly what changed, push the binary changeset to the cloud home, pull and apply on other devices with a conflict handler. No coordination server. The cloud home is a library-level concept -- one bucket/folder per library, configured in `config.yaml`. The cloud home can be an S3 bucket or a folder on a consumer cloud (Google Drive, Dropbox, etc.).
 
 Each device writes to its own keyspace on the shared bucket. No write contention by construction:
 
 ```
-s3://sync-bucket/
+cloud-home/
   snapshot.db.enc                  # full DB for bootstrapping new devices
   changes/{device_id}/{seq}.enc    # changeset blobs per device
   heads/{device_id}.json.enc       # "my latest seq is 42"
@@ -164,7 +250,7 @@ For a music library this is fine -- conflicts are rare and low-stakes. Worst cas
 
 - After `LibraryEvent::AlbumsChanged` (import, delete) with debounce
 - Manual "Sync Now" button in settings
-- If the sync bucket is unreachable, sync is skipped and retried next time
+- If the cloud home is unreachable, sync is skipped and retried next time
 
 #### Database architecture
 
@@ -176,9 +262,9 @@ The SQLite session extension identifies columns by index, not by name. This cons
 
 **Additive changes are transparent.** Adding columns at the end of a table or adding new tables requires no coordination. Old changesets applied to a new schema just have fewer columns (extras keep defaults). New changesets applied to an old schema skip unknown columns. Devices on different schema versions interoperate seamlessly.
 
-**Breaking changes require coordination.** Deleting, reordering, or renaming columns shifts column indices and corrupts changeset application. These changes bump a `min_schema_version` marker in the sync bucket, splitting the changeset history into **epochs**. Within an epoch, all changesets are schema-compatible. Across epochs, no replay -- devices pull a fresh snapshot to jump forward. This means any schema change is possible (the snapshot IS the migrated state), but all devices must upgrade before syncing resumes.
+**Breaking changes require coordination.** Deleting, reordering, or renaming columns shifts column indices and corrupts changeset application. These changes bump a `min_schema_version` marker in the cloud home, splitting the changeset history into **epochs**. Within an epoch, all changesets are schema-compatible. Across epochs, no replay -- devices pull a fresh snapshot to jump forward. This means any schema change is possible (the snapshot IS the migrated state), but all devices must upgrade before syncing resumes.
 
-Every changeset envelope carries a `schema_version` integer so receivers know what schema produced it. In practice, schema changes for a music library are almost always additive (new fields), making breaking migrations rare. See `plans/sync-and-network/roadmap.md` for the full protocol.
+Every changeset envelope carries a `schema_version` integer so receivers know what schema produced it. In practice, schema changes for a music library are almost always additive (new fields), making breaking migrations rare.
 
 #### Snapshots
 
@@ -192,7 +278,7 @@ New devices start from the snapshot, then replay only changesets after it. Old c
 
 #### What this replaces
 
-The `MetadataReplicator` -- which pushed a full `VACUUM INTO` snapshot plus all images to every non-home profile on every mutation -- is eliminated entirely. It is not reduced to local-only; it is removed. Sync goes through the single sync bucket. Storage profiles (including external drives) hold release files only -- no DB, no images, no manifest.
+The `MetadataReplicator` -- which pushed a full `VACUUM INTO` snapshot plus all images to every non-home profile on every mutation -- is eliminated entirely. It is not reduced to local-only; it is removed. Sync goes through the single cloud home. Storage profiles (including external drives) hold release files only -- no DB, no images, no manifest.
 
 ### Shared libraries (layer 2)
 
@@ -205,7 +291,7 @@ Each user generates a keypair locally (Ed25519 for signing, X25519 for encryptio
 #### Bucket layout with users
 
 ```
-s3://sync-bucket/
+cloud-home/
   membership/{pubkey}/{seq}.enc     # signed membership entries (per author, avoids S3 overwrite races)
   keys/{user_pubkey}.enc            # library key wrapped to each member's public key
   heads/{device_id}.json.enc        # per-device head pointer (unchanged from layer 1)
@@ -260,56 +346,7 @@ Owner writes a Remove membership entry, generates a new encryption key, re-wraps
 
 Every changeset envelope carries `author_pubkey`. "Alice added this release," "Bob changed the cover." Free audit trail.
 
-### Cross-library sharing (layer 3)
-
-Libraries are islands. If Alice wants to share one album with Bob (who isn't in her library), she'd have to give him the entire library encryption key. All or nothing.
-
-#### Derived keys
-
-Replace the flat encryption model with a key hierarchy:
-
-```
-master_key (per library, in keyring)
-  -> derive(master_key, release_id) -> release_key
-      -> encrypts that release's files
-```
-
-HKDF-SHA256 with the release ID as context. Each release effectively has its own key, derived from the master. Library members have the master key and can derive any release key. A single release key can be shared without exposing the master.
-
-#### Sharing a release
-
-```
-Alice wants to share "Kind of Blue" with Bob (not in her library):
-
-  1. Alice derives: release_key = derive(master_key, "rel-123")
-  2. Alice wraps release_key + optional S3 creds to Bob's public key
-  3. Alice signs a share grant
-  4. Sends the grant to Bob (any channel)
-
-Bob's client:
-  1. Unwraps the release key and creds with his private key
-  2. Fetches the release's files from Alice's bucket
-  3. Decrypts with the release key
-  4. Plays
-```
-
-No server in the loop. Bob reads directly from Alice's S3 bucket with just enough key material for one release.
-
-#### Aggregated view
-
-A user's client aggregates all their access into one view:
-
-```
-You (keypair)
-  -- your library (master key -> full access)
-  -- friend's library (master key -> full member)
-  -- share from Alice (release key -> one album)
-  -- public catalog follows (metadata only, no keys)
-```
-
-Your music, shared libraries, individual grants -- resolved at play time from different buckets.
-
-### Discovery network (layer 4)
+### Discovery network
 
 Every bae user who imports a release and matches it to a MusicBrainz ID creates a mapping:
 
@@ -387,19 +424,15 @@ The attestation model doesn't need proof of work or consensus:
 
 Off by default. Enable in settings. Per-release opt-out. Attestation-only mode or full participation (attestations + seeding).
 
-## Storage Profiles
-
-How release files are stored and managed across local and cloud locations. See `02-storage-profiles.md` for the full design.
-
 ## bae-server
 
 `bae-server` -- a headless, read-only Subsonic API server.
 
-- Given sync bucket URL + encryption key: downloads `snapshot.db.enc`, applies changesets, caches DB + images locally
-- Streams audio from whatever storage location files are on, decrypting on the fly
+- Given cloud home URL + encryption key: downloads `snapshot.db.enc`, applies changesets, caches DB + images locally
+- Streams audio from the cloud home, decrypting on the fly
 - Optional `--web-dir` serves the bae-web frontend alongside the API
-- `--recovery-key` for encrypted libraries, `--refresh` to re-pull from sync bucket
-- Stateless -- no writes, no migrations, ephemeral cache rebuilt from the sync bucket
+- `--recovery-key` for encrypted libraries, `--refresh` to re-pull from cloud home
+- Stateless -- no writes, no migrations, ephemeral cache rebuilt from the cloud home
 
 ## First-Run Flows
 
@@ -407,77 +440,70 @@ How release files are stored and managed across local and cloud locations. See `
 
 On first run (no `~/.bae/active-library`), desktop shows a welcome screen. User picks "Create new library":
 
-1. Generate a library UUID (e.g., `lib-111`) and a profile UUID (e.g., `prof-aaa`)
+1. Generate a library UUID (e.g., `lib-111`)
 2. Create `~/.bae/libraries/lib-111/`
-3. Create empty `library.db`, insert `storage_profiles` row:
-   | profile_id | location | location_path |
-   |---|---|---|
-   | `prof-aaa` | local | `~/.bae/libraries/lib-111/` |
+3. Create empty `library.db`
 4. Write `config.yaml`, write `~/.bae/active-library` -> `lib-111`
 5. Re-exec binary -- desktop launches normally
 
-The library home is now a storage profile. `storage/` is empty -- user imports their first album, files go into `storage/ab/cd/{file_id}`.
+`storage/` is empty -- user imports their first album, files go into `storage/ab/cd/{file_id}`.
 
-### Restore from sync bucket
+### Restore from cloud home
 
-User picks "Restore from sync bucket" and provides an S3 bucket + creds + encryption key:
+User picks "Restore from cloud home" and provides cloud home credentials + encryption key:
 
-1. Download + decrypt `snapshot.db.enc` from the bucket (validates the key -- if decryption fails, wrong key)
-2. Generate a new profile UUID (`prof-ccc`), create `~/.bae/libraries/{library_id}/`
-3. Insert a new `storage_profiles` row:
-   | profile_id | location | location_path |
-   |---|---|---|
-   | `prof-ccc` | local | `~/.bae/libraries/{library_id}/` |
-4. Write `config.yaml` (with sync bucket config), keyring entries, `~/.bae/active-library` -> `{library_id}`
-5. Download images from the bucket
-6. Pull and apply any changesets newer than the snapshot
-7. Re-exec binary
+1. Download + decrypt `snapshot.db.enc` (validates the key -- if decryption fails, wrong key)
+2. Create `~/.bae/libraries/{library_id}/`
+3. Write `config.yaml` (with cloud home config), keyring entries, `~/.bae/active-library` -> `{library_id}`
+4. Download images from the cloud home
+5. Pull and apply any changesets newer than the snapshot
+6. Re-exec binary
 
-The new library home is `prof-ccc`. Its `storage/` is empty -- release files still live on their original storage profiles. The user can stream from cloud profiles or transfer releases to `prof-ccc`.
+Local `storage/` is empty -- release files stream from the cloud home. The user can optionally download files locally for offline playback.
 
 ### Going from local to cloud
 
-Sync and file storage are independent. Either can be enabled first.
+1. User signs in with a cloud provider (OAuth) or enters S3 credentials
+2. bae creates the cloud home folder/bucket (or uses an existing one)
+3. bae generates encryption key if one doesn't exist, stores in keyring
+4. bae pushes a full snapshot + all images + release files to the cloud home
+5. Subsequent mutations push incremental changesets
+6. Another device can now join from the cloud home
 
-**Enabling sync:**
-1. User provides S3 credentials for a sync bucket (bucket must be empty)
-2. bae generates encryption key if one doesn't exist, stores in keyring
-3. bae pushes a full snapshot + all images to the sync bucket
-4. Subsequent mutations push incremental changesets
-5. Another device can now join from the sync bucket
-
-**Adding cloud file storage:**
-1. User creates a cloud storage profile (provides S3 credentials, bucket must be empty)
-2. Release files can be transferred to the cloud profile
-3. No metadata is replicated to the storage profile -- it just holds files
-
-**Simplest setup: one bucket for everything.** The sync bucket can also serve as a file storage location. Release files go under `storage/` in the same bucket alongside the sync data. One bucket, one set of credentials. For many users, this is all they need.
-
-**Separate buckets.** Power users can have the sync bucket on fast storage and file storage on cheap archival buckets. Or file storage on an external drive. The sync bucket only holds changesets, snapshots, and images -- it stays small.
+One sign-in, one location. Everything lives in the cloud home.
 
 ## How the Layers Compose
 
 **Solo user, local only** (today):
-- Layer 1 replaces full-snapshot sync with incremental changesets to the sync bucket
+- Layer 1 replaces full-snapshot sync with incremental changesets to the cloud home
 - Faster, uses less bandwidth
 
 **Solo user, multiple devices**:
-- Layer 1 syncs between devices via the shared sync bucket
+- Layer 1 syncs between devices via the shared cloud home
 - Same user, different device IDs, merge via LWW
 
 **Friends sharing a library**:
 - Layers 1 + 2: multiple users, signed changesets, membership chain
 - Everyone has the master key, full read/write access
 
-**Sharing one album with someone**:
-- Layer 3: derived key for that release, wrapped to recipient's public key
-- No library membership needed, no server needed
+Each layer is opt-in. A user who never wants collaboration still benefits from incremental sync.
 
-**Public music discovery**:
-- Layer 4: MBID-to-infohash mapping via DHT
-- Participate by announcing your releases, benefit by discovering metadata
+## Constraints
 
-Each layer is opt-in. A user who never wants collaboration still benefits from incremental sync. A user who never wants public participation still benefits from shared libraries and private sharing.
+### Access control varies by backend
+
+See the CloudHome trait's access management table above. The three tiers (consumer cloud, S3 with minting, S3 without minting) have different capabilities for per-user scoping and revocation, but the join flow and membership chain work the same across all of them.
+
+**Bandwidth/request limits are the provider's problem.** bae can't enforce quotas regardless of backend.
+
+### No coordination server
+
+bae has no central server. All sync, membership, and sharing happens through the storage backend and peer-to-peer exchanges (code pasting, link sharing). This means:
+
+- **No push notifications for S3.** Devices poll on a timer. Consumer clouds support change notifications (Google Drive changes.watch, Dropbox longpoll) which are faster.
+- **No NAT traversal service.** Peer-to-peer connections (layer 4) depend on DHT and UPnP.
+- **No account recovery.** Lose your keypair and encryption key, lose access. iCloud Keychain helps but isn't guaranteed.
+- **No global directory.** You can't "search for a user" -- you need their public key or a follow/invite code exchanged out-of-band.
 
 ## What's Not Built Yet
 
@@ -487,6 +513,6 @@ Each layer is opt-in. A user who never wants collaboration still benefits from i
 
 ## Open Questions
 
-- Managed storage (we host S3) or always BYO-bucket?
 - Second-device setup when iCloud Keychain is off -- QR code? Paste key?
 - Key rotation -- probably YAGNI for now
+- bae Cloud managed offering -- storage + always-on bae-server + `yourname.bae.fm` subdomain

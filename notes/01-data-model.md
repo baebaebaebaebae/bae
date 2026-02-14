@@ -4,25 +4,21 @@
 
 A **library** is the logical entity -- a music collection. It has an identity (`library_id`), a name, and an encryption key. It lives primarily at the **library home** (`~/.bae/libraries/{uuid}/`), where desktop writes the authoritative DB.
 
-A library can optionally have a **sync bucket** -- a single S3 bucket that serves as the collaborative hub for multi-device sync. The sync bucket holds changesets, snapshots, images, and optionally release files. It is configured in `config.yaml`, not in the `storage_profiles` table.
+A library can optionally have a **cloud home** -- a single cloud location (Google Drive folder, S3 bucket, etc.) that serves as the collaborative hub for multi-device sync. The cloud home holds changesets, snapshots, images, and release files. There is exactly one cloud home per library. It is configured in `config.yaml`.
 
-**Storage profiles** are places where release files sit. They have no metadata replica, no DB copy, no manifest -- just encrypted files in an opaque layout. Types:
+Release files live in one of two places:
 
-- **Library home** (`~/.bae/libraries/{uuid}/storage/`) -- always exists, doubles as a storage profile
-- **Sync bucket** -- files can live alongside sync data under `storage/ab/cd/{file_id}`
-- **Separate cloud bucket** -- archival storage (cheap S3, Backblaze B2). Just encrypted files.
-- **External drive** -- a local directory with `storage/` files
-- **Unmanaged** -- files stay wherever the user has them on disk
+- **Library home** (`~/.bae/libraries/{uuid}/storage/`) -- local files, always exists
+- **Cloud home** (`cloud-home/storage/`) -- encrypted, uploaded when cloud is configured
+- **Unmanaged** -- files stay wherever the user has them on disk, bae just indexes them
 
 ```
 Library "My Music" (lib-111)
-  ├── home: ~/.bae/libraries/lib-111/          <- desktop writes here
-  ├── sync: s3://my-music-sync/               <- changeset sync + images + optional file storage
-  ├── prof-bbb: s3://my-music-archive/         <- archival file storage only
-  └── prof-ccc: /Volumes/ExternalSSD/          <- local file storage only
+  ├── local home: ~/.bae/libraries/lib-111/    <- desktop writes here
+  └── cloud home: Google Drive / S3 bucket     <- sync + images + release files
 ```
 
-Release files are separate from metadata. Each release's files live on one storage profile (or are unmanaged). Not every profile has every release's files.
+Release files are separate from metadata. A file is either local, in the cloud home, or unmanaged.
 
 ## Directory layout
 
@@ -37,7 +33,7 @@ Used by desktop -- this is what opens when you launch the app. Contains all loca
     {uuid}/                    # one directory per library
 ```
 
-bae-server doesn't use `~/.bae/` -- it syncs from the sync bucket.
+bae-server doesn't use `~/.bae/` -- it syncs from the cloud home.
 
 ### Library home
 
@@ -52,7 +48,7 @@ The library home is where desktop runs. It holds the authoritative DB, device-sp
   pending_deletions.json       # deferred file deletion manifest
 ```
 
-**`config.yaml`** -- device-specific settings. Not synced, only at the library home. Contains keyring hint flags (`discogs_key_stored`, `encryption_key_stored`), torrent settings, subsonic settings, sync bucket configuration, and device_id. Non-secret only -- credentials go in the keyring.
+**`config.yaml`** -- device-specific settings. Not synced, only at the library home. Contains keyring hint flags (`discogs_key_stored`, `encryption_key_stored`), torrent settings, subsonic settings, cloud home configuration, and device_id. Non-secret only -- credentials go in the keyring.
 
 ### Keyring (OS keyring, namespaced by library_id)
 
@@ -62,41 +58,26 @@ Managed by `KeyService`. On macOS, uses the protected data store with iCloud Key
 - `discogs_api_key`
 - `s3_access_key:{profile_id}` -- per-profile S3 access key (cloud profiles only)
 - `s3_secret_key:{profile_id}` -- per-profile S3 secret key (cloud profiles only)
-- `sync_s3_access_key` -- S3 access key for the sync bucket
-- `sync_s3_secret_key` -- S3 secret key for the sync bucket
+- `cloud_home_access_key` -- access key for the cloud home (S3 providers)
+- `cloud_home_secret_key` -- secret key for the cloud home (S3 providers)
+- `cloud_home_oauth_token` -- OAuth refresh token for the cloud home (consumer cloud providers)
 
-### Sync bucket layout
+### Cloud home layout
 
-The sync bucket is one S3 bucket per library. It contains everything needed for multi-device sync, new-device bootstrap, and optionally release files.
+The cloud home is one location per library (a Google Drive folder, S3 bucket, Dropbox folder, etc.). It contains everything needed for multi-device sync, new-device bootstrap, and release files.
 
 ```
-s3://sync-bucket/
+cloud-home/
   snapshot.db.enc                    # full DB for bootstrapping new devices
   changes/{device_id}/{seq}.enc      # binary changesets with metadata envelope
   heads/{device_id}.json.enc         # per-device sequence numbers for cheap polling
   images/ab/cd/{id}                  # all library images (encrypted)
-  storage/ab/cd/{file_id}            # release files (optional -- files can also live elsewhere)
+  storage/ab/cd/{file_id}            # release files (default storage location)
 ```
 
-Images in the sync bucket are encrypted. Release files use chunked encryption as with any cloud storage.
+Images in the cloud home are encrypted. Release files use chunked encryption.
 
-### Storage profile layout
-
-Storage profiles just hold release files. No DB, no images, no manifest. Each profile owns its directory or bucket exclusively -- no sharing between libraries.
-
-**Local profile (external drive):**
-```
-{location_path}/
-  storage/ab/cd/{file_id}
-```
-
-**Cloud profile (separate bucket):**
-```
-s3://{bucket}/
-  storage/ab/cd/{file_id}
-```
-
-Release files live under `storage/` in an opaque hash-based layout. `prefix` = first 2 chars of the file ID, `subprefix` = next 2 chars. No filenames, no extensions -- original filenames and content types live in the DB. The path is deterministic from the file ID alone: `storage/{prefix}/{subprefix}/{file_id}`.
+Release files live under `storage/` in an opaque hash-based layout. `prefix` = first 2 chars of the file ID, `subprefix` = next 2 chars. No filenames, no extensions -- original filenames and content types live in the DB. The path is deterministic from the file ID alone: `storage/{prefix}/{subprefix}/{file_id}`. Same layout in both the library home and cloud home.
 
 ## Two classes of files
 
@@ -106,16 +87,16 @@ bae manages two fundamentally different kinds of files:
 
 All files that came with a release -- audio tracks, cover scans, booklet pages, CUE sheets, logs. These are the user's data. bae stores them exactly as imported so they can be ejected intact or seeded as torrents.
 
-Where they live depends on the storage profile:
+Where they live:
+- **Library home**: bae copies files to `storage/ab/cd/{file_id}`. The originals are untouched.
+- **Cloud home**: bae encrypts and uploads to `cloud-home/storage/ab/cd/{file_id}`.
 - **Unmanaged**: files stay where the user has them on disk. bae indexes but doesn't touch.
-- **Local storage profile**: bae copies files to the profile's local directory.
-- **Cloud storage profile**: bae encrypts and uploads to S3.
 
-All release files for a given release are stored together. The `release_files` table tracks each one with `source_path` pointing to the actual location (local path or S3 key).
+The `release_files` table tracks each file with `source_path` pointing to the actual location (local path or cloud home key).
 
 ### Metadata images
 
-Images that bae creates and manages. These live in the library home directory, not with the release files. They are synced to the sync bucket as part of changeset sync (pushed when the `library_images` table changes).
+Images that bae creates and manages. These live in the library home directory, not with the release files. They are synced to the cloud home as part of changeset sync (pushed when the `library_images` table changes).
 
 Two kinds:
 - **Release covers** -- display art for album grids, detail views, playback. One per release. May originate from a file in the release, or fetched from MusicBrainz/Discogs. bae makes its own copy.
@@ -204,7 +185,7 @@ Desktop and bae-server run a localhost HTTP image server (axum, OS-assigned port
 
 ## Sync
 
-Desktop is the single writer. After mutations, it pushes changesets to the sync bucket (if configured). Other devices pull changesets and apply them with a conflict handler. Images are synced alongside the changesets that reference them. See `plans/sync-and-network/roadmap.md` for the full protocol.
+Desktop is the single writer. After mutations, it pushes changesets to the cloud home (if configured). Other devices pull changesets and apply them with a conflict handler. Images are synced alongside the changesets that reference them. See `notes/02-sync-and-storage.md` for details.
 
 ## Cover lifecycle
 

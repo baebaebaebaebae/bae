@@ -38,12 +38,6 @@ The token is the auth. Possession of the URL = permission to play that resource.
 4. The `<audio>` element points to `/rest/stream?id={track_id}&shareToken={token}`
 5. Server validates the token again on the stream request, decrypts the file if needed, streams audio
 
-### Relationship to share grants
-
-This is completely separate from share grants (`share_grant.rs` / Layer 3 crypto from `notes/01-sync-and-storage.md`). Share grants are for bae-to-bae sharing — giving another bae user a derived encryption key so they can decrypt files directly from your S3 bucket without a server in the middle.
-
-Share links are simpler: the server is the intermediary. It has the encryption key, decrypts on the fly, and streams plaintext audio to the browser. The recipient never touches encrypted data.
-
 ### Deployment paths
 
 **Desktop + custom domain:** User runs bae-desktop, reverse-proxies with their domain to port 4533. Share link = `https://your-domain.com/share/{token}`.
@@ -51,5 +45,3 @@ Share links are simpler: the server is the intermediary. It has the encryption k
 **bae-server in the cloud:** Operator runs `bae-server --s3-bucket ... --recovery-key ... --web-dir ./bae-web/dist --bind 0.0.0.0`. Same share link format, same token validation.
 
 Both paths use the same Subsonic API and bae-web frontend.
-
-See `plans/share-links-roadmap.md` for the implementation plan.

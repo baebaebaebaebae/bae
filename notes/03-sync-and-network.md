@@ -6,12 +6,10 @@ How bae evolves from single-device sync to a decentralized music network.
 
 The design has four layers, each building on the previous:
 
-1. **Changeset sync** -- incremental sync via SQLite session extension changesets pushed to a shared sync bucket
+1. **Changeset sync** -- incremental sync via SQLite session extension changesets pushed to a shared cloud home
 2. **Shared libraries** -- multiple users writing to the same library with signed changesets and a membership chain
-3. **Cross-library sharing** -- share individual releases between libraries using derived encryption keys
-4. **Public discovery** -- a decentralized MBID-to-content mapping via the BitTorrent DHT
 
-Each layer is independently useful. A solo user benefits from layer 1. Friends sharing a library use layers 1-2. Sharing a single album uses layer 3. The public network is layer 4.
+Each layer is independently useful. A solo user benefits from layer 1. Friends sharing a library use layers 1-2.
 
 ---
 
@@ -23,12 +21,12 @@ The current sync model pushes a full DB snapshot + all images to every profile o
 
 ### The model
 
-Use the SQLite session extension to capture exactly what changed, push the binary changeset to the sync bucket, pull and apply on other devices with a conflict handler. No coordination server. The sync bucket is a library-level concept -- one S3 bucket per library, configured in `config.yaml`, separate from storage profiles (which just hold release files).
+Use the SQLite session extension to capture exactly what changed, push the binary changeset to the cloud home, pull and apply on other devices with a conflict handler. No coordination server. The cloud home is a library-level concept -- one bucket/folder per library, configured in `config.yaml`. The cloud home can be an S3 bucket or a folder on a consumer cloud (Google Drive, Dropbox, etc.).
 
 Each device writes to its own keyspace on the shared bucket. No write contention by construction:
 
 ```
-s3://sync-bucket/
+cloud-home/
   snapshot.db.enc                  # full DB for bootstrapping new devices
   changes/{device_id}/{seq}.enc    # changeset blobs per device
   heads/{device_id}.json.enc       # "my latest seq is 42"
@@ -116,7 +114,7 @@ The SQLite session extension identifies columns by index, not by name. This cons
 
 **Additive changes are transparent.** Adding columns at the end of a table or adding new tables requires no coordination. Old changesets applied to a new schema just have fewer columns (extras keep defaults). New changesets applied to an old schema skip unknown columns. Devices on different schema versions interoperate seamlessly.
 
-**Breaking changes require coordination.** Deleting, reordering, or renaming columns shifts column indices and corrupts changeset application. These changes bump a `min_schema_version` marker in the sync bucket, splitting the changeset history into **epochs**. Within an epoch, all changesets are schema-compatible. Across epochs, no replay -- devices pull a fresh snapshot to jump forward. This means any schema change is possible (the snapshot IS the migrated state), but all devices must upgrade before syncing resumes.
+**Breaking changes require coordination.** Deleting, reordering, or renaming columns shifts column indices and corrupts changeset application. These changes bump a `min_schema_version` marker in the cloud home, splitting the changeset history into **epochs**. Within an epoch, all changesets are schema-compatible. Across epochs, no replay -- devices pull a fresh snapshot to jump forward. This means any schema change is possible (the snapshot IS the migrated state), but all devices must upgrade before syncing resumes.
 
 Every changeset envelope carries a `schema_version` integer so receivers know what schema produced it. In practice, schema changes for a music library are almost always additive (new fields), making breaking migrations rare. See the roadmap (1h) for the full protocol.
 
@@ -132,7 +130,7 @@ New devices start from the snapshot, then replay only changesets after it. Old c
 
 ### What this replaces
 
-The current `MetadataReplicator` -- which pushes a full `VACUUM INTO` snapshot plus all images to every non-home profile on every mutation -- is eliminated entirely. It is not reduced to local-only; it is removed. Sync goes through the single sync bucket. Storage profiles (including external drives) hold release files only -- no DB, no images, no manifest.
+The current `MetadataReplicator` -- which pushes a full `VACUUM INTO` snapshot plus all images to every non-home profile on every mutation -- is eliminated entirely. It is not reduced to local-only; it is removed. Sync goes through the single cloud home. Storage profiles (including external drives) hold release files only -- no DB, no images, no manifest.
 
 ---
 
@@ -149,7 +147,7 @@ Each user generates a keypair locally (Ed25519 for signing, X25519 for encryptio
 ### Bucket layout with users
 
 ```
-s3://sync-bucket/
+cloud-home/
   membership/{pubkey}/{seq}.enc     # signed membership entries (per author, avoids S3 overwrite races)
   keys/{user_pubkey}.enc            # library key wrapped to each member's public key
   heads/{device_id}.json.enc        # per-device head pointer (unchanged from layer 1)
@@ -177,17 +175,23 @@ On read, clients download all membership entries, order by timestamp, and valida
 ```
 Owner invites Alice:
   1. Alice generates a keypair, sends her public key to the owner
-  2. Owner wraps the library encryption key to Alice's public key
+  2. Owner's bae calls CloudHome::grant_access (shares folder or mints credentials)
+  3. Owner wraps the library encryption key to Alice's public key
      -> uploads keys/alice.enc
-  3. Owner writes membership entry: { action: "add", user: alice }
-  4. Gives Alice the bucket coordinates
+  4. Owner writes membership entry: { action: "add", user: alice }
+  5. Bundles JoinInfo + wrapped key into an invite code -> sends to Alice
 
 Alice's first sync:
-  1. Downloads keys/alice.enc -> unwraps library key
-  2. Downloads and validates membership entries
-  3. Downloads snapshot, pulls changesets -> applies -> has the full library
-  4. Can now push her own signed changesets
+  1. Pastes invite code
+  2. Consumer cloud: signs into her own account, bae opens the shared folder
+     S3: bae uses the embedded credentials
+  3. Downloads keys/alice.enc -> unwraps library key
+  4. Downloads and validates membership entries
+  5. Downloads snapshot, pulls changesets -> applies -> has the full library
+  6. Can now push her own signed changesets
 ```
+
+The invite code contains everything Alice needs except the encryption key (which is wrapped to her pubkey in the cloud home). What's in the code depends on the backend -- see the CloudHome trait in `02-sync-and-storage.md`.
 
 ### Changeset validation on pull
 
@@ -198,7 +202,7 @@ Before applying any changeset:
 
 ### Revocation
 
-Owner writes a Remove membership entry, generates a new encryption key, re-wraps to remaining members. Old data: Bob had the old key, accept it pragmatically. New data is protected.
+Owner writes a Remove membership entry, calls `CloudHome::revoke_access` (unshares folder or deletes credentials), generates a new encryption key, re-wraps to remaining members. Old data: Bob had the old key, accept it pragmatically. New data is protected.
 
 ### Attribution
 
@@ -206,60 +210,7 @@ Every changeset envelope carries `author_pubkey`. "Alice added this release," "B
 
 ---
 
-## Layer 3: Cross-library sharing
-
-### The problem
-
-Libraries are islands. If Alice wants to share one album with Bob (who isn't in her library), she'd have to give him the entire library encryption key. All or nothing.
-
-### Derived keys
-
-Replace the flat encryption model with a key hierarchy:
-
-```
-master_key (per library, in keyring)
-  -> derive(master_key, release_id) -> release_key
-      -> encrypts that release's files
-```
-
-HKDF-SHA256 with the release ID as context. Each release effectively has its own key, derived from the master. Library members have the master key and can derive any release key. A single release key can be shared without exposing the master.
-
-### Sharing a release
-
-```
-Alice wants to share "Kind of Blue" with Bob (not in her library):
-
-  1. Alice derives: release_key = derive(master_key, "rel-123")
-  2. Alice wraps release_key + optional S3 creds to Bob's public key
-  3. Alice signs a share grant
-  4. Sends the grant to Bob (any channel)
-
-Bob's client:
-  1. Unwraps the release key and creds with his private key
-  2. Fetches the release's files from Alice's bucket
-  3. Decrypts with the release key
-  4. Plays
-```
-
-No server in the loop. Bob reads directly from Alice's S3 bucket with just enough key material for one release.
-
-### Aggregated view
-
-A user's client aggregates all their access into one view:
-
-```
-You (keypair)
-  -- your library (master key -> full access)
-  -- friend's library (master key -> full member)
-  -- share from Alice (release key -> one album)
-  -- public catalog follows (metadata only, no keys)
-```
-
-Your music, shared libraries, individual grants -- resolved at play time from different buckets.
-
----
-
-## Layer 4: Public discovery network
+## Discovery network
 
 ### The idea
 
@@ -344,23 +295,15 @@ Off by default. Enable in settings. Per-release opt-out. Attestation-only mode o
 ## How the layers compose
 
 **Solo user, local only** (today):
-- Layer 1 replaces full-snapshot sync with incremental changesets to the sync bucket
+- Layer 1 replaces full-snapshot sync with incremental changesets to the cloud home
 - Faster, uses less bandwidth
 
 **Solo user, multiple devices**:
-- Layer 1 syncs between devices via the shared sync bucket
+- Layer 1 syncs between devices via the shared cloud home
 - Same user, different device IDs, merge via LWW
 
 **Friends sharing a library**:
 - Layers 1 + 2: multiple users, signed changesets, membership chain
 - Everyone has the master key, full read/write access
 
-**Sharing one album with someone**:
-- Layer 3: derived key for that release, wrapped to recipient's public key
-- No library membership needed, no server needed
-
-**Public music discovery**:
-- Layer 4: MBID-to-infohash mapping via DHT
-- Participate by announcing your releases, benefit by discovering metadata
-
-Each layer is opt-in. A user who never wants collaboration still benefits from incremental sync. A user who never wants public participation still benefits from shared libraries and private sharing.
+Each layer is opt-in. A user who never wants collaboration still benefits from incremental sync.
