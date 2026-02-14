@@ -475,6 +475,29 @@ impl KeyService {
         Ok(())
     }
 
+    /// Delete cloud home S3 access key and secret key.
+    ///
+    /// Dev mode: removes env vars.
+    /// Prod mode: deletes from OS keyring. Silently ignores missing entries.
+    pub fn delete_cloud_home_s3_keys(&self) -> Result<(), KeyError> {
+        if self.dev_mode {
+            std::env::remove_var("BAE_CLOUD_HOME_ACCESS_KEY");
+            std::env::remove_var("BAE_CLOUD_HOME_SECRET_KEY");
+            return Ok(());
+        }
+
+        for key_type in ["cloud_home_access_key", "cloud_home_secret_key"] {
+            let account = self.account(key_type);
+            match keyring_core::Entry::new("bae", &account)?.delete_credential() {
+                Ok(()) => info!("Deleted {key_type} from keyring"),
+                Err(keyring_core::Error::NoEntry) => {}
+                Err(e) => return Err(KeyError::Keyring(e)),
+            }
+        }
+
+        Ok(())
+    }
+
     /// Read the cloud home OAuth refresh token. Returns None if not set.
     ///
     /// Dev mode: reads `BAE_CLOUD_HOME_OAUTH_TOKEN` env var.

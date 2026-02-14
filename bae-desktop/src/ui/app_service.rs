@@ -595,6 +595,29 @@ impl AppService {
             .share_signing_key_version()
             .set(config.share_signing_key_version);
 
+        // Cloud provider
+        self.state
+            .config()
+            .cloud_provider()
+            .set(config.cloud_provider.as_ref().map(|p| match p {
+                bae_core::config::CloudProvider::S3 => bae_ui::stores::config::CloudProvider::S3,
+                bae_core::config::CloudProvider::ICloud => {
+                    bae_ui::stores::config::CloudProvider::ICloud
+                }
+                bae_core::config::CloudProvider::GoogleDrive => {
+                    bae_ui::stores::config::CloudProvider::GoogleDrive
+                }
+                bae_core::config::CloudProvider::Dropbox => {
+                    bae_ui::stores::config::CloudProvider::Dropbox
+                }
+                bae_core::config::CloudProvider::OneDrive => {
+                    bae_ui::stores::config::CloudProvider::OneDrive
+                }
+                bae_core::config::CloudProvider::PCloud => {
+                    bae_ui::stores::config::CloudProvider::PCloud
+                }
+            }));
+
         // Sync config
         self.state
             .sync()
@@ -1628,12 +1651,13 @@ impl AppService {
     }
 
     /// Save sync bucket configuration to config.yaml and credentials to keyring.
-    /// Updates the store with the new values.
+    /// Sets cloud_provider to S3 and updates the store.
     pub fn save_sync_config(&self, config_data: bae_ui::SyncBucketConfig) -> Result<(), String> {
         let state = self.state;
         let key_service = self.key_service.clone();
         let mut new_config = self.config.clone();
 
+        new_config.cloud_provider = Some(bae_core::config::CloudProvider::S3);
         new_config.cloud_home_s3_bucket = Some(config_data.bucket.clone());
         new_config.cloud_home_s3_region = Some(config_data.region.clone());
         new_config.cloud_home_s3_endpoint = if config_data.endpoint.is_empty() {
@@ -1657,6 +1681,10 @@ impl AppService {
 
         // Update store
         state
+            .config()
+            .cloud_provider()
+            .set(Some(bae_ui::stores::config::CloudProvider::S3));
+        state
             .sync()
             .cloud_home_bucket()
             .set(new_config.cloud_home_s3_bucket.clone());
@@ -1674,6 +1702,87 @@ impl AppService {
             .set(new_config.sync_enabled(&key_service));
 
         Ok(())
+    }
+
+    /// Update the selected cloud provider in the store (does not persist until sign-in/save).
+    pub fn select_cloud_provider(&self, provider: bae_ui::stores::config::CloudProvider) {
+        self.state.config().cloud_provider().set(Some(provider));
+    }
+
+    /// Start OAuth sign-in for a cloud provider. Opens the browser, waits for callback,
+    /// stores tokens, and updates the store.
+    pub fn sign_in_cloud_provider(&self, provider: bae_ui::stores::config::CloudProvider) {
+        let state = self.state;
+        state.sync().signing_in().set(true);
+        state.sync().sign_in_error().set(None);
+
+        spawn(async move {
+            let result: Result<(), String> = async {
+                // For now only Google Drive is implemented
+                match provider {
+                    bae_ui::stores::config::CloudProvider::GoogleDrive => Err(
+                        "Google Drive sign-in requires a client_id. Not yet configured."
+                            .to_string(),
+                    ),
+                    bae_ui::stores::config::CloudProvider::Dropbox => {
+                        Err("Dropbox sign-in is not yet implemented.".to_string())
+                    }
+                    bae_ui::stores::config::CloudProvider::OneDrive => {
+                        Err("OneDrive sign-in is not yet implemented.".to_string())
+                    }
+                    bae_ui::stores::config::CloudProvider::PCloud => {
+                        Err("pCloud sign-in is not yet implemented.".to_string())
+                    }
+                    _ => Err("This provider does not use OAuth sign-in.".to_string()),
+                }
+            }
+            .await;
+
+            if let Err(e) = result {
+                state.sync().sign_in_error().set(Some(e));
+            }
+            state.sync().signing_in().set(false);
+        });
+    }
+
+    /// Disconnect the current cloud provider. Clears tokens and config.
+    pub fn disconnect_cloud_provider(&self) {
+        let state = self.state;
+        let key_service = self.key_service.clone();
+        let mut new_config = self.config.clone();
+
+        // Clear all cloud home config fields
+        new_config.cloud_provider = None;
+        new_config.cloud_home_s3_bucket = None;
+        new_config.cloud_home_s3_region = None;
+        new_config.cloud_home_s3_endpoint = None;
+        new_config.cloud_home_google_drive_folder_id = None;
+        new_config.cloud_home_dropbox_folder_path = None;
+        new_config.cloud_home_onedrive_drive_id = None;
+        new_config.cloud_home_onedrive_folder_id = None;
+        new_config.cloud_home_pcloud_folder_id = None;
+
+        if let Err(e) = new_config.save() {
+            tracing::error!("Failed to save config after disconnect: {e}");
+            return;
+        }
+
+        // Delete all cloud home credentials from keyring
+        if let Err(e) = key_service.delete_cloud_home_oauth_token() {
+            tracing::warn!("Failed to delete OAuth token: {e}");
+        }
+        if let Err(e) = key_service.delete_cloud_home_s3_keys() {
+            tracing::warn!("Failed to delete S3 keys: {e}");
+        }
+
+        // Update store
+        state.config().cloud_provider().set(None);
+        state.config().cloud_account_display().set(None);
+        state.sync().cloud_home_bucket().set(None);
+        state.sync().cloud_home_region().set(None);
+        state.sync().cloud_home_endpoint().set(None);
+        state.sync().cloud_home_configured().set(false);
+        state.sync().sign_in_error().set(None);
     }
 
     // =========================================================================

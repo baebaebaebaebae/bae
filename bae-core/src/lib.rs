@@ -20,6 +20,7 @@ pub mod library;
 pub mod library_dir;
 pub mod musicbrainz;
 pub mod network;
+pub mod oauth;
 pub mod playback;
 pub mod retry;
 pub mod share_token;

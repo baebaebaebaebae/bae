@@ -2,11 +2,103 @@
 //! delegates config persistence to AppService
 
 use crate::ui::app_service::use_app;
-use bae_ui::stores::{AppStateStoreExt, MemberRole, SyncStateStoreExt};
-use bae_ui::{SyncBucketConfig, SyncSectionView};
+use bae_ui::stores::config::CloudProvider;
+use bae_ui::stores::{AppStateStoreExt, ConfigStateStoreExt, MemberRole, SyncStateStoreExt};
+use bae_ui::{CloudProviderOption, SyncBucketConfig, SyncSectionView};
 use dioxus::prelude::*;
 
-/// Sync section - shows sync status, other devices, user identity, and sync bucket configuration
+/// Build the list of cloud provider options from current state.
+fn build_cloud_options(
+    cloud_provider: &Option<CloudProvider>,
+    cloud_home_configured: bool,
+    icloud_available: bool,
+    cloud_account_display: &Option<String>,
+    cloud_home_bucket: &Option<String>,
+) -> Vec<CloudProviderOption> {
+    let s3_connected = if matches!(cloud_provider, Some(CloudProvider::S3)) && cloud_home_configured
+    {
+        cloud_home_bucket.clone()
+    } else {
+        None
+    };
+
+    let google_connected =
+        if matches!(cloud_provider, Some(CloudProvider::GoogleDrive)) && cloud_home_configured {
+            cloud_account_display.clone()
+        } else {
+            None
+        };
+
+    vec![
+        CloudProviderOption {
+            provider: CloudProvider::ICloud,
+            label: "iCloud Drive",
+            description: "Automatic sync, no setup needed",
+            available: icloud_available,
+            connected_account: if matches!(cloud_provider, Some(CloudProvider::ICloud)) {
+                Some("iCloud Drive".to_string())
+            } else {
+                None
+            },
+        },
+        CloudProviderOption {
+            provider: CloudProvider::GoogleDrive,
+            label: "Google Drive",
+            description: "Sign in to sync via Google Drive",
+            available: true,
+            connected_account: google_connected,
+        },
+        CloudProviderOption {
+            provider: CloudProvider::Dropbox,
+            label: "Dropbox",
+            description: "Sign in to sync via Dropbox",
+            available: true,
+            connected_account: if matches!(cloud_provider, Some(CloudProvider::Dropbox))
+                && cloud_home_configured
+            {
+                cloud_account_display.clone()
+            } else {
+                None
+            },
+        },
+        CloudProviderOption {
+            provider: CloudProvider::OneDrive,
+            label: "OneDrive",
+            description: "Sign in to sync via OneDrive",
+            available: true,
+            connected_account: if matches!(cloud_provider, Some(CloudProvider::OneDrive))
+                && cloud_home_configured
+            {
+                cloud_account_display.clone()
+            } else {
+                None
+            },
+        },
+        CloudProviderOption {
+            provider: CloudProvider::PCloud,
+            label: "pCloud",
+            description: "Sign in to sync via pCloud",
+            available: true,
+            connected_account: if matches!(cloud_provider, Some(CloudProvider::PCloud))
+                && cloud_home_configured
+            {
+                cloud_account_display.clone()
+            } else {
+                None
+            },
+        },
+        CloudProviderOption {
+            provider: CloudProvider::S3,
+            label: "S3-compatible",
+            description: "For Backblaze B2, Wasabi, MinIO, AWS, etc.",
+            available: true,
+            connected_account: s3_connected,
+        },
+    ]
+}
+
+/// Sync section - shows sync status, other devices, user identity, cloud provider picker,
+/// and membership management.
 #[component]
 pub fn SyncSection() -> Element {
     let app = use_app();
@@ -53,26 +145,30 @@ pub fn SyncSection() -> Element {
         }
     };
 
-    // --- Config display from store ---
+    // --- Cloud provider state from store ---
+    let cloud_provider = app.state.config().cloud_provider().read().clone();
+    let cloud_account_display = app.state.config().cloud_account_display().read().clone();
     let cloud_home_bucket = app.state.sync().cloud_home_bucket().read().clone();
-    let cloud_home_region = app.state.sync().cloud_home_region().read().clone();
-    let cloud_home_endpoint = app.state.sync().cloud_home_endpoint().read().clone();
     let cloud_home_configured = *app.state.sync().cloud_home_configured().read();
+    let icloud_available = *app.state.sync().icloud_available().read();
+    let signing_in = *app.state.sync().signing_in().read();
+    let sign_in_error = app.state.sync().sign_in_error().read().clone();
 
-    // --- Local edit state ---
+    let cloud_options = build_cloud_options(
+        &cloud_provider,
+        cloud_home_configured,
+        icloud_available,
+        &cloud_account_display,
+        &cloud_home_bucket,
+    );
+
+    // --- Local S3 edit state ---
     let mut is_editing = use_signal(|| false);
     let mut edit_bucket = use_signal(String::new);
     let mut edit_region = use_signal(String::new);
     let mut edit_endpoint = use_signal(String::new);
     let mut edit_access_key = use_signal(String::new);
     let mut edit_secret_key = use_signal(String::new);
-    let mut is_saving = use_signal(|| false);
-    let mut save_error = use_signal(|| Option::<String>::None);
-
-    // --- Test connection state ---
-    let mut is_testing = use_signal(|| false);
-    let mut test_success = use_signal(|| Option::<String>::None);
-    let mut test_error = use_signal(|| Option::<String>::None);
 
     // --- Local invite form state ---
     let mut show_invite_form = use_signal(|| false);
@@ -87,12 +183,14 @@ pub fn SyncSection() -> Element {
     let app_for_sync = app.clone();
     let app_for_edit = app.clone();
     let app_for_save = app.clone();
-    let app_for_test = app.clone();
     let app_for_invite = app.clone();
     let app_for_dismiss = app.clone();
     let app_for_remove = app.clone();
     let app_for_accept = app.clone();
     let app_for_revoke = app.clone();
+    let app_for_sign_in = app.clone();
+    let app_for_disconnect = app.clone();
+    let app_for_select = app.clone();
 
     rsx! {
         SyncSectionView {
@@ -112,41 +210,66 @@ pub fn SyncSection() -> Element {
             removing_member_error,
             on_sync_now: move |_| app_for_sync.trigger_sync(),
 
-            // Config display
-            cloud_home_bucket: cloud_home_bucket.clone(),
-            cloud_home_region: cloud_home_region.clone(),
-            cloud_home_endpoint: cloud_home_endpoint.clone(),
+            // Cloud home configured
             cloud_home_configured,
 
-            // Edit state
+            // Cloud provider picker
+            cloud_provider: cloud_provider.clone(),
+            cloud_options,
+            signing_in,
+            sign_in_error,
+            on_select_provider: move |provider: CloudProvider| {
+                app_for_select.select_cloud_provider(provider);
+            },
+            on_sign_in: move |provider: CloudProvider| {
+                app_for_sign_in.sign_in_cloud_provider(provider);
+            },
+            on_disconnect_provider: move |_| {
+                app_for_disconnect.disconnect_cloud_provider();
+            },
+            on_use_icloud: // iCloud not yet implemented
+            |_| {},
+
+            // S3 edit state
             is_editing: *is_editing.read(),
             edit_bucket: edit_bucket.read().clone(),
             edit_region: edit_region.read().clone(),
             edit_endpoint: edit_endpoint.read().clone(),
             edit_access_key: edit_access_key.read().clone(),
             edit_secret_key: edit_secret_key.read().clone(),
-            is_saving: *is_saving.read(),
-            save_error: save_error.read().clone(),
 
-            // Test state
-            is_testing: *is_testing.read(),
-            test_success: test_success.read().clone(),
-            test_error: test_error.read().clone(),
-
-            // Invite state
-            show_invite_form: *show_invite_form.read(),
-            invite_pubkey: invite_pubkey.read().clone(),
-            invite_role: invite_role.read().clone(),
-            invite_status,
-            share_info,
-
-            // Callbacks
+            // S3 callbacks
             on_edit_start: move |_| {
-                // Populate edit fields from current config
-                edit_bucket.set(cloud_home_bucket.clone().unwrap_or_default());
-                edit_region.set(cloud_home_region.clone().unwrap_or_default());
-                edit_endpoint.set(cloud_home_endpoint.clone().unwrap_or_default());
-                // Read credentials from keyring for editing
+                edit_bucket
+                    .set(
+                        app_for_edit
+                            .state
+                            .sync()
+                            .cloud_home_bucket()
+                            .read()
+                            .clone()
+                            .unwrap_or_default(),
+                    );
+                edit_region
+                    .set(
+                        app_for_edit
+                            .state
+                            .sync()
+                            .cloud_home_region()
+                            .read()
+                            .clone()
+                            .unwrap_or_default(),
+                    );
+                edit_endpoint
+                    .set(
+                        app_for_edit
+                            .state
+                            .sync()
+                            .cloud_home_endpoint()
+                            .read()
+                            .clone()
+                            .unwrap_or_default(),
+                    );
                 edit_access_key
                     .set(
                         app_for_edit.key_service.get_cloud_home_access_key().unwrap_or_default(),
@@ -155,20 +278,12 @@ pub fn SyncSection() -> Element {
                     .set(
                         app_for_edit.key_service.get_cloud_home_secret_key().unwrap_or_default(),
                     );
-                save_error.set(None);
-                test_success.set(None);
-                test_error.set(None);
                 is_editing.set(true);
             },
             on_cancel_edit: move |_| {
                 is_editing.set(false);
-                save_error.set(None);
-                test_success.set(None);
-                test_error.set(None);
             },
             on_save_config: move |config: SyncBucketConfig| {
-                is_saving.set(true);
-                save_error.set(None);
                 let app = app_for_save.clone();
                 spawn(async move {
                     match app.save_sync_config(config) {
@@ -176,73 +291,9 @@ pub fn SyncSection() -> Element {
                             is_editing.set(false);
                         }
                         Err(e) => {
-                            save_error.set(Some(e));
+                            tracing::error!("Failed to save sync config: {e}");
                         }
                     }
-                    is_saving.set(false);
-                });
-            },
-            on_test_connection: move |_| {
-                let library_manager = app_for_test.library_manager.clone();
-                let bucket = edit_bucket.read().clone();
-                let region = edit_region.read().clone();
-                let endpoint = edit_endpoint.read().clone();
-                let access_key = edit_access_key.read().clone();
-                let secret_key = edit_secret_key.read().clone();
-
-                is_testing.set(true);
-                test_success.set(None);
-                test_error.set(None);
-
-                spawn(async move {
-                    let encryption_service = library_manager.get().encryption_service().cloned();
-
-                    let result: Result<usize, String> = async {
-                        let encryption = encryption_service
-
-                            .ok_or_else(|| {
-                                "Encryption is not configured. Enable encryption first."
-                                    .to_string()
-                            })?;
-                        let ep = if endpoint.is_empty() { None } else { Some(endpoint) };
-                        let cloud_home = bae_core::cloud_home::s3::S3CloudHome::new(
-                                bucket,
-                                region,
-                                ep,
-                                access_key,
-                                secret_key,
-                            )
-                            .await
-                            .map_err(|e| format!("Failed to create S3 client: {}", e))?;
-                        let client = bae_core::sync::cloud_home_bucket::CloudHomeSyncBucket::new(
-                            Box::new(cloud_home),
-                            encryption,
-                        );
-                        use bae_core::sync::bucket::SyncBucketClient;
-                        let heads = client.list_heads().await.map_err(|e| format!("{}", e))?;
-                        Ok(heads.len())
-                    }
-                        .await;
-                    match result {
-                        Ok(count) => {
-                            let msg = if count == 0 {
-                                "Connected successfully. No other devices syncing yet."
-                                    .to_string()
-                            } else {
-                                format!(
-                                    "Connected successfully. Found {} device head(s).",
-                                    count,
-                                )
-                            };
-                            test_success.set(Some(msg));
-                            test_error.set(None);
-                        }
-                        Err(e) => {
-                            test_error.set(Some(e));
-                            test_success.set(None);
-                        }
-                    }
-                    is_testing.set(false);
                 });
             },
             on_bucket_change: move |v| edit_bucket.set(v),
@@ -251,11 +302,17 @@ pub fn SyncSection() -> Element {
             on_access_key_change: move |v| edit_access_key.set(v),
             on_secret_key_change: move |v| edit_secret_key.set(v),
 
+            // Invite state
+            show_invite_form: *show_invite_form.read(),
+            invite_pubkey: invite_pubkey.read().clone(),
+            invite_role: invite_role.read().clone(),
+            invite_status,
+            share_info,
+
             // Invite callbacks
             on_toggle_invite_form: move |_| {
                 let currently_open = *show_invite_form.read();
                 if currently_open {
-                    // Closing: reset form state
                     show_invite_form.set(false);
                     invite_pubkey.set(String::new());
                     invite_role.set(MemberRole::Member);

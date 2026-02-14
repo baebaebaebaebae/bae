@@ -5,6 +5,7 @@
 //! semantics. Higher-level concerns live in `CloudHomeSyncBucket` which wraps
 //! any `dyn CloudHome`.
 
+pub mod google_drive;
 pub mod s3;
 
 use async_trait::async_trait;
@@ -78,4 +79,66 @@ pub trait CloudHome: Send + Sync {
     /// Revoke a previously granted access. No-op for backends where access
     /// is controlled externally (e.g. S3 with pre-shared credentials).
     async fn revoke_access(&self, member_id: &str) -> Result<(), CloudHomeError>;
+}
+
+/// Construct a CloudHome from config + keyring tokens.
+pub async fn create_cloud_home(
+    config: &crate::config::Config,
+    key_service: &crate::keys::KeyService,
+) -> Result<Box<dyn CloudHome>, CloudHomeError> {
+    use crate::config::CloudProvider;
+
+    match config.cloud_provider {
+        Some(CloudProvider::S3) | None => {
+            let bucket = config
+                .cloud_home_s3_bucket
+                .clone()
+                .ok_or_else(|| CloudHomeError::Storage("S3 bucket not configured".to_string()))?;
+            let region = config
+                .cloud_home_s3_region
+                .clone()
+                .ok_or_else(|| CloudHomeError::Storage("S3 region not configured".to_string()))?;
+            let endpoint = config.cloud_home_s3_endpoint.clone();
+            let access_key = key_service.get_cloud_home_access_key().ok_or_else(|| {
+                CloudHomeError::Storage("S3 access key not in keyring".to_string())
+            })?;
+            let secret_key = key_service.get_cloud_home_secret_key().ok_or_else(|| {
+                CloudHomeError::Storage("S3 secret key not in keyring".to_string())
+            })?;
+
+            let s3 = s3::S3CloudHome::new(bucket, region, endpoint, access_key, secret_key).await?;
+            Ok(Box::new(s3))
+        }
+        Some(CloudProvider::GoogleDrive) => {
+            let folder_id = config
+                .cloud_home_google_drive_folder_id
+                .clone()
+                .ok_or_else(|| {
+                    CloudHomeError::Storage("Google Drive folder ID not configured".to_string())
+                })?;
+
+            let token_json = key_service.get_cloud_home_oauth_token().ok_or_else(|| {
+                CloudHomeError::Storage("Google Drive OAuth token not in keyring".to_string())
+            })?;
+
+            let tokens: crate::oauth::OAuthTokens = serde_json::from_str(&token_json)
+                .map_err(|e| CloudHomeError::Storage(format!("invalid OAuth token JSON: {e}")))?;
+
+            let gd =
+                google_drive::GoogleDriveCloudHome::new(folder_id, tokens, key_service.clone());
+            Ok(Box::new(gd))
+        }
+        Some(CloudProvider::ICloud) => Err(CloudHomeError::Storage(
+            "iCloud Drive is not yet implemented".to_string(),
+        )),
+        Some(CloudProvider::Dropbox) => Err(CloudHomeError::Storage(
+            "Dropbox is not yet implemented".to_string(),
+        )),
+        Some(CloudProvider::OneDrive) => Err(CloudHomeError::Storage(
+            "OneDrive is not yet implemented".to_string(),
+        )),
+        Some(CloudProvider::PCloud) => Err(CloudHomeError::Storage(
+            "pCloud is not yet implemented".to_string(),
+        )),
+    }
 }

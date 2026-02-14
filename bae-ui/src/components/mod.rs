@@ -73,11 +73,11 @@ pub use resizable_panel::{GrabBar, PanelPosition, ResizablePanel, ResizeDirectio
 pub use segmented_control::{Segment, SegmentedControl};
 pub use select::{Select, SelectOption};
 pub use settings::{
-    AboutSectionView, BitTorrentSectionView, BitTorrentSettings, DiscogsSectionView,
-    FollowLibraryView, FollowTestStatus, JoinLibraryView, JoinStatus, LibraryInfo,
-    LibrarySectionView, SettingsCard, SettingsSection, SettingsTab, SettingsView, StorageLocation,
-    StorageProfile, StorageProfileEditorView, StorageProfilesSectionView, SubsonicSectionView,
-    SyncBucketConfig, SyncSectionView,
+    AboutSectionView, BitTorrentSectionView, BitTorrentSettings, CloudProviderOption,
+    CloudProviderPicker, DiscogsSectionView, FollowLibraryView, FollowTestStatus, JoinLibraryView,
+    JoinStatus, LibraryInfo, LibrarySectionView, SettingsCard, SettingsSection, SettingsTab,
+    SettingsView, StorageLocation, StorageProfile, StorageProfileEditorView,
+    StorageProfilesSectionView, SubsonicSectionView, SyncBucketConfig, SyncSectionView,
 };
 pub use success_toast::SuccessToast;
 pub use text_input::{TextInput, TextInputSize, TextInputType};

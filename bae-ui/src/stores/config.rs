@@ -2,12 +2,27 @@
 
 use dioxus::prelude::*;
 
+/// Cloud provider selection (mirrored from bae-core, since bae-ui can't depend on bae-core).
+#[derive(Clone, Debug, PartialEq)]
+pub enum CloudProvider {
+    S3,
+    ICloud,
+    GoogleDrive,
+    Dropbox,
+    OneDrive,
+    PCloud,
+}
+
 /// Application configuration state
 ///
 /// This mirrors the config values from bae_core::config::Config that are
 /// relevant to the UI. The Store is updated when config changes.
 #[derive(Clone, Debug, Default, PartialEq, Store)]
 pub struct ConfigState {
+    /// Selected cloud home provider. None = not configured.
+    pub cloud_provider: Option<CloudProvider>,
+    /// Display name for the connected cloud account (e.g. "user@gmail.com").
+    pub cloud_account_display: Option<String>,
     /// Whether a Discogs API key is stored (hint flag, avoids keyring read)
     pub discogs_key_stored: bool,
     /// Whether an encryption key is stored (hint flag, avoids keyring read)
