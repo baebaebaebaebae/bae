@@ -328,27 +328,9 @@ pub fn SyncSectionView(
                                                             p { class: "text-sm text-gray-300 mb-3",
                                                                 "Remove {member.display_name}? This will rotate the encryption key."
                                                             }
-
-        
-                
-                
-
-                
-        
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
                                                             if let Some(ref err) = removing_member_error {
                                                                 div { class: "text-sm text-red-400 mb-3", "{err}" }
                                                             }
-                
                                                             div { class: "flex gap-2",
                                                                 {
                                                                     let confirm_pubkey = member.pubkey.clone();
@@ -491,10 +473,6 @@ pub fn SyncSectionView(
                                     p { class: "text-xs text-gray-500 mt-2",
                                         "The code contains cloud home connection info. The encryption key is delivered separately via the membership chain."
                                     }
-
-        
-        
-        
                                     div { class: "flex gap-3 mt-3",
                                         Button {
                                             variant: ButtonVariant::Secondary,

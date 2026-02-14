@@ -114,9 +114,6 @@ pub fn CloudProviderPicker(
                                         on_select.call(provider_for_select.clone());
                                     }
                                 },
-
-        
-
                                 div { class: "flex items-start gap-3",
                                     div { class: "mt-0.5 flex-shrink-0",
                                         div {
@@ -127,7 +124,6 @@ pub fn CloudProviderPicker(
                                             }
                                         }
                                     }
-        
                                     div { class: "flex-1 min-w-0",
                                         div { class: "flex items-center gap-2",
                                             span { class: "text-sm font-medium text-gray-200", "{label}" }
@@ -135,7 +131,6 @@ pub fn CloudProviderPicker(
                                                 span { class: "text-xs text-gray-500", "(macOS only)" }
                                             }
                                         }
-        
                                         if let Some(ref account) = connected {
                                             div { class: "flex items-center gap-2 mt-1",
                                                 span { class: "text-xs text-green-400", "Connected as {account}" }
@@ -154,7 +149,6 @@ pub fn CloudProviderPicker(
                                         } else {
                                             p { class: "text-xs text-gray-500 mt-0.5", "{description}" }
                                         }
-        
                                         if is_selected && connected.is_none() {
                                             div { class: "mt-2",
                                                 if signing_in {
@@ -198,12 +192,10 @@ pub fn CloudProviderPicker(
                                                 }
                                             }
                                         }
-        
                                         if is_selected && is_s3 && s3_is_editing {
                                             div {
                                                 class: "mt-3 space-y-3",
                                                 onclick: move |evt: Event<MouseData>| evt.stop_propagation(),
-        
                                                 div {
                                                     label { class: "block text-xs font-medium text-gray-400 mb-1",
                                                         "Bucket"
@@ -296,7 +288,6 @@ pub fn CloudProviderPicker(
                                                 }
                                             }
                                         }
-        
                                         if is_selected && is_s3 && !s3_is_editing && connected.is_some() {
                                             div { class: "mt-2 text-xs text-gray-400 space-y-0.5",
                                                 if !s3_bucket.is_empty() {
