@@ -279,6 +279,22 @@ fn main() {
         let subsonic_key_service = key_service.clone();
         let subsonic_share_base_url = config.share_base_url.clone();
         let subsonic_share_signing_key_version = config.share_signing_key_version;
+
+        let subsonic_auth = if config.subsonic_auth_enabled {
+            let password = key_service.get_subsonic_password();
+            bae_core::subsonic::SubsonicAuth {
+                enabled: config.subsonic_username.is_some() && password.is_some(),
+                username: config.subsonic_username.clone(),
+                password,
+            }
+        } else {
+            bae_core::subsonic::SubsonicAuth {
+                enabled: false,
+                username: None,
+                password: None,
+            }
+        };
+
         runtime_handle.spawn(async move {
             start_subsonic_server(
                 subsonic_library,
@@ -289,6 +305,7 @@ fn main() {
                 subsonic_key_service,
                 subsonic_share_base_url,
                 subsonic_share_signing_key_version,
+                subsonic_auth,
             )
             .await
         });
@@ -401,6 +418,7 @@ async fn start_subsonic_server(
     key_service: bae_core::keys::KeyService,
     share_base_url: Option<String>,
     share_signing_key_version: u32,
+    auth: bae_core::subsonic::SubsonicAuth,
 ) {
     info!("Starting Subsonic API server...");
     let app = create_router(
@@ -410,6 +428,7 @@ async fn start_subsonic_server(
         key_service,
         share_base_url,
         share_signing_key_version,
+        auth,
     );
     let addr = format!("{}:{}", bind_address, port);
     let listener = match tokio::net::TcpListener::bind(&addr).await {

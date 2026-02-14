@@ -1495,6 +1495,11 @@ async fn test_subsonic_stream_cue_flac_track2_correct_range() {
         key_service,
         share_base_url: None,
         share_signing_key_version: 1,
+        auth: bae_core::subsonic::SubsonicAuth {
+            enabled: false,
+            username: None,
+            password: None,
+        },
     };
 
     let (audio_data, content_type) = stream_track_audio(&state, &track2.id)

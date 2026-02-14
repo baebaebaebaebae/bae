@@ -28,6 +28,10 @@ pub fn SettingsMock(initial_state: Option<String>) -> Element {
     let mut subsonic_editing = use_signal(|| false);
     let mut subsonic_edit_enabled = use_signal(|| true);
     let mut subsonic_edit_port = use_signal(|| "4533".to_string());
+    let mut subsonic_edit_auth_enabled = use_signal(|| false);
+    let mut subsonic_edit_username = use_signal(String::new);
+    let mut subsonic_edit_password = use_signal(String::new);
+    let mut subsonic_edit_password_confirm = use_signal(String::new);
 
     rsx! {
         MockPanel {
@@ -202,9 +206,16 @@ pub fn SettingsMock(initial_state: Option<String>) -> Element {
                         SubsonicSectionView {
                             enabled: true,
                             port: 4533,
+                            auth_enabled: false,
+                            auth_username: None,
+                            auth_password_set: false,
                             is_editing: *subsonic_editing.read(),
                             edit_enabled: *subsonic_edit_enabled.read(),
                             edit_port: subsonic_edit_port(),
+                            edit_auth_enabled: *subsonic_edit_auth_enabled.read(),
+                            edit_username: subsonic_edit_username(),
+                            edit_password: subsonic_edit_password(),
+                            edit_password_confirm: subsonic_edit_password_confirm(),
                             is_saving: false,
                             has_changes: false,
                             save_error: None,
@@ -228,6 +239,10 @@ pub fn SettingsMock(initial_state: Option<String>) -> Element {
                             on_share_base_url_change: |_| {},
                             on_share_expiry_change: |_| {},
                             on_invalidate_links: |_| {},
+                            on_auth_enabled_change: move |v| subsonic_edit_auth_enabled.set(v),
+                            on_username_change: move |v| subsonic_edit_username.set(v),
+                            on_password_change: move |v| subsonic_edit_password.set(v),
+                            on_password_confirm_change: move |v| subsonic_edit_password_confirm.set(v),
                         }
                     },
                     SettingsTab::About => rsx! {

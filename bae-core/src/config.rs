@@ -253,6 +253,12 @@ pub struct ConfigYaml {
     /// Subsonic server bind address (default: 127.0.0.1, set to 0.0.0.0 for LAN/external access)
     #[serde(default)]
     pub subsonic_bind_address: Option<String>,
+    /// Whether Subsonic authentication is required
+    #[serde(default)]
+    pub subsonic_auth_enabled: bool,
+    /// Subsonic username (password stored in keyring)
+    #[serde(default)]
+    pub subsonic_username: Option<String>,
 
     // Sync bucket S3 configuration (credentials stored in keyring)
     /// S3 bucket name for changeset sync
@@ -315,6 +321,10 @@ pub struct Config {
     pub subsonic_port: u16,
     /// Subsonic server bind address (default: 127.0.0.1)
     pub subsonic_bind_address: String,
+    /// Whether Subsonic authentication is required
+    pub subsonic_auth_enabled: bool,
+    /// Subsonic username (password stored in keyring)
+    pub subsonic_username: Option<String>,
     /// S3 bucket name for changeset sync
     pub sync_s3_bucket: Option<String>,
     /// S3 region for sync bucket
@@ -497,6 +507,8 @@ impl Config {
             subsonic_bind_address: yaml_config
                 .subsonic_bind_address
                 .unwrap_or_else(|| "127.0.0.1".to_string()),
+            subsonic_auth_enabled: yaml_config.subsonic_auth_enabled,
+            subsonic_username: yaml_config.subsonic_username,
             sync_s3_bucket: yaml_config.sync_s3_bucket,
             sync_s3_region: yaml_config.sync_s3_region,
             sync_s3_endpoint: yaml_config.sync_s3_endpoint,
@@ -555,6 +567,8 @@ impl Config {
             subsonic_enabled: self.subsonic_enabled,
             subsonic_port: Some(self.subsonic_port),
             subsonic_bind_address: Some(self.subsonic_bind_address.clone()),
+            subsonic_auth_enabled: self.subsonic_auth_enabled,
+            subsonic_username: self.subsonic_username.clone(),
             sync_s3_bucket: self.sync_s3_bucket.clone(),
             sync_s3_region: self.sync_s3_region.clone(),
             sync_s3_endpoint: self.sync_s3_endpoint.clone(),
@@ -605,6 +619,8 @@ impl Config {
             subsonic_enabled: true,
             subsonic_port: 4533,
             subsonic_bind_address: "127.0.0.1".to_string(),
+            subsonic_auth_enabled: false,
+            subsonic_username: None,
             sync_s3_bucket: None,
             sync_s3_region: None,
             sync_s3_endpoint: None,
@@ -771,6 +787,8 @@ mod tests {
             subsonic_enabled: true,
             subsonic_port: 4533,
             subsonic_bind_address: "127.0.0.1".to_string(),
+            subsonic_auth_enabled: false,
+            subsonic_username: None,
             sync_s3_bucket: None,
             sync_s3_region: None,
             sync_s3_endpoint: None,

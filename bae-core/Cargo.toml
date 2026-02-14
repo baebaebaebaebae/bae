@@ -14,6 +14,7 @@ bae-common = { path = "../bae-common" }
 reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_urlencoded = "0.7"
 serde_yaml = "0.9"
 tokio = { version = "1.0", features = ["full"] }
 thiserror = "1.0"
@@ -21,6 +22,7 @@ keyring-core = "0.7"
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
 uuid = { version = "1.0", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
+md-5 = "0.10"
 sha1 = "0.10"
 sha2 = "0.10"
 hmac = "0.12"

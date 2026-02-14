@@ -22,6 +22,10 @@ pub struct ConfigState {
     pub subsonic_port: u16,
     /// Subsonic server bind address (default: 127.0.0.1)
     pub subsonic_bind_address: String,
+    /// Whether Subsonic authentication is required
+    pub subsonic_auth_enabled: bool,
+    /// Subsonic username
+    pub subsonic_username: Option<String>,
 
     // BitTorrent settings
     /// Interface to bind torrent client to

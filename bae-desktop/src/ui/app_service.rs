@@ -548,6 +548,14 @@ impl AppService {
             .set(config.subsonic_bind_address.clone());
         self.state
             .config()
+            .subsonic_auth_enabled()
+            .set(config.subsonic_auth_enabled);
+        self.state
+            .config()
+            .subsonic_username()
+            .set(config.subsonic_username.clone());
+        self.state
+            .config()
             .torrent_bind_interface()
             .set(config.torrent_bind_interface.clone());
         self.state
@@ -1076,6 +1084,14 @@ impl AppService {
             .config()
             .subsonic_bind_address()
             .set(new_config.subsonic_bind_address.clone());
+        self.state
+            .config()
+            .subsonic_auth_enabled()
+            .set(new_config.subsonic_auth_enabled);
+        self.state
+            .config()
+            .subsonic_username()
+            .set(new_config.subsonic_username.clone());
         self.state
             .config()
             .torrent_bind_interface()

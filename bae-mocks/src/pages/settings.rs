@@ -166,9 +166,16 @@ pub fn Settings() -> Element {
                     SubsonicSectionView {
                         enabled: true,
                         port: 4533,
+                        auth_enabled: false,
+                        auth_username: None,
+                        auth_password_set: false,
                         is_editing: false,
                         edit_enabled: true,
                         edit_port: "4533".to_string(),
+                        edit_auth_enabled: false,
+                        edit_username: String::new(),
+                        edit_password: String::new(),
+                        edit_password_confirm: String::new(),
                         is_saving: false,
                         has_changes: false,
                         save_error: None,
@@ -192,6 +199,10 @@ pub fn Settings() -> Element {
                         on_share_base_url_change: |_| {},
                         on_share_expiry_change: |_| {},
                         on_invalidate_links: |_| {},
+                        on_auth_enabled_change: |_| {},
+                        on_username_change: |_| {},
+                        on_password_change: |_| {},
+                        on_password_confirm_change: |_| {},
                     }
                 },
                 SettingsTab::About => rsx! {
