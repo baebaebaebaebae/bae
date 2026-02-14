@@ -39,13 +39,11 @@ pub enum InviteStatus {
     Error(String),
 }
 
-/// Cloud home coordinates to share with an invitee after a successful invite.
+/// Invite code to share with an invitee after a successful invite.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShareInfo {
-    pub cloud_home_bucket: String,
-    pub cloud_home_region: String,
-    pub cloud_home_endpoint: Option<String>,
-    pub invitee_pubkey: String,
+    pub invite_code: String,
+    pub invitee_display: String,
 }
 
 /// A release shared with us via a share grant (display-only).

@@ -1348,7 +1348,7 @@ impl AppService {
         spawn(async move {
             let bucket: &dyn SyncBucketClient = &*sync_handle.bucket_client;
 
-            let result: Result<(), String> = async {
+            let result: Result<bae_core::cloud_home::JoinInfo, String> = async {
                 // Parse the encryption key from hex.
                 let key_bytes: [u8; 32] = hex::decode(&encryption_key_hex)
                     .map_err(|e| format!("Invalid encryption key hex: {e}"))?
@@ -1423,7 +1423,7 @@ impl AppService {
 
                 let cloud_home = sync_handle.bucket_client.cloud_home();
 
-                bae_core::sync::invite::create_invitation(
+                let join_info = bae_core::sync::invite::create_invitation(
                     bucket,
                     cloud_home,
                     &mut chain,
@@ -1441,32 +1441,42 @@ impl AppService {
                     &invitee_pubkey_hex[..invitee_pubkey_hex.len().min(16)]
                 );
 
-                Ok(())
+                Ok(join_info)
             }
             .await;
 
             match result {
-                Ok(()) => {
+                Ok(join_info) => {
                     state
                         .sync()
                         .invite_status()
                         .set(Some(bae_ui::stores::InviteStatus::Success));
 
-                    // Set share info for the UI.
+                    // Encode invite code for the UI.
+                    let invite_code = bae_core::join_code::InviteCode {
+                        library_id: config.library_id.clone(),
+                        library_name: config.library_name.clone().unwrap_or_default(),
+                        join_info,
+                        owner_pubkey: user_pubkey_hex.clone(),
+                    };
+                    let code_string = bae_core::join_code::encode(&invite_code);
+
+                    let invitee_display = if invitee_pubkey_hex.len() > 16 {
+                        format!(
+                            "{}...{}",
+                            &invitee_pubkey_hex[..8],
+                            &invitee_pubkey_hex[invitee_pubkey_hex.len() - 8..]
+                        )
+                    } else {
+                        invitee_pubkey_hex.clone()
+                    };
+
                     state
                         .sync()
                         .share_info()
                         .set(Some(bae_ui::stores::ShareInfo {
-                            cloud_home_bucket: config
-                                .cloud_home_s3_bucket
-                                .clone()
-                                .unwrap_or_default(),
-                            cloud_home_region: config
-                                .cloud_home_s3_region
-                                .clone()
-                                .unwrap_or_default(),
-                            cloud_home_endpoint: config.cloud_home_s3_endpoint.clone(),
-                            invitee_pubkey: invitee_pubkey_hex,
+                            invite_code: code_string,
+                            invitee_display,
                         }));
 
                     // Reload the member list.

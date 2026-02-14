@@ -1,8 +1,10 @@
 //! Library settings section — business logic wrapper
 
 use bae_core::cloud_home::s3::S3CloudHome;
+use bae_core::cloud_home::JoinInfo;
 use bae_core::config::{Config, FollowedLibrary};
 use bae_core::encryption::EncryptionService;
+use bae_core::join_code;
 use bae_core::keys::KeyService;
 use bae_core::library_dir::LibraryDir;
 use bae_core::subsonic_client::SubsonicClient;
@@ -57,11 +59,11 @@ pub fn LibrarySection() -> Element {
     let active_source = app.state.library().active_source().read().clone();
 
     // Join form state
-    let mut join_bucket = use_signal(String::new);
-    let mut join_region = use_signal(String::new);
-    let mut join_endpoint = use_signal(String::new);
-    let mut join_access_key = use_signal(String::new);
-    let mut join_secret_key = use_signal(String::new);
+    let mut join_invite_code = use_signal(String::new);
+    let mut join_decoded_name = use_signal(|| Option::<String>::None);
+    let mut join_decoded_owner = use_signal(|| Option::<String>::None);
+    let mut join_decoded_cloud = use_signal(|| Option::<String>::None);
+    let mut join_decode_error = use_signal(|| Option::<String>::None);
     let mut join_status = use_signal(|| Option::<JoinStatus>::None);
 
     // Follow form state
@@ -121,11 +123,11 @@ pub fn LibrarySection() -> Element {
     };
 
     let on_join_start = move |_| {
-        join_bucket.set(String::new());
-        join_region.set(String::new());
-        join_endpoint.set(String::new());
-        join_access_key.set(String::new());
-        join_secret_key.set(String::new());
+        join_invite_code.set(String::new());
+        join_decoded_name.set(None);
+        join_decoded_owner.set(None);
+        join_decoded_cloud.set(None);
+        join_decode_error.set(None);
         join_status.set(None);
         sub_view.set(LibrarySubView::Join);
     };
@@ -134,32 +136,51 @@ pub fn LibrarySection() -> Element {
         sub_view.set(LibrarySubView::Main);
     };
 
+    let on_join_code_change = move |value: String| {
+        join_invite_code.set(value.clone());
+        if value.trim().is_empty() {
+            join_decoded_name.set(None);
+            join_decoded_owner.set(None);
+            join_decoded_cloud.set(None);
+            join_decode_error.set(None);
+            return;
+        }
+        match join_code::decode(&value) {
+            Ok(code) => {
+                join_decoded_name.set(Some(code.library_name));
+                join_decoded_owner.set(Some(code.owner_pubkey));
+                join_decoded_cloud.set(Some(cloud_home_display(&code.join_info)));
+                join_decode_error.set(None);
+            }
+            Err(e) => {
+                join_decoded_name.set(None);
+                join_decoded_owner.set(None);
+                join_decoded_cloud.set(None);
+                join_decode_error.set(Some(e.to_string()));
+            }
+        }
+    };
+
     let on_join_submit = {
         let app = app.clone();
         move |_| {
-            let bucket = join_bucket.read().clone();
-            let region = join_region.read().clone();
-            let endpoint = join_endpoint.read().clone();
-            let access_key = join_access_key.read().clone();
-            let secret_key = join_secret_key.read().clone();
+            let code_str = join_invite_code.read().clone();
             let key_service = app.key_service.clone();
 
+            let code = match join_code::decode(&code_str) {
+                Ok(c) => c,
+                Err(e) => {
+                    join_status.set(Some(JoinStatus::Error(e.to_string())));
+                    return;
+                }
+            };
+
             join_status.set(Some(JoinStatus::Joining(
-                "Connecting to sync bucket...".to_string(),
+                "Connecting to cloud home...".to_string(),
             )));
 
             spawn(async move {
-                match join_shared_library(
-                    bucket,
-                    region,
-                    endpoint,
-                    access_key,
-                    secret_key,
-                    key_service,
-                    join_status,
-                )
-                .await
-                {
+                match join_shared_library_from_code(code, key_service, join_status).await {
                     Ok(config) => {
                         join_status.set(Some(JoinStatus::Success));
 
@@ -341,17 +362,13 @@ pub fn LibrarySection() -> Element {
     if is_join {
         rsx! {
             JoinLibraryView {
-                bucket: join_bucket.read().clone(),
-                region: join_region.read().clone(),
-                endpoint: join_endpoint.read().clone(),
-                access_key: join_access_key.read().clone(),
-                secret_key: join_secret_key.read().clone(),
+                invite_code: join_invite_code.read().clone(),
                 status: join_status.read().clone(),
-                on_bucket_change: move |v| join_bucket.set(v),
-                on_region_change: move |v| join_region.set(v),
-                on_endpoint_change: move |v| join_endpoint.set(v),
-                on_access_key_change: move |v| join_access_key.set(v),
-                on_secret_key_change: move |v| join_secret_key.set(v),
+                decoded_library_name: join_decoded_name.read().clone(),
+                decoded_owner_pubkey: join_decoded_owner.read().clone(),
+                decoded_cloud_home: join_decoded_cloud.read().clone(),
+                decode_error: join_decode_error.read().clone(),
+                on_code_change: on_join_code_change,
                 on_join: on_join_submit,
                 on_cancel: on_join_cancel,
             }
@@ -393,29 +410,48 @@ pub fn LibrarySection() -> Element {
     }
 }
 
-/// Perform the full join-shared-library bootstrap sequence.
-///
-/// Steps:
-/// 1. Load the user's Ed25519 keypair (must exist -- Phase 6a).
-/// 2. Create a CloudHomeSyncBucket with a dummy encryption key (only used
-///    to access the wrapped key, which is stored as raw sealed-box bytes).
-/// 3. `accept_invitation()` to unwrap the library encryption key.
-/// 4. Recreate the bucket client with the real encryption key.
-/// 5. Create a new library directory and config.
-/// 6. `bootstrap_from_snapshot()` to get the initial database.
-/// 7. Pull any changesets since the snapshot.
-/// 8. Save sync bucket config and credentials.
-/// 9. Return the Config so the caller can switch to it.
-async fn join_shared_library(
-    bucket: String,
-    region: String,
-    endpoint: String,
-    access_key: String,
-    secret_key: String,
+/// Return a human-readable label for the cloud home type in a JoinInfo.
+fn cloud_home_display(join_info: &JoinInfo) -> String {
+    match join_info {
+        JoinInfo::S3 { endpoint, .. } => {
+            if let Some(ep) = endpoint {
+                format!("S3 ({})", ep)
+            } else {
+                "S3".to_string()
+            }
+        }
+        JoinInfo::GoogleDrive { .. } => "Google Drive".to_string(),
+        JoinInfo::Dropbox { .. } => "Dropbox".to_string(),
+        JoinInfo::OneDrive { .. } => "OneDrive".to_string(),
+        JoinInfo::PCloud { .. } => "pCloud".to_string(),
+    }
+}
+
+/// Perform the full join-shared-library bootstrap sequence from a decoded invite code.
+async fn join_shared_library_from_code(
+    code: join_code::InviteCode,
     key_service: KeyService,
     mut status: Signal<Option<JoinStatus>>,
 ) -> Result<Config, String> {
     use bae_core::sync::invite::accept_invitation;
+
+    // Extract S3 credentials from the invite code.
+    let (bucket, region, endpoint, access_key, secret_key) = match &code.join_info {
+        JoinInfo::S3 {
+            bucket,
+            region,
+            endpoint,
+            access_key,
+            secret_key,
+        } => (
+            bucket.clone(),
+            region.clone(),
+            endpoint.clone(),
+            access_key.clone(),
+            secret_key.clone(),
+        ),
+        _ => return Err("Only S3 cloud homes are supported for joining at this time".to_string()),
+    };
 
     // Step 1: Load user keypair.
     let user_keypair = key_service
@@ -424,11 +460,6 @@ async fn join_shared_library(
 
     // Step 2: Create bucket client with a dummy encryption key.
     // We only need get_wrapped_key() which stores sealed-box bytes raw (no library-key encryption).
-    let ep = if endpoint.is_empty() {
-        None
-    } else {
-        Some(endpoint.clone())
-    };
     let dummy_key = [0u8; 32];
     let dummy_encryption = EncryptionService::new(&hex::encode(dummy_key))
         .map_err(|e| format!("Failed to create encryption service: {e}"))?;
@@ -436,12 +467,12 @@ async fn join_shared_library(
     let dummy_home = S3CloudHome::new(
         bucket.clone(),
         region.clone(),
-        ep.clone(),
+        endpoint.clone(),
         access_key.clone(),
         secret_key.clone(),
     )
     .await
-    .map_err(|e| format!("Failed to connect to sync bucket: {e}"))?;
+    .map_err(|e| format!("Failed to connect to cloud home: {e}"))?;
 
     let dummy_bucket = CloudHomeSyncBucket::new(Box::new(dummy_home), dummy_encryption);
 
@@ -467,12 +498,12 @@ async fn join_shared_library(
     let real_home = S3CloudHome::new(
         bucket.clone(),
         region.clone(),
-        ep,
+        endpoint.clone(),
         access_key.clone(),
         secret_key.clone(),
     )
     .await
-    .map_err(|e| format!("Failed to reconnect to sync bucket: {e}"))?;
+    .map_err(|e| format!("Failed to reconnect to cloud home: {e}"))?;
 
     let real_bucket = CloudHomeSyncBucket::new(Box::new(real_home), encryption.clone());
 
@@ -486,6 +517,8 @@ async fn join_shared_library(
     std::fs::create_dir_all(&*library_dir)
         .map_err(|e| format!("Failed to create library directory: {e}"))?;
 
+    let endpoint_str = endpoint.as_deref().unwrap_or("");
+
     // All steps after directory creation are wrapped so we can clean up on failure.
     let result = bootstrap_library(
         &real_bucket,
@@ -496,7 +529,7 @@ async fn join_shared_library(
         &device_id,
         &bucket,
         &region,
-        &endpoint,
+        endpoint_str,
         &access_key,
         &secret_key,
         &key_service,

@@ -16,6 +16,8 @@ pub struct S3CloudHome {
     bucket: String,
     region: String,
     endpoint: Option<String>,
+    access_key: String,
+    secret_key: String,
 }
 
 impl S3CloudHome {
@@ -26,7 +28,7 @@ impl S3CloudHome {
         access_key: String,
         secret_key: String,
     ) -> Result<Self, CloudHomeError> {
-        let credentials = Credentials::new(access_key, secret_key, None, None, "bae-cloud-home");
+        let credentials = Credentials::new(&access_key, &secret_key, None, None, "bae-cloud-home");
 
         let mut builder = aws_config::defaults(BehaviorVersion::latest())
             .region(Region::new(region.clone()))
@@ -47,6 +49,8 @@ impl S3CloudHome {
             bucket,
             region,
             endpoint,
+            access_key,
+            secret_key,
         })
     }
 }
@@ -197,10 +201,13 @@ impl CloudHome for S3CloudHome {
 
     async fn grant_access(&self, _member_id: &str) -> Result<JoinInfo, CloudHomeError> {
         // S3 access is managed externally (IAM/pre-shared credentials).
+        // Return the owner's credentials so they can be embedded in the invite code.
         Ok(JoinInfo::S3 {
             bucket: self.bucket.clone(),
             region: self.region.clone(),
             endpoint: self.endpoint.clone(),
+            access_key: self.access_key.clone(),
+            secret_key: self.secret_key.clone(),
         })
     }
 

@@ -1,4 +1,4 @@
-//! Join shared library view -- form for accepting an invitation to a shared library.
+//! Join shared library view -- single invite code paste form.
 
 use crate::components::{
     Button, ButtonSize, ButtonVariant, LoadingSpinner, SettingsSection, TextInput, TextInputSize,
@@ -9,59 +9,40 @@ use dioxus::prelude::*;
 /// Status of the join operation.
 #[derive(Clone, Debug, PartialEq)]
 pub enum JoinStatus {
-    /// Currently joining.
     Joining(String),
-    /// Join succeeded.
     Success,
-    /// Join failed with an error.
     Error(String),
 }
 
 /// Pure view component for joining a shared library.
 ///
-/// The user pastes sync bucket coordinates (received out-of-band from the owner)
-/// and clicks Join. The desktop wrapper handles the actual bootstrap flow.
+/// The user pastes a single invite code (received from the library owner)
+/// and clicks Join. The desktop wrapper decodes the code and handles the
+/// bootstrap flow.
 #[component]
 pub fn JoinLibraryView(
-    /// Bucket name input value.
-    bucket: String,
-    /// Region input value.
-    region: String,
-    /// Endpoint input value (optional).
-    endpoint: String,
-    /// Access key input value.
-    access_key: String,
-    /// Secret key input value.
-    secret_key: String,
-    /// Current status of the join operation.
+    invite_code: String,
     status: Option<JoinStatus>,
+    decoded_library_name: Option<String>,
+    decoded_owner_pubkey: Option<String>,
+    decoded_cloud_home: Option<String>,
+    decode_error: Option<String>,
 
-    // --- Callbacks ---
-    on_bucket_change: EventHandler<String>,
-    on_region_change: EventHandler<String>,
-    on_endpoint_change: EventHandler<String>,
-    on_access_key_change: EventHandler<String>,
-    on_secret_key_change: EventHandler<String>,
-    /// Called when the user clicks "Join". The desktop wrapper performs the actual work.
+    on_code_change: EventHandler<String>,
     on_join: EventHandler<()>,
-    /// Called when the user clicks "Cancel" to go back.
     on_cancel: EventHandler<()>,
 ) -> Element {
     let is_joining = matches!(status, Some(JoinStatus::Joining(_)));
     let is_success = matches!(status, Some(JoinStatus::Success));
-    let can_join = !is_joining
-        && !is_success
-        && !bucket.is_empty()
-        && !region.is_empty()
-        && !access_key.is_empty()
-        && !secret_key.is_empty();
+    let has_valid_code = decoded_library_name.is_some() && decode_error.is_none();
+    let can_join = !is_joining && !is_success && has_valid_code;
 
     rsx! {
         SettingsSection {
             div {
                 h2 { class: "text-xl font-semibold text-white", "Join Shared Library" }
                 p { class: "text-sm text-gray-400 mt-1",
-                    "Enter the sync bucket details shared with you by the library owner."
+                    "Paste the invite code you received from the library owner."
                 }
             }
 
@@ -73,85 +54,46 @@ pub fn JoinLibraryView(
                 }
             } else {
                 div { class: "space-y-4 mt-4",
-                    // Bucket
                     div {
                         label { class: "block text-sm font-medium text-gray-300 mb-1",
-                            "Bucket "
-                            span { class: "text-red-400", "*" }
+                            "Invite code"
                         }
                         TextInput {
-                            value: bucket,
-                            on_input: move |v| on_bucket_change.call(v),
+                            value: invite_code.clone(),
+                            on_input: move |v| on_code_change.call(v),
                             size: TextInputSize::Medium,
                             input_type: TextInputType::Text,
-                            placeholder: "my-sync-bucket",
+                            placeholder: "Paste invite code here",
                             disabled: is_joining,
                         }
                     }
 
-                    // Region
-                    div {
-                        label { class: "block text-sm font-medium text-gray-300 mb-1",
-                            "Region "
-                            span { class: "text-red-400", "*" }
-                        }
-                        TextInput {
-                            value: region,
-                            on_input: move |v| on_region_change.call(v),
-                            size: TextInputSize::Medium,
-                            input_type: TextInputType::Text,
-                            placeholder: "us-east-1",
-                            disabled: is_joining,
+                    // Decode error
+                    if let Some(ref err) = decode_error {
+                        if !invite_code.is_empty() {
+                            div { class: "text-sm text-red-400", "{err}" }
                         }
                     }
 
-                    // Endpoint (optional)
-                    div {
-                        label { class: "block text-sm font-medium text-gray-300 mb-1",
-                            "Endpoint "
-                            span { class: "text-xs text-gray-500",
-                                "(optional, for S3-compatible services)"
+                    // Decoded info preview
+                    if let Some(ref name) = decoded_library_name {
+                        div { class: "p-3 bg-gray-700/50 rounded-lg space-y-2 text-sm",
+                            div { class: "flex justify-between",
+                                span { class: "text-gray-400", "Library" }
+                                span { class: "text-gray-200", "\"{name}\"" }
                             }
-                        }
-                        TextInput {
-                            value: endpoint,
-                            on_input: move |v| on_endpoint_change.call(v),
-                            size: TextInputSize::Medium,
-                            input_type: TextInputType::Text,
-                            placeholder: "https://s3.example.com",
-                            disabled: is_joining,
-                        }
-                    }
-
-                    // Access Key
-                    div {
-                        label { class: "block text-sm font-medium text-gray-300 mb-1",
-                            "Access Key "
-                            span { class: "text-red-400", "*" }
-                        }
-                        TextInput {
-                            value: access_key,
-                            on_input: move |v| on_access_key_change.call(v),
-                            size: TextInputSize::Medium,
-                            input_type: TextInputType::Text,
-                            placeholder: "AKIAIOSFODNN7EXAMPLE",
-                            disabled: is_joining,
-                        }
-                    }
-
-                    // Secret Key
-                    div {
-                        label { class: "block text-sm font-medium text-gray-300 mb-1",
-                            "Secret Key "
-                            span { class: "text-red-400", "*" }
-                        }
-                        TextInput {
-                            value: secret_key,
-                            on_input: move |v| on_secret_key_change.call(v),
-                            size: TextInputSize::Medium,
-                            input_type: TextInputType::Password,
-                            placeholder: "",
-                            disabled: is_joining,
+                            if let Some(ref pubkey) = decoded_owner_pubkey {
+                                div { class: "flex justify-between",
+                                    span { class: "text-gray-400", "Owner" }
+                                    span { class: "text-gray-200 font-mono", {truncate_pubkey(pubkey)} }
+                                }
+                            }
+                            if let Some(ref cloud) = decoded_cloud_home {
+                                div { class: "flex justify-between",
+                                    span { class: "text-gray-400", "Cloud home" }
+                                    span { class: "text-gray-200", "{cloud}" }
+                                }
+                            }
                         }
                     }
                 }
@@ -197,5 +139,13 @@ pub fn JoinLibraryView(
                 }
             }
         }
+    }
+}
+
+fn truncate_pubkey(key: &str) -> String {
+    if key.len() > 20 {
+        format!("{}...{}", &key[..8], &key[key.len() - 8..])
+    } else {
+        key.to_string()
     }
 }
