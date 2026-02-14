@@ -191,7 +191,7 @@ pub fn create_router(
         .with_state(state)
 }
 /// Compute the MD5 hex digest of a string.
-fn md5_hex(input: &str) -> String {
+pub(crate) fn md5_hex(input: &str) -> String {
     use md5::Digest;
     let hash = md5::Md5::digest(input.as_bytes());
     hex::encode(hash)
