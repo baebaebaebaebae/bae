@@ -3,6 +3,7 @@ pub mod attestation;
 pub mod attestation_cache;
 pub mod attribution;
 pub mod bucket;
+pub mod cloud_home_bucket;
 pub mod conflict;
 pub mod envelope;
 #[cfg(feature = "torrent")]
@@ -16,7 +17,6 @@ pub mod pull;
 mod pull_tests;
 pub mod push;
 pub mod reverse_lookup;
-pub mod s3_bucket;
 pub mod service;
 pub mod session;
 pub mod session_ext;

@@ -14,8 +14,8 @@ use bae_core::import;
 use bae_core::keys::{KeyService, UserKeypair};
 use bae_core::library::SharedLibraryManager;
 use bae_core::playback;
+use bae_core::sync::cloud_home_bucket::CloudHomeSyncBucket;
 use bae_core::sync::hlc::Hlc;
-use bae_core::sync::s3_bucket::S3SyncBucketClient;
 use bae_core::sync::session::SyncSession;
 #[cfg(feature = "torrent")]
 use bae_core::torrent;
@@ -30,8 +30,8 @@ use bae_core::torrent;
 /// connection is heap-allocated and never moved.
 #[derive(Clone)]
 pub struct SyncHandle {
-    /// S3 sync bucket client for pushing/pulling changesets
-    pub bucket_client: Arc<S3SyncBucketClient>,
+    /// Sync bucket client for pushing/pulling changesets
+    pub bucket_client: Arc<CloudHomeSyncBucket>,
     /// Hybrid logical clock for causal ordering of writes
     pub hlc: Arc<Hlc>,
     /// Device ID for this device (used in push, cursors, and SyncService)
@@ -60,7 +60,7 @@ unsafe impl Sync for SyncHandle {}
 
 impl SyncHandle {
     pub fn new(
-        bucket_client: S3SyncBucketClient,
+        bucket_client: CloudHomeSyncBucket,
         hlc: Hlc,
         device_id: String,
         raw_db: *mut libsqlite3_sys::sqlite3,

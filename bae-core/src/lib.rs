@@ -2,6 +2,7 @@ pub mod audio_codec;
 pub mod cache;
 #[cfg(feature = "cd-rip")]
 pub mod cd;
+pub mod cloud_home;
 pub mod cloud_storage;
 #[doc(hidden)]
 pub mod config;

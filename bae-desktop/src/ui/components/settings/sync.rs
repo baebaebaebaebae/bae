@@ -201,16 +201,19 @@ pub fn SyncSection() -> Element {
                                     .to_string()
                             })?;
                         let ep = if endpoint.is_empty() { None } else { Some(endpoint) };
-                        let client = bae_core::sync::s3_bucket::S3SyncBucketClient::new(
+                        let cloud_home = bae_core::cloud_home::s3::S3CloudHome::new(
                                 bucket,
                                 region,
                                 ep,
                                 access_key,
                                 secret_key,
-                                encryption,
                             )
                             .await
                             .map_err(|e| format!("Failed to create S3 client: {}", e))?;
+                        let client = bae_core::sync::cloud_home_bucket::CloudHomeSyncBucket::new(
+                            Box::new(cloud_home),
+                            encryption,
+                        );
                         use bae_core::sync::bucket::SyncBucketClient;
                         let heads = client.list_heads().await.map_err(|e| format!("{}", e))?;
                         Ok(heads.len())
