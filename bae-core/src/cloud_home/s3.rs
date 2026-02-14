@@ -195,15 +195,16 @@ impl CloudHome for S3CloudHome {
         }
     }
 
-    fn join_info(&self) -> JoinInfo {
-        JoinInfo::S3 {
+    async fn grant_access(&self, _member_id: &str) -> Result<JoinInfo, CloudHomeError> {
+        // S3 access is managed externally (IAM/pre-shared credentials).
+        Ok(JoinInfo::S3 {
             bucket: self.bucket.clone(),
             region: self.region.clone(),
             endpoint: self.endpoint.clone(),
-        }
+        })
     }
 
-    async fn revoke_access(&self) -> Result<(), CloudHomeError> {
+    async fn revoke_access(&self, _member_id: &str) -> Result<(), CloudHomeError> {
         // S3 access is managed externally (IAM/pre-shared credentials).
         Ok(())
     }

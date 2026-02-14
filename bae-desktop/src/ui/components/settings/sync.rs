@@ -54,10 +54,10 @@ pub fn SyncSection() -> Element {
     };
 
     // --- Config display from store ---
-    let sync_bucket = app.state.sync().sync_bucket().read().clone();
-    let sync_region = app.state.sync().sync_region().read().clone();
-    let sync_endpoint = app.state.sync().sync_endpoint().read().clone();
-    let sync_configured = *app.state.sync().sync_configured().read();
+    let cloud_home_bucket = app.state.sync().cloud_home_bucket().read().clone();
+    let cloud_home_region = app.state.sync().cloud_home_region().read().clone();
+    let cloud_home_endpoint = app.state.sync().cloud_home_endpoint().read().clone();
+    let cloud_home_configured = *app.state.sync().cloud_home_configured().read();
 
     // --- Local edit state ---
     let mut is_editing = use_signal(|| false);
@@ -113,10 +113,10 @@ pub fn SyncSection() -> Element {
             on_sync_now: move |_| app_for_sync.trigger_sync(),
 
             // Config display
-            sync_bucket: sync_bucket.clone(),
-            sync_region: sync_region.clone(),
-            sync_endpoint: sync_endpoint.clone(),
-            sync_configured,
+            cloud_home_bucket: cloud_home_bucket.clone(),
+            cloud_home_region: cloud_home_region.clone(),
+            cloud_home_endpoint: cloud_home_endpoint.clone(),
+            cloud_home_configured,
 
             // Edit state
             is_editing: *is_editing.read(),
@@ -143,14 +143,18 @@ pub fn SyncSection() -> Element {
             // Callbacks
             on_edit_start: move |_| {
                 // Populate edit fields from current config
-                edit_bucket.set(sync_bucket.clone().unwrap_or_default());
-                edit_region.set(sync_region.clone().unwrap_or_default());
-                edit_endpoint.set(sync_endpoint.clone().unwrap_or_default());
+                edit_bucket.set(cloud_home_bucket.clone().unwrap_or_default());
+                edit_region.set(cloud_home_region.clone().unwrap_or_default());
+                edit_endpoint.set(cloud_home_endpoint.clone().unwrap_or_default());
                 // Read credentials from keyring for editing
                 edit_access_key
-                    .set(app_for_edit.key_service.get_sync_access_key().unwrap_or_default());
+                    .set(
+                        app_for_edit.key_service.get_cloud_home_access_key().unwrap_or_default(),
+                    );
                 edit_secret_key
-                    .set(app_for_edit.key_service.get_sync_secret_key().unwrap_or_default());
+                    .set(
+                        app_for_edit.key_service.get_cloud_home_secret_key().unwrap_or_default(),
+                    );
                 save_error.set(None);
                 test_success.set(None);
                 test_error.set(None);

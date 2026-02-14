@@ -588,11 +588,11 @@ async fn bootstrap_library(
 
     // Save sync bucket credentials to keyring.
     new_key_service
-        .set_sync_access_key(access_key)
+        .set_cloud_home_access_key(access_key)
         .map_err(|e| format!("Failed to save sync access key: {e}"))?;
 
     new_key_service
-        .set_sync_secret_key(secret_key)
+        .set_cloud_home_secret_key(secret_key)
         .map_err(|e| format!("Failed to save sync secret key: {e}"))?;
 
     let config = Config {
@@ -619,9 +619,9 @@ async fn bootstrap_library(
         subsonic_bind_address: "127.0.0.1".to_string(),
         subsonic_auth_enabled: false,
         subsonic_username: None,
-        sync_s3_bucket: Some(bucket.to_string()),
-        sync_s3_region: Some(region.to_string()),
-        sync_s3_endpoint: if endpoint.is_empty() {
+        cloud_home_s3_bucket: Some(bucket.to_string()),
+        cloud_home_s3_region: Some(region.to_string()),
+        cloud_home_s3_endpoint: if endpoint.is_empty() {
             None
         } else {
             Some(endpoint.to_string())

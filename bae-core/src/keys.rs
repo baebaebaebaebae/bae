@@ -404,20 +404,20 @@ impl KeyService {
     }
 
     // -------------------------------------------------------------------------
-    // Sync bucket S3 credentials (library-scoped)
+    // Cloud home credentials (library-scoped)
     // -------------------------------------------------------------------------
 
-    /// Read the sync bucket S3 access key. Returns None if not set.
+    /// Read the cloud home access key. Returns None if not set.
     ///
-    /// Dev mode: reads `BAE_SYNC_S3_ACCESS_KEY` env var.
+    /// Dev mode: reads `BAE_CLOUD_HOME_ACCESS_KEY` env var.
     /// Prod mode: reads from OS keyring.
-    pub fn get_sync_access_key(&self) -> Option<String> {
+    pub fn get_cloud_home_access_key(&self) -> Option<String> {
         if self.dev_mode {
-            std::env::var("BAE_SYNC_S3_ACCESS_KEY")
+            std::env::var("BAE_CLOUD_HOME_ACCESS_KEY")
                 .ok()
                 .filter(|k| !k.is_empty())
         } else {
-            let account = self.account("sync_s3_access_key");
+            let account = self.account("cloud_home_access_key");
             keyring_core::Entry::new("bae", &account)
                 .ok()
                 .and_then(|e| e.get_password().ok())
@@ -425,33 +425,33 @@ impl KeyService {
         }
     }
 
-    /// Save the sync bucket S3 access key.
+    /// Save the cloud home access key.
     ///
     /// Dev mode: sets the env var.
     /// Prod mode: writes to OS keyring.
-    pub fn set_sync_access_key(&self, value: &str) -> Result<(), KeyError> {
+    pub fn set_cloud_home_access_key(&self, value: &str) -> Result<(), KeyError> {
         if self.dev_mode {
-            std::env::set_var("BAE_SYNC_S3_ACCESS_KEY", value);
+            std::env::set_var("BAE_CLOUD_HOME_ACCESS_KEY", value);
             return Ok(());
         }
 
-        let account = self.account("sync_s3_access_key");
+        let account = self.account("cloud_home_access_key");
         keyring_core::Entry::new("bae", &account)?.set_password(value)?;
-        info!("Sync S3 access key saved to keyring");
+        info!("Cloud home access key saved to keyring");
         Ok(())
     }
 
-    /// Read the sync bucket S3 secret key. Returns None if not set.
+    /// Read the cloud home secret key. Returns None if not set.
     ///
-    /// Dev mode: reads `BAE_SYNC_S3_SECRET_KEY` env var.
+    /// Dev mode: reads `BAE_CLOUD_HOME_SECRET_KEY` env var.
     /// Prod mode: reads from OS keyring.
-    pub fn get_sync_secret_key(&self) -> Option<String> {
+    pub fn get_cloud_home_secret_key(&self) -> Option<String> {
         if self.dev_mode {
-            std::env::var("BAE_SYNC_S3_SECRET_KEY")
+            std::env::var("BAE_CLOUD_HOME_SECRET_KEY")
                 .ok()
                 .filter(|k| !k.is_empty())
         } else {
-            let account = self.account("sync_s3_secret_key");
+            let account = self.account("cloud_home_secret_key");
             keyring_core::Entry::new("bae", &account)
                 .ok()
                 .and_then(|e| e.get_password().ok())
@@ -459,20 +459,75 @@ impl KeyService {
         }
     }
 
-    /// Save the sync bucket S3 secret key.
+    /// Save the cloud home secret key.
     ///
     /// Dev mode: sets the env var.
     /// Prod mode: writes to OS keyring.
-    pub fn set_sync_secret_key(&self, value: &str) -> Result<(), KeyError> {
+    pub fn set_cloud_home_secret_key(&self, value: &str) -> Result<(), KeyError> {
         if self.dev_mode {
-            std::env::set_var("BAE_SYNC_S3_SECRET_KEY", value);
+            std::env::set_var("BAE_CLOUD_HOME_SECRET_KEY", value);
             return Ok(());
         }
 
-        let account = self.account("sync_s3_secret_key");
+        let account = self.account("cloud_home_secret_key");
         keyring_core::Entry::new("bae", &account)?.set_password(value)?;
-        info!("Sync S3 secret key saved to keyring");
+        info!("Cloud home secret key saved to keyring");
         Ok(())
+    }
+
+    /// Read the cloud home OAuth refresh token. Returns None if not set.
+    ///
+    /// Dev mode: reads `BAE_CLOUD_HOME_OAUTH_TOKEN` env var.
+    /// Prod mode: reads from OS keyring.
+    pub fn get_cloud_home_oauth_token(&self) -> Option<String> {
+        if self.dev_mode {
+            std::env::var("BAE_CLOUD_HOME_OAUTH_TOKEN")
+                .ok()
+                .filter(|k| !k.is_empty())
+        } else {
+            let account = self.account("cloud_home_oauth_token");
+            keyring_core::Entry::new("bae", &account)
+                .ok()
+                .and_then(|e| e.get_password().ok())
+                .filter(|k| !k.is_empty())
+        }
+    }
+
+    /// Save the cloud home OAuth refresh token.
+    ///
+    /// Dev mode: sets the env var.
+    /// Prod mode: writes to OS keyring.
+    pub fn set_cloud_home_oauth_token(&self, token: &str) -> Result<(), KeyError> {
+        if self.dev_mode {
+            std::env::set_var("BAE_CLOUD_HOME_OAUTH_TOKEN", token);
+            return Ok(());
+        }
+
+        let account = self.account("cloud_home_oauth_token");
+        keyring_core::Entry::new("bae", &account)?.set_password(token)?;
+        info!("Cloud home OAuth token saved to keyring");
+        Ok(())
+    }
+
+    /// Delete the cloud home OAuth refresh token.
+    ///
+    /// Dev mode: removes the env var.
+    /// Prod mode: deletes from OS keyring. Silently ignores missing entries.
+    pub fn delete_cloud_home_oauth_token(&self) -> Result<(), KeyError> {
+        if self.dev_mode {
+            std::env::remove_var("BAE_CLOUD_HOME_OAUTH_TOKEN");
+            return Ok(());
+        }
+
+        let account = self.account("cloud_home_oauth_token");
+        match keyring_core::Entry::new("bae", &account)?.delete_credential() {
+            Ok(()) => {
+                info!("Cloud home OAuth token deleted from keyring");
+                Ok(())
+            }
+            Err(keyring_core::Error::NoEntry) => Ok(()),
+            Err(e) => Err(KeyError::Keyring(e)),
+        }
     }
 
     // -------------------------------------------------------------------------

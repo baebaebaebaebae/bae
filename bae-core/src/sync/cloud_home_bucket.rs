@@ -50,6 +50,11 @@ impl CloudHomeSyncBucket {
         self.encryption.clone()
     }
 
+    /// Borrow the underlying CloudHome for direct access (e.g., grant_access/revoke_access).
+    pub fn cloud_home(&self) -> &dyn CloudHome {
+        &*self.home
+    }
+
     /// Convenience: read-lock the encryption service.
     fn enc(&self) -> std::sync::RwLockReadGuard<'_, EncryptionService> {
         self.encryption.read().unwrap()

@@ -39,13 +39,13 @@ pub fn SyncSectionView(
 
     // --- Config display props ---
     /// Current configured bucket name (from store). None if not configured.
-    sync_bucket: Option<String>,
+    cloud_home_bucket: Option<String>,
     /// Current configured region (from store).
-    sync_region: Option<String>,
+    cloud_home_region: Option<String>,
     /// Current configured endpoint (from store).
-    sync_endpoint: Option<String>,
+    cloud_home_endpoint: Option<String>,
     /// Whether sync is fully configured (bucket + region + credentials).
-    sync_configured: bool,
+    cloud_home_configured: bool,
 
     // --- Edit state props ---
     /// Whether currently editing the sync config.
@@ -209,7 +209,7 @@ pub fn SyncSectionView(
 
                     div { class: "flex justify-between items-center",
                         span { class: "text-gray-400", "Sync bucket" }
-                        if sync_configured {
+                        if cloud_home_configured {
                             span { class: "px-3 py-1 bg-green-900 text-green-300 rounded-full text-sm",
                                 "Configured"
                             }
@@ -230,7 +230,7 @@ pub fn SyncSectionView(
                     Button {
                         variant: ButtonVariant::Secondary,
                         size: ButtonSize::Small,
-                        disabled: syncing || !sync_configured,
+                        disabled: syncing || !cloud_home_configured,
                         loading: syncing,
                         onclick: move |_| on_sync_now.call(()),
                         if syncing {
@@ -268,7 +268,7 @@ pub fn SyncSectionView(
             }
 
             // Members card (shown when sync is configured)
-            if sync_configured {
+            if cloud_home_configured {
                 SettingsCard {
                     div { class: "flex items-center justify-between mb-4",
                         h3 { class: "text-lg font-medium text-white", "Members" }
@@ -333,10 +333,14 @@ pub fn SyncSectionView(
                                                                 "Remove {member.display_name}? This will rotate the encryption key."
                                                             }
 
+        
+                
+        
+
                                                             if let Some(ref err) = removing_member_error {
                                                                 div { class: "text-sm text-red-400 mb-3", "{err}" }
                                                             }
-
+                
                                                             div { class: "flex gap-2",
                                                                 {
                                                                     let confirm_pubkey = member.pubkey.clone();
@@ -472,13 +476,13 @@ pub fn SyncSectionView(
                                     div { class: "p-3 bg-gray-700/50 rounded-lg space-y-2 text-sm",
                                         div { class: "flex justify-between",
                                             span { class: "text-gray-400", "Bucket" }
-                                            span { class: "text-gray-200 font-mono", "{info.bucket}" }
+                                            span { class: "text-gray-200 font-mono", "{info.cloud_home_bucket}" }
                                         }
                                         div { class: "flex justify-between",
                                             span { class: "text-gray-400", "Region" }
-                                            span { class: "text-gray-200 font-mono", "{info.region}" }
+                                            span { class: "text-gray-200 font-mono", "{info.cloud_home_region}" }
                                         }
-                                        if let Some(ref ep) = info.endpoint {
+                                        if let Some(ref ep) = info.cloud_home_endpoint {
                                             div { class: "flex justify-between",
                                                 span { class: "text-gray-400", "Endpoint" }
                                                 span { class: "text-gray-200 font-mono", "{ep}" }
@@ -490,6 +494,7 @@ pub fn SyncSectionView(
                                         }
                                     }
 
+        
                                     div { class: "flex gap-3 mt-3",
                                         Button {
                                             variant: ButtonVariant::Secondary,
@@ -539,7 +544,7 @@ pub fn SyncSectionView(
                             variant: ButtonVariant::Secondary,
                             size: ButtonSize::Small,
                             onclick: move |_| on_edit_start.call(()),
-                            if sync_configured {
+                            if cloud_home_configured {
                                 "Edit"
                             } else {
                                 "Configure"
@@ -676,22 +681,22 @@ pub fn SyncSectionView(
                             }
                         }
                     }
-                } else if sync_configured {
+                } else if cloud_home_configured {
                     // Show current config summary
                     div { class: "space-y-2 text-sm",
-                        if let Some(ref bucket) = sync_bucket {
+                        if let Some(ref bucket) = cloud_home_bucket {
                             div { class: "flex justify-between",
                                 span { class: "text-gray-400", "Bucket" }
                                 span { class: "text-gray-200 font-mono", "{bucket}" }
                             }
                         }
-                        if let Some(ref region) = sync_region {
+                        if let Some(ref region) = cloud_home_region {
                             div { class: "flex justify-between",
                                 span { class: "text-gray-400", "Region" }
                                 span { class: "text-gray-200 font-mono", "{region}" }
                             }
                         }
-                        if let Some(ref endpoint) = sync_endpoint {
+                        if let Some(ref endpoint) = cloud_home_endpoint {
                             div { class: "flex justify-between",
                                 span { class: "text-gray-400", "Endpoint" }
                                 span { class: "text-gray-200 font-mono", "{endpoint}" }
@@ -826,10 +831,10 @@ fn short_device_id(id: &str) -> String {
 /// Format share info as a text block for clipboard copy.
 fn format_share_text(info: &ShareInfo) -> String {
     let mut lines = vec![
-        format!("Bucket: {}", info.bucket),
-        format!("Region: {}", info.region),
+        format!("Bucket: {}", info.cloud_home_bucket),
+        format!("Region: {}", info.cloud_home_region),
     ];
-    if let Some(ref ep) = info.endpoint {
+    if let Some(ref ep) = info.cloud_home_endpoint {
         lines.push(format!("Endpoint: {ep}"));
     }
     lines.push(format!("Invitee key: {}", info.invitee_pubkey));
