@@ -1,6 +1,7 @@
 //! Settings mock component
 
 use super::framework::{ControlRegistryBuilder, MockPage, MockPanel};
+use bae_ui::stores::config::{FollowedLibraryInfo, LibrarySource};
 use bae_ui::stores::{DeviceActivityInfo, Member, MemberRole, SharedReleaseDisplay};
 use bae_ui::{
     AboutSectionView, BitTorrentSectionView, BitTorrentSettings, DiscogsSectionView, LibraryInfo,
@@ -46,9 +47,14 @@ pub fn SettingsMock(initial_state: Option<String>) -> Element {
                     SettingsTab::Library => rsx! {
                         LibrarySectionView {
                             libraries: mock_libraries(),
+                            followed_libraries: mock_followed_libraries(),
+                            active_source: LibrarySource::Local,
                             on_switch: |_| {},
                             on_create: |_| {},
                             on_join: |_| {},
+                            on_follow: |_| {},
+                            on_unfollow: |_| {},
+                            on_switch_source: |_| {},
                             on_rename: |_| {},
                             on_remove: |_| {},
                         }
@@ -273,6 +279,15 @@ fn mock_libraries() -> Vec<LibraryInfo> {
             is_active: false,
         },
     ]
+}
+
+fn mock_followed_libraries() -> Vec<FollowedLibraryInfo> {
+    vec![FollowedLibraryInfo {
+        id: "follow-1".to_string(),
+        name: "Friend's Library".to_string(),
+        server_url: "http://192.168.1.50:4533".to_string(),
+        username: "listener".to_string(),
+    }]
 }
 
 fn mock_members() -> Vec<Member> {

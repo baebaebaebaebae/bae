@@ -38,6 +38,9 @@ pub fn AlbumDetailView(
     /// Whether to show the "Copy Share Link" menu item
     #[props(default)]
     show_share_link: bool,
+    /// When true, hides edit/delete/export/storage/share actions (used for followed libraries)
+    #[props(default)]
+    read_only: bool,
     on_release_select: EventHandler<String>,
     on_album_deleted: EventHandler<()>,
     on_export_release: EventHandler<String>,
@@ -93,6 +96,7 @@ pub fn AlbumDetailView(
                 div { class: "w-full lg:flex-shrink-0 lg:w-[360px] lg:self-start lg:sticky lg:top-6",
                     AlbumInfoSection {
                         state,
+                        read_only,
                         is_deleting,
                         is_exporting,
                         on_export: on_export_release,
@@ -125,6 +129,7 @@ pub fn AlbumDetailView(
                 div { class: "flex-1 min-w-0",
                     ReleaseTabsSectionWrapper {
                         state,
+                        read_only,
                         is_deleting,
                         is_exporting,
                         export_error,
@@ -143,7 +148,8 @@ pub fn AlbumDetailView(
                         state,
                         tracks,
                         playback,
-                        show_share_link,
+                        show_share_link: show_share_link && !read_only,
+                        read_only,
                         on_track_play,
                         on_track_pause,
                         on_track_resume,
@@ -207,6 +213,7 @@ pub fn AlbumDetailView(
 #[component]
 fn AlbumInfoSection(
     state: ReadStore<AlbumDetailState>,
+    read_only: bool,
     is_deleting: Signal<bool>,
     is_exporting: Signal<bool>,
     on_export: EventHandler<String>,
@@ -249,6 +256,7 @@ fn AlbumInfoSection(
             is_exporting: *is_exporting.read(),
             first_release_id: releases.first().map(|r| r.id.clone()),
             has_single_release: releases.len() == 1,
+            read_only,
             on_export,
             on_delete_album,
             on_view_release_info,
@@ -280,6 +288,7 @@ fn AlbumInfoSection(
 #[component]
 fn ReleaseTabsSectionWrapper(
     state: ReadStore<AlbumDetailState>,
+    read_only: bool,
     is_deleting: Signal<bool>,
     is_exporting: Signal<bool>,
     export_error: Signal<Option<String>>,
@@ -312,6 +321,7 @@ fn ReleaseTabsSectionWrapper(
             releases,
             selected_release_id,
             on_release_select,
+            read_only,
             is_deleting,
             is_exporting,
             export_error,
@@ -335,6 +345,7 @@ fn TrackListSection(
     tracks: ReadStore<Vec<Track>>,
     playback: PlaybackDisplay,
     show_share_link: bool,
+    read_only: bool,
     on_track_play: EventHandler<String>,
     on_track_pause: EventHandler<()>,
     on_track_resume: EventHandler<()>,
@@ -431,6 +442,7 @@ fn TrackListSection(
                                 is_loading,
                                 show_spinner: is_loading,
                                 show_share_link,
+                                read_only,
                                 on_play: on_track_play,
                                 on_pause: on_track_pause,
                                 on_resume: on_track_resume,

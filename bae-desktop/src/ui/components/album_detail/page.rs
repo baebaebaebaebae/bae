@@ -6,9 +6,10 @@ use super::AlbumDetailView;
 use crate::ui::app_service::use_app;
 use crate::ui::Route;
 use bae_ui::display_types::{CoverChange, PlaybackDisplay};
+use bae_ui::stores::config::LibrarySource;
 use bae_ui::stores::{
-    AlbumDetailStateStoreExt, AppStateStoreExt, ConfigStateStoreExt, PlaybackStatus,
-    PlaybackUiStateStoreExt, StorageProfilesStateStoreExt,
+    AlbumDetailStateStoreExt, AppStateStoreExt, ConfigStateStoreExt, LibraryStateStoreExt,
+    PlaybackStatus, PlaybackUiStateStoreExt, StorageProfilesStateStoreExt,
 };
 use bae_ui::{ErrorToast, SuccessToast};
 use dioxus::prelude::*;
@@ -349,6 +350,10 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
     // Show share link menu item only when base URL is configured
     let show_share_link = config_store.share_base_url().read().is_some();
 
+    // Check if viewing a followed library (read-only mode)
+    let active_source = app.state.library().active_source().read().clone();
+    let is_followed = matches!(active_source, LibrarySource::Followed(_));
+
     // Available storage profiles for transfer
     let available_profiles = app.state.storage_profiles().profiles().read().clone();
 
@@ -379,6 +384,7 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
                 tracks,
                 playback: playback_display(),
                 show_share_link,
+                read_only: is_followed,
                 on_release_select,
                 on_album_deleted,
                 on_export_release,

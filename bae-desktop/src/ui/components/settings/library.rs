@@ -1,15 +1,20 @@
 //! Library settings section — business logic wrapper
 
 use bae_core::cloud_home::s3::S3CloudHome;
-use bae_core::config::Config;
+use bae_core::config::{Config, FollowedLibrary};
 use bae_core::encryption::EncryptionService;
 use bae_core::keys::KeyService;
 use bae_core::library_dir::LibraryDir;
+use bae_core::subsonic_client::SubsonicClient;
 use bae_core::sync::bucket::SyncBucketClient;
 use bae_core::sync::cloud_home_bucket::CloudHomeSyncBucket;
 use bae_core::sync::pull::pull_changes;
 use bae_core::sync::snapshot::bootstrap_from_snapshot;
-use bae_ui::{JoinLibraryView, JoinStatus, LibrarySectionView};
+use bae_ui::stores::config::{FollowedLibraryInfo, LibrarySource};
+use bae_ui::stores::{AppStateStoreExt, ConfigStateStoreExt, LibraryStateStoreExt};
+use bae_ui::{
+    FollowLibraryView, FollowTestStatus, JoinLibraryView, JoinStatus, LibrarySectionView,
+};
 use dioxus::prelude::*;
 use std::collections::HashMap;
 use std::ffi::CString;
@@ -31,11 +36,25 @@ fn discover_ui_libraries() -> Vec<bae_ui::LibraryInfo> {
         .collect()
 }
 
+/// Which sub-view the library settings section is showing.
+enum LibrarySubView {
+    /// Main library list with followed servers.
+    Main,
+    /// Join shared library form.
+    Join,
+    /// Follow server form.
+    Follow,
+}
+
 #[component]
 pub fn LibrarySection() -> Element {
     let app = use_app();
     let mut libraries = use_signal(discover_ui_libraries);
-    let mut showing_join = use_signal(|| false);
+    let mut sub_view = use_signal(|| LibrarySubView::Main);
+
+    // Read followed libraries and active source from store
+    let followed_libraries = app.state.config().followed_libraries().read().clone();
+    let active_source = app.state.library().active_source().read().clone();
 
     // Join form state
     let mut join_bucket = use_signal(String::new);
@@ -44,6 +63,14 @@ pub fn LibrarySection() -> Element {
     let mut join_access_key = use_signal(String::new);
     let mut join_secret_key = use_signal(String::new);
     let mut join_status = use_signal(|| Option::<JoinStatus>::None);
+
+    // Follow form state
+    let mut follow_name = use_signal(String::new);
+    let mut follow_url = use_signal(String::new);
+    let mut follow_username = use_signal(String::new);
+    let mut follow_password = use_signal(String::new);
+    let mut follow_test_status = use_signal(|| Option::<FollowTestStatus>::None);
+    let mut follow_saving = use_signal(|| false);
 
     let on_switch = {
         let app = app.clone();
@@ -94,18 +121,17 @@ pub fn LibrarySection() -> Element {
     };
 
     let on_join_start = move |_| {
-        // Reset join form state and show the form
         join_bucket.set(String::new());
         join_region.set(String::new());
         join_endpoint.set(String::new());
         join_access_key.set(String::new());
         join_secret_key.set(String::new());
         join_status.set(None);
-        showing_join.set(true);
+        sub_view.set(LibrarySubView::Join);
     };
 
     let on_join_cancel = move |_| {
-        showing_join.set(false);
+        sub_view.set(LibrarySubView::Main);
     };
 
     let on_join_submit = {
@@ -152,6 +178,141 @@ pub fn LibrarySection() -> Element {
         }
     };
 
+    // Follow form callbacks
+    let on_follow_start = move |_| {
+        follow_name.set(String::new());
+        follow_url.set(String::new());
+        follow_username.set(String::new());
+        follow_password.set(String::new());
+        follow_test_status.set(None);
+        follow_saving.set(false);
+        sub_view.set(LibrarySubView::Follow);
+    };
+
+    let on_follow_cancel = move |_| {
+        sub_view.set(LibrarySubView::Main);
+    };
+
+    let on_follow_test = move |_| {
+        let url = follow_url.read().clone();
+        let username = follow_username.read().clone();
+        let password = follow_password.read().clone();
+        follow_test_status.set(Some(FollowTestStatus::Testing));
+
+        spawn(async move {
+            let client = SubsonicClient::new(url, username, password);
+            match client.ping().await {
+                Ok(()) => follow_test_status.set(Some(FollowTestStatus::Success)),
+                Err(e) => follow_test_status.set(Some(FollowTestStatus::Error(format!("{e}")))),
+            }
+        });
+    };
+
+    let on_follow_save = {
+        let app = app.clone();
+        move |_| {
+            let name = follow_name.read().clone();
+            let url = follow_url.read().clone();
+            let username = follow_username.read().clone();
+            let password = follow_password.read().clone();
+            let mut config = app.config.clone();
+            let key_service = app.key_service.clone();
+            let state = app.state;
+
+            follow_saving.set(true);
+
+            let id = uuid::Uuid::new_v4().to_string();
+
+            // Save password to keyring
+            if let Err(e) = key_service.set_followed_password(&id, &password) {
+                error!("Failed to save followed library password: {e}");
+                follow_saving.set(false);
+                return;
+            }
+
+            // Save to config
+            let followed = FollowedLibrary {
+                id: id.clone(),
+                name: name.clone(),
+                server_url: url.clone(),
+                username: username.clone(),
+            };
+
+            if let Err(e) = config.add_followed_library(followed) {
+                error!("Failed to save followed library config: {e}");
+                follow_saving.set(false);
+                return;
+            }
+
+            info!("Added followed library '{name}' at {url}");
+
+            // Update store
+            let mut followed_list = state.read().config.followed_libraries.clone();
+            followed_list.push(FollowedLibraryInfo {
+                id,
+                name,
+                server_url: url,
+                username,
+            });
+            state.config().followed_libraries().set(followed_list);
+
+            follow_saving.set(false);
+            sub_view.set(LibrarySubView::Main);
+        }
+    };
+
+    let on_unfollow = {
+        let app = app.clone();
+        move |id: String| {
+            let mut config = app.config.clone();
+            let key_service = app.key_service.clone();
+            let state = app.state;
+
+            // Delete password from keyring
+            if let Err(e) = key_service.delete_followed_password(&id) {
+                error!("Failed to delete followed library password: {e}");
+            }
+
+            // Remove from config
+            if let Err(e) = config.remove_followed_library(&id) {
+                error!("Failed to remove followed library config: {e}");
+                return;
+            }
+
+            info!("Removed followed library {id}");
+
+            // Update store
+            let mut followed_list = state.read().config.followed_libraries.clone();
+            followed_list.retain(|f| f.id != id);
+            state.config().followed_libraries().set(followed_list);
+
+            // If we were browsing this library, switch back to local
+            if state.read().library.active_source == LibrarySource::Followed(id) {
+                state.library().active_source().set(LibrarySource::Local);
+                app.load_library();
+            }
+        }
+    };
+
+    let on_switch_source = {
+        let app = app.clone();
+        move |source: LibrarySource| {
+            let state = app.state;
+            state.library().active_source().set(source.clone());
+
+            match source {
+                LibrarySource::Local => {
+                    // Reload local library data
+                    app.load_library();
+                }
+                LibrarySource::Followed(ref id) => {
+                    // Load followed library data
+                    app.load_followed_library(id);
+                }
+            }
+        }
+    };
+
     let on_rename = move |(path, new_name): (String, String)| {
         let library_path = PathBuf::from(&path);
         if let Err(e) = Config::rename_library(&library_path, &new_name) {
@@ -174,7 +335,10 @@ pub fn LibrarySection() -> Element {
         libraries.set(discover_ui_libraries());
     };
 
-    if *showing_join.read() {
+    let is_join = matches!(&*sub_view.read(), LibrarySubView::Join);
+    let is_follow = matches!(&*sub_view.read(), LibrarySubView::Follow);
+
+    if is_join {
         rsx! {
             JoinLibraryView {
                 bucket: join_bucket.read().clone(),
@@ -192,13 +356,36 @@ pub fn LibrarySection() -> Element {
                 on_cancel: on_join_cancel,
             }
         }
+    } else if is_follow {
+        rsx! {
+            FollowLibraryView {
+                name: follow_name.read().clone(),
+                server_url: follow_url.read().clone(),
+                username: follow_username.read().clone(),
+                password: follow_password.read().clone(),
+                test_status: follow_test_status.read().clone(),
+                is_saving: *follow_saving.read(),
+                on_name_change: move |v| follow_name.set(v),
+                on_server_url_change: move |v| follow_url.set(v),
+                on_username_change: move |v| follow_username.set(v),
+                on_password_change: move |v| follow_password.set(v),
+                on_test: on_follow_test,
+                on_save: on_follow_save,
+                on_cancel: on_follow_cancel,
+            }
+        }
     } else {
         rsx! {
             LibrarySectionView {
                 libraries: libraries.read().clone(),
+                followed_libraries,
+                active_source,
                 on_switch,
                 on_create,
                 on_join: on_join_start,
+                on_follow: on_follow_start,
+                on_unfollow,
+                on_switch_source,
                 on_rename,
                 on_remove,
             }
@@ -442,6 +629,7 @@ async fn bootstrap_library(
         share_base_url: None,
         share_default_expiry_days: None,
         share_signing_key_version: 1,
+        followed_libraries: vec![],
     };
 
     config

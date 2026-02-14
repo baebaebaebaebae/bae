@@ -102,6 +102,12 @@ pub fn LibraryView(
     on_add_album_to_queue: EventHandler<String>,
     // Empty state action (e.g., navigate to import)
     on_empty_action: EventHandler<()>,
+    /// When true, hides import/edit actions (used when viewing a followed library)
+    #[props(default)]
+    read_only: bool,
+    /// Optional label to show next to the header (e.g. "Following")
+    #[props(default)]
+    header_badge: Option<String>,
 ) -> Element {
     // Use lenses to subscribe only to specific fields for routing decisions
     let loading = *state.loading().read();
@@ -122,7 +128,14 @@ pub fn LibraryView(
             div { class: "container mx-auto flex flex-col flex-1",
                 // Header row: title + controls on same line
                 div { class: "flex items-center justify-between mb-6",
-                    h1 { class: "text-3xl font-bold text-white", "Music Library" }
+                    div { class: "flex items-center gap-3",
+                        h1 { class: "text-3xl font-bold text-white", "Music Library" }
+                        if let Some(ref badge) = header_badge {
+                            span { class: "text-xs font-medium bg-accent/20 text-accent-soft px-2 py-0.5 rounded",
+                                "{badge}"
+                            }
+                        }
+                    }
 
                     if !loading && error.is_none() && !albums.is_empty() {
                         SortToolbar {
@@ -143,12 +156,16 @@ pub fn LibraryView(
                     }
                 } else if albums.is_empty() {
                     div { class: "flex-1 flex flex-col items-center justify-center",
-                        p { class: "text-gray-500 mb-4", "No albums in your library" }
-                        Button {
-                            variant: ButtonVariant::Primary,
-                            size: ButtonSize::Medium,
-                            onclick: move |_| on_empty_action.call(()),
-                            "Import"
+                        if read_only {
+                            p { class: "text-gray-500", "No albums available" }
+                        } else {
+                            p { class: "text-gray-500 mb-4", "No albums in your library" }
+                            Button {
+                                variant: ButtonVariant::Primary,
+                                size: ButtonSize::Medium,
+                                onclick: move |_| on_empty_action.call(()),
+                                "Import"
+                            }
                         }
                     }
                 } else {

@@ -17,6 +17,9 @@ pub fn ReleaseTabsSection(
     releases: Vec<Release>,
     selected_release_id: Option<String>,
     on_release_select: EventHandler<String>,
+    /// When true, hides edit/delete/export/storage/share actions
+    #[props(default)]
+    read_only: bool,
     is_deleting: ReadSignal<bool>,
     is_exporting: Signal<bool>,
     export_error: Signal<Option<String>>,
@@ -48,6 +51,7 @@ pub fn ReleaseTabsSection(
                                 key: "{release.id}",
                                 release: release.clone(),
                                 is_selected,
+                                read_only,
                                 show_release_dropdown,
                                 on_release_select: {
                                     let release_id = release_id.clone();
@@ -101,6 +105,7 @@ pub fn ReleaseTabsSection(
 fn ReleaseTab(
     release: Release,
     is_selected: bool,
+    read_only: bool,
     show_release_dropdown: Signal<Option<String>>,
     on_release_select: EventHandler<()>,
     is_deleting: ReadSignal<bool>,
@@ -155,110 +160,112 @@ fn ReleaseTab(
                     }
                 }
             }
-            ChromelessButton {
-                id: Some(anchor_id.clone()),
-                disabled: is_deleting(),
-                class: Some(menu_button_class.to_string()),
-                onclick: {
-                    let release_id = release_id.clone();
-                    move |evt: MouseEvent| {
-                        evt.stop_propagation();
-                        if !is_deleting() {
-                            let current = show_release_dropdown();
-                            if current.as_ref() == Some(&release_id) {
-                                show_release_dropdown.set(None);
-                            } else {
-                                show_release_dropdown.set(Some(release_id.clone()));
+            if !read_only {
+                ChromelessButton {
+                    id: Some(anchor_id.clone()),
+                    disabled: is_deleting(),
+                    class: Some(menu_button_class.to_string()),
+                    onclick: {
+                        let release_id = release_id.clone();
+                        move |evt: MouseEvent| {
+                            evt.stop_propagation();
+                            if !is_deleting() {
+                                let current = show_release_dropdown();
+                                if current.as_ref() == Some(&release_id) {
+                                    show_release_dropdown.set(None);
+                                } else {
+                                    show_release_dropdown.set(Some(release_id.clone()));
+                                }
                             }
                         }
-                    }
-                },
-                "⋮"
-            }
-
-            MenuDropdown {
-                anchor_id: anchor_id.clone(),
-                is_open,
-                on_close: move |_| show_release_dropdown.set(None),
-                placement: Placement::BottomEnd,
-
-                MenuItem {
-                    disabled: is_deleting() || is_exporting(),
-                    onclick: move |_| {
-                        show_release_dropdown.set(None);
-                        on_view_files.call(());
                     },
-                    "Info"
+                    "⋮"
                 }
-                MenuItem {
-                    disabled: is_deleting() || is_exporting(),
-                    onclick: move |_| {
-                        show_release_dropdown.set(None);
-                        on_view_storage.call(());
-                    },
-                    "Storage"
-                }
-                if is_on_cloud {
+
+                MenuDropdown {
+                    anchor_id: anchor_id.clone(),
+                    is_open,
+                    on_close: move |_| show_release_dropdown.set(None),
+                    placement: Placement::BottomEnd,
+
                     MenuItem {
                         disabled: is_deleting() || is_exporting(),
                         onclick: move |_| {
                             show_release_dropdown.set(None);
-                            on_share.call(());
+                            on_view_files.call(());
                         },
-                        "Share"
+                        "Info"
                     }
-                }
-                if torrent.has_torrent {
-                    if torrent.is_seeding {
-                        if let Some(ref handler) = on_stop_seeding {
-                            MenuItem {
-                                disabled: is_deleting() || is_exporting(),
-                                onclick: {
-                                    let handler = *handler;
-                                    move |_| {
-                                        show_release_dropdown.set(None);
-                                        handler.call(());
-                                    }
-                                },
-                                "Stop Seeding"
-                            }
-                        }
-                    } else {
-                        if let Some(ref handler) = on_start_seeding {
-                            MenuItem {
-                                disabled: is_deleting() || is_exporting(),
-                                onclick: {
-                                    let handler = *handler;
-                                    move |_| {
-                                        show_release_dropdown.set(None);
-                                        handler.call(());
-                                    }
-                                },
-                                "Start Seeding"
-                            }
+                    MenuItem {
+                        disabled: is_deleting() || is_exporting(),
+                        onclick: move |_| {
+                            show_release_dropdown.set(None);
+                            on_view_storage.call(());
+                        },
+                        "Storage"
+                    }
+                    if is_on_cloud {
+                        MenuItem {
+                            disabled: is_deleting() || is_exporting(),
+                            onclick: move |_| {
+                                show_release_dropdown.set(None);
+                                on_share.call(());
+                            },
+                            "Share"
                         }
                     }
-                }
-                MenuItem {
-                    disabled: is_deleting() || is_exporting(),
-                    onclick: move |_| {
-                        show_release_dropdown.set(None);
-                        on_export.call(());
-                    },
-                    if is_exporting() {
-                        "Exporting..."
-                    } else {
-                        "Export"
+                    if torrent.has_torrent {
+                        if torrent.is_seeding {
+                            if let Some(ref handler) = on_stop_seeding {
+                                MenuItem {
+                                    disabled: is_deleting() || is_exporting(),
+                                    onclick: {
+                                        let handler = *handler;
+                                        move |_| {
+                                            show_release_dropdown.set(None);
+                                            handler.call(());
+                                        }
+                                    },
+                                    "Stop Seeding"
+                                }
+                            }
+                        } else {
+                            if let Some(ref handler) = on_start_seeding {
+                                MenuItem {
+                                    disabled: is_deleting() || is_exporting(),
+                                    onclick: {
+                                        let handler = *handler;
+                                        move |_| {
+                                            show_release_dropdown.set(None);
+                                            handler.call(());
+                                        }
+                                    },
+                                    "Start Seeding"
+                                }
+                            }
+                        }
                     }
-                }
-                MenuItem {
-                    disabled: is_deleting() || is_exporting(),
-                    danger: true,
-                    onclick: move |_| {
-                        show_release_dropdown.set(None);
-                        on_delete.call(());
-                    },
-                    "Delete Release"
+                    MenuItem {
+                        disabled: is_deleting() || is_exporting(),
+                        onclick: move |_| {
+                            show_release_dropdown.set(None);
+                            on_export.call(());
+                        },
+                        if is_exporting() {
+                            "Exporting..."
+                        } else {
+                            "Export"
+                        }
+                    }
+                    MenuItem {
+                        disabled: is_deleting() || is_exporting(),
+                        danger: true,
+                        onclick: move |_| {
+                            show_release_dropdown.set(None);
+                            on_delete.call(());
+                        },
+                        "Delete Release"
+                    }
                 }
             }
         }

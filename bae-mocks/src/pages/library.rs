@@ -19,6 +19,7 @@ pub fn Library() -> Element {
         artists_by_album,
         loading: false,
         error: None,
+        active_source: bae_ui::stores::config::LibrarySource::Local,
     });
 
     let sort_state = use_store(LibrarySortState::default);

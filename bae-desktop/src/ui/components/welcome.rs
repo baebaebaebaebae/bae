@@ -393,6 +393,7 @@ async fn do_restore(
         share_base_url: None,
         share_default_expiry_days: None,
         share_signing_key_version: 1,
+        followed_libraries: vec![],
     };
     config.save_to_config_yaml()?;
 

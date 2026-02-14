@@ -6,7 +6,10 @@
 use crate::ui::app_service::use_app;
 use crate::ui::components::album_detail::utils::get_album_track_ids;
 use crate::ui::Route;
-use bae_ui::stores::{AppStateStoreExt, LibrarySortStateStoreExt, UiStateStoreExt};
+use bae_ui::stores::config::LibrarySource;
+use bae_ui::stores::{
+    AppStateStoreExt, LibrarySortStateStoreExt, LibraryStateStoreExt, UiStateStoreExt,
+};
 use bae_ui::LibraryView;
 use dioxus::prelude::*;
 
@@ -83,6 +86,15 @@ pub fn LibraryPage() -> Element {
         navigator().push(Route::ImportWorkflowManager {});
     };
 
+    // Check if viewing a followed library
+    let active_source = state.active_source().read().clone();
+    let is_followed = matches!(active_source, LibrarySource::Followed(_));
+    let header_badge = if is_followed {
+        Some("Following".to_string())
+    } else {
+        None
+    };
+
     rsx! {
         LibraryView {
             state,
@@ -94,6 +106,8 @@ pub fn LibraryPage() -> Element {
             on_play_album,
             on_add_album_to_queue,
             on_empty_action,
+            read_only: is_followed,
+            header_badge,
         }
     }
 }

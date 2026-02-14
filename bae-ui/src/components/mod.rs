@@ -74,9 +74,10 @@ pub use segmented_control::{Segment, SegmentedControl};
 pub use select::{Select, SelectOption};
 pub use settings::{
     AboutSectionView, BitTorrentSectionView, BitTorrentSettings, DiscogsSectionView,
-    JoinLibraryView, JoinStatus, LibraryInfo, LibrarySectionView, SettingsCard, SettingsSection,
-    SettingsTab, SettingsView, StorageLocation, StorageProfile, StorageProfileEditorView,
-    StorageProfilesSectionView, SubsonicSectionView, SyncBucketConfig, SyncSectionView,
+    FollowLibraryView, FollowTestStatus, JoinLibraryView, JoinStatus, LibraryInfo,
+    LibrarySectionView, SettingsCard, SettingsSection, SettingsTab, SettingsView, StorageLocation,
+    StorageProfile, StorageProfileEditorView, StorageProfilesSectionView, SubsonicSectionView,
+    SyncBucketConfig, SyncSectionView,
 };
 pub use success_toast::SuccessToast;
 pub use text_input::{TextInput, TextInputSize, TextInputType};

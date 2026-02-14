@@ -25,6 +25,9 @@ pub fn TrackRow(
     show_spinner: bool,
     /// Whether to show the "Copy Share Link" menu item
     show_share_link: bool,
+    /// When true, hides export and other local-only actions
+    #[props(default)]
+    read_only: bool,
     // Callbacks
     on_play: EventHandler<String>,
     on_pause: EventHandler<()>,
@@ -180,6 +183,7 @@ pub fn TrackRow(
                 TrackMenu {
                     track_id: track_id_for_menu,
                     show_share_link,
+                    read_only,
                     on_export,
                     on_add_next,
                     on_add_to_queue,
@@ -195,6 +199,7 @@ pub fn TrackRow(
 fn TrackMenu(
     track_id: String,
     show_share_link: bool,
+    read_only: bool,
     on_export: EventHandler<String>,
     on_add_next: EventHandler<String>,
     on_add_to_queue: EventHandler<String>,
@@ -227,15 +232,17 @@ fn TrackMenu(
             on_close: move |_| show_menu.set(false),
             placement: Placement::BottomEnd,
 
-            MenuItem {
-                onclick: {
-                    let track_id = track_id.clone();
-                    move |_| {
-                        show_menu.set(false);
-                        on_export.call(track_id.clone());
-                    }
-                },
-                "Export File"
+            if !read_only {
+                MenuItem {
+                    onclick: {
+                        let track_id = track_id.clone();
+                        move |_| {
+                            show_menu.set(false);
+                            on_export.call(track_id.clone());
+                        }
+                    },
+                    "Export File"
+                }
             }
             MenuItem {
                 onclick: {
