@@ -299,6 +299,9 @@ pub struct ConfigYaml {
     /// pCloud folder ID for the cloud home
     #[serde(default)]
     pub cloud_home_pcloud_folder_id: Option<u64>,
+    /// pCloud API host (e.g. "api.pcloud.com" or "eapi.pcloud.com" for EU)
+    #[serde(default)]
+    pub cloud_home_pcloud_api_host: Option<String>,
 
     /// Base URL for share links (e.g. "https://listen.example.com")
     #[serde(default)]
@@ -389,6 +392,8 @@ pub struct Config {
     pub cloud_home_onedrive_folder_id: Option<String>,
     /// pCloud folder ID for the cloud home
     pub cloud_home_pcloud_folder_id: Option<u64>,
+    /// pCloud API host (e.g. "api.pcloud.com" or "eapi.pcloud.com" for EU)
+    pub cloud_home_pcloud_api_host: Option<String>,
     /// Base URL for share links (e.g. "https://listen.example.com")
     pub share_base_url: Option<String>,
     /// Default expiry for share links in days (None = never expires)
@@ -578,6 +583,7 @@ impl Config {
             cloud_home_onedrive_drive_id: yaml_config.cloud_home_onedrive_drive_id,
             cloud_home_onedrive_folder_id: yaml_config.cloud_home_onedrive_folder_id,
             cloud_home_pcloud_folder_id: yaml_config.cloud_home_pcloud_folder_id,
+            cloud_home_pcloud_api_host: yaml_config.cloud_home_pcloud_api_host,
             share_base_url: yaml_config.share_base_url,
             share_default_expiry_days: yaml_config.share_default_expiry_days,
             share_signing_key_version: yaml_config.share_signing_key_version,
@@ -674,6 +680,7 @@ impl Config {
             cloud_home_onedrive_drive_id: self.cloud_home_onedrive_drive_id.clone(),
             cloud_home_onedrive_folder_id: self.cloud_home_onedrive_folder_id.clone(),
             cloud_home_pcloud_folder_id: self.cloud_home_pcloud_folder_id,
+            cloud_home_pcloud_api_host: self.cloud_home_pcloud_api_host.clone(),
             share_base_url: self.share_base_url.clone(),
             share_default_expiry_days: self.share_default_expiry_days,
             share_signing_key_version: self.share_signing_key_version,
@@ -733,6 +740,7 @@ impl Config {
             cloud_home_onedrive_drive_id: None,
             cloud_home_onedrive_folder_id: None,
             cloud_home_pcloud_folder_id: None,
+            cloud_home_pcloud_api_host: None,
             share_base_url: None,
             share_default_expiry_days: None,
             share_signing_key_version: 1,
@@ -920,6 +928,7 @@ mod tests {
             cloud_home_onedrive_drive_id: None,
             cloud_home_onedrive_folder_id: None,
             cloud_home_pcloud_folder_id: None,
+            cloud_home_pcloud_api_host: None,
             share_base_url: None,
             share_default_expiry_days: None,
             share_signing_key_version: 1,

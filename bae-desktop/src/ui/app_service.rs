@@ -1816,7 +1816,7 @@ impl AppService {
                         sign_in_onedrive(state, &key_service, &config).await
                     }
                     bae_ui::stores::config::CloudProvider::PCloud => {
-                        Err("pCloud sign-in is not yet implemented.".to_string())
+                        sign_in_pcloud(&key_service, &mut config, state).await
                     }
                     _ => Err("This provider does not use OAuth sign-in.".to_string()),
                 }
@@ -1846,6 +1846,7 @@ impl AppService {
         new_config.cloud_home_onedrive_drive_id = None;
         new_config.cloud_home_onedrive_folder_id = None;
         new_config.cloud_home_pcloud_folder_id = None;
+        new_config.cloud_home_pcloud_api_host = None;
 
         if let Err(e) = new_config.save() {
             tracing::error!("Failed to save config after disconnect: {e}");
@@ -3066,6 +3067,87 @@ async fn sign_in_onedrive(
 /// Hook to access the AppService from any component
 pub fn use_app() -> AppService {
     use_context::<AppService>()
+}
+
+// =============================================================================
+// pCloud OAuth Sign-In
+// =============================================================================
+
+/// Run the pCloud OAuth sign-in flow: authorize, create app folder, save config.
+async fn sign_in_pcloud(
+    key_service: &KeyService,
+    config: &mut config::Config,
+    state: Store<AppState>,
+) -> Result<(), String> {
+    use bae_core::cloud_home::pcloud::PCloudCloudHome;
+
+    let oauth_config = PCloudCloudHome::oauth_config();
+    let tokens = bae_core::oauth::authorize(&oauth_config)
+        .await
+        .map_err(|e| format!("pCloud authorization failed: {e}"))?;
+
+    // Persist the OAuth tokens to keyring
+    let token_json =
+        serde_json::to_string(&tokens).map_err(|e| format!("serialize tokens: {e}"))?;
+    key_service
+        .set_cloud_home_oauth_token(&token_json)
+        .map_err(|e| format!("failed to save OAuth token: {e}"))?;
+
+    // Determine API host from the token exchange response.
+    // pCloud's token response includes `locationid` but our generic OAuthTokens
+    // doesn't capture it. Default to US host; user can configure EU in settings
+    // if needed. In practice, the token_url host itself indicates the region --
+    // we used api.pcloud.com (US) for the exchange.
+    let api_host = "api.pcloud.com".to_string();
+
+    // Create the bae app folder in the user's pCloud root
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("https://{}/createfolderifnotexists", api_host))
+        .bearer_auth(&tokens.access_token)
+        .query(&[("folderid", "0"), ("name", "bae")])
+        .send()
+        .await
+        .map_err(|e| format!("failed to create pCloud folder: {e}"))?;
+
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| format!("read createfolder response: {e}"))?;
+
+    let json: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("parse createfolder response: {e}"))?;
+
+    let result = json["result"].as_u64().unwrap_or(999);
+    if result != 0 {
+        let error_msg = json["error"]
+            .as_str()
+            .unwrap_or("unknown error")
+            .to_string();
+        return Err(format!(
+            "pCloud createfolder failed (error {result}): {error_msg}"
+        ));
+    }
+
+    let folder_id = json["metadata"]["folderid"]
+        .as_u64()
+        .ok_or_else(|| "no folderid in createfolder response".to_string())?;
+
+    // Save config
+    config.cloud_provider = Some(config::CloudProvider::PCloud);
+    config.cloud_home_pcloud_folder_id = Some(folder_id);
+    config.cloud_home_pcloud_api_host = Some(api_host);
+    config.save().map_err(|e| format!("save config: {e}"))?;
+
+    // Update store
+    state
+        .config()
+        .cloud_provider()
+        .set(Some(bae_ui::stores::config::CloudProvider::PCloud));
+    state.sync().cloud_home_configured().set(true);
+
+    tracing::info!("pCloud sign-in complete, folder_id={folder_id}");
+    Ok(())
 }
 
 // =============================================================================

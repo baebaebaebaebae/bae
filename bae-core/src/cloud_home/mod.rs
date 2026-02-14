@@ -8,6 +8,7 @@
 pub mod dropbox;
 pub mod google_drive;
 pub mod onedrive;
+pub mod pcloud;
 pub mod s3;
 
 use async_trait::async_trait;
@@ -173,8 +174,25 @@ pub async fn create_cloud_home(
                 onedrive::OneDriveCloudHome::new(drive_id, folder_id, tokens, key_service.clone());
             Ok(Box::new(od))
         }
-        Some(CloudProvider::PCloud) => Err(CloudHomeError::Storage(
-            "pCloud is not yet implemented".to_string(),
-        )),
+        Some(CloudProvider::PCloud) => {
+            let folder_id = config.cloud_home_pcloud_folder_id.ok_or_else(|| {
+                CloudHomeError::Storage("pCloud folder ID not configured".to_string())
+            })?;
+
+            let api_host = config
+                .cloud_home_pcloud_api_host
+                .clone()
+                .unwrap_or_else(|| "api.pcloud.com".to_string());
+
+            let token_json = key_service.get_cloud_home_oauth_token().ok_or_else(|| {
+                CloudHomeError::Storage("pCloud OAuth token not in keyring".to_string())
+            })?;
+
+            let tokens: crate::oauth::OAuthTokens = serde_json::from_str(&token_json)
+                .map_err(|e| CloudHomeError::Storage(format!("invalid OAuth token JSON: {e}")))?;
+
+            let pc = pcloud::PCloudCloudHome::new(folder_id, api_host, tokens.access_token);
+            Ok(Box::new(pc))
+        }
     }
 }

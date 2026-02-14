@@ -227,8 +227,7 @@ pub fn SyncSection() -> Element {
             on_disconnect_provider: move |_| {
                 app_for_disconnect.disconnect_cloud_provider();
             },
-            on_use_icloud: // iCloud not yet implemented
-            |_| {},
+            on_use_icloud: |_| {},
 
             // S3 edit state
             is_editing: *is_editing.read(),
