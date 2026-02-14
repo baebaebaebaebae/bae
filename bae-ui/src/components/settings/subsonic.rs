@@ -12,11 +12,21 @@ pub fn SubsonicSectionView(
     enabled: bool,
     /// Port number
     port: u16,
+    /// Whether auth is enabled
+    auth_enabled: bool,
+    /// Configured username (display mode)
+    auth_username: Option<String>,
+    /// Whether a password is configured (display mode)
+    auth_password_set: bool,
     /// Whether currently in edit mode
     is_editing: bool,
     /// Temporary values while editing
     edit_enabled: bool,
     edit_port: String,
+    edit_auth_enabled: bool,
+    edit_username: String,
+    edit_password: String,
+    edit_password_confirm: String,
     /// State flags
     is_saving: bool,
     has_changes: bool,
@@ -43,7 +53,15 @@ pub fn SubsonicSectionView(
     on_share_base_url_change: EventHandler<String>,
     on_share_expiry_change: EventHandler<String>,
     on_invalidate_links: EventHandler<()>,
+    on_auth_enabled_change: EventHandler<bool>,
+    on_username_change: EventHandler<String>,
+    on_password_change: EventHandler<String>,
+    on_password_confirm_change: EventHandler<String>,
 ) -> Element {
+    let passwords_mismatch = !edit_password.is_empty() && edit_password != edit_password_confirm;
+    let needs_password = edit_auth_enabled && !auth_password_set && edit_password.is_empty();
+    let needs_username = edit_auth_enabled && edit_username.is_empty();
+
     rsx! {
         SettingsSection {
             h2 { class: "text-xl font-semibold text-white mb-6", "Subsonic Server" }
@@ -110,6 +128,90 @@ pub fn SubsonicSectionView(
                 }
             }
 
+            SettingsCard {
+                div { class: "flex items-center justify-between mb-4",
+                    h3 { class: "text-lg font-medium text-white", "Authentication" }
+                }
+
+                if is_editing {
+                    div { class: "space-y-4",
+                        div { class: "flex items-center gap-3",
+                            input {
+                                r#type: "checkbox",
+                                class: "w-4 h-4 rounded bg-gray-700 border-gray-600 text-indigo-600 focus:ring-indigo-500",
+                                checked: edit_auth_enabled,
+                                onchange: move |e| on_auth_enabled_change.call(e.checked()),
+                            }
+                            label { class: "text-sm text-gray-300", "Require authentication" }
+                        }
+
+                        if edit_auth_enabled {
+                            div { class: "flex items-center gap-4",
+                                label { class: "text-sm text-gray-400 w-32", "Username:" }
+                                input {
+                                    r#type: "text",
+                                    class: "flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                                    placeholder: "admin",
+                                    value: "{edit_username}",
+                                    oninput: move |e| on_username_change.call(e.value()),
+                                }
+                            }
+                            div { class: "flex items-center gap-4",
+                                label { class: "text-sm text-gray-400 w-32", "Password:" }
+                                input {
+                                    r#type: "password",
+                                    class: "flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                                    placeholder: if auth_password_set { "Leave blank to keep current" } else { "Enter password" },
+                                    value: "{edit_password}",
+                                    oninput: move |e| on_password_change.call(e.value()),
+                                }
+                            }
+                            div { class: "flex items-center gap-4",
+                                label { class: "text-sm text-gray-400 w-32", "Confirm:" }
+                                input {
+                                    r#type: "password",
+                                    class: "flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                                    placeholder: "Confirm password",
+                                    value: "{edit_password_confirm}",
+                                    oninput: move |e| on_password_confirm_change.call(e.value()),
+                                }
+                            }
+
+                            if passwords_mismatch {
+                                div { class: "text-sm text-red-400", "Passwords do not match" }
+                            }
+                            if needs_username {
+                                div { class: "text-sm text-red-400", "Username is required" }
+                            }
+                            if needs_password {
+                                div { class: "text-sm text-red-400", "Password is required" }
+                            }
+                        }
+                    }
+                } else {
+                    div { class: "space-y-2 text-sm",
+                        div { class: "flex items-center gap-2",
+                            span { class: "text-gray-400", "Authentication:" }
+                            span { class: if auth_enabled { "text-green-400" } else { "text-gray-500" },
+                                if auth_enabled {
+                                    "Enabled"
+                                } else {
+                                    "Disabled"
+                                }
+                            }
+                        }
+                        if auth_enabled {
+                            if let Some(username) = &auth_username {
+                                div { class: "flex items-center gap-2",
+                                    span { class: "text-gray-400", "Username:" }
+                                    span { class: "text-white", "{username}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             if is_editing {
                 if let Some(error) = save_error {
                     div { class: "p-3 bg-red-900/30 border border-red-700 rounded-lg text-sm text-red-300",
@@ -121,7 +223,7 @@ pub fn SubsonicSectionView(
                     Button {
                         variant: ButtonVariant::Primary,
                         size: ButtonSize::Medium,
-                        disabled: !has_changes || is_saving,
+                        disabled: !has_changes || is_saving || passwords_mismatch || needs_password || needs_username,
                         loading: is_saving,
                         onclick: move |_| on_save.call(()),
                         if is_saving {

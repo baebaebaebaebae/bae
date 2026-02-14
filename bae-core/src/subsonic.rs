@@ -5,8 +5,9 @@ use crate::share_token::{validate_share_token, ShareKind, ShareTokenError};
 use crate::storage::create_storage_reader;
 use axum::{
     body::Body,
-    extract::{Query, State},
+    extract::{Query, Request, State},
     http::StatusCode,
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::get,
     Json, Router,
@@ -14,6 +15,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio_util::io::ReaderStream;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, warn};
@@ -26,10 +28,33 @@ pub struct SubsonicState {
     pub key_service: crate::keys::KeyService,
     pub share_base_url: Option<String>,
     pub share_signing_key_version: u32,
+    pub auth: SubsonicAuth,
+}
+
+/// Subsonic authentication configuration
+#[derive(Clone)]
+pub struct SubsonicAuth {
+    pub enabled: bool,
+    pub username: Option<String>,
+    /// Raw password (stored securely in keyring; kept in memory for token auth verification)
+    pub password: Option<String>,
 }
 /// Common query parameters for Subsonic API
 #[derive(Debug, Deserialize)]
-pub struct SubsonicQuery {}
+pub struct SubsonicQuery {
+    /// Username
+    #[serde(default)]
+    pub u: Option<String>,
+    /// Password (plaintext or hex-encoded with "enc:" prefix)
+    #[serde(default)]
+    pub p: Option<String>,
+    /// Authentication token: md5(password + salt)
+    #[serde(default)]
+    pub t: Option<String>,
+    /// Salt for token-based auth
+    #[serde(default)]
+    pub s: Option<String>,
+}
 /// Standard Subsonic API response envelope
 #[derive(Debug, Serialize)]
 pub struct SubsonicResponse<T> {
@@ -137,6 +162,7 @@ pub fn create_router(
     key_service: crate::keys::KeyService,
     share_base_url: Option<String>,
     share_signing_key_version: u32,
+    auth: SubsonicAuth,
 ) -> Router {
     let state = SubsonicState {
         library_manager,
@@ -145,7 +171,9 @@ pub fn create_router(
         key_service,
         share_base_url,
         share_signing_key_version,
+        auth: auth.clone(),
     };
+    let auth = Arc::new(auth);
     Router::new()
         .route("/rest/ping", get(ping))
         .route("/rest/getLicense", get(get_license))
@@ -155,9 +183,129 @@ pub fn create_router(
         .route("/rest/getCoverArt", get(get_cover_art))
         .route("/rest/getShareInfo", get(get_share_info))
         .route("/rest/stream", get(stream_song))
+        .layer(middleware::from_fn(move |req, next| {
+            let auth = auth.clone();
+            auth_middleware(auth, req, next)
+        }))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
+/// Compute the MD5 hex digest of a string.
+fn md5_hex(input: &str) -> String {
+    use md5::Digest;
+    let hash = md5::Md5::digest(input.as_bytes());
+    hex::encode(hash)
+}
+
+/// Validate Subsonic authentication credentials against the configured auth.
+///
+/// Returns Ok(()) on success, or an error message on failure.
+///
+/// Supports two auth modes per the Subsonic API spec:
+/// - Password: `p` param (plaintext or hex-encoded with "enc:" prefix)
+/// - Token+salt: `t` = md5(password + salt), `s` = salt
+///
+/// Token auth requires the server to know the raw password (not just its hash),
+/// which is why we store the raw password in the keyring rather than an MD5 hash.
+pub fn validate_auth(auth: &SubsonicAuth, query: &SubsonicQuery) -> Result<(), &'static str> {
+    if !auth.enabled {
+        return Ok(());
+    }
+
+    let expected_username = match &auth.username {
+        Some(u) => u,
+        None => return Err("Server authentication is misconfigured"),
+    };
+
+    let expected_password = match &auth.password {
+        Some(p) => p,
+        None => return Err("Server authentication is misconfigured"),
+    };
+
+    let username = match &query.u {
+        Some(u) => u,
+        None => return Err("Wrong username or password"),
+    };
+
+    if username != expected_username {
+        return Err("Wrong username or password");
+    }
+
+    // Token-based auth: client sends t = md5(password + salt), s = salt
+    if let (Some(token), Some(salt)) = (&query.t, &query.s) {
+        let expected_token = md5_hex(&format!("{}{}", expected_password, salt));
+        if token == &expected_token {
+            return Ok(());
+        }
+
+        return Err("Wrong username or password");
+    }
+
+    // Password-based auth: p = password (optionally hex-encoded with "enc:" prefix)
+    if let Some(password) = &query.p {
+        let raw_password = if let Some(hex_encoded) = password.strip_prefix("enc:") {
+            match hex::decode(hex_encoded) {
+                Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
+                Err(_) => return Err("Wrong username or password"),
+            }
+        } else {
+            password.clone()
+        };
+
+        if raw_password == *expected_password {
+            return Ok(());
+        }
+
+        return Err("Wrong username or password");
+    }
+
+    Err("Wrong username or password")
+}
+
+/// Axum middleware that checks Subsonic authentication on every request.
+async fn auth_middleware(auth: Arc<SubsonicAuth>, req: Request, next: Next) -> Response {
+    if !auth.enabled {
+        return next.run(req).await;
+    }
+
+    // Share token requests carry their own HMAC-based authentication,
+    // so they bypass username/password auth.
+    let query_string = req.uri().query().unwrap_or("");
+    if query_string.contains("shareToken=") {
+        return next.run(req).await;
+    }
+
+    // Parse query string for auth params
+    let query: SubsonicQuery = match serde_urlencoded::from_str(query_string) {
+        Ok(q) => q,
+        Err(_) => {
+            return auth_error_response("Missing authentication parameters");
+        }
+    };
+
+    if let Err(message) = validate_auth(&auth, &query) {
+        return auth_error_response(message);
+    }
+
+    next.run(req).await
+}
+
+/// Build a Subsonic error response for authentication failures.
+fn auth_error_response(message: &str) -> Response {
+    let error = SubsonicError {
+        code: 40,
+        message: message.to_string(),
+    };
+    let response = SubsonicResponse {
+        subsonic_response: SubsonicResponseInner {
+            status: "failed".to_string(),
+            version: "1.16.1".to_string(),
+            data: serde_json::json!({ "error": error }),
+        },
+    };
+    (StatusCode::UNAUTHORIZED, Json(response)).into_response()
+}
+
 /// Validate a share token from query params. Returns the payload or an HTTP error response.
 #[allow(clippy::result_large_err)]
 fn validate_token(
@@ -1158,4 +1306,143 @@ async fn buffer_track_audio(
         audio_data.len()
     );
     Ok((audio_data, audio_format.content_type))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn auth_enabled(username: &str, password: &str) -> SubsonicAuth {
+        SubsonicAuth {
+            enabled: true,
+            username: Some(username.to_string()),
+            password: Some(password.to_string()),
+        }
+    }
+
+    fn auth_disabled() -> SubsonicAuth {
+        SubsonicAuth {
+            enabled: false,
+            username: None,
+            password: None,
+        }
+    }
+
+    #[test]
+    fn auth_disabled_passes_through() {
+        let auth = auth_disabled();
+        let query = SubsonicQuery {
+            u: None,
+            p: None,
+            t: None,
+            s: None,
+        };
+        assert!(validate_auth(&auth, &query).is_ok());
+    }
+
+    #[test]
+    fn auth_valid_plaintext_password() {
+        let auth = auth_enabled("admin", "secret123");
+        let query = SubsonicQuery {
+            u: Some("admin".to_string()),
+            p: Some("secret123".to_string()),
+            t: None,
+            s: None,
+        };
+        assert!(validate_auth(&auth, &query).is_ok());
+    }
+
+    #[test]
+    fn auth_invalid_plaintext_password() {
+        let auth = auth_enabled("admin", "secret123");
+        let query = SubsonicQuery {
+            u: Some("admin".to_string()),
+            p: Some("wrong".to_string()),
+            t: None,
+            s: None,
+        };
+        assert!(validate_auth(&auth, &query).is_err());
+    }
+
+    #[test]
+    fn auth_valid_hex_encoded_password() {
+        let auth = auth_enabled("admin", "secret123");
+        // "secret123" in hex
+        let hex_password = hex::encode("secret123");
+        let query = SubsonicQuery {
+            u: Some("admin".to_string()),
+            p: Some(format!("enc:{}", hex_password)),
+            t: None,
+            s: None,
+        };
+        assert!(validate_auth(&auth, &query).is_ok());
+    }
+
+    #[test]
+    fn auth_valid_token_and_salt() {
+        let auth = auth_enabled("admin", "secret123");
+        let salt = "randomsalt";
+        let token = md5_hex(&format!("secret123{}", salt));
+        let query = SubsonicQuery {
+            u: Some("admin".to_string()),
+            p: None,
+            t: Some(token),
+            s: Some(salt.to_string()),
+        };
+        assert!(validate_auth(&auth, &query).is_ok());
+    }
+
+    #[test]
+    fn auth_invalid_token() {
+        let auth = auth_enabled("admin", "secret123");
+        let query = SubsonicQuery {
+            u: Some("admin".to_string()),
+            p: None,
+            t: Some("badtoken".to_string()),
+            s: Some("somesalt".to_string()),
+        };
+        assert!(validate_auth(&auth, &query).is_err());
+    }
+
+    #[test]
+    fn auth_wrong_username() {
+        let auth = auth_enabled("admin", "secret123");
+        let query = SubsonicQuery {
+            u: Some("hacker".to_string()),
+            p: Some("secret123".to_string()),
+            t: None,
+            s: None,
+        };
+        assert!(validate_auth(&auth, &query).is_err());
+    }
+
+    #[test]
+    fn auth_missing_credentials() {
+        let auth = auth_enabled("admin", "secret123");
+        let query = SubsonicQuery {
+            u: None,
+            p: None,
+            t: None,
+            s: None,
+        };
+        assert!(validate_auth(&auth, &query).is_err());
+    }
+
+    #[test]
+    fn auth_missing_password_and_token() {
+        let auth = auth_enabled("admin", "secret123");
+        let query = SubsonicQuery {
+            u: Some("admin".to_string()),
+            p: None,
+            t: None,
+            s: None,
+        };
+        assert!(validate_auth(&auth, &query).is_err());
+    }
+
+    #[test]
+    fn md5_hex_produces_correct_hash() {
+        // Known MD5 hash for "password"
+        assert_eq!(md5_hex("password"), "5f4dcc3b5aa765d61d8327deb882cf99");
+    }
 }

@@ -385,6 +385,8 @@ async fn do_restore(
         subsonic_enabled: false,
         subsonic_port: 4533,
         subsonic_bind_address: "127.0.0.1".to_string(),
+        subsonic_auth_enabled: false,
+        subsonic_username: None,
         sync_s3_bucket: None,
         sync_s3_region: None,
         sync_s3_endpoint: None,

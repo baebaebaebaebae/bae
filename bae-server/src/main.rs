@@ -78,6 +78,16 @@ struct Args {
     /// Share token signing key version. Increment to invalidate all outstanding share links.
     #[arg(long, default_value = "1", env = "BAE_SHARE_SIGNING_KEY_VERSION")]
     share_signing_key_version: u32,
+
+    /// Subsonic username for authentication.
+    /// When both username and password are provided, authentication is required.
+    #[arg(long, env = "BAE_SUBSONIC_USERNAME")]
+    subsonic_username: Option<String>,
+
+    /// Subsonic password for authentication.
+    /// When both username and password are provided, authentication is required.
+    #[arg(long, env = "BAE_SUBSONIC_PASSWORD")]
+    subsonic_password: Option<String>,
 }
 
 fn configure_logging() {
@@ -195,6 +205,30 @@ async fn main() {
     let library_manager =
         SharedLibraryManager::new(LibraryManager::new(database, Some(encryption.clone())));
 
+    let auth = match (&args.subsonic_username, &args.subsonic_password) {
+        (Some(username), Some(password)) => {
+            info!("Subsonic authentication enabled for user: {username}");
+            bae_core::subsonic::SubsonicAuth {
+                enabled: true,
+                username: Some(username.clone()),
+                password: Some(password.clone()),
+            }
+        }
+        (Some(_), None) | (None, Some(_)) => {
+            warn!("Both --subsonic-username and --subsonic-password must be set to enable auth; running without authentication");
+            bae_core::subsonic::SubsonicAuth {
+                enabled: false,
+                username: None,
+                password: None,
+            }
+        }
+        (None, None) => bae_core::subsonic::SubsonicAuth {
+            enabled: false,
+            username: None,
+            password: None,
+        },
+    };
+
     let api_router = create_router(
         library_manager,
         Some(encryption),
@@ -202,6 +236,7 @@ async fn main() {
         key_service,
         args.share_base_url,
         args.share_signing_key_version,
+        auth,
     );
 
     // If --web-dir is provided, serve static files with SPA fallback.
