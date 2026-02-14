@@ -1,12 +1,13 @@
 //! Settings mock component
 
 use super::framework::{ControlRegistryBuilder, MockPage, MockPanel};
-use bae_ui::stores::config::{FollowedLibraryInfo, LibrarySource};
+use bae_ui::stores::config::{CloudProvider, FollowedLibraryInfo, LibrarySource};
 use bae_ui::stores::{DeviceActivityInfo, Member, MemberRole, SharedReleaseDisplay};
 use bae_ui::{
-    AboutSectionView, BitTorrentSectionView, BitTorrentSettings, DiscogsSectionView, LibraryInfo,
-    LibrarySectionView, SettingsTab, SettingsView, StorageLocation, StorageProfile,
-    StorageProfilesSectionView, SubsonicSectionView, SyncSectionView,
+    AboutSectionView, BitTorrentSectionView, BitTorrentSettings, CloudProviderOption,
+    DiscogsSectionView, LibraryInfo, LibrarySectionView, SettingsTab, SettingsView,
+    StorageLocation, StorageProfile, StorageProfilesSectionView, SubsonicSectionView,
+    SyncSectionView,
 };
 use dioxus::prelude::*;
 
@@ -112,35 +113,37 @@ pub fn SettingsMock(initial_state: Option<String>) -> Element {
                             is_removing_member: false,
                             removing_member_error: None,
                             on_sync_now: |_| {},
-                            cloud_home_bucket: Some("my-sync-bucket".to_string()),
-                            cloud_home_region: Some("us-east-1".to_string()),
-                            cloud_home_endpoint: Some("https://s3.example.com".to_string()),
                             cloud_home_configured: true,
+                            // Cloud provider picker
+                            cloud_provider: Some(CloudProvider::GoogleDrive),
+                            cloud_options: mock_cloud_options(),
+                            signing_in: false,
+                            sign_in_error: None,
+                            on_select_provider: |_| {},
+                            on_sign_in: |_| {},
+                            on_disconnect_provider: |_| {},
+                            on_use_icloud: |_| {},
+                            // S3 edit state
                             is_editing: false,
                             edit_bucket: String::new(),
                             edit_region: String::new(),
                             edit_endpoint: String::new(),
                             edit_access_key: String::new(),
                             edit_secret_key: String::new(),
-                            is_saving: false,
-                            save_error: None,
-                            is_testing: false,
-                            test_success: None,
-                            test_error: None,
-                            show_invite_form: false,
-                            invite_pubkey: String::new(),
-                            invite_role: MemberRole::Member,
-                            invite_status: None,
-                            share_info: None,
                             on_edit_start: |_| {},
                             on_cancel_edit: |_| {},
                             on_save_config: |_| {},
-                            on_test_connection: |_| {},
                             on_bucket_change: |_| {},
                             on_region_change: |_| {},
                             on_endpoint_change: |_| {},
                             on_access_key_change: |_| {},
                             on_secret_key_change: |_| {},
+                            // Invite
+                            show_invite_form: false,
+                            invite_pubkey: String::new(),
+                            invite_role: MemberRole::Member,
+                            invite_status: None,
+                            share_info: None,
                             on_toggle_invite_form: |_| {},
                             on_invite_pubkey_change: |_| {},
                             on_invite_role_change: |_| {},
@@ -330,6 +333,53 @@ fn mock_shared_releases() -> Vec<SharedReleaseDisplay> {
             region: "eu-west-1".to_string(),
             endpoint: Some("https://s3.example.com".to_string()),
             expires: None,
+        },
+    ]
+}
+
+fn mock_cloud_options() -> Vec<CloudProviderOption> {
+    vec![
+        CloudProviderOption {
+            provider: CloudProvider::ICloud,
+            label: "iCloud Drive",
+            description: "Automatic sync, no setup needed",
+            available: cfg!(target_os = "macos"),
+            connected_account: None,
+        },
+        CloudProviderOption {
+            provider: CloudProvider::GoogleDrive,
+            label: "Google Drive",
+            description: "Sign in to sync via Google Drive",
+            available: true,
+            connected_account: Some("user@gmail.com".to_string()),
+        },
+        CloudProviderOption {
+            provider: CloudProvider::Dropbox,
+            label: "Dropbox",
+            description: "Sign in to sync via Dropbox",
+            available: true,
+            connected_account: None,
+        },
+        CloudProviderOption {
+            provider: CloudProvider::OneDrive,
+            label: "OneDrive",
+            description: "Sign in to sync via OneDrive",
+            available: true,
+            connected_account: None,
+        },
+        CloudProviderOption {
+            provider: CloudProvider::PCloud,
+            label: "pCloud",
+            description: "Sign in to sync via pCloud",
+            available: true,
+            connected_account: None,
+        },
+        CloudProviderOption {
+            provider: CloudProvider::S3,
+            label: "S3-compatible",
+            description: "For Backblaze B2, Wasabi, MinIO, AWS, etc.",
+            available: true,
+            connected_account: None,
         },
     ]
 }

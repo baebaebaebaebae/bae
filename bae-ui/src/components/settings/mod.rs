@@ -5,6 +5,7 @@
 mod about;
 mod bittorrent;
 mod card;
+mod cloud_provider;
 mod discogs;
 mod follow_library;
 mod join_library;
@@ -17,6 +18,7 @@ mod view;
 pub use about::AboutSectionView;
 pub use bittorrent::{BitTorrentSectionView, BitTorrentSettings};
 pub use card::{SettingsCard, SettingsSection};
+pub use cloud_provider::{CloudProviderOption, CloudProviderPicker};
 pub use discogs::DiscogsSectionView;
 pub use follow_library::{FollowLibraryView, FollowTestStatus};
 pub use join_library::{JoinLibraryView, JoinStatus};

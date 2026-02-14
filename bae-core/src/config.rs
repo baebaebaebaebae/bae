@@ -178,6 +178,17 @@ pub fn init_keyring() {
     }
 }
 
+/// Cloud home provider selection.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum CloudProvider {
+    S3,
+    ICloud,
+    GoogleDrive,
+    Dropbox,
+    OneDrive,
+    PCloud,
+}
+
 /// Configuration errors
 #[derive(Error, Debug)]
 pub enum ConfigError {
@@ -260,7 +271,10 @@ pub struct ConfigYaml {
     #[serde(default)]
     pub subsonic_username: Option<String>,
 
-    // Cloud home S3 configuration (credentials stored in keyring)
+    // Cloud home configuration
+    /// Selected cloud provider for the cloud home. None = not configured.
+    #[serde(default)]
+    pub cloud_provider: Option<CloudProvider>,
     /// S3 bucket name for cloud home
     #[serde(default)]
     pub cloud_home_s3_bucket: Option<String>,
@@ -270,6 +284,21 @@ pub struct ConfigYaml {
     /// S3 endpoint for cloud home (for S3-compatible services)
     #[serde(default)]
     pub cloud_home_s3_endpoint: Option<String>,
+    /// Google Drive folder ID for the cloud home
+    #[serde(default)]
+    pub cloud_home_google_drive_folder_id: Option<String>,
+    /// Dropbox folder path for the cloud home
+    #[serde(default)]
+    pub cloud_home_dropbox_folder_path: Option<String>,
+    /// OneDrive drive ID for the cloud home
+    #[serde(default)]
+    pub cloud_home_onedrive_drive_id: Option<String>,
+    /// OneDrive folder ID for the cloud home
+    #[serde(default)]
+    pub cloud_home_onedrive_folder_id: Option<String>,
+    /// pCloud folder ID for the cloud home
+    #[serde(default)]
+    pub cloud_home_pcloud_folder_id: Option<u64>,
 
     /// Base URL for share links (e.g. "https://listen.example.com")
     #[serde(default)]
@@ -342,12 +371,24 @@ pub struct Config {
     pub subsonic_auth_enabled: bool,
     /// Subsonic username (password stored in keyring)
     pub subsonic_username: Option<String>,
+    /// Selected cloud provider for the cloud home. None = not configured.
+    pub cloud_provider: Option<CloudProvider>,
     /// S3 bucket name for cloud home
     pub cloud_home_s3_bucket: Option<String>,
     /// S3 region for cloud home
     pub cloud_home_s3_region: Option<String>,
     /// S3 endpoint for cloud home (for S3-compatible services)
     pub cloud_home_s3_endpoint: Option<String>,
+    /// Google Drive folder ID for the cloud home
+    pub cloud_home_google_drive_folder_id: Option<String>,
+    /// Dropbox folder path for the cloud home
+    pub cloud_home_dropbox_folder_path: Option<String>,
+    /// OneDrive drive ID for the cloud home
+    pub cloud_home_onedrive_drive_id: Option<String>,
+    /// OneDrive folder ID for the cloud home
+    pub cloud_home_onedrive_folder_id: Option<String>,
+    /// pCloud folder ID for the cloud home
+    pub cloud_home_pcloud_folder_id: Option<u64>,
     /// Base URL for share links (e.g. "https://listen.example.com")
     pub share_base_url: Option<String>,
     /// Default expiry for share links in days (None = never expires)
@@ -528,9 +569,15 @@ impl Config {
                 .unwrap_or_else(|| "127.0.0.1".to_string()),
             subsonic_auth_enabled: yaml_config.subsonic_auth_enabled,
             subsonic_username: yaml_config.subsonic_username,
+            cloud_provider: yaml_config.cloud_provider,
             cloud_home_s3_bucket: yaml_config.cloud_home_s3_bucket,
             cloud_home_s3_region: yaml_config.cloud_home_s3_region,
             cloud_home_s3_endpoint: yaml_config.cloud_home_s3_endpoint,
+            cloud_home_google_drive_folder_id: yaml_config.cloud_home_google_drive_folder_id,
+            cloud_home_dropbox_folder_path: yaml_config.cloud_home_dropbox_folder_path,
+            cloud_home_onedrive_drive_id: yaml_config.cloud_home_onedrive_drive_id,
+            cloud_home_onedrive_folder_id: yaml_config.cloud_home_onedrive_folder_id,
+            cloud_home_pcloud_folder_id: yaml_config.cloud_home_pcloud_folder_id,
             share_base_url: yaml_config.share_base_url,
             share_default_expiry_days: yaml_config.share_default_expiry_days,
             share_signing_key_version: yaml_config.share_signing_key_version,
@@ -542,12 +589,41 @@ impl Config {
         std::env::var("BAE_DEV_MODE").is_ok() || std::path::Path::new(".env").exists()
     }
 
-    /// Whether sync is configured: bucket, region, and keyring credentials all present.
+    /// Whether sync is configured: a cloud provider is selected with necessary credentials.
     pub fn sync_enabled(&self, key_service: &crate::keys::KeyService) -> bool {
-        self.cloud_home_s3_bucket.is_some()
-            && self.cloud_home_s3_region.is_some()
-            && key_service.get_cloud_home_access_key().is_some()
-            && key_service.get_cloud_home_secret_key().is_some()
+        match self.cloud_provider {
+            Some(CloudProvider::S3) => {
+                self.cloud_home_s3_bucket.is_some()
+                    && self.cloud_home_s3_region.is_some()
+                    && key_service.get_cloud_home_access_key().is_some()
+                    && key_service.get_cloud_home_secret_key().is_some()
+            }
+            Some(CloudProvider::GoogleDrive) => {
+                self.cloud_home_google_drive_folder_id.is_some()
+                    && key_service.get_cloud_home_oauth_token().is_some()
+            }
+            Some(CloudProvider::Dropbox) => {
+                self.cloud_home_dropbox_folder_path.is_some()
+                    && key_service.get_cloud_home_oauth_token().is_some()
+            }
+            Some(CloudProvider::OneDrive) => {
+                self.cloud_home_onedrive_drive_id.is_some()
+                    && self.cloud_home_onedrive_folder_id.is_some()
+                    && key_service.get_cloud_home_oauth_token().is_some()
+            }
+            Some(CloudProvider::PCloud) => {
+                self.cloud_home_pcloud_folder_id.is_some()
+                    && key_service.get_cloud_home_oauth_token().is_some()
+            }
+            Some(CloudProvider::ICloud) => true, // filesystem-based, no credentials
+            None => {
+                // Backwards compat: check S3 fields directly (pre-cloud_provider configs)
+                self.cloud_home_s3_bucket.is_some()
+                    && self.cloud_home_s3_region.is_some()
+                    && key_service.get_cloud_home_access_key().is_some()
+                    && key_service.get_cloud_home_secret_key().is_some()
+            }
+        }
     }
 
     pub fn save(&self) -> Result<(), ConfigError> {
@@ -589,9 +665,15 @@ impl Config {
             subsonic_bind_address: Some(self.subsonic_bind_address.clone()),
             subsonic_auth_enabled: self.subsonic_auth_enabled,
             subsonic_username: self.subsonic_username.clone(),
+            cloud_provider: self.cloud_provider.clone(),
             cloud_home_s3_bucket: self.cloud_home_s3_bucket.clone(),
             cloud_home_s3_region: self.cloud_home_s3_region.clone(),
             cloud_home_s3_endpoint: self.cloud_home_s3_endpoint.clone(),
+            cloud_home_google_drive_folder_id: self.cloud_home_google_drive_folder_id.clone(),
+            cloud_home_dropbox_folder_path: self.cloud_home_dropbox_folder_path.clone(),
+            cloud_home_onedrive_drive_id: self.cloud_home_onedrive_drive_id.clone(),
+            cloud_home_onedrive_folder_id: self.cloud_home_onedrive_folder_id.clone(),
+            cloud_home_pcloud_folder_id: self.cloud_home_pcloud_folder_id,
             share_base_url: self.share_base_url.clone(),
             share_default_expiry_days: self.share_default_expiry_days,
             share_signing_key_version: self.share_signing_key_version,
@@ -642,9 +724,15 @@ impl Config {
             subsonic_bind_address: "127.0.0.1".to_string(),
             subsonic_auth_enabled: false,
             subsonic_username: None,
+            cloud_provider: None,
             cloud_home_s3_bucket: None,
             cloud_home_s3_region: None,
             cloud_home_s3_endpoint: None,
+            cloud_home_google_drive_folder_id: None,
+            cloud_home_dropbox_folder_path: None,
+            cloud_home_onedrive_drive_id: None,
+            cloud_home_onedrive_folder_id: None,
+            cloud_home_pcloud_folder_id: None,
             share_base_url: None,
             share_default_expiry_days: None,
             share_signing_key_version: 1,
@@ -823,9 +911,15 @@ mod tests {
             subsonic_bind_address: "127.0.0.1".to_string(),
             subsonic_auth_enabled: false,
             subsonic_username: None,
+            cloud_provider: None,
             cloud_home_s3_bucket: None,
             cloud_home_s3_region: None,
             cloud_home_s3_endpoint: None,
+            cloud_home_google_drive_folder_id: None,
+            cloud_home_dropbox_folder_path: None,
+            cloud_home_onedrive_drive_id: None,
+            cloud_home_onedrive_folder_id: None,
+            cloud_home_pcloud_folder_id: None,
             share_base_url: None,
             share_default_expiry_days: None,
             share_signing_key_version: 1,

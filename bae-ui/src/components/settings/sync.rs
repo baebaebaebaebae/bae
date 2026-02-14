@@ -1,10 +1,12 @@
 //! Sync status and configuration section view
 
 use crate::components::icons::{CheckIcon, CopyIcon};
+use crate::components::settings::cloud_provider::{CloudProviderOption, CloudProviderPicker};
 use crate::components::{
     Button, ButtonSize, ButtonVariant, ChromelessButton, SettingsCard, SettingsSection, TextInput,
     TextInputSize, TextInputType,
 };
+use crate::stores::config::CloudProvider;
 use crate::stores::{
     DeviceActivityInfo, InviteStatus, Member, MemberRole, ShareInfo, SharedReleaseDisplay,
 };
@@ -38,17 +40,29 @@ pub fn SyncSectionView(
     on_copy_pubkey: EventHandler<()>,
 
     // --- Config display props ---
-    /// Current configured bucket name (from store). None if not configured.
-    cloud_home_bucket: Option<String>,
-    /// Current configured region (from store).
-    cloud_home_region: Option<String>,
-    /// Current configured endpoint (from store).
-    cloud_home_endpoint: Option<String>,
-    /// Whether sync is fully configured (bucket + region + credentials).
+    /// Whether sync is fully configured (cloud provider + credentials).
     cloud_home_configured: bool,
 
-    // --- Edit state props ---
-    /// Whether currently editing the sync config.
+    // --- Cloud provider props ---
+    /// Currently selected cloud provider.
+    cloud_provider: Option<CloudProvider>,
+    /// Available cloud provider options.
+    cloud_options: Vec<CloudProviderOption>,
+    /// Whether a cloud sign-in is in progress.
+    signing_in: bool,
+    /// Error from a cloud sign-in attempt.
+    sign_in_error: Option<String>,
+    /// Callback when user selects a provider.
+    on_select_provider: EventHandler<CloudProvider>,
+    /// Callback when user clicks sign in for an OAuth provider.
+    on_sign_in: EventHandler<CloudProvider>,
+    /// Callback when user disconnects the current provider.
+    on_disconnect_provider: EventHandler<()>,
+    /// Callback when user selects iCloud Drive.
+    on_use_icloud: EventHandler<()>,
+
+    // --- S3 edit state props (passed through to CloudProviderPicker) ---
+    /// Whether currently editing the S3 config.
     is_editing: bool,
     /// Edit field: bucket name.
     edit_bucket: String,
@@ -60,18 +74,6 @@ pub fn SyncSectionView(
     edit_access_key: String,
     /// Edit field: secret key.
     edit_secret_key: String,
-    /// Whether a save is in progress.
-    is_saving: bool,
-    /// Error from a save attempt.
-    save_error: Option<String>,
-
-    // --- Test connection state ---
-    /// Whether a connection test is in progress.
-    is_testing: bool,
-    /// Success message from a connection test.
-    test_success: Option<String>,
-    /// Error message from a connection test.
-    test_error: Option<String>,
 
     // --- Members props ---
     /// Current library members from membership chain. Empty if solo/not syncing.
@@ -102,7 +104,6 @@ pub fn SyncSectionView(
     on_edit_start: EventHandler<()>,
     on_cancel_edit: EventHandler<()>,
     on_save_config: EventHandler<SyncBucketConfig>,
-    on_test_connection: EventHandler<()>,
     on_bucket_change: EventHandler<String>,
     on_region_change: EventHandler<String>,
     on_endpoint_change: EventHandler<String>,
@@ -151,11 +152,6 @@ pub fn SyncSectionView(
             copied.set(false);
         });
     };
-
-    let has_required_fields = !edit_bucket.is_empty()
-        && !edit_region.is_empty()
-        && !edit_access_key.is_empty()
-        && !edit_secret_key.is_empty();
 
     let is_valid_invite_pubkey =
         invite_pubkey.len() == 64 && invite_pubkey.chars().all(|c| c.is_ascii_hexdigit());
@@ -341,6 +337,10 @@ pub fn SyncSectionView(
         
                 
                 
+                
+                
+                
+                
                                                             if let Some(ref err) = removing_member_error {
                                                                 div { class: "text-sm text-red-400 mb-3", "{err}" }
                                                             }
@@ -489,6 +489,7 @@ pub fn SyncSectionView(
                                     }
 
         
+        
                                     div { class: "flex gap-3 mt-3",
                                         Button {
                                             variant: ButtonVariant::Secondary,
@@ -524,191 +525,30 @@ pub fn SyncSectionView(
                 }
             }
 
-            // Sync bucket configuration card
-            SettingsCard {
-                div { class: "flex items-center justify-between mb-4",
-                    div {
-                        h3 { class: "text-lg font-medium text-white", "Sync Bucket" }
-                        p { class: "text-sm text-gray-400 mt-1",
-                            "S3-compatible bucket for syncing your library across devices"
-                        }
-                    }
-                    if !is_editing {
-                        Button {
-                            variant: ButtonVariant::Secondary,
-                            size: ButtonSize::Small,
-                            onclick: move |_| on_edit_start.call(()),
-                            if cloud_home_configured {
-                                "Edit"
-                            } else {
-                                "Configure"
-                            }
-                        }
-                    }
-                }
-
-                if is_editing {
-                    div { class: "space-y-4",
-                        div {
-                            label { class: "block text-sm font-medium text-gray-400 mb-2",
-                                "Bucket"
-                            }
-                            TextInput {
-                                value: edit_bucket.to_string(),
-                                on_input: move |v| on_bucket_change.call(v),
-                                size: TextInputSize::Medium,
-                                input_type: TextInputType::Text,
-                                placeholder: "my-sync-bucket",
-                            }
-                        }
-
-                        div {
-                            label { class: "block text-sm font-medium text-gray-400 mb-2",
-                                "Region"
-                            }
-                            TextInput {
-                                value: edit_region.to_string(),
-                                on_input: move |v| on_region_change.call(v),
-                                size: TextInputSize::Medium,
-                                input_type: TextInputType::Text,
-                                placeholder: "us-east-1",
-                            }
-                        }
-
-                        div {
-                            label { class: "block text-sm font-medium text-gray-400 mb-2",
-                                "Endpoint (optional)"
-                            }
-                            TextInput {
-                                value: edit_endpoint.to_string(),
-                                on_input: move |v| on_endpoint_change.call(v),
-                                size: TextInputSize::Medium,
-                                input_type: TextInputType::Text,
-                                placeholder: "https://s3.example.com",
-                            }
-                        }
-
-                        div {
-                            label { class: "block text-sm font-medium text-gray-400 mb-2",
-                                "Access Key"
-                            }
-                            TextInput {
-                                value: edit_access_key.to_string(),
-                                on_input: move |v| on_access_key_change.call(v),
-                                size: TextInputSize::Medium,
-                                input_type: TextInputType::Text,
-                                placeholder: "AKIA...",
-                            }
-                        }
-
-                        div {
-                            label { class: "block text-sm font-medium text-gray-400 mb-2",
-                                "Secret Key"
-                            }
-                            TextInput {
-                                value: edit_secret_key.to_string(),
-                                on_input: move |v| on_secret_key_change.call(v),
-                                size: TextInputSize::Medium,
-                                input_type: TextInputType::Password,
-                                placeholder: "Secret key",
-                            }
-                        }
-
-                        if let Some(ref err) = save_error {
-                            div { class: "p-3 bg-red-900/30 border border-red-700 rounded-lg text-sm text-red-300",
-                                "{err}"
-                            }
-                        }
-
-                        // Test connection result
-                        if let Some(ref msg) = test_success {
-                            div { class: "p-3 bg-green-900/30 border border-green-700 rounded-lg text-sm text-green-300",
-                                "{msg}"
-                            }
-                        }
-
-                        if let Some(ref err) = test_error {
-                            div { class: "p-3 bg-red-900/30 border border-red-700 rounded-lg text-sm text-red-300",
-                                "{err}"
-                            }
-                        }
-
-                        div { class: "flex gap-3",
-                            Button {
-                                variant: ButtonVariant::Primary,
-                                size: ButtonSize::Medium,
-                                disabled: !has_required_fields || is_saving,
-                                loading: is_saving,
-                                onclick: {
-                                    let config = SyncBucketConfig {
-                                        bucket: edit_bucket.to_string(),
-                                        region: edit_region.to_string(),
-                                        endpoint: edit_endpoint.to_string(),
-                                        access_key: edit_access_key.to_string(),
-                                        secret_key: edit_secret_key.to_string(),
-                                    };
-                                    move |_| on_save_config.call(config.clone())
-                                },
-                                if is_saving {
-                                    "Saving..."
-                                } else {
-                                    "Save"
-                                }
-                            }
-                            Button {
-                                variant: ButtonVariant::Secondary,
-                                size: ButtonSize::Medium,
-                                disabled: !has_required_fields || is_testing,
-                                loading: is_testing,
-                                onclick: move |_| on_test_connection.call(()),
-                                if is_testing {
-                                    "Testing..."
-                                } else {
-                                    "Test Connection"
-                                }
-                            }
-                            Button {
-                                variant: ButtonVariant::Secondary,
-                                size: ButtonSize::Medium,
-                                onclick: move |_| on_cancel_edit.call(()),
-                                "Cancel"
-                            }
-                        }
-                    }
-                } else if cloud_home_configured {
-                    // Show current config summary
-                    div { class: "space-y-2 text-sm",
-                        if let Some(ref bucket) = cloud_home_bucket {
-                            div { class: "flex justify-between",
-                                span { class: "text-gray-400", "Bucket" }
-                                span { class: "text-gray-200 font-mono", "{bucket}" }
-                            }
-                        }
-                        if let Some(ref region) = cloud_home_region {
-                            div { class: "flex justify-between",
-                                span { class: "text-gray-400", "Region" }
-                                span { class: "text-gray-200 font-mono", "{region}" }
-                            }
-                        }
-                        if let Some(ref endpoint) = cloud_home_endpoint {
-                            div { class: "flex justify-between",
-                                span { class: "text-gray-400", "Endpoint" }
-                                span { class: "text-gray-200 font-mono", "{endpoint}" }
-                            }
-                        }
-                    }
-                } else {
-                    p { class: "text-sm text-gray-500",
-                        "No sync bucket configured. Click Configure to set up syncing."
-                    }
-                }
-
-                div { class: "mt-6 p-4 bg-gray-700/50 rounded-lg",
-                    p { class: "text-sm text-gray-400",
-                        "The sync bucket must be created externally (e.g. in your S3 provider's console). "
-                        "bae uses this bucket to sync library metadata across your devices."
-                    }
-                }
+            // Cloud provider picker (replaces old S3-only sync bucket card)
+            CloudProviderPicker {
+                selected: cloud_provider,
+                options: cloud_options,
+                signing_in,
+                sign_in_error,
+                s3_is_editing: is_editing,
+                s3_bucket: edit_bucket,
+                s3_region: edit_region,
+                s3_endpoint: edit_endpoint,
+                s3_access_key: edit_access_key,
+                s3_secret_key: edit_secret_key,
+                on_select: move |p| on_select_provider.call(p),
+                on_sign_in: move |p| on_sign_in.call(p),
+                on_disconnect: move |_| on_disconnect_provider.call(()),
+                on_use_icloud: move |_| on_use_icloud.call(()),
+                on_s3_edit_start: move |_| on_edit_start.call(()),
+                on_s3_cancel: move |_| on_cancel_edit.call(()),
+                on_s3_save: move |config| on_save_config.call(config),
+                on_s3_bucket_change: move |v| on_bucket_change.call(v),
+                on_s3_region_change: move |v| on_region_change.call(v),
+                on_s3_endpoint_change: move |v| on_endpoint_change.call(v),
+                on_s3_access_key_change: move |v| on_access_key_change.call(v),
+                on_s3_secret_key_change: move |v| on_secret_key_change.call(v),
             }
 
             // Shared with Me

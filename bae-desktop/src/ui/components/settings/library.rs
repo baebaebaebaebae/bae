@@ -652,6 +652,7 @@ async fn bootstrap_library(
         subsonic_bind_address: "127.0.0.1".to_string(),
         subsonic_auth_enabled: false,
         subsonic_username: None,
+        cloud_provider: Some(bae_core::config::CloudProvider::S3),
         cloud_home_s3_bucket: Some(bucket.to_string()),
         cloud_home_s3_region: Some(region.to_string()),
         cloud_home_s3_endpoint: if endpoint.is_empty() {
@@ -659,6 +660,11 @@ async fn bootstrap_library(
         } else {
             Some(endpoint.to_string())
         },
+        cloud_home_google_drive_folder_id: None,
+        cloud_home_dropbox_folder_path: None,
+        cloud_home_onedrive_drive_id: None,
+        cloud_home_onedrive_folder_id: None,
+        cloud_home_pcloud_folder_id: None,
         share_base_url: None,
         share_default_expiry_days: None,
         share_signing_key_version: 1,
