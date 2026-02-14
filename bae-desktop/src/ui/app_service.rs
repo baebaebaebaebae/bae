@@ -1813,7 +1813,7 @@ impl AppService {
                         Ok(())
                     }
                     bae_ui::stores::config::CloudProvider::OneDrive => {
-                        Err("OneDrive sign-in is not yet implemented.".to_string())
+                        sign_in_onedrive(state, &key_service, &config).await
                     }
                     bae_ui::stores::config::CloudProvider::PCloud => {
                         Err("pCloud sign-in is not yet implemented.".to_string())
@@ -2936,6 +2936,131 @@ fn handle_import_progress(state: &Store<AppState>, event: ImportProgress) {
             state.album_detail().import_error().set(Some(error));
         }
     }
+}
+
+/// OneDrive sign-in flow: OAuth authorize, get drive, create app folder, persist config.
+async fn sign_in_onedrive(
+    state: Store<AppState>,
+    key_service: &KeyService,
+    config: &config::Config,
+) -> Result<(), String> {
+    let oauth_config = bae_core::cloud_home::onedrive::OneDriveCloudHome::oauth_config();
+
+    if oauth_config.client_id.is_empty() {
+        return Err("OneDrive sign-in requires a client_id. Not yet configured.".to_string());
+    }
+
+    // Step 1: OAuth authorization (opens browser)
+    let tokens = bae_core::oauth::authorize(&oauth_config)
+        .await
+        .map_err(|e| format!("OAuth authorization failed: {e}"))?;
+
+    let client = reqwest::Client::new();
+
+    // Step 2: Get the user's default drive
+    let drive_resp = client
+        .get("https://graph.microsoft.com/v1.0/me/drive")
+        .bearer_auth(&tokens.access_token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to get drive info: {e}"))?;
+
+    let drive_status = drive_resp.status();
+    let drive_body = drive_resp
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read drive response: {e}"))?;
+
+    if !drive_status.is_success() {
+        return Err(format!(
+            "Failed to get drive info (HTTP {drive_status}): {drive_body}"
+        ));
+    }
+
+    let drive_json: serde_json::Value = serde_json::from_str(&drive_body)
+        .map_err(|e| format!("Failed to parse drive response: {e}"))?;
+
+    let drive_id = drive_json["id"]
+        .as_str()
+        .ok_or_else(|| "Drive response missing 'id' field".to_string())?
+        .to_string();
+
+    let user_display = drive_json["owner"]["user"]["displayName"]
+        .as_str()
+        .or_else(|| drive_json["owner"]["user"]["email"].as_str())
+        .unwrap_or("OneDrive user")
+        .to_string();
+
+    // Step 3: Create the app folder in root (or find existing one)
+    let folder_name = "bae";
+    let create_resp = client
+        .post(format!(
+            "https://graph.microsoft.com/v1.0/drives/{}/root/children",
+            drive_id
+        ))
+        .bearer_auth(&tokens.access_token)
+        .json(&serde_json::json!({
+            "name": folder_name,
+            "folder": {},
+            "@microsoft.graph.conflictBehavior": "useExisting",
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to create app folder: {e}"))?;
+
+    let folder_status = create_resp.status();
+    let folder_body = create_resp
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read folder response: {e}"))?;
+
+    if !folder_status.is_success() {
+        return Err(format!(
+            "Failed to create app folder (HTTP {folder_status}): {folder_body}"
+        ));
+    }
+
+    let folder_json: serde_json::Value = serde_json::from_str(&folder_body)
+        .map_err(|e| format!("Failed to parse folder response: {e}"))?;
+
+    let folder_id = folder_json["id"]
+        .as_str()
+        .ok_or_else(|| "Folder response missing 'id' field".to_string())?
+        .to_string();
+
+    // Step 4: Save tokens to keyring
+    let token_json =
+        serde_json::to_string(&tokens).map_err(|e| format!("Failed to serialize tokens: {e}"))?;
+
+    key_service
+        .set_cloud_home_oauth_token(&token_json)
+        .map_err(|e| format!("Failed to save OAuth token: {e}"))?;
+
+    // Step 5: Save config
+    let mut new_config = config.clone();
+    new_config.cloud_provider = Some(bae_core::config::CloudProvider::OneDrive);
+    new_config.cloud_home_onedrive_drive_id = Some(drive_id);
+    new_config.cloud_home_onedrive_folder_id = Some(folder_id);
+
+    new_config
+        .save()
+        .map_err(|e| format!("Failed to save config: {e}"))?;
+
+    // Step 6: Update store
+    state
+        .config()
+        .cloud_provider()
+        .set(Some(bae_ui::stores::config::CloudProvider::OneDrive));
+    state
+        .config()
+        .cloud_account_display()
+        .set(Some(user_display));
+    state
+        .sync()
+        .cloud_home_configured()
+        .set(new_config.sync_enabled(key_service));
+
+    Ok(())
 }
 
 /// Hook to access the AppService from any component
