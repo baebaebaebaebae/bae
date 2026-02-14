@@ -598,19 +598,19 @@ impl AppService {
         // Sync config
         self.state
             .sync()
-            .sync_bucket()
-            .set(config.sync_s3_bucket.clone());
+            .cloud_home_bucket()
+            .set(config.cloud_home_s3_bucket.clone());
         self.state
             .sync()
-            .sync_region()
-            .set(config.sync_s3_region.clone());
+            .cloud_home_region()
+            .set(config.cloud_home_s3_region.clone());
         self.state
             .sync()
-            .sync_endpoint()
-            .set(config.sync_s3_endpoint.clone());
+            .cloud_home_endpoint()
+            .set(config.cloud_home_s3_endpoint.clone());
         self.state
             .sync()
-            .sync_configured()
+            .cloud_home_configured()
             .set(config.sync_enabled(&self.key_service));
 
         // Followed libraries
@@ -1231,19 +1231,19 @@ impl AppService {
         // Sync config might have changed via save_config too
         self.state
             .sync()
-            .sync_bucket()
-            .set(new_config.sync_s3_bucket.clone());
+            .cloud_home_bucket()
+            .set(new_config.cloud_home_s3_bucket.clone());
         self.state
             .sync()
-            .sync_region()
-            .set(new_config.sync_s3_region.clone());
+            .cloud_home_region()
+            .set(new_config.cloud_home_s3_region.clone());
         self.state
             .sync()
-            .sync_endpoint()
-            .set(new_config.sync_s3_endpoint.clone());
+            .cloud_home_endpoint()
+            .set(new_config.cloud_home_s3_endpoint.clone());
         self.state
             .sync()
-            .sync_configured()
+            .cloud_home_configured()
             .set(new_config.sync_enabled(&self.key_service));
     }
 
@@ -1421,8 +1421,11 @@ impl AppService {
                 // Create the invitation (validates chain, wraps key, uploads).
                 let invite_ts = hlc.now().to_string();
 
+                let cloud_home = sync_handle.bucket_client.cloud_home();
+
                 bae_core::sync::invite::create_invitation(
                     bucket,
+                    cloud_home,
                     &mut chain,
                     &keypair,
                     &invitee_pubkey_hex,
@@ -1454,9 +1457,15 @@ impl AppService {
                         .sync()
                         .share_info()
                         .set(Some(bae_ui::stores::ShareInfo {
-                            bucket: config.sync_s3_bucket.clone().unwrap_or_default(),
-                            region: config.sync_s3_region.clone().unwrap_or_default(),
-                            endpoint: config.sync_s3_endpoint.clone(),
+                            cloud_home_bucket: config
+                                .cloud_home_s3_bucket
+                                .clone()
+                                .unwrap_or_default(),
+                            cloud_home_region: config
+                                .cloud_home_s3_region
+                                .clone()
+                                .unwrap_or_default(),
+                            cloud_home_endpoint: config.cloud_home_s3_endpoint.clone(),
                             invitee_pubkey: invitee_pubkey_hex,
                         }));
 
@@ -1545,9 +1554,11 @@ impl AppService {
                     .map_err(|e| format!("Invalid membership chain: {e}"))?;
 
                 // Revoke the member (creates Remove entry, rotates key, re-wraps).
+                let cloud_home = sync_handle.bucket_client.cloud_home();
                 let revoke_ts = hlc.now().to_string();
                 let new_key = bae_core::sync::invite::revoke_member(
                     bucket,
+                    cloud_home,
                     &mut chain,
                     &keypair,
                     &revokee_pubkey,
@@ -1613,9 +1624,9 @@ impl AppService {
         let key_service = self.key_service.clone();
         let mut new_config = self.config.clone();
 
-        new_config.sync_s3_bucket = Some(config_data.bucket.clone());
-        new_config.sync_s3_region = Some(config_data.region.clone());
-        new_config.sync_s3_endpoint = if config_data.endpoint.is_empty() {
+        new_config.cloud_home_s3_bucket = Some(config_data.bucket.clone());
+        new_config.cloud_home_s3_region = Some(config_data.region.clone());
+        new_config.cloud_home_s3_endpoint = if config_data.endpoint.is_empty() {
             None
         } else {
             Some(config_data.endpoint.clone())
@@ -1628,28 +1639,28 @@ impl AppService {
 
         // Save credentials to keyring
         key_service
-            .set_sync_access_key(&config_data.access_key)
+            .set_cloud_home_access_key(&config_data.access_key)
             .map_err(|e| format!("Failed to save access key: {}", e))?;
         key_service
-            .set_sync_secret_key(&config_data.secret_key)
+            .set_cloud_home_secret_key(&config_data.secret_key)
             .map_err(|e| format!("Failed to save secret key: {}", e))?;
 
         // Update store
         state
             .sync()
-            .sync_bucket()
-            .set(new_config.sync_s3_bucket.clone());
+            .cloud_home_bucket()
+            .set(new_config.cloud_home_s3_bucket.clone());
         state
             .sync()
-            .sync_region()
-            .set(new_config.sync_s3_region.clone());
+            .cloud_home_region()
+            .set(new_config.cloud_home_s3_region.clone());
         state
             .sync()
-            .sync_endpoint()
-            .set(new_config.sync_s3_endpoint.clone());
+            .cloud_home_endpoint()
+            .set(new_config.cloud_home_s3_endpoint.clone());
         state
             .sync()
-            .sync_configured()
+            .cloud_home_configured()
             .set(new_config.sync_enabled(&key_service));
 
         Ok(())

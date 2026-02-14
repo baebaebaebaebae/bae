@@ -3,6 +3,7 @@
 /// `create_invitation()` is called by the library owner to invite a new member.
 /// `accept_invitation()` is called by the invitee to unwrap the library key.
 /// `revoke_member()` is called by the library owner to remove a member and rotate the key.
+use crate::cloud_home::{CloudHome, CloudHomeError, JoinInfo};
 use crate::encryption;
 use crate::keys::{self, KeyError, UserKeypair};
 use crate::sodium_ffi;
@@ -21,6 +22,8 @@ pub enum InviteError {
     Key(#[from] KeyError),
     #[error("Membership error: {0}")]
     Membership(#[from] MembershipError),
+    #[error("Cloud home error: {0}")]
+    CloudHome(#[from] CloudHomeError),
     #[error("Crypto error: {0}")]
     Crypto(String),
     #[error("User {0} is not a current member")]
@@ -73,18 +76,23 @@ async fn upload_membership_entry(
 
 /// Create an invitation for a new member.
 ///
-/// This wraps the library encryption key to the invitee's X25519 public key,
-/// creates and signs a membership entry (Add), validates it against the local
-/// chain, and only then uploads both to the bucket.
+/// This grants access on the cloud home, wraps the library encryption key
+/// to the invitee's X25519 public key, creates and signs a membership entry
+/// (Add), validates it against the local chain, and uploads both to the bucket.
+/// Returns the JoinInfo so the caller can share connection details with the invitee.
 pub async fn create_invitation(
     bucket: &dyn SyncBucketClient,
+    cloud_home: &dyn CloudHome,
     chain: &mut MembershipChain,
     owner_keypair: &UserKeypair,
     invitee_ed25519_pubkey: &str,
     role: MemberRole,
     encryption_key: &[u8; 32],
     timestamp: &str,
-) -> Result<(), InviteError> {
+) -> Result<JoinInfo, InviteError> {
+    // Grant access on the cloud home (no-op for S3, shares folder for consumer clouds).
+    let join_info = cloud_home.grant_access(invitee_ed25519_pubkey).await?;
+
     // Convert Ed25519 -> X25519 for sealed box encryption.
     let invitee_x25519_pk = ed25519_hex_to_x25519(invitee_ed25519_pubkey)?;
 
@@ -113,7 +121,7 @@ pub async fn create_invitation(
     let author_pubkey_hex = hex::encode(owner_keypair.public_key);
     upload_membership_entry(bucket, &entry, &author_pubkey_hex).await?;
 
-    Ok(())
+    Ok(join_info)
 }
 
 /// Accept an invitation by downloading and unwrapping the library encryption key.
@@ -143,15 +151,17 @@ pub async fn accept_invitation(
 }
 
 /// Revoke a member from the library. This:
-/// 1. Creates a Remove membership entry signed by the owner
-/// 2. Generates a new library encryption key
-/// 3. Re-wraps the new key to all remaining members
-/// 4. Deletes the revoked member's wrapped key
-/// 5. Uploads updated entries and keys
+/// 1. Revokes access on the cloud home
+/// 2. Creates a Remove membership entry signed by the owner
+/// 3. Generates a new library encryption key
+/// 4. Re-wraps the new key to all remaining members
+/// 5. Deletes the revoked member's wrapped key
+/// 6. Uploads updated entries and keys
 ///
 /// Returns the new encryption key (caller must persist it and start using it).
 pub async fn revoke_member(
     bucket: &dyn SyncBucketClient,
+    cloud_home: &dyn CloudHome,
     chain: &mut MembershipChain,
     owner_keypair: &UserKeypair,
     revokee_pubkey: &str,
@@ -172,6 +182,9 @@ pub async fn revoke_member(
     if remaining_owners == 0 {
         return Err(InviteError::LastOwner);
     }
+
+    // Revoke access on the cloud home (no-op for S3, removes share for consumer clouds).
+    cloud_home.revoke_access(revokee_pubkey).await?;
 
     // Create and sign a Remove entry.
     let mut entry = MembershipEntry {
@@ -211,8 +224,50 @@ pub async fn revoke_member(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cloud_home::{CloudHome, CloudHomeError, JoinInfo};
     use crate::sync::membership::MemberRole;
     use crate::sync::test_helpers::MockBucket;
+    use async_trait::async_trait;
+
+    /// Minimal CloudHome mock that returns a dummy S3 JoinInfo.
+    struct MockCloudHome;
+
+    #[async_trait]
+    impl CloudHome for MockCloudHome {
+        async fn write(&self, _key: &str, _data: Vec<u8>) -> Result<(), CloudHomeError> {
+            Ok(())
+        }
+        async fn read(&self, _key: &str) -> Result<Vec<u8>, CloudHomeError> {
+            Err(CloudHomeError::NotFound("mock".to_string()))
+        }
+        async fn read_range(
+            &self,
+            _key: &str,
+            _start: u64,
+            _end: u64,
+        ) -> Result<Vec<u8>, CloudHomeError> {
+            Err(CloudHomeError::NotFound("mock".to_string()))
+        }
+        async fn list(&self, _prefix: &str) -> Result<Vec<String>, CloudHomeError> {
+            Ok(vec![])
+        }
+        async fn delete(&self, _key: &str) -> Result<(), CloudHomeError> {
+            Ok(())
+        }
+        async fn exists(&self, _key: &str) -> Result<bool, CloudHomeError> {
+            Ok(false)
+        }
+        async fn grant_access(&self, _member_id: &str) -> Result<JoinInfo, CloudHomeError> {
+            Ok(JoinInfo::S3 {
+                bucket: "test-bucket".to_string(),
+                region: "us-east-1".to_string(),
+                endpoint: None,
+            })
+        }
+        async fn revoke_access(&self, _member_id: &str) -> Result<(), CloudHomeError> {
+            Ok(())
+        }
+    }
 
     /// Generate a keypair directly (bypasses KeyService env-var issues).
     fn gen_keypair() -> UserKeypair {
@@ -262,6 +317,7 @@ mod tests {
         // Owner invites the new member.
         create_invitation(
             &bucket,
+            &MockCloudHome,
             &mut chain,
             &owner,
             &pubkey_hex(&invitee),
@@ -299,6 +355,7 @@ mod tests {
 
         create_invitation(
             &bucket,
+            &MockCloudHome,
             &mut chain,
             &owner,
             &pubkey_hex(&invitee),
@@ -323,6 +380,7 @@ mod tests {
 
         let result = create_invitation(
             &bucket,
+            &MockCloudHome,
             &mut chain,
             &owner,
             "not-valid-hex",
@@ -348,6 +406,7 @@ mod tests {
         // Add member first.
         create_invitation(
             &bucket,
+            &MockCloudHome,
             &mut chain,
             &owner,
             &pubkey_hex(&member),
@@ -361,6 +420,7 @@ mod tests {
         // Member (not owner) tries to invite someone.
         let result = create_invitation(
             &bucket,
+            &MockCloudHome,
             &mut chain,
             &member,
             &pubkey_hex(&invitee),
@@ -384,6 +444,7 @@ mod tests {
 
         create_invitation(
             &bucket,
+            &MockCloudHome,
             &mut chain,
             &owner,
             &pubkey_hex(&invitee),
@@ -419,6 +480,7 @@ mod tests {
         // Owner invites the member.
         create_invitation(
             &bucket,
+            &MockCloudHome,
             &mut chain,
             &owner,
             &pubkey_hex(&member),
@@ -436,6 +498,7 @@ mod tests {
         // Owner revokes the member.
         let new_key = revoke_member(
             &bucket,
+            &MockCloudHome,
             &mut chain,
             &owner,
             &pubkey_hex(&member),
@@ -486,6 +549,7 @@ mod tests {
         // Invite two members.
         create_invitation(
             &bucket,
+            &MockCloudHome,
             &mut chain,
             &owner,
             &pubkey_hex(&member1),
@@ -498,6 +562,7 @@ mod tests {
 
         create_invitation(
             &bucket,
+            &MockCloudHome,
             &mut chain,
             &owner,
             &pubkey_hex(&member2),
@@ -511,6 +576,7 @@ mod tests {
         // Revoke member1.
         let new_key = revoke_member(
             &bucket,
+            &MockCloudHome,
             &mut chain,
             &owner,
             &pubkey_hex(&member1),
@@ -541,6 +607,7 @@ mod tests {
 
         let result = revoke_member(
             &bucket,
+            &MockCloudHome,
             &mut chain,
             &owner,
             &pubkey_hex(&outsider),
@@ -562,6 +629,7 @@ mod tests {
         // Add a regular member.
         create_invitation(
             &bucket,
+            &MockCloudHome,
             &mut chain,
             &owner,
             &pubkey_hex(&member),
@@ -575,6 +643,7 @@ mod tests {
         // Owner tries to revoke themselves (the only owner).
         let result = revoke_member(
             &bucket,
+            &MockCloudHome,
             &mut chain,
             &owner,
             &pubkey_hex(&owner),
@@ -597,6 +666,7 @@ mod tests {
         // Add two members.
         create_invitation(
             &bucket,
+            &MockCloudHome,
             &mut chain,
             &owner,
             &pubkey_hex(&member1),
@@ -609,6 +679,7 @@ mod tests {
 
         create_invitation(
             &bucket,
+            &MockCloudHome,
             &mut chain,
             &owner,
             &pubkey_hex(&member2),
@@ -622,6 +693,7 @@ mod tests {
         // Member (not owner) tries to revoke another member.
         let result = revoke_member(
             &bucket,
+            &MockCloudHome,
             &mut chain,
             &member1,
             &pubkey_hex(&member2),

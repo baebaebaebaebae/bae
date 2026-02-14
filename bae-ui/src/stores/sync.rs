@@ -39,12 +39,12 @@ pub enum InviteStatus {
     Error(String),
 }
 
-/// Bucket coordinates to share with an invitee after a successful invite.
+/// Cloud home coordinates to share with an invitee after a successful invite.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShareInfo {
-    pub bucket: String,
-    pub region: String,
-    pub endpoint: Option<String>,
+    pub cloud_home_bucket: String,
+    pub cloud_home_region: String,
+    pub cloud_home_endpoint: Option<String>,
     pub invitee_pubkey: String,
 }
 
@@ -77,15 +77,15 @@ pub struct SyncState {
     /// Current library members (from membership chain). Empty if solo or not syncing.
     pub members: Vec<Member>,
 
-    // Sync bucket configuration (mirrors Config, for UI display)
-    /// S3 bucket name for sync.
-    pub sync_bucket: Option<String>,
-    /// S3 region for sync bucket.
-    pub sync_region: Option<String>,
-    /// S3 endpoint for sync bucket.
-    pub sync_endpoint: Option<String>,
-    /// Whether sync is fully configured (bucket + region + credentials present).
-    pub sync_configured: bool,
+    // Cloud home configuration (mirrors Config, for UI display)
+    /// S3 bucket name for cloud home.
+    pub cloud_home_bucket: Option<String>,
+    /// S3 region for cloud home.
+    pub cloud_home_region: Option<String>,
+    /// S3 endpoint for cloud home.
+    pub cloud_home_endpoint: Option<String>,
+    /// Whether cloud home is fully configured (bucket + region + credentials present).
+    pub cloud_home_configured: bool,
 
     // Invite flow state
     /// Current invite operation status.

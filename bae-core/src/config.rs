@@ -260,16 +260,16 @@ pub struct ConfigYaml {
     #[serde(default)]
     pub subsonic_username: Option<String>,
 
-    // Sync bucket S3 configuration (credentials stored in keyring)
-    /// S3 bucket name for changeset sync
+    // Cloud home S3 configuration (credentials stored in keyring)
+    /// S3 bucket name for cloud home
     #[serde(default)]
-    pub sync_s3_bucket: Option<String>,
-    /// S3 region for sync bucket
+    pub cloud_home_s3_bucket: Option<String>,
+    /// S3 region for cloud home
     #[serde(default)]
-    pub sync_s3_region: Option<String>,
-    /// S3 endpoint for sync bucket (for S3-compatible services)
+    pub cloud_home_s3_region: Option<String>,
+    /// S3 endpoint for cloud home (for S3-compatible services)
     #[serde(default)]
-    pub sync_s3_endpoint: Option<String>,
+    pub cloud_home_s3_endpoint: Option<String>,
 
     /// Base URL for share links (e.g. "https://listen.example.com")
     #[serde(default)]
@@ -342,12 +342,12 @@ pub struct Config {
     pub subsonic_auth_enabled: bool,
     /// Subsonic username (password stored in keyring)
     pub subsonic_username: Option<String>,
-    /// S3 bucket name for changeset sync
-    pub sync_s3_bucket: Option<String>,
-    /// S3 region for sync bucket
-    pub sync_s3_region: Option<String>,
-    /// S3 endpoint for sync bucket (for S3-compatible services)
-    pub sync_s3_endpoint: Option<String>,
+    /// S3 bucket name for cloud home
+    pub cloud_home_s3_bucket: Option<String>,
+    /// S3 region for cloud home
+    pub cloud_home_s3_region: Option<String>,
+    /// S3 endpoint for cloud home (for S3-compatible services)
+    pub cloud_home_s3_endpoint: Option<String>,
     /// Base URL for share links (e.g. "https://listen.example.com")
     pub share_base_url: Option<String>,
     /// Default expiry for share links in days (None = never expires)
@@ -407,25 +407,25 @@ impl Config {
             config.torrent_bind_interface = Some(v);
         }
 
-        if let Some(v) = std::env::var("BAE_SYNC_S3_BUCKET")
+        if let Some(v) = std::env::var("BAE_CLOUD_HOME_S3_BUCKET")
             .ok()
             .filter(|s| !s.is_empty())
         {
-            config.sync_s3_bucket = Some(v);
+            config.cloud_home_s3_bucket = Some(v);
         }
 
-        if let Some(v) = std::env::var("BAE_SYNC_S3_REGION")
+        if let Some(v) = std::env::var("BAE_CLOUD_HOME_S3_REGION")
             .ok()
             .filter(|s| !s.is_empty())
         {
-            config.sync_s3_region = Some(v);
+            config.cloud_home_s3_region = Some(v);
         }
 
-        if let Some(v) = std::env::var("BAE_SYNC_S3_ENDPOINT")
+        if let Some(v) = std::env::var("BAE_CLOUD_HOME_S3_ENDPOINT")
             .ok()
             .filter(|s| !s.is_empty())
         {
-            config.sync_s3_endpoint = Some(v);
+            config.cloud_home_s3_endpoint = Some(v);
         }
 
         if let Some(v) = std::env::var("BAE_SHARE_BASE_URL")
@@ -528,9 +528,9 @@ impl Config {
                 .unwrap_or_else(|| "127.0.0.1".to_string()),
             subsonic_auth_enabled: yaml_config.subsonic_auth_enabled,
             subsonic_username: yaml_config.subsonic_username,
-            sync_s3_bucket: yaml_config.sync_s3_bucket,
-            sync_s3_region: yaml_config.sync_s3_region,
-            sync_s3_endpoint: yaml_config.sync_s3_endpoint,
+            cloud_home_s3_bucket: yaml_config.cloud_home_s3_bucket,
+            cloud_home_s3_region: yaml_config.cloud_home_s3_region,
+            cloud_home_s3_endpoint: yaml_config.cloud_home_s3_endpoint,
             share_base_url: yaml_config.share_base_url,
             share_default_expiry_days: yaml_config.share_default_expiry_days,
             share_signing_key_version: yaml_config.share_signing_key_version,
@@ -544,10 +544,10 @@ impl Config {
 
     /// Whether sync is configured: bucket, region, and keyring credentials all present.
     pub fn sync_enabled(&self, key_service: &crate::keys::KeyService) -> bool {
-        self.sync_s3_bucket.is_some()
-            && self.sync_s3_region.is_some()
-            && key_service.get_sync_access_key().is_some()
-            && key_service.get_sync_secret_key().is_some()
+        self.cloud_home_s3_bucket.is_some()
+            && self.cloud_home_s3_region.is_some()
+            && key_service.get_cloud_home_access_key().is_some()
+            && key_service.get_cloud_home_secret_key().is_some()
     }
 
     pub fn save(&self) -> Result<(), ConfigError> {
@@ -589,9 +589,9 @@ impl Config {
             subsonic_bind_address: Some(self.subsonic_bind_address.clone()),
             subsonic_auth_enabled: self.subsonic_auth_enabled,
             subsonic_username: self.subsonic_username.clone(),
-            sync_s3_bucket: self.sync_s3_bucket.clone(),
-            sync_s3_region: self.sync_s3_region.clone(),
-            sync_s3_endpoint: self.sync_s3_endpoint.clone(),
+            cloud_home_s3_bucket: self.cloud_home_s3_bucket.clone(),
+            cloud_home_s3_region: self.cloud_home_s3_region.clone(),
+            cloud_home_s3_endpoint: self.cloud_home_s3_endpoint.clone(),
             share_base_url: self.share_base_url.clone(),
             share_default_expiry_days: self.share_default_expiry_days,
             share_signing_key_version: self.share_signing_key_version,
@@ -642,9 +642,9 @@ impl Config {
             subsonic_bind_address: "127.0.0.1".to_string(),
             subsonic_auth_enabled: false,
             subsonic_username: None,
-            sync_s3_bucket: None,
-            sync_s3_region: None,
-            sync_s3_endpoint: None,
+            cloud_home_s3_bucket: None,
+            cloud_home_s3_region: None,
+            cloud_home_s3_endpoint: None,
             share_base_url: None,
             share_default_expiry_days: None,
             share_signing_key_version: 1,
@@ -823,9 +823,9 @@ mod tests {
             subsonic_bind_address: "127.0.0.1".to_string(),
             subsonic_auth_enabled: false,
             subsonic_username: None,
-            sync_s3_bucket: None,
-            sync_s3_region: None,
-            sync_s3_endpoint: None,
+            cloud_home_s3_bucket: None,
+            cloud_home_s3_region: None,
+            cloud_home_s3_endpoint: None,
             share_base_url: None,
             share_default_expiry_days: None,
             share_signing_key_version: 1,
