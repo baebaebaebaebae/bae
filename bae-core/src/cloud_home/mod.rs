@@ -5,6 +5,7 @@
 //! semantics. Higher-level concerns live in `CloudHomeSyncBucket` which wraps
 //! any `dyn CloudHome`.
 
+pub mod dropbox;
 pub mod google_drive;
 pub mod s3;
 
@@ -131,9 +132,24 @@ pub async fn create_cloud_home(
         Some(CloudProvider::ICloud) => Err(CloudHomeError::Storage(
             "iCloud Drive is not yet implemented".to_string(),
         )),
-        Some(CloudProvider::Dropbox) => Err(CloudHomeError::Storage(
-            "Dropbox is not yet implemented".to_string(),
-        )),
+        Some(CloudProvider::Dropbox) => {
+            let folder_path = config
+                .cloud_home_dropbox_folder_path
+                .clone()
+                .ok_or_else(|| {
+                    CloudHomeError::Storage("Dropbox folder path not configured".to_string())
+                })?;
+
+            let token_json = key_service.get_cloud_home_oauth_token().ok_or_else(|| {
+                CloudHomeError::Storage("Dropbox OAuth token not in keyring".to_string())
+            })?;
+
+            let tokens: crate::oauth::OAuthTokens = serde_json::from_str(&token_json)
+                .map_err(|e| CloudHomeError::Storage(format!("invalid OAuth token JSON: {e}")))?;
+
+            let db = dropbox::DropboxCloudHome::new(folder_path, tokens, key_service.clone());
+            Ok(Box::new(db))
+        }
         Some(CloudProvider::OneDrive) => Err(CloudHomeError::Storage(
             "OneDrive is not yet implemented".to_string(),
         )),

@@ -21,6 +21,10 @@ pub struct OAuthConfig {
     pub scopes: Vec<String>,
     /// Localhost callback port. Default: 19284.
     pub redirect_port: u16,
+    /// Extra params appended to the authorization URL (e.g. Dropbox's
+    /// `token_access_type=offline`). Google uses `access_type=offline` which
+    /// is always included.
+    pub extra_auth_params: Vec<(String, String)>,
 }
 
 /// Tokens returned from an OAuth authorization or refresh.
@@ -91,8 +95,11 @@ pub async fn authorize(config: &OAuthConfig) -> Result<OAuthTokens, OAuthError> 
         ("redirect_uri", redirect_uri.clone()),
         ("code_challenge", challenge),
         ("code_challenge_method", "S256".to_string()),
-        ("access_type", "offline".to_string()),
     ];
+
+    for (k, v) in &config.extra_auth_params {
+        auth_params.push((k.as_str(), v.clone()));
+    }
 
     if !config.scopes.is_empty() {
         auth_params.push(("scope", config.scopes.join(" ")));

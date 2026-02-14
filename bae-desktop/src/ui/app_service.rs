@@ -1713,19 +1713,104 @@ impl AppService {
     /// stores tokens, and updates the store.
     pub fn sign_in_cloud_provider(&self, provider: bae_ui::stores::config::CloudProvider) {
         let state = self.state;
+        let mut config = self.config.clone();
+        let key_service = self.key_service.clone();
+
         state.sync().signing_in().set(true);
         state.sync().sign_in_error().set(None);
 
         spawn(async move {
             let result: Result<(), String> = async {
-                // For now only Google Drive is implemented
                 match provider {
                     bae_ui::stores::config::CloudProvider::GoogleDrive => Err(
                         "Google Drive sign-in requires a client_id. Not yet configured."
                             .to_string(),
                     ),
                     bae_ui::stores::config::CloudProvider::Dropbox => {
-                        Err("Dropbox sign-in is not yet implemented.".to_string())
+                        let oauth_config =
+                            bae_core::cloud_home::dropbox::DropboxCloudHome::oauth_config();
+                        let tokens = bae_core::oauth::authorize(&oauth_config)
+                            .await
+                            .map_err(|e| format!("Dropbox authorization failed: {e}"))?;
+
+                        // Determine the folder path. Use library_name if set, otherwise library_id.
+                        let lib_name = config
+                            .library_name
+                            .clone()
+                            .unwrap_or_else(|| config.library_id.clone());
+                        let folder_path = format!("/Apps/bae/{}", lib_name);
+
+                        // Create the folder (ignore error if it already exists)
+                        let client = reqwest::Client::new();
+                        let create_body = serde_json::json!({
+                            "path": folder_path,
+                            "autorename": false,
+                        });
+                        let resp = client
+                            .post("https://api.dropboxapi.com/2/files/create_folder_v2")
+                            .bearer_auth(&tokens.access_token)
+                            .json(&create_body)
+                            .send()
+                            .await
+                            .map_err(|e| format!("Failed to create Dropbox folder: {e}"))?;
+
+                        let status = resp.status();
+                        if !status.is_success() {
+                            let body = resp.text().await.unwrap_or_default();
+                            // 409 with "path/conflict" means the folder already exists -- that's fine
+                            if !(status == reqwest::StatusCode::CONFLICT
+                                && body.contains("conflict"))
+                            {
+                                return Err(format!(
+                                    "Failed to create Dropbox folder (HTTP {status}): {body}"
+                                ));
+                            }
+                        }
+
+                        // Get account display name
+                        let account_resp = client
+                            .post("https://api.dropboxapi.com/2/users/get_current_account")
+                            .bearer_auth(&tokens.access_token)
+                            .header("Content-Type", "application/json")
+                            .body("{}")
+                            .send()
+                            .await
+                            .ok();
+                        let account_display = if let Some(resp) = account_resp {
+                            resp.text().await.ok().and_then(|body| {
+                                let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+                                json["email"].as_str().map(|s| s.to_string())
+                            })
+                        } else {
+                            None
+                        };
+
+                        // Save tokens to keyring
+                        let token_json = serde_json::to_string(&tokens)
+                            .map_err(|e| format!("Failed to serialize tokens: {e}"))?;
+                        key_service
+                            .set_cloud_home_oauth_token(&token_json)
+                            .map_err(|e| format!("Failed to save OAuth token: {e}"))?;
+
+                        // Save config
+                        config.cloud_provider = Some(config::CloudProvider::Dropbox);
+                        config.cloud_home_dropbox_folder_path = Some(folder_path);
+                        config
+                            .save()
+                            .map_err(|e| format!("Failed to save config: {e}"))?;
+
+                        // Update store
+                        state
+                            .config()
+                            .cloud_provider()
+                            .set(Some(bae_ui::stores::config::CloudProvider::Dropbox));
+                        state.config().cloud_account_display().set(account_display);
+                        state
+                            .sync()
+                            .cloud_home_configured()
+                            .set(config.sync_enabled(&key_service));
+
+                        Ok(())
                     }
                     bae_ui::stores::config::CloudProvider::OneDrive => {
                         Err("OneDrive sign-in is not yet implemented.".to_string())

@@ -43,6 +43,7 @@ impl GoogleDriveCloudHome {
             token_url: "https://oauth2.googleapis.com/token".to_string(),
             scopes: vec!["https://www.googleapis.com/auth/drive.file".to_string()],
             redirect_port: 19284,
+            extra_auth_params: vec![("access_type".to_string(), "offline".to_string())],
         }
     }
 
