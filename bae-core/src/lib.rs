@@ -25,6 +25,7 @@ pub mod share_token;
 pub mod sodium_ffi;
 pub mod storage;
 pub mod subsonic;
+pub mod subsonic_client;
 pub mod sync;
 #[cfg(feature = "test-utils")]
 pub mod test_support;
