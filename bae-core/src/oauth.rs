@@ -21,9 +21,8 @@ pub struct OAuthConfig {
     pub scopes: Vec<String>,
     /// Localhost callback port. Default: 19284.
     pub redirect_port: u16,
-    /// Extra params appended to the authorization URL (e.g. Dropbox's
-    /// `token_access_type=offline`). Google uses `access_type=offline` which
-    /// is always included.
+    /// Extra params appended to the authorization URL (e.g. Google's
+    /// `access_type=offline` or Dropbox's `token_access_type=offline`).
     pub extra_auth_params: Vec<(String, String)>,
 }
 

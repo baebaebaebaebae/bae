@@ -7,6 +7,7 @@
 
 pub mod dropbox;
 pub mod google_drive;
+pub mod onedrive;
 pub mod s3;
 
 use async_trait::async_trait;
@@ -150,9 +151,28 @@ pub async fn create_cloud_home(
             let db = dropbox::DropboxCloudHome::new(folder_path, tokens, key_service.clone());
             Ok(Box::new(db))
         }
-        Some(CloudProvider::OneDrive) => Err(CloudHomeError::Storage(
-            "OneDrive is not yet implemented".to_string(),
-        )),
+        Some(CloudProvider::OneDrive) => {
+            let drive_id = config.cloud_home_onedrive_drive_id.clone().ok_or_else(|| {
+                CloudHomeError::Storage("OneDrive drive ID not configured".to_string())
+            })?;
+            let folder_id = config
+                .cloud_home_onedrive_folder_id
+                .clone()
+                .ok_or_else(|| {
+                    CloudHomeError::Storage("OneDrive folder ID not configured".to_string())
+                })?;
+
+            let token_json = key_service.get_cloud_home_oauth_token().ok_or_else(|| {
+                CloudHomeError::Storage("OneDrive OAuth token not in keyring".to_string())
+            })?;
+
+            let tokens: crate::oauth::OAuthTokens = serde_json::from_str(&token_json)
+                .map_err(|e| CloudHomeError::Storage(format!("invalid OAuth token JSON: {e}")))?;
+
+            let od =
+                onedrive::OneDriveCloudHome::new(drive_id, folder_id, tokens, key_service.clone());
+            Ok(Box::new(od))
+        }
         Some(CloudProvider::PCloud) => Err(CloudHomeError::Storage(
             "pCloud is not yet implemented".to_string(),
         )),
