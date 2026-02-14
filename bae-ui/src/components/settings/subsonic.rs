@@ -1,6 +1,8 @@
 //! Subsonic section view
 
-use crate::components::{Button, ButtonSize, ButtonVariant, SettingsCard, SettingsSection};
+use crate::components::{
+    Button, ButtonSize, ButtonVariant, Select, SelectOption, SettingsCard, SettingsSection,
+};
 use dioxus::prelude::*;
 
 /// Subsonic section view
@@ -25,6 +27,22 @@ pub fn SubsonicSectionView(
     on_save: EventHandler<()>,
     on_enabled_change: EventHandler<bool>,
     on_port_change: EventHandler<String>,
+    // Share link settings
+    share_base_url: String,
+    share_default_expiry: String,
+    share_signing_key_version: u32,
+    is_editing_share: bool,
+    edit_share_base_url: String,
+    edit_share_expiry: String,
+    is_saving_share: bool,
+    has_share_changes: bool,
+    share_save_error: Option<String>,
+    on_share_edit_start: EventHandler<()>,
+    on_share_cancel: EventHandler<()>,
+    on_share_save: EventHandler<()>,
+    on_share_base_url_change: EventHandler<String>,
+    on_share_expiry_change: EventHandler<String>,
+    on_invalidate_links: EventHandler<()>,
 ) -> Element {
     rsx! {
         SettingsSection {
@@ -128,6 +146,119 @@ pub fn SubsonicSectionView(
             }
 
             SettingsCard {
+                div { class: "flex items-center justify-between mb-4",
+                    h3 { class: "text-lg font-medium text-white", "Share Links" }
+                    if !is_editing_share {
+                        Button {
+                            variant: ButtonVariant::Secondary,
+                            size: ButtonSize::Small,
+                            onclick: move |_| on_share_edit_start.call(()),
+                            "Edit"
+                        }
+                    }
+                }
+
+                if is_editing_share {
+                    div { class: "space-y-4",
+                        div {
+                            label { class: "block text-sm text-gray-400 mb-1", "Base URL" }
+                            input {
+                                r#type: "text",
+                                class: "w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                                placeholder: "https://listen.example.com",
+                                value: "{edit_share_base_url}",
+                                oninput: move |e| on_share_base_url_change.call(e.value()),
+                            }
+                            p { class: "text-xs text-gray-500 mt-1",
+                                "The public URL where your bae instance is accessible."
+                            }
+                        }
+                        div {
+                            label { class: "block text-sm text-gray-400 mb-1", "Default Expiry" }
+                            Select {
+                                value: edit_share_expiry.clone(),
+                                onchange: move |val: String| on_share_expiry_change.call(val),
+                                SelectOption {
+                                    value: "never".to_string(),
+                                    label: "Never".to_string(),
+                                }
+                                SelectOption {
+                                    value: "7".to_string(),
+                                    label: "7 days".to_string(),
+                                }
+                                SelectOption {
+                                    value: "30".to_string(),
+                                    label: "30 days".to_string(),
+                                }
+                                SelectOption {
+                                    value: "90".to_string(),
+                                    label: "90 days".to_string(),
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(error) = share_save_error {
+                        div { class: "p-3 bg-red-900/30 border border-red-700 rounded-lg text-sm text-red-300 mt-4",
+                            "{error}"
+                        }
+                    }
+
+                    div { class: "flex gap-3 mt-4",
+                        Button {
+                            variant: ButtonVariant::Primary,
+                            size: ButtonSize::Medium,
+                            disabled: !has_share_changes || is_saving_share,
+                            loading: is_saving_share,
+                            onclick: move |_| on_share_save.call(()),
+                            if is_saving_share {
+                                "Saving..."
+                            } else {
+                                "Save Changes"
+                            }
+                        }
+                        Button {
+                            variant: ButtonVariant::Secondary,
+                            size: ButtonSize::Medium,
+                            onclick: move |_| on_share_cancel.call(()),
+                            "Cancel"
+                        }
+                    }
+                } else {
+                    div { class: "space-y-2 text-sm",
+                        div { class: "flex items-center gap-2",
+                            span { class: "text-gray-400", "Base URL:" }
+                            if share_base_url.is_empty() {
+                                span { class: "text-gray-500 italic", "Not configured" }
+                            } else {
+                                span { class: "text-white font-mono", "{share_base_url}" }
+                            }
+                        }
+                        div { class: "flex items-center gap-2",
+                            span { class: "text-gray-400", "Default Expiry:" }
+                            span { class: "text-white", {expiry_display_label(&share_default_expiry)} }
+                        }
+                        div { class: "flex items-center gap-2",
+                            span { class: "text-gray-400", "Key Version:" }
+                            span { class: "text-white font-mono", "{share_signing_key_version}" }
+                        }
+                    }
+
+                    div { class: "mt-4",
+                        Button {
+                            variant: ButtonVariant::Secondary,
+                            size: ButtonSize::Small,
+                            onclick: move |_| on_invalidate_links.call(()),
+                            "Invalidate All Share Links"
+                        }
+                        p { class: "text-xs text-gray-500 mt-2",
+                            "Increments the signing key version, making all previously generated share links invalid."
+                        }
+                    }
+                }
+            }
+
+            SettingsCard {
                 h3 { class: "text-lg font-medium text-white mb-4", "About Subsonic" }
                 div { class: "space-y-3 text-sm text-gray-400",
                     p {
@@ -142,5 +273,14 @@ pub fn SubsonicSectionView(
                 }
             }
         }
+    }
+}
+
+fn expiry_display_label(value: &str) -> &str {
+    match value {
+        "7" => "7 days",
+        "30" => "30 days",
+        "90" => "90 days",
+        _ => "Never",
     }
 }

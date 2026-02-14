@@ -23,6 +23,8 @@ pub fn TrackRow(
     is_paused: bool,
     is_loading: bool,
     show_spinner: bool,
+    /// Whether to show the "Copy Share Link" menu item
+    show_share_link: bool,
     // Callbacks
     on_play: EventHandler<String>,
     on_pause: EventHandler<()>,
@@ -177,6 +179,7 @@ pub fn TrackRow(
             if is_available {
                 TrackMenu {
                     track_id: track_id_for_menu,
+                    show_share_link,
                     on_export,
                     on_add_next,
                     on_add_to_queue,
@@ -191,6 +194,7 @@ pub fn TrackRow(
 #[component]
 fn TrackMenu(
     track_id: String,
+    show_share_link: bool,
     on_export: EventHandler<String>,
     on_add_next: EventHandler<String>,
     on_add_to_queue: EventHandler<String>,
@@ -253,15 +257,17 @@ fn TrackMenu(
                 },
                 "Add to Queue"
             }
-            MenuItem {
-                onclick: {
-                    let track_id = track_id.clone();
-                    move |_| {
-                        show_menu.set(false);
-                        on_copy_share_link.call(track_id.clone());
-                    }
-                },
-                "Copy Share Link"
+            if show_share_link {
+                MenuItem {
+                    onclick: {
+                        let track_id = track_id.clone();
+                        move |_| {
+                            show_menu.set(false);
+                            on_copy_share_link.call(track_id.clone());
+                        }
+                    },
+                    "Copy Share Link"
+                }
             }
         }
     }

@@ -5,6 +5,20 @@ use bae_ui::stores::{AppStateStoreExt, ConfigStateStoreExt};
 use bae_ui::SubsonicSectionView;
 use dioxus::prelude::*;
 
+fn expiry_to_string(days: Option<u32>) -> String {
+    match days {
+        Some(d) => d.to_string(),
+        None => "never".to_string(),
+    }
+}
+
+fn string_to_expiry(val: &str) -> Option<u32> {
+    match val {
+        "never" | "" => None,
+        s => s.parse().ok(),
+    }
+}
+
 #[component]
 pub fn SubsonicSection() -> Element {
     let app = use_app();
@@ -13,16 +27,33 @@ pub fn SubsonicSection() -> Element {
     let config_store = app.state.config();
     let store_enabled = *config_store.subsonic_enabled().read();
     let store_port = *config_store.subsonic_port().read();
+    let store_share_base_url = config_store.share_base_url().read().clone();
+    let store_share_expiry = *config_store.share_default_expiry_days().read();
+    let store_share_version = *config_store.share_signing_key_version().read();
 
+    // Server settings edit state
     let mut is_editing = use_signal(|| false);
     let mut is_saving = use_signal(|| false);
     let mut save_error = use_signal(|| Option::<String>::None);
-
     let mut enabled = use_signal(move || store_enabled);
     let mut port = use_signal(move || store_port.to_string());
 
     let has_changes = *enabled.read() != store_enabled || *port.read() != store_port.to_string();
 
+    // Share link settings edit state
+    let mut is_editing_share = use_signal(|| false);
+    let mut is_saving_share = use_signal(|| false);
+    let mut share_save_error = use_signal(|| Option::<String>::None);
+    let initial_url = store_share_base_url.clone().unwrap_or_default();
+    let mut edit_share_base_url = use_signal(move || initial_url.clone());
+    let mut edit_share_expiry = use_signal(move || expiry_to_string(store_share_expiry));
+
+    let current_url = store_share_base_url.clone().unwrap_or_default();
+    let current_expiry = expiry_to_string(store_share_expiry);
+    let has_share_changes =
+        *edit_share_base_url.read() != current_url || *edit_share_expiry.read() != current_expiry;
+
+    // Server settings save
     let save_changes = {
         let app = app.clone();
         move |_| {
@@ -49,6 +80,52 @@ pub fn SubsonicSection() -> Element {
         save_error.set(None);
     };
 
+    // Share link settings save
+    let save_share_changes = {
+        let app = app.clone();
+        move |_| {
+            let new_url = edit_share_base_url.read().clone();
+            let new_expiry = string_to_expiry(&edit_share_expiry.read());
+
+            is_saving_share.set(true);
+            share_save_error.set(None);
+
+            let url_option = if new_url.is_empty() {
+                None
+            } else {
+                Some(new_url)
+            };
+
+            app.save_config(move |config| {
+                config.share_base_url = url_option;
+                config.share_default_expiry_days = new_expiry;
+            });
+
+            is_saving_share.set(false);
+            is_editing_share.set(false);
+        }
+    };
+
+    let cancel_url = store_share_base_url.clone().unwrap_or_default();
+    let cancel_share_edit = move |_| {
+        edit_share_base_url.set(cancel_url.clone());
+        edit_share_expiry.set(expiry_to_string(store_share_expiry));
+        is_editing_share.set(false);
+        share_save_error.set(None);
+    };
+
+    // Invalidate all share links
+    let invalidate_links = {
+        let app = app.clone();
+        move |_| {
+            app.save_config(move |config| {
+                config.share_signing_key_version += 1;
+            });
+        }
+    };
+
+    let display_url = store_share_base_url.unwrap_or_default();
+
     rsx! {
         SubsonicSectionView {
             enabled: store_enabled,
@@ -64,6 +141,22 @@ pub fn SubsonicSection() -> Element {
             on_save: save_changes,
             on_enabled_change: move |val| enabled.set(val),
             on_port_change: move |val| port.set(val),
+            // Share link props
+            share_base_url: display_url,
+            share_default_expiry: expiry_to_string(store_share_expiry),
+            share_signing_key_version: store_share_version,
+            is_editing_share: *is_editing_share.read(),
+            edit_share_base_url: edit_share_base_url.read().clone(),
+            edit_share_expiry: edit_share_expiry.read().clone(),
+            is_saving_share: *is_saving_share.read(),
+            has_share_changes,
+            share_save_error: share_save_error.read().clone(),
+            on_share_edit_start: move |_| is_editing_share.set(true),
+            on_share_cancel: cancel_share_edit,
+            on_share_save: save_share_changes,
+            on_share_base_url_change: move |val| edit_share_base_url.set(val),
+            on_share_expiry_change: move |val| edit_share_expiry.set(val),
+            on_invalidate_links: invalidate_links,
         }
     }
 }
