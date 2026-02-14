@@ -335,8 +335,12 @@ pub fn SyncSectionView(
 
         
                 
-        
+                
 
+                
+        
+                
+                
                                                             if let Some(ref err) = removing_member_error {
                                                                 div { class: "text-sm text-red-400 mb-3", "{err}" }
                                                             }
@@ -469,29 +473,19 @@ pub fn SyncSectionView(
                     // Share info panel (shown after successful invite)
                     if let Some(ref info) = share_info {
                         {
-                            let share_text = format_share_text(info);
+                            let code = info.invite_code.clone();
                             rsx! {
                                 div { class: "mt-4 pt-4 border-t border-gray-700",
-                                    h4 { class: "text-sm font-medium text-gray-300 mb-3", "Share these details with the invitee" }
-                                    div { class: "p-3 bg-gray-700/50 rounded-lg space-y-2 text-sm",
-                                        div { class: "flex justify-between",
-                                            span { class: "text-gray-400", "Bucket" }
-                                            span { class: "text-gray-200 font-mono", "{info.cloud_home_bucket}" }
-                                        }
-                                        div { class: "flex justify-between",
-                                            span { class: "text-gray-400", "Region" }
-                                            span { class: "text-gray-200 font-mono", "{info.cloud_home_region}" }
-                                        }
-                                        if let Some(ref ep) = info.cloud_home_endpoint {
-                                            div { class: "flex justify-between",
-                                                span { class: "text-gray-400", "Endpoint" }
-                                                span { class: "text-gray-200 font-mono", "{ep}" }
-                                            }
-                                        }
-                                        div { class: "flex justify-between",
-                                            span { class: "text-gray-400", "Invitee key" }
-                                            span { class: "text-gray-200 font-mono", {truncate_pubkey(&info.invitee_pubkey)} }
-                                        }
+                                    h4 { class: "text-sm font-medium text-gray-300 mb-3",
+                                        "Send this invite code to {info.invitee_display}:"
+                                    }
+                                    textarea {
+                                        class: "w-full h-24 bg-gray-700 text-white text-sm font-mono rounded-lg p-3 border border-gray-600 focus:outline-none resize-none",
+                                        readonly: true,
+                                        value: "{info.invite_code}",
+                                    }
+                                    p { class: "text-xs text-gray-500 mt-2",
+                                        "The code contains cloud home connection info. The encryption key is delivered separately via the membership chain."
                                     }
 
         
@@ -500,7 +494,7 @@ pub fn SyncSectionView(
                                             variant: ButtonVariant::Secondary,
                                             size: ButtonSize::Small,
                                             onclick: {
-                                                let text = share_text.clone();
+                                                let text = code.clone();
                                                 move |_| {
                                                     on_copy_share_info.call(text.clone());
                                                     share_copied.set(true);
@@ -520,7 +514,7 @@ pub fn SyncSectionView(
                                             variant: ButtonVariant::Secondary,
                                             size: ButtonSize::Small,
                                             onclick: move |_| on_dismiss_share_info.call(()),
-                                            "Dismiss"
+                                            "Done"
                                         }
                                     }
                                 }
@@ -826,19 +820,6 @@ fn short_device_id(id: &str) -> String {
     } else {
         clean
     }
-}
-
-/// Format share info as a text block for clipboard copy.
-fn format_share_text(info: &ShareInfo) -> String {
-    let mut lines = vec![
-        format!("Bucket: {}", info.cloud_home_bucket),
-        format!("Region: {}", info.cloud_home_region),
-    ];
-    if let Some(ref ep) = info.cloud_home_endpoint {
-        lines.push(format!("Endpoint: {ep}"));
-    }
-    lines.push(format!("Invitee key: {}", info.invitee_pubkey));
-    lines.join("\n")
 }
 
 /// Format an RFC 3339 timestamp as a relative time string.

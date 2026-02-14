@@ -262,6 +262,8 @@ mod tests {
                 bucket: "test-bucket".to_string(),
                 region: "us-east-1".to_string(),
                 endpoint: None,
+                access_key: "test-access-key".to_string(),
+                secret_key: "test-secret-key".to_string(),
             })
         }
         async fn revoke_access(&self, _member_id: &str) -> Result<(), CloudHomeError> {

@@ -28,6 +28,8 @@ pub enum JoinInfo {
         bucket: String,
         region: String,
         endpoint: Option<String>,
+        access_key: String,
+        secret_key: String,
     },
     GoogleDrive {
         folder_id: String,

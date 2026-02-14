@@ -14,6 +14,7 @@ pub mod encryption;
 pub mod hmac_utils;
 pub mod image_server;
 pub mod import;
+pub mod join_code;
 pub mod keys;
 pub mod library;
 pub mod library_dir;
