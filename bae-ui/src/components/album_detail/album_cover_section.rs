@@ -15,6 +15,9 @@ pub fn AlbumCoverSection(
     is_exporting: bool,
     first_release_id: Option<String>,
     has_single_release: bool,
+    /// When true, hides edit/delete/export/storage/share actions
+    #[props(default)]
+    read_only: bool,
     // Callbacks - all required
     on_export: EventHandler<String>,
     on_delete_album: EventHandler<String>,
@@ -61,8 +64,8 @@ pub fn AlbumCoverSection(
                 }
             }
 
-            // Show dropdown button on hover
-            if hover_cover() || show_dropdown() {
+            // Show dropdown button on hover (hidden in read-only mode)
+            if !read_only && (hover_cover() || show_dropdown()) {
                 div { class: "absolute top-2 right-2 z-10",
                     button {
                         id: "{anchor_id}",

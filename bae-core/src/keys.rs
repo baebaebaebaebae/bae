@@ -536,6 +536,66 @@ impl KeyService {
     }
 
     // -------------------------------------------------------------------------
+    // Followed library passwords (library-scoped, per followed server)
+    // -------------------------------------------------------------------------
+
+    /// Read the password for a followed library. Returns None if not set.
+    ///
+    /// Dev mode: reads `BAE_FOLLOWED_{followed_id}_PASSWORD` env var.
+    /// Prod mode: reads from OS keyring.
+    pub fn get_followed_password(&self, followed_id: &str) -> Option<String> {
+        if self.dev_mode {
+            std::env::var(format!("BAE_FOLLOWED_{}_PASSWORD", followed_id))
+                .ok()
+                .filter(|k| !k.is_empty())
+        } else {
+            let account = self.account(&format!("followed_password:{}", followed_id));
+            keyring_core::Entry::new("bae", &account)
+                .ok()
+                .and_then(|e| e.get_password().ok())
+                .filter(|k| !k.is_empty())
+        }
+    }
+
+    /// Save the password for a followed library.
+    ///
+    /// Dev mode: sets the env var.
+    /// Prod mode: writes to OS keyring.
+    pub fn set_followed_password(&self, followed_id: &str, password: &str) -> Result<(), KeyError> {
+        if self.dev_mode {
+            std::env::set_var(format!("BAE_FOLLOWED_{}_PASSWORD", followed_id), password);
+            return Ok(());
+        }
+
+        let account = self.account(&format!("followed_password:{}", followed_id));
+        keyring_core::Entry::new("bae", &account)?.set_password(password)?;
+
+        info!("Saved password for followed library {}", followed_id);
+        Ok(())
+    }
+
+    /// Delete the password for a followed library.
+    ///
+    /// Dev mode: removes the env var.
+    /// Prod mode: deletes from OS keyring. Silently ignores missing entries.
+    pub fn delete_followed_password(&self, followed_id: &str) -> Result<(), KeyError> {
+        if self.dev_mode {
+            std::env::remove_var(format!("BAE_FOLLOWED_{}_PASSWORD", followed_id));
+            return Ok(());
+        }
+
+        let account = self.account(&format!("followed_password:{}", followed_id));
+        match keyring_core::Entry::new("bae", &account)?.delete_credential() {
+            Ok(()) => {
+                info!("Deleted password for followed library {}", followed_id);
+                Ok(())
+            }
+            Err(keyring_core::Error::NoEntry) => Ok(()),
+            Err(e) => Err(KeyError::Keyring(e)),
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Global user keypair (Ed25519 identity, NOT library-scoped)
     // -------------------------------------------------------------------------
 

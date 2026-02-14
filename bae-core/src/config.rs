@@ -280,6 +280,23 @@ pub struct ConfigYaml {
     /// Signing key version for share tokens. Incrementing invalidates all outstanding links.
     #[serde(default = "default_share_signing_version")]
     pub share_signing_key_version: u32,
+
+    /// Remote Subsonic servers the user is following (read-only browsing + streaming)
+    #[serde(default)]
+    pub followed_libraries: Vec<FollowedLibrary>,
+}
+
+/// A remote Subsonic server the user is "following" (read-only browsing + streaming).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FollowedLibrary {
+    /// Unique ID (UUID)
+    pub id: String,
+    /// User-chosen display name
+    pub name: String,
+    /// Subsonic server URL (e.g. "http://192.168.1.100:4533")
+    pub server_url: String,
+    /// Subsonic username (password stored in keyring)
+    pub username: String,
 }
 
 /// Metadata about a discovered library (for the library switcher UI)
@@ -337,6 +354,8 @@ pub struct Config {
     pub share_default_expiry_days: Option<u32>,
     /// Signing key version for share tokens. Incrementing invalidates all outstanding links.
     pub share_signing_key_version: u32,
+    /// Remote Subsonic servers the user is following
+    pub followed_libraries: Vec<FollowedLibrary>,
 }
 
 impl Config {
@@ -515,6 +534,7 @@ impl Config {
             share_base_url: yaml_config.share_base_url,
             share_default_expiry_days: yaml_config.share_default_expiry_days,
             share_signing_key_version: yaml_config.share_signing_key_version,
+            followed_libraries: yaml_config.followed_libraries,
         }
     }
 
@@ -575,6 +595,7 @@ impl Config {
             share_base_url: self.share_base_url.clone(),
             share_default_expiry_days: self.share_default_expiry_days,
             share_signing_key_version: self.share_signing_key_version,
+            followed_libraries: self.followed_libraries.clone(),
         };
         std::fs::write(
             self.library_dir.config_path(),
@@ -627,6 +648,7 @@ impl Config {
             share_base_url: None,
             share_default_expiry_days: None,
             share_signing_key_version: 1,
+            followed_libraries: vec![],
         };
 
         match key_service.get_or_create_encryption_key() {
@@ -688,6 +710,18 @@ impl Config {
         let yaml: ConfigYaml = serde_yaml::from_str(&content)
             .map_err(|e| ConfigError::Serialization(e.to_string()))?;
         Ok(yaml.library_id)
+    }
+
+    /// Add a followed library to the config and persist.
+    pub fn add_followed_library(&mut self, lib: FollowedLibrary) -> Result<(), ConfigError> {
+        self.followed_libraries.push(lib);
+        self.save_to_config_yaml()
+    }
+
+    /// Remove a followed library by ID and persist.
+    pub fn remove_followed_library(&mut self, id: &str) -> Result<(), ConfigError> {
+        self.followed_libraries.retain(|l| l.id != id);
+        self.save_to_config_yaml()
     }
 
     /// Rename a library by updating its config.yaml library_name field.
@@ -795,6 +829,7 @@ mod tests {
             share_base_url: None,
             share_default_expiry_days: None,
             share_signing_key_version: 1,
+            followed_libraries: vec![],
         }
     }
 
@@ -1002,6 +1037,80 @@ mod tests {
         assert_eq!(&*found.unwrap(), lib2_path.as_path());
 
         assert!(find_library_by_id(bae_dir, "nonexistent").is_none());
+    }
+
+    #[test]
+    fn followed_libraries_roundtrip() {
+        let tmp = TempDir::new().unwrap();
+        let library_path = tmp.path().to_path_buf();
+        let mut config = make_test_config("lib-follow", library_path.clone());
+        config.followed_libraries = vec![FollowedLibrary {
+            id: "follow-1".to_string(),
+            name: "Friend's Library".to_string(),
+            server_url: "http://192.168.1.50:4533".to_string(),
+            username: "listener".to_string(),
+        }];
+        config.save_to_config_yaml().unwrap();
+
+        let yaml: ConfigYaml = serde_yaml::from_str(
+            &std::fs::read_to_string(library_path.join("config.yaml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(yaml.followed_libraries.len(), 1);
+        assert_eq!(yaml.followed_libraries[0].id, "follow-1");
+        assert_eq!(yaml.followed_libraries[0].name, "Friend's Library");
+        assert_eq!(
+            yaml.followed_libraries[0].server_url,
+            "http://192.168.1.50:4533"
+        );
+        assert_eq!(yaml.followed_libraries[0].username, "listener");
+    }
+
+    #[test]
+    fn followed_libraries_default_empty() {
+        let yaml = "library_id: abc-123\n";
+        let config: ConfigYaml = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.followed_libraries.is_empty());
+    }
+
+    #[test]
+    fn add_and_remove_followed_library() {
+        let tmp = TempDir::new().unwrap();
+        let library_path = tmp.path().to_path_buf();
+        let mut config = make_test_config("lib-follow-2", library_path.clone());
+        config.save_to_config_yaml().unwrap();
+
+        config
+            .add_followed_library(FollowedLibrary {
+                id: "f1".to_string(),
+                name: "Server A".to_string(),
+                server_url: "http://a:4533".to_string(),
+                username: "user".to_string(),
+            })
+            .unwrap();
+        assert_eq!(config.followed_libraries.len(), 1);
+
+        config
+            .add_followed_library(FollowedLibrary {
+                id: "f2".to_string(),
+                name: "Server B".to_string(),
+                server_url: "http://b:4533".to_string(),
+                username: "user2".to_string(),
+            })
+            .unwrap();
+        assert_eq!(config.followed_libraries.len(), 2);
+
+        config.remove_followed_library("f1").unwrap();
+        assert_eq!(config.followed_libraries.len(), 1);
+        assert_eq!(config.followed_libraries[0].id, "f2");
+
+        // Verify persistence
+        let yaml: ConfigYaml = serde_yaml::from_str(
+            &std::fs::read_to_string(library_path.join("config.yaml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(yaml.followed_libraries.len(), 1);
+        assert_eq!(yaml.followed_libraries[0].id, "f2");
     }
 
     #[test]

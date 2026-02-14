@@ -612,6 +612,19 @@ impl AppService {
             .sync()
             .sync_configured()
             .set(config.sync_enabled(&self.key_service));
+
+        // Followed libraries
+        let followed: Vec<bae_ui::stores::config::FollowedLibraryInfo> = config
+            .followed_libraries
+            .iter()
+            .map(|fl| bae_ui::stores::config::FollowedLibraryInfo {
+                id: fl.id.clone(),
+                name: fl.name.clone(),
+                server_url: fl.server_url.clone(),
+                username: fl.username.clone(),
+            })
+            .collect();
+        self.state.config().followed_libraries().set(followed);
     }
 
     /// Load active imports from database
@@ -646,13 +659,49 @@ impl AppService {
     }
 
     /// Load library albums from database
-    fn load_library(&self) {
+    pub fn load_library(&self) {
         let state = self.state;
         let library_manager = self.library_manager.clone();
         let imgs = self.image_server.clone();
 
         spawn(async move {
             load_library(&state, &library_manager, &imgs).await;
+        });
+    }
+
+    /// Load albums from a followed Subsonic server into the library state.
+    pub fn load_followed_library(&self, followed_id: &str) {
+        let state = self.state;
+        let key_service = self.key_service.clone();
+
+        // Read connection details from the Store (not the stale boot config)
+        let followed = {
+            let followed_libs = state.read().config.followed_libraries.clone();
+            followed_libs.into_iter().find(|f| f.id == followed_id)
+        };
+
+        let Some(followed) = followed else {
+            state
+                .library()
+                .error()
+                .set(Some("Followed library not found".to_string()));
+            return;
+        };
+
+        let password = match key_service.get_followed_password(&followed.id) {
+            Some(p) => p,
+            None => {
+                state
+                    .library()
+                    .error()
+                    .set(Some("No password found for followed library".to_string()));
+                return;
+            }
+        };
+
+        spawn(async move {
+            load_followed_library(&state, &followed.server_url, &followed.username, &password)
+                .await;
         });
     }
 
@@ -663,23 +712,69 @@ impl AppService {
     /// Load album detail data into Store (called when navigating to album page)
     pub fn load_album_detail(&self, album_id: &str, release_id: Option<&str>) {
         let state = self.state;
-        let library_manager = self.library_manager.clone();
-        let album_id = album_id.to_string();
-        let release_id = release_id.map(|s| s.to_string());
-        let imgs = self.image_server.clone();
-        let key_service = self.key_service.clone();
+        let active_source = state.read().library.active_source.clone();
 
-        spawn(async move {
-            load_album_detail(
-                &state,
-                &library_manager,
-                &album_id,
-                release_id.as_deref(),
-                &imgs,
-                &key_service,
-            )
-            .await;
-        });
+        match active_source {
+            bae_ui::stores::config::LibrarySource::Followed(ref followed_id) => {
+                let key_service = self.key_service.clone();
+                let album_id = album_id.to_string();
+
+                // Read connection details from the Store
+                let followed = {
+                    let followed_libs = state.read().config.followed_libraries.clone();
+                    followed_libs.into_iter().find(|f| f.id == *followed_id)
+                };
+
+                let Some(followed) = followed else {
+                    state
+                        .album_detail()
+                        .error()
+                        .set(Some("Followed library not found".to_string()));
+                    return;
+                };
+
+                let password = match key_service.get_followed_password(&followed.id) {
+                    Some(p) => p,
+                    None => {
+                        state
+                            .album_detail()
+                            .error()
+                            .set(Some("No password found for followed library".to_string()));
+                        return;
+                    }
+                };
+
+                spawn(async move {
+                    load_followed_album_detail(
+                        &state,
+                        &followed.server_url,
+                        &followed.username,
+                        &password,
+                        &album_id,
+                    )
+                    .await;
+                });
+            }
+            bae_ui::stores::config::LibrarySource::Local => {
+                let library_manager = self.library_manager.clone();
+                let album_id = album_id.to_string();
+                let release_id = release_id.map(|s| s.to_string());
+                let imgs = self.image_server.clone();
+                let key_service = self.key_service.clone();
+
+                spawn(async move {
+                    load_album_detail(
+                        &state,
+                        &library_manager,
+                        &album_id,
+                        release_id.as_deref(),
+                        &imgs,
+                        &key_service,
+                    )
+                    .await;
+                });
+            }
+        }
     }
 
     /// Fetch remote cover options (MusicBrainz + Discogs) for the cover picker
@@ -1926,6 +2021,161 @@ async fn load_library(
     }
 
     state.library().loading().set(false);
+}
+
+/// Load albums from a followed Subsonic server into the Store.
+async fn load_followed_library(
+    state: &Store<AppState>,
+    server_url: &str,
+    username: &str,
+    password: &str,
+) {
+    state.library().loading().set(true);
+    state.library().error().set(None);
+
+    let client = bae_core::subsonic_client::SubsonicClient::new(
+        server_url.to_string(),
+        username.to_string(),
+        password.to_string(),
+    );
+
+    match client.get_album_list("newest", 500, 0).await {
+        Ok(albums) => {
+            let display_albums: Vec<bae_ui::Album> = albums
+                .iter()
+                .map(|a| bae_ui::Album {
+                    id: a.id.clone(),
+                    title: a.name.clone(),
+                    year: a.year,
+                    cover_url: a
+                        .cover_art
+                        .as_ref()
+                        .map(|id| client.get_cover_art_url(id, Some(300))),
+                    is_compilation: false,
+                    date_added: chrono::Utc::now(),
+                })
+                .collect();
+
+            // Build artists_by_album from the album artist field
+            let mut artists_map: HashMap<String, Vec<bae_ui::Artist>> = HashMap::new();
+            for a in &albums {
+                if let Some(ref artist_name) = a.artist {
+                    artists_map.insert(
+                        a.id.clone(),
+                        vec![bae_ui::Artist {
+                            id: a.artist_id.clone().unwrap_or_default(),
+                            name: artist_name.clone(),
+                            image_url: None,
+                        }],
+                    );
+                }
+            }
+
+            state.library().albums().set(display_albums);
+            state.library().artists_by_album().set(artists_map);
+        }
+        Err(e) => {
+            state
+                .library()
+                .error()
+                .set(Some(format!("Failed to load followed library: {}", e)));
+        }
+    }
+
+    state.library().loading().set(false);
+}
+
+/// Load album detail from a followed Subsonic server into the Store.
+async fn load_followed_album_detail(
+    state: &Store<AppState>,
+    server_url: &str,
+    username: &str,
+    password: &str,
+    album_id: &str,
+) {
+    state.album_detail().loading().set(true);
+    state.album_detail().error().set(None);
+
+    let client = bae_core::subsonic_client::SubsonicClient::new(
+        server_url.to_string(),
+        username.to_string(),
+        password.to_string(),
+    );
+
+    match client.get_album(album_id).await {
+        Ok(album) => {
+            let cover_url = album
+                .cover_art
+                .as_ref()
+                .map(|id| client.get_cover_art_url(id, Some(600)));
+
+            // Set album
+            state.album_detail().album().set(Some(bae_ui::Album {
+                id: album.id.clone(),
+                title: album.name.clone(),
+                year: album.year,
+                cover_url,
+                is_compilation: false,
+                date_added: chrono::Utc::now(),
+            }));
+
+            // Artists
+            let artists = if let Some(ref artist_name) = album.artist {
+                vec![bae_ui::Artist {
+                    id: album.artist_id.clone().unwrap_or_default(),
+                    name: artist_name.clone(),
+                    image_url: None,
+                }]
+            } else {
+                vec![]
+            };
+            state.album_detail().artists().set(artists);
+
+            // Convert songs to tracks
+            let tracks: Vec<bae_ui::Track> = album
+                .song
+                .as_deref()
+                .unwrap_or(&[])
+                .iter()
+                .map(|s| bae_ui::Track {
+                    id: s.id.clone(),
+                    title: s.title.clone(),
+                    track_number: s.track,
+                    disc_number: None,
+                    duration_ms: s.duration.map(|d| d as i64 * 1000),
+                    is_available: true,
+                    import_state: bae_ui::TrackImportState::None,
+                })
+                .collect();
+
+            let track_count = tracks.len();
+            let track_ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
+            let track_disc_info: Vec<(Option<i32>, String)> = tracks
+                .iter()
+                .map(|t| (t.disc_number, t.id.clone()))
+                .collect();
+
+            state.album_detail().tracks().set(tracks);
+            state.album_detail().track_count().set(track_count);
+            state.album_detail().track_ids().set(track_ids);
+            state.album_detail().track_disc_info().set(track_disc_info);
+
+            // Clear local-only fields
+            state.album_detail().releases().set(vec![]);
+            state.album_detail().files().set(vec![]);
+            state.album_detail().images().set(vec![]);
+            state.album_detail().selected_release_id().set(None);
+            state.album_detail().storage_profile().set(None);
+        }
+        Err(e) => {
+            state
+                .album_detail()
+                .error()
+                .set(Some(format!("Failed to load album: {}", e)));
+        }
+    }
+
+    state.album_detail().loading().set(false);
 }
 
 /// Load album detail data into the Store

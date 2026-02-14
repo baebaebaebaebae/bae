@@ -1,6 +1,7 @@
 //! Library management section for settings
 
 use crate::components::SettingsSection;
+use crate::stores::config::{FollowedLibraryInfo, LibrarySource};
 use dioxus::prelude::*;
 
 /// Library info for the settings UI (uses String for path since bae-ui targets wasm too)
@@ -16,9 +17,14 @@ pub struct LibraryInfo {
 #[component]
 pub fn LibrarySectionView(
     libraries: Vec<LibraryInfo>,
+    followed_libraries: Vec<FollowedLibraryInfo>,
+    active_source: LibrarySource,
     on_switch: EventHandler<String>,
     on_create: EventHandler<()>,
     on_join: EventHandler<()>,
+    on_follow: EventHandler<()>,
+    on_unfollow: EventHandler<String>,
+    on_switch_source: EventHandler<LibrarySource>,
     on_rename: EventHandler<(String, String)>,
     on_remove: EventHandler<String>,
 ) -> Element {
@@ -26,6 +32,7 @@ pub fn LibrarySectionView(
     let mut rename_value = use_signal(String::new);
     let mut confirming_switch = use_signal(|| None::<String>);
     let mut confirming_delete = use_signal(|| None::<String>);
+    let mut confirming_unfollow = use_signal(|| None::<String>);
 
     let mut start_rename = move |lib: &LibraryInfo| {
         renaming_path.set(Some(lib.path.clone()));
@@ -41,6 +48,8 @@ pub fn LibrarySectionView(
     let mut cancel_rename = move |_| {
         renaming_path.set(None);
     };
+
+    let is_local_active = active_source == LibrarySource::Local;
 
     rsx! {
         SettingsSection {
@@ -60,9 +69,15 @@ pub fn LibrarySectionView(
                         onclick: move |_| on_join.call(()),
                         "Join Shared..."
                     }
+                    button {
+                        class: "px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded-md transition-colors",
+                        onclick: move |_| on_follow.call(()),
+                        "Follow Server..."
+                    }
                 }
             }
 
+            // Local libraries
             div { class: "space-y-2",
                 for lib in &libraries {
                     {
@@ -103,7 +118,7 @@ pub fn LibrarySectionView(
                                                 "{lib.name.as_deref().unwrap_or(&lib.id)}"
                                             }
                                         }
-                                        if lib.is_active {
+                                        if lib.is_active && is_local_active {
                                             span { class: "px-2 py-0.5 text-xs bg-indigo-600 text-white rounded-full",
                                                 "Active"
                                             }
@@ -165,6 +180,86 @@ pub fn LibrarySectionView(
                                                 class: "px-2 py-1 text-xs text-red-400 hover:text-red-300 transition-colors",
                                                 onclick: move |_| confirming_delete.set(Some(lib_path_confirm.clone())),
                                                 "Delete"
+                                            }
+                                        }
+                                    }
+                                    // For the active local library, show "Switch to Local" when a followed library is active
+                                    if lib.is_active && !is_local_active {
+                                        button {
+                                            class: "px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors",
+                                            onclick: move |_| on_switch_source.call(LibrarySource::Local),
+                                            "Switch to Local"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Followed libraries section
+            if !followed_libraries.is_empty() {
+                div { class: "mt-6",
+                    h3 { class: "text-sm font-medium text-gray-400 uppercase tracking-wider mb-3",
+                        "Following"
+                    }
+                    div { class: "space-y-2",
+                        for flib in &followed_libraries {
+                            {
+                                let flib_id = flib.id.clone();
+                                let flib_id_switch = flib.id.clone();
+                                let flib_id_confirm = flib.id.clone();
+                                let is_active = active_source == LibrarySource::Followed(flib.id.clone());
+                                let is_confirming = confirming_unfollow.read().as_ref() == Some(&flib.id);
+
+                                rsx! {
+                                    div {
+                                        key: "follow-{flib.id}",
+                                        class: "flex items-center justify-between p-4 rounded-lg border border-border-subtle",
+                                        div { class: "flex-1 min-w-0",
+                                            div { class: "flex items-center gap-2",
+                                                span { class: "text-sm font-medium text-white", "{flib.name}" }
+                                                span { class: "px-2 py-0.5 text-xs bg-gray-600 text-gray-300 rounded-full",
+                                                    "Following"
+                                                }
+                                                if is_active {
+                                                    span { class: "px-2 py-0.5 text-xs bg-indigo-600 text-white rounded-full",
+                                                        "Active"
+                                                    }
+                                                }
+                                            }
+                                            p { class: "text-xs text-gray-500 mt-1 truncate", "{flib.server_url} ({flib.username})" }
+                                        }
+                                        div { class: "flex items-center gap-2 ml-4 flex-shrink-0",
+                                            if !is_active {
+                                                button {
+                                                    class: "px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors",
+                                                    onclick: move |_| on_switch_source.call(LibrarySource::Followed(flib_id_switch.clone())),
+                                                    "Browse"
+                                                }
+                                            }
+                                            if is_confirming {
+                                                span { class: "text-xs text-red-400 mr-1", "Unfollow?" }
+                                                button {
+                                                    class: "px-2 py-1 text-xs bg-red-600 hover:bg-red-500 text-white rounded transition-colors",
+                                                    onclick: move |_| {
+                                                        confirming_unfollow.set(None);
+                                                        on_unfollow.call(flib_id.clone());
+                                                    },
+                                                    "Yes"
+                                                }
+                                                button {
+                                                    class: "px-2 py-1 text-xs text-gray-400 hover:text-white transition-colors",
+                                                    onclick: move |_| confirming_unfollow.set(None),
+                                                    "No"
+                                                }
+                                            } else {
+                                                button {
+                                                    class: "px-2 py-1 text-xs text-red-400 hover:text-red-300 transition-colors",
+                                                    onclick: move |_| confirming_unfollow.set(Some(flib_id_confirm.clone())),
+                                                    "Unfollow"
+                                                }
                                             }
                                         }
                                     }

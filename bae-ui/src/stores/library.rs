@@ -1,6 +1,7 @@
 //! Library state store
 
 use crate::display_types::{Album, Artist};
+use crate::stores::config::LibrarySource;
 use dioxus::prelude::*;
 use std::collections::HashMap;
 
@@ -15,4 +16,6 @@ pub struct LibraryState {
     pub loading: bool,
     /// Error message if loading failed
     pub error: Option<String>,
+    /// Which library source is currently active (local or followed)
+    pub active_source: LibrarySource,
 }

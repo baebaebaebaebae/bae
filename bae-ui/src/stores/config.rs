@@ -49,4 +49,31 @@ pub struct ConfigState {
     pub share_default_expiry_days: Option<u32>,
     /// Signing key version for share tokens
     pub share_signing_key_version: u32,
+    /// Followed remote Subsonic libraries
+    pub followed_libraries: Vec<FollowedLibraryInfo>,
+}
+
+/// Info about a followed remote Subsonic library (UI display type)
+#[derive(Clone, Debug, PartialEq)]
+pub struct FollowedLibraryInfo {
+    pub id: String,
+    pub name: String,
+    pub server_url: String,
+    pub username: String,
+}
+
+/// Which library source is currently active
+#[derive(Clone, Debug, PartialEq)]
+pub enum LibrarySource {
+    /// The local library (default)
+    Local,
+    /// A followed remote Subsonic library, by ID
+    Followed(String),
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for LibrarySource {
+    fn default() -> Self {
+        Self::Local
+    }
 }

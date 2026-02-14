@@ -58,6 +58,7 @@ pub fn LibraryMock(initial_state: Option<String>) -> Element {
         artists_by_album,
         loading,
         error,
+        active_source: bae_ui::stores::config::LibrarySource::Local,
     });
 
     let sort_state = use_store(LibrarySortState::default);
