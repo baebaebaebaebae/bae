@@ -35,6 +35,9 @@ pub fn AlbumDetailView(
     tracks: ReadStore<Vec<Track>>,
     /// Playback state (from separate playback store)
     playback: PlaybackDisplay,
+    /// Whether to show the "Copy Share Link" menu item
+    #[props(default)]
+    show_share_link: bool,
     on_release_select: EventHandler<String>,
     on_album_deleted: EventHandler<()>,
     on_export_release: EventHandler<String>,
@@ -140,6 +143,7 @@ pub fn AlbumDetailView(
                         state,
                         tracks,
                         playback,
+                        show_share_link,
                         on_track_play,
                         on_track_pause,
                         on_track_resume,
@@ -330,6 +334,7 @@ fn TrackListSection(
     state: ReadStore<AlbumDetailState>,
     tracks: ReadStore<Vec<Track>>,
     playback: PlaybackDisplay,
+    show_share_link: bool,
     on_track_play: EventHandler<String>,
     on_track_pause: EventHandler<()>,
     on_track_resume: EventHandler<()>,
@@ -425,6 +430,7 @@ fn TrackListSection(
                                 is_paused,
                                 is_loading,
                                 show_spinner: is_loading,
+                                show_share_link,
                                 on_play: on_track_play,
                                 on_pause: on_track_pause,
                                 on_resume: on_track_resume,

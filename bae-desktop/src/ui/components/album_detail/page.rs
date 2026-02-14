@@ -7,9 +7,10 @@ use crate::ui::app_service::use_app;
 use crate::ui::Route;
 use bae_ui::display_types::{CoverChange, PlaybackDisplay};
 use bae_ui::stores::{
-    AlbumDetailStateStoreExt, AppStateStoreExt, PlaybackStatus, PlaybackUiStateStoreExt,
-    StorageProfilesStateStoreExt,
+    AlbumDetailStateStoreExt, AppStateStoreExt, ConfigStateStoreExt, PlaybackStatus,
+    PlaybackUiStateStoreExt, StorageProfilesStateStoreExt,
 };
+use bae_ui::{ErrorToast, SuccessToast};
 use dioxus::prelude::*;
 use rfd::AsyncFileDialog;
 use tracing::{error, warn};
@@ -127,33 +128,66 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
         }
     });
 
+    // Toast feedback signals
+    let mut success_toast = use_signal(|| None::<String>);
+    let mut error_toast = use_signal(|| None::<String>);
+
     // Copy share link callback
+    let config_store = app.state.config();
     let on_track_copy_share_link = EventHandler::new({
         let library_manager = library_manager.clone();
-        let share_base_url = app.config.share_base_url.clone();
         move |track_id: String| {
-            let Some(ref base_url) = share_base_url else {
+            let base_url = config_store.share_base_url().read().clone();
+
+            let Some(base_url) = base_url else {
                 warn!("share_base_url not configured, cannot copy share link");
+                error_toast.set(Some("Share base URL not configured".to_string()));
                 return;
             };
 
             let Some(encryption) = library_manager.get().encryption_service() else {
                 warn!("Encryption not configured, cannot generate share token");
+                error_toast.set(Some("Encryption not configured".to_string()));
                 return;
             };
+
+            let expiry_days = *config_store.share_default_expiry_days().read();
+            let expiry = expiry_days.map(|days| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system clock before UNIX epoch")
+                    .as_secs()
+                    + (days as u64) * 86400
+            });
+            let version = *config_store.share_signing_key_version().read();
 
             match bae_core::share_token::generate_share_token(
                 encryption,
                 bae_core::share_token::ShareKind::Track,
                 &track_id,
-                None,
+                expiry,
+                version,
             ) {
                 Ok(token) => {
                     let url = format!("{}/share/{}", base_url, token);
-                    let _ = arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&url));
+                    match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&url)) {
+                        Ok(()) => {
+                            success_toast.set(Some("Link copied".to_string()));
+
+                            spawn(async move {
+                                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                                success_toast.set(None);
+                            });
+                        }
+                        Err(e) => {
+                            warn!("Failed to copy to clipboard: {e}");
+                            error_toast.set(Some("Failed to copy to clipboard".to_string()));
+                        }
+                    }
                 }
                 Err(e) => {
                     warn!("Failed to generate share token: {e}");
+                    error_toast.set(Some(format!("Failed to generate share link: {e}")));
                 }
             }
         }
@@ -312,6 +346,9 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
         }
     });
 
+    // Show share link menu item only when base URL is configured
+    let show_share_link = config_store.share_base_url().read().is_some();
+
     // Available storage profiles for transfer
     let available_profiles = app.state.storage_profiles().profiles().read().clone();
 
@@ -341,6 +378,7 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
                 state,
                 tracks,
                 playback: playback_display(),
+                show_share_link,
                 on_release_select,
                 on_album_deleted,
                 on_export_release,
@@ -362,6 +400,20 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
                 on_select_cover,
                 on_create_share_grant,
                 available_profiles,
+            }
+
+            if let Some(ref msg) = success_toast() {
+                SuccessToast {
+                    message: msg.clone(),
+                    on_dismiss: move |_| success_toast.set(None),
+                }
+            }
+
+            if let Some(ref msg) = error_toast() {
+                ErrorToast {
+                    message: msg.clone(),
+                    on_dismiss: move |_| error_toast.set(None),
+                }
             }
         } else {
             AlbumDetailLoading {}

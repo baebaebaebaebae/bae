@@ -73,6 +73,10 @@ struct Args {
     /// Base URL for share links (e.g. "https://listen.example.com").
     #[arg(long, env = "BAE_SHARE_BASE_URL")]
     share_base_url: Option<String>,
+
+    /// Share token signing key version. Increment to invalidate all outstanding share links.
+    #[arg(long, default_value = "1", env = "BAE_SHARE_SIGNING_KEY_VERSION")]
+    share_signing_key_version: u32,
 }
 
 fn configure_logging() {
@@ -195,6 +199,7 @@ async fn main() {
         library_dir,
         key_service,
         args.share_base_url,
+        args.share_signing_key_version,
     );
 
     // If --web-dir is provided, serve static files with SPA fallback.
