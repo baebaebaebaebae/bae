@@ -437,8 +437,9 @@ async fn create_sync_handle(
     database: &Database,
     encryption: &encryption::EncryptionService,
 ) -> Option<ui::app_context::SyncHandle> {
+    use bae_core::cloud_home::s3::S3CloudHome;
+    use bae_core::sync::cloud_home_bucket::CloudHomeSyncBucket;
     use bae_core::sync::hlc::Hlc;
-    use bae_core::sync::s3_bucket::S3SyncBucketClient;
     use bae_core::sync::session::SyncSession;
 
     let bucket = config.sync_s3_bucket.as_ref()?;
@@ -447,22 +448,23 @@ async fn create_sync_handle(
     let access_key = key_service.get_sync_access_key()?;
     let secret_key = key_service.get_sync_secret_key()?;
 
-    let bucket_client = match S3SyncBucketClient::new(
+    let cloud_home = match S3CloudHome::new(
         bucket.clone(),
         region.clone(),
         endpoint,
         access_key,
         secret_key,
-        encryption.clone(),
     )
     .await
     {
-        Ok(client) => client,
+        Ok(home) => home,
         Err(e) => {
-            error!("Failed to create sync bucket client: {e}");
+            error!("Failed to create cloud home: {e}");
             return None;
         }
     };
+
+    let bucket_client = CloudHomeSyncBucket::new(Box::new(cloud_home), encryption.clone());
 
     let raw_db = match database.raw_write_handle().await {
         Ok(ptr) => ptr,

@@ -39,6 +39,18 @@ pub enum BucketError {
     Decryption(String),
 }
 
+impl From<crate::cloud_home::CloudHomeError> for BucketError {
+    fn from(e: crate::cloud_home::CloudHomeError) -> Self {
+        match e {
+            crate::cloud_home::CloudHomeError::NotFound(key) => BucketError::NotFound(key),
+            crate::cloud_home::CloudHomeError::Storage(msg) => BucketError::S3(msg),
+            crate::cloud_home::CloudHomeError::Io(io_err) => {
+                BucketError::S3(format!("I/O error: {io_err}"))
+            }
+        }
+    }
+}
+
 #[async_trait]
 pub trait SyncBucketClient: Send + Sync {
     /// List all device heads (one LIST call to `heads/`).

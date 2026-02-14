@@ -1,12 +1,13 @@
 //! Library settings section — business logic wrapper
 
+use bae_core::cloud_home::s3::S3CloudHome;
 use bae_core::config::Config;
 use bae_core::encryption::EncryptionService;
 use bae_core::keys::KeyService;
 use bae_core::library_dir::LibraryDir;
 use bae_core::sync::bucket::SyncBucketClient;
+use bae_core::sync::cloud_home_bucket::CloudHomeSyncBucket;
 use bae_core::sync::pull::pull_changes;
-use bae_core::sync::s3_bucket::S3SyncBucketClient;
 use bae_core::sync::snapshot::bootstrap_from_snapshot;
 use bae_ui::{JoinLibraryView, JoinStatus, LibrarySectionView};
 use dioxus::prelude::*;
@@ -209,7 +210,7 @@ pub fn LibrarySection() -> Element {
 ///
 /// Steps:
 /// 1. Load the user's Ed25519 keypair (must exist -- Phase 6a).
-/// 2. Create an S3SyncBucketClient with a dummy encryption key (only used
+/// 2. Create a CloudHomeSyncBucket with a dummy encryption key (only used
 ///    to access the wrapped key, which is stored as raw sealed-box bytes).
 /// 3. `accept_invitation()` to unwrap the library encryption key.
 /// 4. Recreate the bucket client with the real encryption key.
@@ -245,16 +246,17 @@ async fn join_shared_library(
     let dummy_encryption = EncryptionService::new(&hex::encode(dummy_key))
         .map_err(|e| format!("Failed to create encryption service: {e}"))?;
 
-    let dummy_bucket = S3SyncBucketClient::new(
+    let dummy_home = S3CloudHome::new(
         bucket.clone(),
         region.clone(),
         ep.clone(),
         access_key.clone(),
         secret_key.clone(),
-        dummy_encryption,
     )
     .await
     .map_err(|e| format!("Failed to connect to sync bucket: {e}"))?;
+
+    let dummy_bucket = CloudHomeSyncBucket::new(Box::new(dummy_home), dummy_encryption);
 
     // Step 3: Accept invitation to get the library encryption key.
     status.set(Some(JoinStatus::Joining(
@@ -275,16 +277,17 @@ async fn join_shared_library(
     let encryption = EncryptionService::new(&encryption_key_hex)
         .map_err(|e| format!("Invalid encryption key: {e}"))?;
 
-    let real_bucket = S3SyncBucketClient::new(
+    let real_home = S3CloudHome::new(
         bucket.clone(),
         region.clone(),
         ep,
         access_key.clone(),
         secret_key.clone(),
-        encryption.clone(),
     )
     .await
     .map_err(|e| format!("Failed to reconnect to sync bucket: {e}"))?;
+
+    let real_bucket = CloudHomeSyncBucket::new(Box::new(real_home), encryption.clone());
 
     // Step 5: Create a new library directory.
     let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
@@ -323,7 +326,7 @@ async fn join_shared_library(
 
 /// Inner bootstrap logic — separated so the caller can clean up the library directory on failure.
 async fn bootstrap_library(
-    real_bucket: &S3SyncBucketClient,
+    real_bucket: &CloudHomeSyncBucket,
     encryption: &EncryptionService,
     encryption_key_hex: &str,
     library_dir: &LibraryDir,

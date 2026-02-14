@@ -1,3 +1,4 @@
+use bae_core::cloud_home::s3::S3CloudHome;
 use bae_core::db::Database;
 use bae_core::encryption::EncryptionService;
 use bae_core::keys::KeyService;
@@ -5,8 +6,8 @@ use bae_core::library::{LibraryManager, SharedLibraryManager};
 use bae_core::library_dir::LibraryDir;
 use bae_core::subsonic::create_router;
 use bae_core::sync::bucket::SyncBucketClient;
+use bae_core::sync::cloud_home_bucket::CloudHomeSyncBucket;
 use bae_core::sync::pull::pull_changes;
-use bae_core::sync::s3_bucket::S3SyncBucketClient;
 use bae_core::sync::snapshot::bootstrap_from_snapshot;
 use clap::Parser;
 use std::collections::HashMap;
@@ -126,19 +127,20 @@ async fn main() {
     );
 
     // Connect to sync bucket.
-    let bucket = S3SyncBucketClient::new(
+    let cloud_home = S3CloudHome::new(
         args.s3_bucket.clone(),
         args.s3_region.clone(),
         args.s3_endpoint.clone(),
         args.s3_access_key.clone(),
         args.s3_secret_key.clone(),
-        encryption.clone(),
     )
     .await
     .unwrap_or_else(|e| {
-        error!("Failed to connect to sync bucket: {e}");
+        error!("Failed to connect to cloud home: {e}");
         std::process::exit(1);
     });
+
+    let bucket = CloudHomeSyncBucket::new(Box::new(cloud_home), encryption.clone());
 
     info!("Connected to sync bucket: {}", args.s3_bucket);
 
@@ -235,7 +237,7 @@ async fn main() {
 ///
 /// Returns the number of changesets applied.
 async fn apply_changesets(
-    bucket: &S3SyncBucketClient,
+    bucket: &CloudHomeSyncBucket,
     db_path: &std::path::Path,
     snapshot_seq: u64,
 ) -> u64 {
@@ -286,7 +288,7 @@ async fn apply_changesets(
 
 /// Download all images from the sync bucket.
 /// The bucket client handles decryption internally.
-async fn download_images(bucket: &S3SyncBucketClient, library_dir: &LibraryDir) {
+async fn download_images(bucket: &CloudHomeSyncBucket, library_dir: &LibraryDir) {
     info!("Downloading images...");
 
     let image_keys = match bucket.list_image_keys().await {
