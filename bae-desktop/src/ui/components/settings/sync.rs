@@ -191,6 +191,8 @@ pub fn SyncSection() -> Element {
     let app_for_sign_in = app.clone();
     let app_for_disconnect = app.clone();
     let app_for_select = app.clone();
+    #[cfg(target_os = "macos")]
+    let app_for_icloud = app.clone();
 
     rsx! {
         SyncSectionView {
@@ -227,7 +229,9 @@ pub fn SyncSection() -> Element {
             on_disconnect_provider: move |_| {
                 app_for_disconnect.disconnect_cloud_provider();
             },
-            on_use_icloud: |_| {},
+            on_use_icloud: move |_| {
+                #[cfg(target_os = "macos")] app_for_icloud.use_icloud();
+            },
 
             // S3 edit state
             is_editing: *is_editing.read(),

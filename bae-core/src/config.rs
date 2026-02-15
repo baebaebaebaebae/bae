@@ -302,6 +302,9 @@ pub struct ConfigYaml {
     /// pCloud API host (e.g. "api.pcloud.com" or "eapi.pcloud.com" for EU)
     #[serde(default)]
     pub cloud_home_pcloud_api_host: Option<String>,
+    /// iCloud Drive ubiquity container path for cloud home
+    #[serde(default)]
+    pub cloud_home_icloud_container_path: Option<String>,
 
     /// Base URL for share links (e.g. "https://listen.example.com")
     #[serde(default)]
@@ -394,6 +397,8 @@ pub struct Config {
     pub cloud_home_pcloud_folder_id: Option<u64>,
     /// pCloud API host (e.g. "api.pcloud.com" or "eapi.pcloud.com" for EU)
     pub cloud_home_pcloud_api_host: Option<String>,
+    /// iCloud Drive ubiquity container path for cloud home
+    pub cloud_home_icloud_container_path: Option<String>,
     /// Base URL for share links (e.g. "https://listen.example.com")
     pub share_base_url: Option<String>,
     /// Default expiry for share links in days (None = never expires)
@@ -584,6 +589,7 @@ impl Config {
             cloud_home_onedrive_folder_id: yaml_config.cloud_home_onedrive_folder_id,
             cloud_home_pcloud_folder_id: yaml_config.cloud_home_pcloud_folder_id,
             cloud_home_pcloud_api_host: yaml_config.cloud_home_pcloud_api_host,
+            cloud_home_icloud_container_path: yaml_config.cloud_home_icloud_container_path,
             share_base_url: yaml_config.share_base_url,
             share_default_expiry_days: yaml_config.share_default_expiry_days,
             share_signing_key_version: yaml_config.share_signing_key_version,
@@ -621,7 +627,7 @@ impl Config {
                 self.cloud_home_pcloud_folder_id.is_some()
                     && key_service.get_cloud_home_oauth_token().is_some()
             }
-            Some(CloudProvider::ICloud) => true, // filesystem-based, no credentials
+            Some(CloudProvider::ICloud) => self.cloud_home_icloud_container_path.is_some(),
             None => {
                 // Backwards compat: check S3 fields directly (pre-cloud_provider configs)
                 self.cloud_home_s3_bucket.is_some()
@@ -681,6 +687,7 @@ impl Config {
             cloud_home_onedrive_folder_id: self.cloud_home_onedrive_folder_id.clone(),
             cloud_home_pcloud_folder_id: self.cloud_home_pcloud_folder_id,
             cloud_home_pcloud_api_host: self.cloud_home_pcloud_api_host.clone(),
+            cloud_home_icloud_container_path: self.cloud_home_icloud_container_path.clone(),
             share_base_url: self.share_base_url.clone(),
             share_default_expiry_days: self.share_default_expiry_days,
             share_signing_key_version: self.share_signing_key_version,
@@ -741,6 +748,7 @@ impl Config {
             cloud_home_onedrive_folder_id: None,
             cloud_home_pcloud_folder_id: None,
             cloud_home_pcloud_api_host: None,
+            cloud_home_icloud_container_path: None,
             share_base_url: None,
             share_default_expiry_days: None,
             share_signing_key_version: 1,
@@ -929,6 +937,7 @@ mod tests {
             cloud_home_onedrive_folder_id: None,
             cloud_home_pcloud_folder_id: None,
             cloud_home_pcloud_api_host: None,
+            cloud_home_icloud_container_path: None,
             share_base_url: None,
             share_default_expiry_days: None,
             share_signing_key_version: 1,

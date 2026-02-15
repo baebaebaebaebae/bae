@@ -7,6 +7,7 @@
 
 pub mod dropbox;
 pub mod google_drive;
+pub mod icloud;
 pub mod onedrive;
 pub mod pcloud;
 pub mod s3;
@@ -131,9 +132,17 @@ pub async fn create_cloud_home(
                 google_drive::GoogleDriveCloudHome::new(folder_id, tokens, key_service.clone());
             Ok(Box::new(gd))
         }
-        Some(CloudProvider::ICloud) => Err(CloudHomeError::Storage(
-            "iCloud Drive is not yet implemented".to_string(),
-        )),
+        Some(CloudProvider::ICloud) => {
+            let path = config
+                .cloud_home_icloud_container_path
+                .as_ref()
+                .ok_or_else(|| {
+                    CloudHomeError::Storage("iCloud container path not configured".to_string())
+                })?;
+            Ok(Box::new(icloud::ICloudCloudHome::new(
+                std::path::PathBuf::from(path),
+            )))
+        }
         Some(CloudProvider::Dropbox) => {
             let folder_path = config
                 .cloud_home_dropbox_folder_path
