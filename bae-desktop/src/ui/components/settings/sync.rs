@@ -128,6 +128,9 @@ pub fn SyncSection() -> Element {
     let mut is_accepting_grant = use_signal(|| false);
     let mut accept_grant_error = use_signal(|| Option::<String>::None);
 
+    // --- Recovery key state ---
+    let mut recovery_key = use_signal(|| Option::<String>::None);
+
     // Load membership and shared releases on mount
     let app_for_membership = app.clone();
     let app_for_load_shared = app.clone();
@@ -389,6 +392,19 @@ pub fn SyncSection() -> Element {
             },
             on_revoke_shared_release: move |grant_id: String| {
                 app_for_revoke.revoke_shared_release(grant_id);
+            },
+
+            // Recovery key
+            recovery_key: recovery_key.read().clone(),
+            on_reveal_recovery_key: move |_| {
+                if let Some(key) = app.key_service.get_encryption_key() {
+                    recovery_key.set(Some(key));
+                }
+            },
+            on_copy_recovery_key: move |_| {
+                if let Some(ref key) = *recovery_key.read() {
+                    let _ = arboard::Clipboard::new().and_then(|mut cb| cb.set_text(key));
+                }
             },
         }
     }
