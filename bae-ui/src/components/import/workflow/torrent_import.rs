@@ -17,7 +17,7 @@ use super::{
     MultipleExactMatchesView, SelectedSourceView, TorrentFilesDisplayView, TorrentInfoDisplayView,
     TorrentTrackerDisplayView, TrackerStatus,
 };
-use crate::components::StorageProfile;
+
 use crate::display_types::{
     IdentifyMode, ImportStep, MatchCandidate, SearchSource, SearchTab, SelectedCover,
     TorrentFileInfo, TorrentInfo,
@@ -52,8 +52,6 @@ pub struct TorrentImportViewProps {
 
     // === External data ===
     /// Storage profiles (from app context)
-    pub storage_profiles: ReadSignal<Vec<StorageProfile>>,
-
     // === Callbacks ===
     pub on_exact_match_select: EventHandler<usize>,
     pub on_confirm_exact_match: EventHandler<MatchCandidate>,
@@ -73,10 +71,10 @@ pub struct TorrentImportViewProps {
     pub on_retry_discid_lookup: EventHandler<()>,
     pub on_detect_metadata: EventHandler<()>,
     pub on_select_cover: EventHandler<SelectedCover>,
-    pub on_storage_profile_change: EventHandler<Option<String>>,
+    pub on_managed_change: EventHandler<bool>,
     pub on_edit: EventHandler<()>,
     pub on_confirm: EventHandler<()>,
-    pub on_configure_storage: EventHandler<()>,
+
     pub on_clear: EventHandler<()>,
     pub on_view_in_library: EventHandler<String>,
 }
@@ -107,7 +105,7 @@ pub fn TorrentImportView(props: TorrentImportViewProps) -> Element {
                     torrent_info: props.torrent_info.clone(),
                     tracker_statuses: props.tracker_statuses.clone(),
                     torrent_files: props.torrent_files.clone(),
-                    storage_profiles: props.storage_profiles,
+
                     on_clear: props.on_clear,
                     on_exact_match_select: props.on_exact_match_select,
                     on_confirm_exact_match: props.on_confirm_exact_match,
@@ -127,10 +125,10 @@ pub fn TorrentImportView(props: TorrentImportViewProps) -> Element {
                     on_retry_discid_lookup: props.on_retry_discid_lookup,
                     on_detect_metadata: props.on_detect_metadata,
                     on_select_cover: props.on_select_cover,
-                    on_storage_profile_change: props.on_storage_profile_change,
+                    on_managed_change: props.on_managed_change,
                     on_edit: props.on_edit,
                     on_confirm: props.on_confirm,
-                    on_configure_storage: props.on_configure_storage,
+
                     on_view_in_library: props.on_view_in_library,
                 }
             }
@@ -145,7 +143,7 @@ fn TorrentWorkflowContent(
     torrent_info: Option<TorrentInfo>,
     tracker_statuses: Vec<TrackerStatus>,
     torrent_files: Vec<TorrentFileInfo>,
-    storage_profiles: ReadSignal<Vec<StorageProfile>>,
+
     on_clear: EventHandler<()>,
     on_exact_match_select: EventHandler<usize>,
     on_confirm_exact_match: EventHandler<MatchCandidate>,
@@ -165,10 +163,10 @@ fn TorrentWorkflowContent(
     on_retry_discid_lookup: EventHandler<()>,
     on_detect_metadata: EventHandler<()>,
     on_select_cover: EventHandler<SelectedCover>,
-    on_storage_profile_change: EventHandler<Option<String>>,
+    on_managed_change: EventHandler<bool>,
     on_edit: EventHandler<()>,
     on_confirm: EventHandler<()>,
-    on_configure_storage: EventHandler<()>,
+
     on_view_in_library: EventHandler<String>,
 ) -> Element {
     let torrent_path = state
@@ -222,13 +220,13 @@ fn TorrentWorkflowContent(
                 torrent_info,
                 tracker_statuses,
                 torrent_files,
-                storage_profiles,
+
                 on_clear,
                 on_select_cover,
-                on_storage_profile_change,
+                on_managed_change,
                 on_edit,
                 on_confirm,
-                on_configure_storage,
+
                 on_view_in_library,
             }
         },
@@ -347,13 +345,13 @@ fn TorrentConfirmContent(
     torrent_info: Option<TorrentInfo>,
     tracker_statuses: Vec<TrackerStatus>,
     torrent_files: Vec<TorrentFileInfo>,
-    storage_profiles: ReadSignal<Vec<StorageProfile>>,
+
     on_clear: EventHandler<()>,
     on_select_cover: EventHandler<SelectedCover>,
-    on_storage_profile_change: EventHandler<Option<String>>,
+    on_managed_change: EventHandler<bool>,
     on_edit: EventHandler<()>,
     on_confirm: EventHandler<()>,
-    on_configure_storage: EventHandler<()>,
+
     on_view_in_library: EventHandler<String>,
 ) -> Element {
     let current_key = state.current_candidate_key().read().clone();
@@ -365,7 +363,7 @@ fn TorrentConfirmContent(
         selected_cover,
         display_cover_url,
         artwork_files,
-        selected_profile_id,
+        managed,
         is_importing,
         is_completed,
         completed_album_id,
@@ -395,7 +393,7 @@ fn TorrentConfirmContent(
                 cs.selected_cover.clone(),
                 cover_url,
                 cs.files.artwork.clone(),
-                cs.selected_profile_id.clone(),
+                cs.managed,
                 importing,
                 completed,
                 album_id,
@@ -408,7 +406,7 @@ fn TorrentConfirmContent(
             None,
             None,
             vec![],
-            None,
+            true,
             false,
             false,
             None,
@@ -440,17 +438,17 @@ fn TorrentConfirmContent(
                 display_cover_url,
                 artwork_files,
                 remote_cover_url: candidate.cover_url.clone(),
-                storage_profiles,
-                selected_profile_id,
+
+                managed,
                 is_importing,
                 is_completed,
                 completed_album_id,
                 preparing_step_text,
                 on_select_cover,
-                on_storage_profile_change,
+                on_managed_change,
                 on_edit,
                 on_confirm,
-                on_configure_storage,
+
                 on_view_in_library,
                 import_error,
             }

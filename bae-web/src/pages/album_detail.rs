@@ -138,12 +138,11 @@ pub fn AlbumDetail(album_id: String) -> Element {
                         let infos = build_track_infos(&album_state, &track_ids);
                         service.write().add_to_queue_with_info(infos);
                     },
-                    on_transfer_to_profile: |_| {},
+                    on_transfer_to_managed: |_| {},
                     on_eject: |_| {},
                     on_fetch_remote_covers: |_| {},
                     on_select_cover: |_| {},
                     on_create_share_grant: |_| {},
-                    available_profiles: vec![],
                 }
             }
         }

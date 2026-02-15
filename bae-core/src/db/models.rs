@@ -172,6 +172,13 @@ pub struct DbRelease {
     /// Barcode
     pub barcode: Option<String>,
     pub import_status: ImportStatus,
+    /// Files are in `~/.bae/libraries/{uuid}/storage/ab/cd/{file_id}`
+    pub managed_locally: bool,
+    /// Files are in cloud home `storage/ab/cd/{file_id}`
+    pub managed_in_cloud: bool,
+    /// Base folder path for unmanaged files (path = unmanaged_path/original_filename).
+    /// Mutually exclusive with managed_locally/managed_in_cloud.
+    pub unmanaged_path: Option<String>,
     /// When true, this release is excluded from discovery network participation
     /// (no DHT announces, no attestation sharing).
     pub private: bool,
@@ -239,8 +246,10 @@ impl EncryptionScheme {
 /// - Files are part of a specific release (e.g., "2016 Remaster" has different files than "1973 Original")
 /// - Some files are metadata (cover.jpg, .cue sheets) not associated with any track
 ///
-/// When a release has no storage profile, the `source_path` field stores the actual
-/// file location for direct playback.
+/// File location is determined by the parent release's storage flags:
+/// - managed_locally: path derived from file_id via `storage_path()`
+/// - managed_in_cloud: key derived from file_id via `storage_path()`
+/// - unmanaged_path: `unmanaged_path/original_filename`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbFile {
     pub id: String,
@@ -249,11 +258,6 @@ pub struct DbFile {
     pub original_filename: String,
     pub file_size: i64,
     pub content_type: ContentType,
-    /// Absolute path to the source file on disk.
-    /// Set when release has no storage profile (bae doesn't manage storage).
-    /// For local imports: user's original file path.
-    /// For torrent imports: temp folder path (ephemeral).
-    pub source_path: Option<String>,
     /// Encryption nonce (24 bytes) for efficient range decryption.
     /// Only set when file is encrypted with chunked encryption.
     /// Stored at import time, used during seek to avoid fetching nonce from cloud.
@@ -310,7 +314,6 @@ pub struct DbAudioFormat {
     /// Seektable byte offsets are relative to this position.
     pub audio_data_start: i64,
     /// FK to DbFile containing this track's audio data.
-    /// Links to files.id to get the actual source_path.
     pub file_id: Option<String>,
     pub updated_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
@@ -463,6 +466,9 @@ impl DbRelease {
             country: None,
             barcode: None,
             import_status: ImportStatus::Queued,
+            managed_locally: false,
+            managed_in_cloud: false,
+            unmanaged_path: None,
             private: false,
             created_at: now,
             updated_at: now,
@@ -489,6 +495,9 @@ impl DbRelease {
             country: release.country.clone(),
             barcode: None,
             import_status: ImportStatus::Queued,
+            managed_locally: false,
+            managed_in_cloud: false,
+            unmanaged_path: None,
             private: false,
             created_at: now,
             updated_at: now,
@@ -513,6 +522,9 @@ impl DbRelease {
             country: release.country.clone(),
             barcode: release.barcode.clone(),
             import_status: ImportStatus::Queued,
+            managed_locally: false,
+            managed_in_cloud: false,
+            unmanaged_path: None,
             private: false,
             created_at: now,
             updated_at: now,
@@ -580,19 +592,11 @@ impl DbFile {
             original_filename: original_filename.to_string(),
             file_size,
             content_type,
-            source_path: None,
             encryption_nonce: None,
             encryption_scheme: EncryptionScheme::Master,
             updated_at: now,
             created_at: now,
         }
-    }
-
-    /// Set the source path for None storage mode.
-    /// This is the actual file location on disk for direct playback.
-    pub fn with_source_path(mut self, path: &str) -> Self {
-        self.source_path = Some(path.to_string());
-        self
     }
 
     /// Set the encryption nonce for efficient encrypted range requests.
@@ -606,6 +610,14 @@ impl DbFile {
     pub fn with_encryption_scheme(mut self, scheme: EncryptionScheme) -> Self {
         self.encryption_scheme = scheme;
         self
+    }
+
+    /// Derive the local storage path for this file.
+    pub fn local_storage_path(
+        &self,
+        library_dir: &crate::library_dir::LibraryDir,
+    ) -> std::path::PathBuf {
+        library_dir.join(crate::storage::storage_path(&self.id))
     }
 }
 impl DbAudioFormat {
@@ -896,123 +908,6 @@ pub struct DbLibraryImage {
     pub source_url: Option<String>,
     pub updated_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
-}
-/// Where release data is stored
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[sqlx(type_name = "TEXT", rename_all = "lowercase")]
-pub enum StorageLocation {
-    /// Local filesystem path (bae manages storage)
-    Local,
-    /// Cloud storage (S3/MinIO, bae manages storage)
-    Cloud,
-}
-impl StorageLocation {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            StorageLocation::Local => "local",
-            StorageLocation::Cloud => "cloud",
-        }
-    }
-}
-/// Reusable storage configuration template
-///
-/// Defines how releases should be stored. Users create profiles like
-/// "Local Raw", "Cloud Encrypted", etc. and select them during import.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DbStorageProfile {
-    pub id: String,
-    pub name: String,
-    /// Where to store: local filesystem or cloud
-    pub location: StorageLocation,
-    /// Path for local storage (ignored for cloud)
-    pub location_path: String,
-    /// Whether to encrypt data
-    pub encrypted: bool,
-    /// True if this is the default profile for new imports
-    pub is_default: bool,
-    /// True if this is the library home profile (where desktop writes the authoritative DB)
-    pub is_home: bool,
-    /// S3 bucket name
-    pub cloud_bucket: Option<String>,
-    /// AWS region (e.g., "us-east-1")
-    pub cloud_region: Option<String>,
-    /// Custom endpoint URL for S3-compatible services (MinIO, etc.)
-    pub cloud_endpoint: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-impl DbStorageProfile {
-    /// Create a new local storage profile
-    pub fn new_local(name: &str, path: &str, encrypted: bool) -> Self {
-        let now = Utc::now();
-        DbStorageProfile {
-            id: Uuid::new_v4().to_string(),
-            name: name.to_string(),
-            location: StorageLocation::Local,
-            location_path: path.to_string(),
-            encrypted,
-            is_default: false,
-            is_home: false,
-            cloud_bucket: None,
-            cloud_region: None,
-            cloud_endpoint: None,
-            created_at: now,
-            updated_at: now,
-        }
-    }
-    /// Create a new cloud storage profile
-    pub fn new_cloud(
-        name: &str,
-        bucket: &str,
-        region: &str,
-        endpoint: Option<&str>,
-        encrypted: bool,
-    ) -> Self {
-        let now = Utc::now();
-        DbStorageProfile {
-            id: Uuid::new_v4().to_string(),
-            name: name.to_string(),
-            location: StorageLocation::Cloud,
-            location_path: String::new(),
-            encrypted,
-            is_default: false,
-            is_home: false,
-            cloud_bucket: Some(bucket.to_string()),
-            cloud_region: Some(region.to_string()),
-            cloud_endpoint: endpoint.map(|s| s.to_string()),
-            created_at: now,
-            updated_at: now,
-        }
-    }
-    pub fn with_home(mut self, is_home: bool) -> Self {
-        self.is_home = is_home;
-        self
-    }
-    pub fn with_default(mut self, is_default: bool) -> Self {
-        self.is_default = is_default;
-        self
-    }
-}
-/// Links a release to its storage profile
-///
-/// Each release has exactly one storage configuration that determines
-/// where and how its data is stored.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DbReleaseStorage {
-    pub id: String,
-    pub release_id: String,
-    pub storage_profile_id: String,
-    pub created_at: DateTime<Utc>,
-}
-impl DbReleaseStorage {
-    pub fn new(release_id: &str, storage_profile_id: &str) -> Self {
-        DbReleaseStorage {
-            id: Uuid::new_v4().to_string(),
-            release_id: release_id.to_string(),
-            storage_profile_id: storage_profile_id.to_string(),
-            created_at: Utc::now(),
-        }
-    }
 }
 
 // ============================================================================

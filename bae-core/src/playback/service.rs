@@ -23,7 +23,6 @@
 use crate::cloud_storage::CloudStorage;
 use crate::db::DbTrack;
 use crate::encryption::EncryptionService;
-use crate::keys::KeyService;
 use crate::library::LibraryManager;
 use crate::playback::cpal_output::AudioOutput;
 use crate::playback::data_source::{
@@ -33,7 +32,6 @@ use crate::playback::error::PlaybackError;
 use crate::playback::progress::{PlaybackProgress, PlaybackProgressHandle};
 use crate::playback::sparse_buffer::{create_sparse_buffer, SharedSparseBuffer};
 use crate::playback::{create_streaming_pair, StreamingPcmSource};
-use crate::storage::create_storage_reader;
 use bae_common::{NextTrack, PlaybackQueue, PreviousAction, RepeatMode};
 use cpal::traits::StreamTrait;
 use std::collections::VecDeque;
@@ -212,8 +210,7 @@ struct PreparedTrack {
 /// This is the common preparation logic used by both play_track and preload_next_track.
 async fn prepare_track(
     library_manager: &LibraryManager,
-    encryption_service: Option<&EncryptionService>,
-    key_service: &KeyService,
+    library_dir: &crate::library_dir::LibraryDir,
     track_id: &str,
 ) -> Result<PreparedTrack, PlaybackError> {
     let track = library_manager
@@ -222,10 +219,12 @@ async fn prepare_track(
         .map_err(PlaybackError::database)?
         .ok_or_else(|| PlaybackError::not_found("Track", track_id))?;
 
-    let storage_profile = library_manager
-        .get_storage_profile_for_release(&track.release_id)
+    let release = library_manager
+        .database()
+        .get_release_by_id(&track.release_id)
         .await
-        .map_err(PlaybackError::database)?;
+        .map_err(PlaybackError::database)?
+        .ok_or_else(|| PlaybackError::not_found("Release", &track.release_id))?;
 
     let audio_format = library_manager
         .get_audio_format_by_track_id(track_id)
@@ -244,9 +243,22 @@ async fn prepare_track(
         .map_err(PlaybackError::database)?
         .ok_or_else(|| PlaybackError::not_found("Audio file", file_id))?;
 
-    let source_path = audio_file
-        .source_path
-        .ok_or_else(|| PlaybackError::not_found("source_path", track_id))?;
+    // Derive source path from release storage flags
+    let source_path = if release.managed_locally {
+        audio_file
+            .local_storage_path(library_dir)
+            .display()
+            .to_string()
+    } else if let Some(ref unmanaged_path) = release.unmanaged_path {
+        std::path::Path::new(unmanaged_path)
+            .join(&audio_file.original_filename)
+            .display()
+            .to_string()
+    } else {
+        // No local path — will be resolved as a shared release below,
+        // or an error will be returned.
+        String::new()
+    };
 
     let pregap_ms = audio_format.pregap_ms;
 
@@ -284,7 +296,7 @@ async fn prepare_track(
         end_byte,
     };
 
-    // Create appropriate data reader based on storage profile.
+    // Create appropriate data reader based on release storage flags.
     // Also capture cloud storage info for seek support.
     // encryption_override is set for shared releases (per-release key instead of library key).
     type ReaderInfo = (
@@ -295,83 +307,58 @@ async fn prepare_track(
         Option<Arc<EncryptionService>>,
     );
     let (reader, is_local_storage, cloud_storage, cloud_encrypted, encryption_override): ReaderInfo =
-        match &storage_profile {
-            None => {
-                // No local storage profile — check if this is a shared release
-                let shared = match crate::sync::shared_release::resolve_release(
-                    library_manager.database(),
-                    &track.release_id,
-                )
-                .await
-                {
-                    Ok(s) => s,
-                    Err(e) => {
-                        warn!("Failed to resolve shared release for {}: {e}", track.release_id);
-                        None
-                    }
+        if !release.managed_locally && release.unmanaged_path.is_none() {
+            // No local storage — check if this is a shared release
+            let shared = match crate::sync::shared_release::resolve_release(
+                library_manager.database(),
+                &track.release_id,
+            )
+            .await
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!("Failed to resolve shared release for {}: {e}", track.release_id);
+                    None
+                }
+            };
+
+            if let Some(shared) = shared {
+                use crate::playback::track_loader::create_shared_release_storage;
+                let srs = create_shared_release_storage(shared, file_id).await?;
+
+                // Override path to storage key layout for the sharer's bucket
+                let shared_read_config = AudioReadConfig {
+                    path: srs.storage_key,
+                    ..read_config
                 };
 
-                if let Some(shared) = shared {
-                    use crate::playback::track_loader::create_shared_release_storage;
-                    let srs = create_shared_release_storage(shared, file_id).await?;
-
-                    // Override path to storage key layout for the sharer's bucket
-                    let shared_read_config = AudioReadConfig {
-                        path: srs.storage_key,
-                        ..read_config
-                    };
-
-                    (
-                        Box::new(CloudStorageReader::new(
-                            shared_read_config,
-                            srs.storage.clone(),
-                            Some(srs.encryption.clone()),
-                            true,
-                        )) as Box<dyn AudioDataReader>,
-                        false,
-                        Some(srs.storage),
-                        true,
-                        Some(srs.encryption),
-                    )
-                } else {
-                    (
-                        Box::new(LocalFileReader::new(read_config)),
-                        true,
-                        None,
-                        false,
-                        None,
-                    )
-                }
-            }
-            Some(profile)
-                if !profile.encrypted && profile.location == crate::db::StorageLocation::Local =>
-            {
-                (
-                    Box::new(LocalFileReader::new(read_config)),
-                    true,
-                    None,
-                    false,
-                    None,
-                )
-            }
-            Some(profile) => {
-                let storage = create_storage_reader(profile, key_service)
-                    .await
-                    .map_err(PlaybackError::cloud)?;
-                let encrypted = profile.encrypted;
                 (
                     Box::new(CloudStorageReader::new(
-                        read_config,
-                        storage.clone(),
-                        encryption_service.map(|e| Arc::new(e.clone())),
-                        encrypted,
-                    )),
+                        shared_read_config,
+                        srs.storage.clone(),
+                        Some(srs.encryption.clone()),
+                        true,
+                    )) as Box<dyn AudioDataReader>,
                     false,
-                    Some(storage),
-                    encrypted,
-                    None,
+                    Some(srs.storage),
+                    true,
+                    Some(srs.encryption),
                 )
+            } else {
+                return Err(PlaybackError::not_found(
+                    "playable file location",
+                    track_id,
+                ));
             }
+        } else {
+            // Local file (managed or unmanaged) — read from disk
+            (
+                Box::new(LocalFileReader::new(read_config)),
+                true,
+                None,
+                false,
+                None,
+            )
         };
 
     // Start reading data into buffer
@@ -421,7 +408,7 @@ async fn prepare_track(
 pub struct PlaybackService {
     library_manager: LibraryManager,
     encryption_service: Option<EncryptionService>,
-    key_service: KeyService,
+    library_dir: crate::library_dir::LibraryDir,
     command_rx: tokio_mpsc::UnboundedReceiver<PlaybackCommand>,
     progress_tx: tokio_mpsc::UnboundedSender<PlaybackProgress>,
     playback_queue: PlaybackQueue,
@@ -587,7 +574,7 @@ impl PlaybackService {
     pub fn start(
         library_manager: LibraryManager,
         encryption_service: Option<EncryptionService>,
-        key_service: KeyService,
+        library_dir: crate::library_dir::LibraryDir,
         runtime_handle: tokio::runtime::Handle,
     ) -> PlaybackHandle {
         let (command_tx, command_rx) = tokio_mpsc::unbounded_channel();
@@ -624,7 +611,7 @@ impl PlaybackService {
                 let mut service = PlaybackService {
                     library_manager,
                     encryption_service,
-                    key_service,
+                    library_dir,
                     command_rx,
                     progress_tx,
                     playback_queue: PlaybackQueue::new(),
@@ -987,13 +974,7 @@ impl PlaybackService {
         });
 
         // Prepare track: fetch metadata, create buffer, start reading
-        let prepared = match prepare_track(
-            &self.library_manager,
-            self.encryption_service.as_ref(),
-            &self.key_service,
-            track_id,
-        )
-        .await
+        let prepared = match prepare_track(&self.library_manager, &self.library_dir, track_id).await
         {
             Ok(p) => p,
             Err(e) => {
@@ -1101,13 +1082,7 @@ impl PlaybackService {
     /// This eagerly starts the decoder so samples are ready when we switch tracks.
     async fn preload_next_track(&mut self, track_id: &str) {
         // Prepare track: fetch metadata, create buffer, start reading
-        let prepared = match prepare_track(
-            &self.library_manager,
-            self.encryption_service.as_ref(),
-            &self.key_service,
-            track_id,
-        )
-        .await
+        let prepared = match prepare_track(&self.library_manager, &self.library_dir, track_id).await
         {
             Ok(p) => p,
             Err(e) => {

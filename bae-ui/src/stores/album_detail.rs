@@ -1,6 +1,5 @@
 //! Album detail state store
 
-use crate::components::settings::StorageProfile;
 use crate::display_types::{Album, Artist, File, Image, Release, RemoteCoverOption, Track};
 use dioxus::prelude::*;
 
@@ -44,8 +43,12 @@ pub struct AlbumDetailState {
     pub import_progress: Option<u8>,
     /// Import error message if import failed
     pub import_error: Option<String>,
-    /// Storage profile for the current release (None = self-managed)
-    pub storage_profile: Option<StorageProfile>,
+    /// Whether the current release's files are managed locally
+    pub managed_locally: bool,
+    /// Whether the current release's files are managed in the cloud
+    pub managed_in_cloud: bool,
+    /// Whether the release is unmanaged (files at original location)
+    pub is_unmanaged: bool,
     /// Transfer progress (Some when a transfer is active)
     pub transfer_progress: Option<TransferProgressState>,
     /// Transfer error message

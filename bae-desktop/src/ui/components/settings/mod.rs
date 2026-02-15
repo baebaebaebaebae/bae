@@ -2,7 +2,6 @@ mod about;
 mod bittorrent;
 mod discogs;
 mod library;
-mod storage_profiles;
 mod subsonic;
 mod sync;
 
@@ -22,9 +21,6 @@ pub fn Settings() -> Element {
             match *active_tab.read() {
                 SettingsTab::Library => rsx! {
                     library::LibrarySection {}
-                },
-                SettingsTab::Storage => rsx! {
-                    storage_profiles::StorageProfilesSection {}
                 },
                 SettingsTab::Sync => rsx! {
                     sync::SyncSection {}

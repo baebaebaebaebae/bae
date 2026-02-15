@@ -110,6 +110,9 @@ fn get_demo_data() -> &'static DemoData {
                 barcode: None,
                 discogs_release_id: None,
                 musicbrainz_release_id: None,
+                managed_locally: true,
+                managed_in_cloud: false,
+                unmanaged_path: None,
             };
             releases_by_album.insert(album_id.clone(), vec![release]);
 

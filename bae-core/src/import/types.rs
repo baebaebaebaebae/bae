@@ -53,8 +53,9 @@ pub enum ImportRequest {
         mb_release: Option<MbRelease>,
         folder: PathBuf,
         master_year: u32,
-        /// Storage profile ID. None means no bae storage (files stay in place).
-        storage_profile_id: Option<String>,
+        /// Whether to store files in managed local storage.
+        /// When false, files stay in place (unmanaged).
+        managed: bool,
         /// User-selected cover image.
         selected_cover: Option<CoverSelection>,
     },
@@ -66,8 +67,9 @@ pub enum ImportRequest {
         master_year: u32,
         seed_after_download: bool,
         torrent_metadata: TorrentImportMetadata,
-        /// Storage profile ID. None means no bae storage (files stay in temp folder).
-        storage_profile_id: Option<String>,
+        /// Whether to store files in managed local storage.
+        /// When false, files stay in temp folder (unmanaged).
+        managed: bool,
         /// User-selected cover image.
         selected_cover: Option<CoverSelection>,
     },
@@ -77,8 +79,9 @@ pub enum ImportRequest {
         mb_release: Option<MbRelease>,
         drive_path: PathBuf,
         master_year: u32,
-        /// Storage profile ID. None means no bae storage (files stay in temp folder).
-        storage_profile_id: Option<String>,
+        /// Whether to store files in managed local storage.
+        /// When false, files stay in temp folder (unmanaged).
+        managed: bool,
         /// User-selected cover image.
         selected_cover: Option<CoverSelection>,
     },
@@ -241,8 +244,8 @@ pub enum ImportCommand {
         discovered_files: Vec<DiscoveredFile>,
         /// Pre-parsed CUE/FLAC metadata (for CUE/FLAC imports only)
         cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
-        /// Storage profile ID. None means no bae storage (files stay in place).
-        storage_profile_id: Option<String>,
+        /// Whether to store files in managed local storage
+        managed: bool,
         /// Resolved absolute path to a local cover image file
         cover_image_path: Option<PathBuf>,
         /// Whether a remote cover was already downloaded and cached by the handle
@@ -266,8 +269,8 @@ pub enum ImportCommand {
         torrent_metadata: TorrentImportMetadata,
         /// Whether to start seeding after download completes
         seed_after_download: bool,
-        /// Storage profile ID. None means no bae storage (files stay in temp folder).
-        storage_profile_id: Option<String>,
+        /// Whether to store files in managed local storage
+        managed: bool,
         /// User-selected cover (resolved after torrent download)
         selected_cover: Option<CoverSelection>,
     },
@@ -284,8 +287,8 @@ pub enum ImportCommand {
         drive_path: PathBuf,
         /// CD TOC (Table of Contents) - read during validation
         toc: CdToc,
-        /// Storage profile ID. None means no bae storage (files stay in temp folder).
-        storage_profile_id: Option<String>,
+        /// Whether to store files in managed local storage
+        managed: bool,
         /// Resolved absolute path to the cover image file
         cover_image_path: Option<PathBuf>,
     },

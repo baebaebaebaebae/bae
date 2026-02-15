@@ -1,12 +1,10 @@
 //! Storage trait and implementation
-use crate::cloud_storage::{s3_config_from_profile, CloudStorage, S3CloudStorage};
 use crate::content_type::ContentType;
-use crate::db::{Database, DbFile, DbStorageProfile, StorageLocation};
+use crate::db::{Database, DbFile};
 use crate::encryption::EncryptionService;
-use crate::keys::KeyService;
+use crate::library_dir::LibraryDir;
 use crate::storage::storage_path;
 use async_trait::async_trait;
-use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::info;
@@ -29,7 +27,6 @@ pub type ProgressCallback = Box<dyn Fn(usize, usize) + Send + Sync>;
 /// Trait for writing release files to storage during import
 ///
 /// Abstracts over different storage configurations (local/cloud, encrypted/plain).
-/// Implementations apply the appropriate transforms based on the StorageProfile.
 #[async_trait]
 pub trait ReleaseStorage: Send + Sync {
     /// Write a file to storage with progress reporting.
@@ -45,73 +42,40 @@ pub trait ReleaseStorage: Send + Sync {
     ) -> Result<(), StorageError>;
 }
 
-/// Storage implementation that applies transforms based on StorageProfile flags
+/// Storage implementation for managed local storage.
 ///
-/// Handles combinations of (local/cloud) x (encrypted/plain).
-/// Transforms are applied in sequence: encrypt -> store.
+/// Writes files to `library_dir/storage/ab/cd/{file_id}`, optionally encrypting.
 #[derive(Clone)]
 pub struct ReleaseStorageImpl {
-    profile: DbStorageProfile,
+    library_dir: LibraryDir,
     encryption: Option<EncryptionService>,
-    cloud: Option<Arc<dyn CloudStorage>>,
     database: Option<Arc<Database>>,
 }
 
 impl ReleaseStorageImpl {
-    /// Create storage from a profile, reading S3 credentials from the keyring if needed.
-    pub async fn from_profile(
-        profile: DbStorageProfile,
+    /// Create storage for managed local imports.
+    pub fn new_local(
+        library_dir: LibraryDir,
         encryption: Option<EncryptionService>,
-        database: Arc<Database>,
-        key_service: &KeyService,
-    ) -> Result<Self, StorageError> {
-        let cloud: Option<Arc<dyn CloudStorage>> = if profile.location == StorageLocation::Cloud {
-            let s3_config = s3_config_from_profile(&profile, key_service)
-                .ok_or_else(|| StorageError::Cloud("Missing S3 credentials for profile".into()))?;
-            let client = S3CloudStorage::new(s3_config)
-                .await
-                .map_err(|e| StorageError::Cloud(e.to_string()))?;
-
-            info!("Created S3 client for profile: {}", profile.name);
-            Some(Arc::new(client))
-        } else {
-            None
-        };
-
-        Ok(Self {
-            profile,
-            encryption,
-            cloud,
-            database: Some(database),
-        })
-    }
-
-    /// Create storage with an injected cloud storage (for testing).
-    #[cfg(feature = "test-utils")]
-    pub fn with_cloud(
-        profile: DbStorageProfile,
-        encryption: Option<EncryptionService>,
-        cloud: Arc<dyn CloudStorage>,
         database: Arc<Database>,
     ) -> Self {
         Self {
-            profile,
+            library_dir,
             encryption,
-            cloud: Some(cloud),
             database: Some(database),
         }
     }
 
-    /// Write bytes to storage without creating a DB record.
+    /// Write bytes to local storage without creating a DB record.
     ///
     /// Uses the given `file_id` for the hash-based storage path.
-    /// Returns `(source_path, encryption_nonce)`.
+    /// Returns the encryption nonce if encryption was applied.
     pub async fn store_bytes(
         &self,
         file_id: &str,
         data: &[u8],
         on_progress: ProgressCallback,
-    ) -> Result<(String, Option<Vec<u8>>), StorageError> {
+    ) -> Result<Option<Vec<u8>>, StorageError> {
         use tokio::io::AsyncWriteExt;
 
         let total_bytes = data.len();
@@ -119,66 +83,47 @@ impl ReleaseStorageImpl {
 
         let data_to_store = self.encrypt_if_needed(data)?;
 
-        let nonce = if self.profile.encrypted && data_to_store.len() >= 24 {
+        let nonce = if self.encryption.is_some() && data_to_store.len() >= 24 {
             Some(data_to_store[..24].to_vec())
         } else {
             None
         };
 
         let rel_path = storage_path(file_id);
+        let path = self.library_dir.join(&rel_path);
 
-        let source_path = match self.profile.location {
-            StorageLocation::Local => {
-                let path = PathBuf::from(&self.profile.location_path).join(&rel_path);
-                if let Some(parent) = path.parent() {
-                    tokio::fs::create_dir_all(parent).await?;
-                }
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
 
-                let batch_size = 1_048_576;
-                let file = tokio::fs::File::create(&path).await?;
-                let mut writer = tokio::io::BufWriter::new(file);
-                let mut bytes_written = 0usize;
+        let batch_size = 1_048_576;
+        let file = tokio::fs::File::create(&path).await?;
+        let mut writer = tokio::io::BufWriter::new(file);
+        let mut bytes_written = 0usize;
 
-                for chunk in data_to_store.chunks(batch_size) {
-                    writer.write_all(chunk).await?;
-                    bytes_written += chunk.len();
+        for chunk in data_to_store.chunks(batch_size) {
+            writer.write_all(chunk).await?;
+            bytes_written += chunk.len();
 
-                    let progress_bytes = if data_to_store.len() != data.len() {
-                        (bytes_written as f64 * data.len() as f64 / data_to_store.len() as f64)
-                            as usize
-                    } else {
-                        bytes_written
-                    };
-                    on_progress(progress_bytes.min(total_bytes), total_bytes);
-                }
+            let progress_bytes = if data_to_store.len() != data.len() {
+                (bytes_written as f64 * data.len() as f64 / data_to_store.len() as f64) as usize
+            } else {
+                bytes_written
+            };
+            on_progress(progress_bytes.min(total_bytes), total_bytes);
+        }
 
-                writer.flush().await?;
-                path.display().to_string()
-            }
-            StorageLocation::Cloud => {
-                let cloud = self.cloud.as_ref().ok_or(StorageError::NotConfigured)?;
-                let storage_location = cloud
-                    .upload(&rel_path, &data_to_store)
-                    .await
-                    .map_err(|e| StorageError::Cloud(e.to_string()))?;
-                on_progress(total_bytes, total_bytes);
-                storage_location
-            }
-        };
+        writer.flush().await?;
 
-        Ok((source_path, nonce))
+        Ok(nonce)
     }
 
     /// Encrypt data if encryption is enabled
     fn encrypt_if_needed(&self, data: &[u8]) -> Result<Vec<u8>, StorageError> {
-        if !self.profile.encrypted {
-            return Ok(data.to_vec());
+        match &self.encryption {
+            Some(encryption) => Ok(encryption.encrypt(data)),
+            None => Ok(data.to_vec()),
         }
-        let encryption = self
-            .encryption
-            .as_ref()
-            .ok_or(StorageError::NotConfigured)?;
-        Ok(encryption.encrypt(data))
     }
 }
 
@@ -191,11 +136,6 @@ impl ReleaseStorage for ReleaseStorageImpl {
         data: &[u8],
         on_progress: ProgressCallback,
     ) -> Result<(), StorageError> {
-        use tokio::io::AsyncWriteExt;
-
-        let total_bytes = data.len();
-        on_progress(0, total_bytes);
-
         let ext = std::path::Path::new(filename)
             .extension()
             .and_then(|e| e.to_str())
@@ -210,56 +150,10 @@ impl ReleaseStorage for ReleaseStorageImpl {
             ContentType::from_extension(&ext),
         );
 
-        let data_to_store = self.encrypt_if_needed(data)?;
+        let nonce = self.store_bytes(&db_file.id, data, on_progress).await?;
+        db_file.encryption_nonce = nonce;
 
-        // Extract and store encryption nonce for efficient range requests
-        if self.profile.encrypted && data_to_store.len() >= 24 {
-            db_file.encryption_nonce = Some(data_to_store[..24].to_vec());
-        }
-
-        let rel_path = storage_path(&db_file.id);
-
-        let source_path = match self.profile.location {
-            StorageLocation::Local => {
-                let path = PathBuf::from(&self.profile.location_path).join(&rel_path);
-                if let Some(parent) = path.parent() {
-                    tokio::fs::create_dir_all(parent).await?;
-                }
-
-                let batch_size = 1_048_576; // 1MB batches for progress reporting
-                let file = tokio::fs::File::create(&path).await?;
-                let mut writer = tokio::io::BufWriter::new(file);
-                let mut bytes_written = 0usize;
-
-                for chunk in data_to_store.chunks(batch_size) {
-                    writer.write_all(chunk).await?;
-                    bytes_written += chunk.len();
-
-                    // Adjust progress for encryption overhead
-                    let progress_bytes = if data_to_store.len() != data.len() {
-                        (bytes_written as f64 * data.len() as f64 / data_to_store.len() as f64)
-                            as usize
-                    } else {
-                        bytes_written
-                    };
-                    on_progress(progress_bytes.min(total_bytes), total_bytes);
-                }
-
-                writer.flush().await?;
-                path.display().to_string()
-            }
-            StorageLocation::Cloud => {
-                let cloud = self.cloud.as_ref().ok_or(StorageError::NotConfigured)?;
-                let storage_location = cloud
-                    .upload(&rel_path, &data_to_store)
-                    .await
-                    .map_err(|e| StorageError::Cloud(e.to_string()))?;
-                on_progress(total_bytes, total_bytes);
-                storage_location
-            }
-        };
-
-        db_file.source_path = Some(source_path);
+        info!("Stored file {} -> {}", filename, storage_path(&db_file.id));
 
         if let Some(db) = &self.database {
             db.insert_file(&db_file)

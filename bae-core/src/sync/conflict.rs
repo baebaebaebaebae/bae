@@ -6,9 +6,9 @@
 /// The `_updated_at` column index is looked up dynamically from the schema
 /// (via `TableSchema`) so adding columns to the end of a table is safe.
 ///
-/// For `release_files`, the `source_path` and `encryption_nonce` columns are
-/// device-specific. When incoming wins a DATA conflict on that table, the
-/// row ID is recorded so the caller can restore local values afterward.
+/// For `release_files`, the `encryption_nonce` column is device-specific.
+/// When incoming wins a DATA conflict on that table, the row ID is recorded
+/// so the caller can restore the local value afterward.
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, CStr, CString};
 use std::ptr;

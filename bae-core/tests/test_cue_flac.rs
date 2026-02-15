@@ -17,6 +17,7 @@ use bae_core::encryption::EncryptionService;
 use bae_core::import::{ImportProgress, ImportRequest, ImportService};
 use bae_core::keys::KeyService;
 use bae_core::library::{LibraryManager, SharedLibraryManager};
+use bae_core::library_dir::LibraryDir;
 use std::path::Path;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -50,7 +51,7 @@ async fn test_cue_flac_records_track_positions() {
         encryption_service,
         database_arc,
         bae_core::keys::KeyService::new(true, "test".to_string()),
-        std::env::temp_dir().join("bae-test-covers").into(),
+        LibraryDir::new(db_dir.clone()),
     );
     let discogs_release = create_test_discogs_release();
     let import_id = uuid::Uuid::new_v4().to_string();
@@ -61,7 +62,7 @@ async fn test_cue_flac_records_track_positions() {
             mb_release: None,
             folder: album_dir,
             master_year: 2024,
-            storage_profile_id: None,
+            managed: false,
             selected_cover: None,
         })
         .await
@@ -200,7 +201,7 @@ async fn test_cue_flac_playback_uses_track_positions() {
         encryption_service.clone(),
         database_arc,
         bae_core::keys::KeyService::new(true, "test".to_string()),
-        std::env::temp_dir().join("bae-test-covers").into(),
+        LibraryDir::new(db_dir.clone()),
     );
     let discogs_release = create_test_discogs_release();
     let import_id = uuid::Uuid::new_v4().to_string();
@@ -211,7 +212,7 @@ async fn test_cue_flac_playback_uses_track_positions() {
             mb_release: None,
             folder: album_dir,
             master_year: 2024,
-            storage_profile_id: None,
+            managed: false,
             selected_cover: None,
         })
         .await
@@ -264,7 +265,7 @@ async fn test_cue_flac_playback_uses_track_positions() {
     let playback_handle = bae_core::playback::PlaybackService::start(
         library_manager.as_ref().clone(),
         encryption_service,
-        KeyService::new(true, "test".to_string()),
+        LibraryDir::new(temp_root.path().to_path_buf()),
         runtime_handle,
     );
     playback_handle.set_volume(0.0);
@@ -355,7 +356,7 @@ async fn test_cue_flac_decoded_duration_matches_cue_timing() {
         encryption_service.clone(),
         database_arc,
         bae_core::keys::KeyService::new(true, "test".to_string()),
-        std::env::temp_dir().join("bae-test-covers").into(),
+        LibraryDir::new(db_dir.clone()),
     );
     let discogs_release = create_test_discogs_release();
     let import_id = uuid::Uuid::new_v4().to_string();
@@ -366,7 +367,7 @@ async fn test_cue_flac_decoded_duration_matches_cue_timing() {
             mb_release: None,
             folder: album_dir,
             master_year: 2024,
-            storage_profile_id: None,
+            managed: false,
             selected_cover: None,
         })
         .await
@@ -397,7 +398,7 @@ async fn test_cue_flac_decoded_duration_matches_cue_timing() {
     let playback_handle = bae_core::playback::PlaybackService::start(
         library_manager.as_ref().clone(),
         encryption_service,
-        KeyService::new(true, "test".to_string()),
+        LibraryDir::new(temp_root.path().to_path_buf()),
         runtime_handle,
     );
     playback_handle.set_volume(0.0);
@@ -494,7 +495,7 @@ async fn test_cue_flac_byte_ranges_have_no_gaps() {
         encryption_service,
         database_arc,
         bae_core::keys::KeyService::new(true, "test".to_string()),
-        std::env::temp_dir().join("bae-test-covers").into(),
+        LibraryDir::new(db_dir.clone()),
     );
 
     let discogs_release = create_test_discogs_release();
@@ -506,7 +507,7 @@ async fn test_cue_flac_byte_ranges_have_no_gaps() {
             mb_release: None,
             folder: album_dir,
             master_year: 2024,
-            storage_profile_id: None,
+            managed: false,
             selected_cover: None,
         })
         .await
@@ -648,7 +649,7 @@ async fn test_cue_flac_builds_dense_seektable() {
         encryption_service,
         database_arc,
         bae_core::keys::KeyService::new(true, "test".to_string()),
-        std::env::temp_dir().join("bae-test-covers").into(),
+        LibraryDir::new(db_dir.clone()),
     );
 
     let discogs_release = create_test_discogs_release();
@@ -660,7 +661,7 @@ async fn test_cue_flac_builds_dense_seektable() {
             mb_release: None,
             folder: album_dir.clone(),
             master_year: 2024,
-            storage_profile_id: None,
+            managed: false,
             selected_cover: None,
         })
         .await
@@ -1424,7 +1425,7 @@ async fn test_subsonic_stream_cue_flac_track2_correct_range() {
         encryption_service.clone(),
         database_arc,
         KeyService::new(true, "test".to_string()),
-        std::env::temp_dir().join("bae-test-covers").into(),
+        LibraryDir::new(db_dir.clone()),
     );
 
     let discogs_release = create_test_discogs_release();
@@ -1436,7 +1437,7 @@ async fn test_subsonic_stream_cue_flac_track2_correct_range() {
             mb_release: None,
             folder: album_dir.clone(),
             master_year: 2024,
-            storage_profile_id: None,
+            managed: false,
             selected_cover: None,
         })
         .await

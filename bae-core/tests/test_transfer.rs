@@ -2,19 +2,15 @@
 //! Integration tests for the storage transfer service.
 //!
 //! Tests:
-//! - Self-managed → local profile transfer
-//! - Local profile → local profile transfer
-//! - Local profile → eject (export to folder)
-//! - Self-managed originals are preserved after transfer
+//! - Unmanaged → managed local transfer
+//! - Managed local → eject (export to folder)
+//! - Transfer preserves audio_format.file_id
+//! - Empty release transfer fails gracefully
 
 mod support;
 
 use bae_core::content_type::ContentType;
-use bae_core::db::{
-    Database, DbAlbum, DbAudioFormat, DbFile, DbRelease, DbReleaseStorage, DbStorageProfile,
-    DbTrack, ImportStatus,
-};
-use bae_core::keys::KeyService;
+use bae_core::db::{Database, DbAlbum, DbAudioFormat, DbFile, DbRelease, DbTrack, ImportStatus};
 use bae_core::library::LibraryManager;
 use bae_core::library_dir::LibraryDir;
 use bae_core::storage::cleanup::PendingDeletion;
@@ -43,7 +39,7 @@ async fn setup_db(temp: &TempDir) -> (Database, LibraryManager) {
 }
 
 /// Create a test album + release in the DB, return (album_id, release_id)
-async fn create_album_and_release(db: &Database) -> (String, String) {
+async fn create_album_and_release(db: &Database, unmanaged_path: Option<&str>) -> (String, String) {
     let now = Utc::now();
     let album = DbAlbum {
         id: Uuid::new_v4().to_string(),
@@ -72,6 +68,9 @@ async fn create_album_and_release(db: &Database) -> (String, String) {
         country: None,
         barcode: None,
         import_status: ImportStatus::Complete,
+        managed_locally: false,
+        managed_in_cloud: false,
+        unmanaged_path: unmanaged_path.map(|s| s.to_string()),
         private: false,
         created_at: now,
         updated_at: now,
@@ -81,8 +80,8 @@ async fn create_album_and_release(db: &Database) -> (String, String) {
     (album.id, release.id)
 }
 
-/// Create self-managed files on disk and insert DbFile records pointing to them
-async fn create_self_managed_files(
+/// Create unmanaged files on disk and insert DbFile records
+async fn create_unmanaged_files(
     mgr: &LibraryManager,
     release_id: &str,
     source_dir: &Path,
@@ -98,8 +97,7 @@ async fn create_self_managed_files(
         let file_path = source_dir.join(name);
         tokio::fs::write(&file_path, data).await.unwrap();
 
-        let mut db_file = DbFile::new(release_id, name, data.len() as i64, ContentType::Flac);
-        db_file.source_path = Some(file_path.display().to_string());
+        let db_file = DbFile::new(release_id, name, data.len() as i64, ContentType::Flac);
         mgr.add_file(&db_file).await.unwrap();
 
         result.push((name.to_string(), data.to_vec()));
@@ -108,37 +106,38 @@ async fn create_self_managed_files(
     result
 }
 
-/// Create files in a local storage profile directory and insert DbFile + release_storage records
-async fn create_profile_files(
+/// Create managed local files on disk and insert DbFile records
+async fn create_managed_local_files(
     db: &Database,
     mgr: &LibraryManager,
     release_id: &str,
-    profile: &DbStorageProfile,
-    storage_dir: &Path,
+    library_dir: &LibraryDir,
 ) -> Vec<(String, Vec<u8>)> {
     let files = vec![
         ("track1.flac", b"stored-data-track-one" as &[u8]),
         ("track2.flac", b"stored-data-track-two"),
     ];
 
-    let release_dir = storage_dir.join(release_id);
-    tokio::fs::create_dir_all(&release_dir).await.unwrap();
-
     let mut result = Vec::new();
     for (name, data) in &files {
-        let file_path = release_dir.join(name);
-        tokio::fs::write(&file_path, data).await.unwrap();
+        let db_file = DbFile::new(release_id, name, data.len() as i64, ContentType::Flac);
 
-        let mut db_file = DbFile::new(release_id, name, data.len() as i64, ContentType::Flac);
-        db_file.source_path = Some(file_path.display().to_string());
+        // Write data to the derived storage path
+        let storage_path = db_file.local_storage_path(library_dir);
+        tokio::fs::create_dir_all(storage_path.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&storage_path, data).await.unwrap();
+
         mgr.add_file(&db_file).await.unwrap();
 
         result.push((name.to_string(), data.to_vec()));
     }
 
-    // Link release to profile
-    let rs = DbReleaseStorage::new(release_id, &profile.id);
-    db.set_release_storage(&rs).await.unwrap();
+    // Mark release as managed locally
+    db.set_release_managed_locally(release_id, true)
+        .await
+        .unwrap();
 
     result
 }
@@ -171,28 +170,22 @@ async fn read_pending_deletions(library_path: &Path) -> Vec<PendingDeletion> {
     serde_json::from_str(&contents).unwrap()
 }
 
-/// Transfer self-managed files into a local storage profile.
+/// Transfer unmanaged files into managed local storage.
 /// Verifies: files written to storage, DB updated, original files preserved, no pending deletions.
 #[tokio::test]
-async fn test_transfer_self_managed_to_local_profile() {
+async fn test_transfer_unmanaged_to_managed_local() {
     tracing_init();
 
     let temp = TempDir::new().unwrap();
     let source_dir = temp.path().join("source");
-    let storage_dir = temp.path().join("storage");
     let library_path = temp.path().join("library");
     tokio::fs::create_dir_all(&source_dir).await.unwrap();
-    tokio::fs::create_dir_all(&storage_dir).await.unwrap();
     tokio::fs::create_dir_all(&library_path).await.unwrap();
 
     let (db, mgr) = setup_db(&temp).await;
-    let (_album_id, release_id) = create_album_and_release(&db).await;
-    let original_files = create_self_managed_files(&mgr, &release_id, &source_dir).await;
-
-    // Create destination profile
-    let dest_profile =
-        DbStorageProfile::new_local("Local Storage", storage_dir.to_str().unwrap(), false);
-    db.insert_storage_profile(&dest_profile).await.unwrap();
+    let (_album_id, release_id) =
+        create_album_and_release(&db, Some(source_dir.to_str().unwrap())).await;
+    let original_files = create_unmanaged_files(&mgr, &release_id, &source_dir).await;
 
     // Execute transfer
     let shared_mgr = bae_core::library::SharedLibraryManager::new(mgr);
@@ -200,12 +193,8 @@ async fn test_transfer_self_managed_to_local_profile() {
         shared_mgr.clone(),
         None,
         LibraryDir::new(library_path.clone()),
-        KeyService::new(true, "test".to_string()),
     );
-    let rx = service.transfer(
-        release_id.clone(),
-        TransferTarget::Profile(dest_profile.clone()),
-    );
+    let rx = service.transfer(release_id.clone(), TransferTarget::ManagedLocal);
     let events = collect_progress(rx).await;
 
     // Verify progress events
@@ -219,16 +208,18 @@ async fn test_transfer_self_managed_to_local_profile() {
         .iter()
         .any(|e| matches!(e, TransferProgress::Failed { .. })));
 
-    // Verify DB: release now linked to dest profile
-    let profile = shared_mgr
+    // Verify DB: release is now managed locally
+    let release = shared_mgr
         .get()
-        .get_storage_profile_for_release(&release_id)
+        .database()
+        .get_release_by_id(&release_id)
         .await
+        .unwrap()
         .unwrap();
-    assert!(profile.is_some());
-    assert_eq!(profile.unwrap().id, dest_profile.id);
+    assert!(release.managed_locally);
 
-    // Verify DB: new file records exist with storage paths
+    // Verify files exist at managed local storage paths
+    let library_dir = LibraryDir::new(library_path.clone());
     let new_files = shared_mgr
         .get()
         .get_files_for_release(&release_id)
@@ -236,21 +227,15 @@ async fn test_transfer_self_managed_to_local_profile() {
         .unwrap();
     assert_eq!(new_files.len(), original_files.len());
     for file in &new_files {
-        let source_path = file.source_path.as_ref().unwrap();
+        let storage_path = file.local_storage_path(&library_dir);
         assert!(
-            source_path.contains(storage_dir.to_str().unwrap()),
-            "New file should be in storage dir: {}",
-            source_path
-        );
-        // Verify file actually exists on disk
-        assert!(
-            Path::new(source_path).exists(),
-            "Stored file should exist: {}",
-            source_path
+            storage_path.exists(),
+            "Stored file should exist: {:?}",
+            storage_path
         );
     }
 
-    // Verify original files are preserved (self-managed → no pending deletions)
+    // Verify original files are preserved (unmanaged sources are never deleted)
     for (name, _) in &original_files {
         let orig_path = source_dir.join(name);
         assert!(
@@ -260,136 +245,31 @@ async fn test_transfer_self_managed_to_local_profile() {
         );
     }
 
-    // Self-managed sources should NOT queue deletions
+    // Unmanaged sources should NOT queue deletions
     let pending = read_pending_deletions(&library_path).await;
     assert!(
         pending.is_empty(),
-        "Self-managed transfer should not queue deletions"
+        "Unmanaged transfer should not queue deletions"
     );
 }
 
-/// Transfer from one local profile to another.
-/// Verifies: files written to new location, DB updated, old files queued for deletion.
+/// Eject from managed local storage to a user-chosen folder.
+/// Verifies: files written to target folder, release becomes unmanaged,
+/// old managed files queued for deletion.
 #[tokio::test]
-async fn test_transfer_local_profile_to_local_profile() {
+async fn test_eject_from_managed_local() {
     tracing_init();
 
     let temp = TempDir::new().unwrap();
-    let storage_a = temp.path().join("storage_a");
-    let storage_b = temp.path().join("storage_b");
-    let library_path = temp.path().join("library");
-    tokio::fs::create_dir_all(&storage_a).await.unwrap();
-    tokio::fs::create_dir_all(&storage_b).await.unwrap();
-    tokio::fs::create_dir_all(&library_path).await.unwrap();
-
-    let (db, mgr) = setup_db(&temp).await;
-    let (_album_id, release_id) = create_album_and_release(&db).await;
-
-    // Create source profile and files
-    let source_profile =
-        DbStorageProfile::new_local("Profile A", storage_a.to_str().unwrap(), false);
-    db.insert_storage_profile(&source_profile).await.unwrap();
-    let original_files =
-        create_profile_files(&db, &mgr, &release_id, &source_profile, &storage_a).await;
-
-    // Create destination profile
-    let dest_profile = DbStorageProfile::new_local("Profile B", storage_b.to_str().unwrap(), false);
-    db.insert_storage_profile(&dest_profile).await.unwrap();
-
-    // Record old file paths for checking pending deletions
-    let old_file_paths: Vec<String> = mgr
-        .get_files_for_release(&release_id)
-        .await
-        .unwrap()
-        .iter()
-        .map(|f| f.source_path.clone().unwrap())
-        .collect();
-
-    // Execute transfer
-    let shared_mgr = bae_core::library::SharedLibraryManager::new(mgr);
-    let service = TransferService::new(
-        shared_mgr.clone(),
-        None,
-        LibraryDir::new(library_path.clone()),
-        KeyService::new(true, "test".to_string()),
-    );
-    let rx = service.transfer(
-        release_id.clone(),
-        TransferTarget::Profile(dest_profile.clone()),
-    );
-    let events = collect_progress(rx).await;
-
-    // Verify success
-    assert!(events
-        .iter()
-        .any(|e| matches!(e, TransferProgress::Complete { .. })));
-
-    // Verify DB: release now linked to dest profile
-    let profile = shared_mgr
-        .get()
-        .get_storage_profile_for_release(&release_id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(profile.id, dest_profile.id);
-
-    // Verify new files exist in storage_b
-    let new_files = shared_mgr
-        .get()
-        .get_files_for_release(&release_id)
-        .await
-        .unwrap();
-    assert_eq!(new_files.len(), original_files.len());
-    for file in &new_files {
-        let source_path = file.source_path.as_ref().unwrap();
-        assert!(
-            source_path.contains(storage_b.to_str().unwrap()),
-            "New file should be in storage_b: {}",
-            source_path
-        );
-        assert!(Path::new(source_path).exists());
-    }
-
-    // Verify old files are queued for deferred deletion
-    let pending = read_pending_deletions(&library_path).await;
-    assert_eq!(pending.len(), old_file_paths.len());
-    for deletion in &pending {
-        match deletion {
-            PendingDeletion::Local { path } => {
-                assert!(
-                    old_file_paths.contains(path),
-                    "Pending deletion should be an old file: {}",
-                    path
-                );
-            }
-            _ => panic!("Expected Local deletion for local profile transfer"),
-        }
-    }
-}
-
-/// Eject from a local profile to a user-chosen folder.
-/// Verifies: files written to target folder, release_storage removed, new DbFile records
-/// point to ejected location, old files queued for deletion.
-#[tokio::test]
-async fn test_eject_from_local_profile() {
-    tracing_init();
-
-    let temp = TempDir::new().unwrap();
-    let storage_dir = temp.path().join("storage");
     let eject_dir = temp.path().join("ejected");
     let library_path = temp.path().join("library");
-    tokio::fs::create_dir_all(&storage_dir).await.unwrap();
     tokio::fs::create_dir_all(&library_path).await.unwrap();
 
     let (db, mgr) = setup_db(&temp).await;
-    let (_album_id, release_id) = create_album_and_release(&db).await;
+    let (_album_id, release_id) = create_album_and_release(&db, None).await;
 
-    // Create source profile and files
-    let source_profile =
-        DbStorageProfile::new_local("Managed Storage", storage_dir.to_str().unwrap(), false);
-    db.insert_storage_profile(&source_profile).await.unwrap();
-    let original_files =
-        create_profile_files(&db, &mgr, &release_id, &source_profile, &storage_dir).await;
+    let library_dir = LibraryDir::new(library_path.clone());
+    let original_files = create_managed_local_files(&db, &mgr, &release_id, &library_dir).await;
 
     // Execute eject
     let shared_mgr = bae_core::library::SharedLibraryManager::new(mgr);
@@ -397,7 +277,6 @@ async fn test_eject_from_local_profile() {
         shared_mgr.clone(),
         None,
         LibraryDir::new(library_path.clone()),
-        KeyService::new(true, "test".to_string()),
     );
     let rx = service.transfer(release_id.clone(), TransferTarget::Eject(eject_dir.clone()));
     let events = collect_progress(rx).await;
@@ -407,15 +286,18 @@ async fn test_eject_from_local_profile() {
         .iter()
         .any(|e| matches!(e, TransferProgress::Complete { .. })));
 
-    // Verify DB: no storage profile linked
-    let profile = shared_mgr
+    // Verify DB: release is now unmanaged
+    let release = shared_mgr
         .get()
-        .get_storage_profile_for_release(&release_id)
+        .database()
+        .get_release_by_id(&release_id)
         .await
+        .unwrap()
         .unwrap();
-    assert!(
-        profile.is_none(),
-        "Ejected release should not have a storage profile"
+    assert!(!release.managed_locally);
+    assert_eq!(
+        release.unmanaged_path.as_deref(),
+        Some(eject_dir.to_str().unwrap())
     );
 
     // Verify files exist in eject directory
@@ -430,25 +312,12 @@ async fn test_eject_from_local_profile() {
         assert_eq!(&ejected_data, data, "Ejected file content should match");
     }
 
-    // Verify DB: new file records point to ejected location
-    let new_files = shared_mgr
-        .get()
-        .get_files_for_release(&release_id)
-        .await
-        .unwrap();
-    assert_eq!(new_files.len(), original_files.len());
-    for file in &new_files {
-        let source_path = file.source_path.as_ref().unwrap();
-        assert!(
-            source_path.contains(eject_dir.to_str().unwrap()),
-            "Ejected file record should point to eject dir: {}",
-            source_path
-        );
-    }
-
-    // Verify old files queued for deletion
+    // Verify old managed files queued for deletion
     let pending = read_pending_deletions(&library_path).await;
     assert_eq!(pending.len(), original_files.len());
+    for deletion in &pending {
+        let PendingDeletion::Local { .. } = deletion;
+    }
 }
 
 /// Transfer preserves audio_format.file_id since file records are updated in place.
@@ -458,20 +327,19 @@ async fn test_transfer_preserves_audio_format_file_ids() {
 
     let temp = TempDir::new().unwrap();
     let source_dir = temp.path().join("source");
-    let storage_dir = temp.path().join("storage");
     let library_path = temp.path().join("library");
     tokio::fs::create_dir_all(&source_dir).await.unwrap();
-    tokio::fs::create_dir_all(&storage_dir).await.unwrap();
     tokio::fs::create_dir_all(&library_path).await.unwrap();
 
     let (db, mgr) = setup_db(&temp).await;
-    let (_album_id, release_id) = create_album_and_release(&db).await;
+    let (_album_id, release_id) =
+        create_album_and_release(&db, Some(source_dir.to_str().unwrap())).await;
 
-    // Create a self-managed FLAC file
+    // Create an unmanaged FLAC file
     let file_path = source_dir.join("track1.flac");
     tokio::fs::write(&file_path, b"flac-data").await.unwrap();
-    let mut db_file = DbFile::new(&release_id, "track1.flac", 9, ContentType::Flac);
-    db_file.source_path = Some(file_path.display().to_string());
+    let db_file = DbFile::new(&release_id, "track1.flac", 9, ContentType::Flac);
+    let file_id = db_file.id.clone();
     mgr.add_file(&db_file).await.unwrap();
 
     // Create a track and audio_format linked to the file
@@ -500,31 +368,23 @@ async fn test_transfer_preserves_audio_format_file_ids() {
         "[]".to_string(),
         0,
     )
-    .with_file_id(&db_file.id);
+    .with_file_id(&file_id);
     db.insert_audio_format(&af).await.unwrap();
 
-    // Create destination profile and transfer
-    let dest_profile =
-        DbStorageProfile::new_local("Local Storage", storage_dir.to_str().unwrap(), false);
-    db.insert_storage_profile(&dest_profile).await.unwrap();
-
+    // Transfer to managed local
     let shared_mgr = bae_core::library::SharedLibraryManager::new(mgr);
     let service = TransferService::new(
         shared_mgr.clone(),
         None,
         LibraryDir::new(library_path.clone()),
-        KeyService::new(true, "test".to_string()),
     );
-    let rx = service.transfer(
-        release_id.clone(),
-        TransferTarget::Profile(dest_profile.clone()),
-    );
+    let rx = service.transfer(release_id.clone(), TransferTarget::ManagedLocal);
     let events = collect_progress(rx).await;
     assert!(events
         .iter()
         .any(|e| matches!(e, TransferProgress::Complete { .. })));
 
-    // File ID unchanged — file record was updated in place, not deleted/recreated
+    // File ID unchanged -- file record was updated in place, not deleted/recreated
     let af_after = db
         .get_audio_format_by_track_id(&track.id)
         .await
@@ -532,24 +392,22 @@ async fn test_transfer_preserves_audio_format_file_ids() {
         .unwrap();
     assert_eq!(
         af_after.file_id.as_deref(),
-        Some(db_file.id.as_str()),
+        Some(file_id.as_str()),
         "audio_format.file_id should be unchanged after transfer"
     );
 
-    // The file record's source_path should now point to the new storage
+    // The file should now exist at the managed local storage path
+    let library_dir = LibraryDir::new(library_path);
     let file_after = shared_mgr
         .get()
-        .get_file_by_id(&db_file.id)
+        .get_file_by_id(&file_id)
         .await
         .unwrap()
         .unwrap();
+    let storage_path = file_after.local_storage_path(&library_dir);
     assert!(
-        file_after
-            .source_path
-            .as_ref()
-            .unwrap()
-            .contains(storage_dir.to_str().unwrap()),
-        "File source_path should point to new storage"
+        storage_path.exists(),
+        "File should exist at managed local storage path"
     );
 }
 
@@ -559,26 +417,16 @@ async fn test_transfer_empty_release_fails() {
     tracing_init();
 
     let temp = TempDir::new().unwrap();
-    let storage_dir = temp.path().join("storage");
     let library_path = temp.path().join("library");
-    tokio::fs::create_dir_all(&storage_dir).await.unwrap();
     tokio::fs::create_dir_all(&library_path).await.unwrap();
 
     let (db, mgr) = setup_db(&temp).await;
-    let (_album_id, release_id) = create_album_and_release(&db).await;
+    let (_album_id, release_id) = create_album_and_release(&db, None).await;
     // No files created
 
-    let dest_profile = DbStorageProfile::new_local("Storage", storage_dir.to_str().unwrap(), false);
-    db.insert_storage_profile(&dest_profile).await.unwrap();
-
     let shared_mgr = bae_core::library::SharedLibraryManager::new(mgr);
-    let service = TransferService::new(
-        shared_mgr,
-        None,
-        LibraryDir::new(library_path),
-        KeyService::new(true, "test".to_string()),
-    );
-    let rx = service.transfer(release_id.clone(), TransferTarget::Profile(dest_profile));
+    let service = TransferService::new(shared_mgr, None, LibraryDir::new(library_path));
+    let rx = service.transfer(release_id.clone(), TransferTarget::ManagedLocal);
     let events = collect_progress(rx).await;
 
     assert!(

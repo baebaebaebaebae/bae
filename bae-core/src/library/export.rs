@@ -1,12 +1,9 @@
 use crate::cache::CacheManager;
-use crate::cloud_storage::CloudStorage;
 use crate::encryption::EncryptionService;
-use crate::keys::KeyService;
 use crate::library::LibraryManager;
+use crate::library_dir::LibraryDir;
 use crate::playback::track_loader::load_track_audio;
-use crate::storage::create_storage_reader;
 use std::path::Path;
-use std::sync::Arc;
 use tracing::{debug, info};
 
 /// Export service for exporting files and tracks
@@ -23,7 +20,7 @@ impl ExportService {
         library_manager: &LibraryManager,
         _cache: &CacheManager,
         encryption_service: Option<&EncryptionService>,
-        key_service: &KeyService,
+        library_dir: &LibraryDir,
     ) -> Result<(), String> {
         info!(
             "Exporting release {} to {}",
@@ -31,16 +28,12 @@ impl ExportService {
             target_dir.display()
         );
 
-        // Get storage profile for this release
-        let storage_profile = library_manager
-            .get_storage_profile_for_release(release_id)
+        let release = library_manager
+            .database()
+            .get_release_by_id(release_id)
             .await
-            .map_err(|e| format!("Failed to get storage profile: {}", e))?
-            .ok_or_else(|| "No storage profile found for release".to_string())?;
-
-        let storage = create_storage_reader(&storage_profile, key_service)
-            .await
-            .map_err(|e| format!("Failed to create storage reader: {}", e))?;
+            .map_err(|e| format!("Failed to get release: {}", e))?
+            .ok_or_else(|| "Release not found".to_string())?;
 
         let files = library_manager
             .get_files_for_release(release_id)
@@ -51,37 +44,42 @@ impl ExportService {
             return Err("No files found for release".to_string());
         }
 
-        for file in &files {
-            let file_data = if let Some(ref source_path) = file.source_path {
-                // Read from storage
-                debug!("Reading file from storage: {}", source_path);
-                let data = storage
-                    .download(source_path)
-                    .await
-                    .map_err(|e| format!("Failed to read file {}: {}", source_path, e))?;
+        let is_encrypted = release.managed_locally && encryption_service.is_some();
 
-                // Decrypt if profile has encryption enabled
-                if storage_profile.encrypted {
-                    let enc_service = encryption_service
-                        .ok_or_else(|| {
-                            "Cannot export encrypted files: encryption not configured".to_string()
-                        })?
-                        .clone();
-                    tokio::task::spawn_blocking(move || {
-                        enc_service
-                            .decrypt(&data)
-                            .map_err(|e| format!("Failed to decrypt file: {}", e))
-                    })
-                    .await
-                    .map_err(|e| format!("Decryption task failed: {}", e))??
-                } else {
-                    data
-                }
+        for file in &files {
+            // Derive file path from release storage flags
+            let source_path = if release.managed_locally {
+                file.local_storage_path(library_dir)
+            } else if let Some(ref unmanaged_path) = release.unmanaged_path {
+                std::path::Path::new(unmanaged_path).join(&file.original_filename)
             } else {
                 return Err(format!(
-                    "File {} has no source path",
+                    "File {} has no readable location",
                     file.original_filename
                 ));
+            };
+
+            debug!("Reading file from: {}", source_path.display());
+            let data = tokio::fs::read(&source_path)
+                .await
+                .map_err(|e| format!("Failed to read file {}: {}", source_path.display(), e))?;
+
+            // Decrypt if needed
+            let file_data = if is_encrypted {
+                let enc_service = encryption_service
+                    .ok_or_else(|| {
+                        "Cannot export encrypted files: encryption not configured".to_string()
+                    })?
+                    .clone();
+                tokio::task::spawn_blocking(move || {
+                    enc_service
+                        .decrypt(&data)
+                        .map_err(|e| format!("Failed to decrypt file: {}", e))
+                })
+                .await
+                .map_err(|e| format!("Decryption task failed: {}", e))??
+            } else {
+                data
             };
 
             // Ensure subdirectories exist for nested filenames
@@ -117,16 +115,17 @@ impl ExportService {
         track_id: &str,
         output_path: &Path,
         library_manager: &LibraryManager,
-        storage: Arc<dyn CloudStorage>,
         cache: &CacheManager,
         encryption_service: Option<&EncryptionService>,
+        library_dir: &LibraryDir,
     ) -> Result<(), String> {
         info!("Exporting track {} to {}", track_id, output_path.display());
 
         let pcm_source = load_track_audio(
             track_id,
             library_manager,
-            Some(storage),
+            library_dir,
+            None,
             cache,
             encryption_service,
         )

@@ -5,8 +5,7 @@ use bae_ui::stores::{DeviceActivityInfo, Member, MemberRole, SharedReleaseDispla
 use bae_ui::{
     AboutSectionView, BitTorrentSectionView, BitTorrentSettings, CloudProviderOption,
     DiscogsSectionView, LibraryInfo, LibrarySectionView, SettingsTab, SettingsView,
-    StorageLocation, StorageProfile, StorageProfilesSectionView, SubsonicSectionView,
-    SyncSectionView,
+    SubsonicSectionView, SyncSectionView,
 };
 use dioxus::prelude::*;
 
@@ -33,27 +32,6 @@ pub fn Settings() -> Element {
                         on_switch_source: |_| {},
                         on_rename: |_| {},
                         on_remove: |_| {},
-                    }
-                },
-                SettingsTab::Storage => rsx! {
-                    StorageProfilesSectionView {
-                        profiles: mock_storage_profiles(),
-                        is_loading: false,
-                        editing_profile: None,
-                        is_creating: false,
-                        delete_error: None,
-                        encryption_configured: true,
-                        encryption_key_fingerprint: "a1b2c3d4e5f6g7h8".to_string(),
-                        on_copy_key: |_| {},
-                        on_import_key: |_| {},
-                        on_create: |_| {},
-                        on_edit: |_| {},
-                        on_delete: |_| {},
-                        on_set_default: |_| {},
-                        on_save: |_| {},
-                        on_cancel_edit: |_| {},
-                        on_browse_directory: |_| {},
-                        browsed_directory: None,
                     }
                 },
                 SettingsTab::Sync => rsx! {
@@ -332,37 +310,6 @@ fn mock_cloud_options() -> Vec<CloudProviderOption> {
             description: "For Backblaze B2, Wasabi, MinIO, AWS, etc.",
             available: true,
             connected_account: None,
-        },
-    ]
-}
-
-fn mock_storage_profiles() -> Vec<StorageProfile> {
-    vec![
-        StorageProfile {
-            id: "profile-1".to_string(),
-            name: "Cloud Storage".to_string(),
-            location: StorageLocation::Cloud,
-            location_path: String::new(),
-            encrypted: true,
-            is_default: true,
-            cloud_bucket: Some("my-music-bucket".to_string()),
-            cloud_region: Some("us-east-1".to_string()),
-            cloud_endpoint: None,
-            cloud_access_key: Some("AKIA***".to_string()),
-            cloud_secret_key: Some("***".to_string()),
-        },
-        StorageProfile {
-            id: "profile-2".to_string(),
-            name: "Local Backup".to_string(),
-            location: StorageLocation::Local,
-            location_path: "/Users/demo/Music/bae".to_string(),
-            encrypted: false,
-            is_default: false,
-            cloud_bucket: None,
-            cloud_region: None,
-            cloud_endpoint: None,
-            cloud_access_key: None,
-            cloud_secret_key: None,
         },
     ]
 }

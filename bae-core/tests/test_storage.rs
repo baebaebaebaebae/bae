@@ -1,19 +1,18 @@
 #![cfg(feature = "test-utils")]
-//! Parameterized integration tests for storage configurations.
+//! Integration tests for managed and unmanaged import storage.
 //!
 //! Tests:
-//! - Local/Cloud storage with encryption permutations
-//! - Storageless (files stay in place, no encryption)
+//! - Managed import: files stored to derived paths in library dir
+//! - Unmanaged import: files stay in original location
+//! - Unmanaged delete preserves files on disk
 mod support;
 use crate::support::test_encryption_service;
-use bae_core::cache::CacheManager;
 use bae_core::content_type::ContentType;
-use bae_core::db::{Database, DbStorageProfile, ImportStatus, LibraryImageType, StorageLocation};
+use bae_core::db::{Database, ImportStatus, LibraryImageType};
 use bae_core::discogs::models::{DiscogsRelease, DiscogsTrack};
 use bae_core::encryption::EncryptionService;
 use bae_core::import::{CoverSelection, ImportPhase, ImportProgress, ImportRequest, ImportService};
 use bae_core::library::LibraryManager;
-use bae_core::test_support::MockCloudStorage;
 use std::path::Path;
 use std::sync::Arc;
 use std::{fs, path::PathBuf};
@@ -30,24 +29,16 @@ fn tracing_init() {
         .try_init();
 }
 
+/// Test managed import: files are stored into the library's storage directory.
 #[tokio::test]
-async fn test_storage_permutations() {
+async fn test_managed_import() {
     tracing_init();
-    // Test all 4 permutations: (local/cloud) × (encrypted/plain)
-    for location in [StorageLocation::Local, StorageLocation::Cloud] {
-        for encrypted in [false, true] {
-            info!(
-                "\n\n========== Testing: {:?} / encrypted={} ==========\n",
-                location, encrypted
-            );
-            run_storage_test(location, encrypted).await;
-        }
-    }
+    run_managed_test().await;
 }
 
-/// Test storageless import: files stay in original location, no storage profile.
+/// Test unmanaged import: files stay in original location.
 #[tokio::test]
-async fn test_storageless_import() {
+async fn test_unmanaged_import() {
     tracing_init();
 
     let temp_root = TempDir::new().expect("temp root");
@@ -90,7 +81,7 @@ async fn test_storageless_import() {
         encryption_service,
         database_arc,
         bae_core::keys::KeyService::new(true, "test".to_string()),
-        std::env::temp_dir().join("bae-test-covers").into(),
+        bae_core::library_dir::LibraryDir::new(db_dir.clone()),
     );
 
     let discogs_release = create_test_discogs_release();
@@ -102,16 +93,13 @@ async fn test_storageless_import() {
             mb_release: None,
             folder: album_dir.clone(),
             master_year: 2024,
-            storage_profile_id: None, // Storageless
+            managed: false,
             selected_cover: None,
         })
         .await
         .expect("send request");
 
-    info!(
-        "Storageless import request sent, release_id: {}",
-        release_id
-    );
+    info!("Unmanaged import request sent, release_id: {}", release_id);
 
     let mut progress_rx = import_handle.subscribe_release(release_id.clone());
     while let Some(progress) = progress_rx.recv().await {
@@ -145,7 +133,7 @@ async fn test_storageless_import() {
         );
     }
 
-    info!("✓ All {} tracks are Complete", tracks.len());
+    info!("All {} tracks are Complete", tracks.len());
 
     // Verify audio_format records exist with file_id linkage
     for track in &tracks {
@@ -166,39 +154,43 @@ async fn test_storageless_import() {
         );
     }
 
-    info!("✓ All tracks have audio_format records with file_id");
+    info!("All tracks have audio_format records with file_id");
 
-    // Verify no release_storage record (storageless)
-    let release_storage = database
-        .get_release_storage(&release_id)
+    // Verify release is unmanaged
+    let release = database
+        .get_release_by_id(&release_id)
         .await
-        .expect("query");
+        .expect("query")
+        .expect("release should exist");
     assert!(
-        release_storage.is_none(),
-        "Storageless import should NOT create release_storage record"
+        !release.managed_locally,
+        "Unmanaged import should NOT set managed_locally"
+    );
+    assert!(
+        release.unmanaged_path.is_some(),
+        "Unmanaged import should set unmanaged_path"
     );
 
-    info!("✓ No release_storage record (correct for storageless)");
+    info!("Release is correctly unmanaged");
 
     // Verify original files still exist in place
     for path in &original_files {
         assert!(
             path.exists(),
-            "Original file should still exist after storageless import: {:?}",
+            "Original file should still exist after unmanaged import: {:?}",
             path
         );
     }
 
-    info!("✓ Original files preserved in place");
-    info!("✅ Storageless import test passed");
+    info!("Original files preserved in place");
 }
 
-/// Test that deleting a storageless release preserves the original files on disk.
+/// Test that deleting an unmanaged release preserves the original files on disk.
 ///
-/// When a release has no storage profile, the files live at their original location.
+/// When a release is unmanaged, the files live at their original location.
 /// Deleting the release should only remove database records, NOT the actual files.
 #[tokio::test]
-async fn test_storageless_delete_preserves_files() {
+async fn test_unmanaged_delete_preserves_files() {
     tracing_init();
 
     let temp_root = TempDir::new().expect("temp root");
@@ -241,7 +233,7 @@ async fn test_storageless_delete_preserves_files() {
         encryption_service,
         database_arc,
         bae_core::keys::KeyService::new(true, "test".to_string()),
-        std::env::temp_dir().join("bae-test-covers").into(),
+        bae_core::library_dir::LibraryDir::new(db_dir.clone()),
     );
 
     let discogs_release = create_test_discogs_release();
@@ -253,7 +245,7 @@ async fn test_storageless_delete_preserves_files() {
             mb_release: None,
             folder: album_dir.clone(),
             master_year: 2024,
-            storage_profile_id: None, // Storageless
+            managed: false,
             selected_cover: None,
         })
         .await
@@ -301,16 +293,17 @@ async fn test_storageless_delete_preserves_files() {
     for path in &original_files {
         assert!(
             path.exists(),
-            "File should still exist after storageless import: {:?}",
+            "File should still exist after unmanaged import: {:?}",
             path
         );
     }
 
     // Now delete the release
     info!("Deleting release {}", release_id);
+    let library_dir = bae_core::library_dir::LibraryDir::new(db_dir.clone());
     shared_library_manager
         .get()
-        .delete_release(&release_id, &db_dir)
+        .delete_release(&release_id, &library_dir)
         .await
         .expect("delete release");
 
@@ -337,24 +330,20 @@ async fn test_storageless_delete_preserves_files() {
     for path in &original_files {
         assert!(
             path.exists(),
-            "Original file must be preserved after deleting storageless release: {:?}",
+            "Original file must be preserved after deleting unmanaged release: {:?}",
             path
         );
     }
 
-    info!("✅ Storageless delete preserves original files");
+    info!("Unmanaged delete preserves original files");
 }
 
-async fn run_storage_test(location: StorageLocation, encrypted: bool) {
+async fn run_managed_test() {
     let temp_root = TempDir::new().expect("Failed to create temp root");
     let album_dir = temp_root.path().join("album");
     let db_dir = temp_root.path().join("db");
-    let cache_dir = temp_root.path().join("cache");
-    let storage_dir = temp_root.path().join("storage");
     fs::create_dir_all(&album_dir).expect("Failed to create album dir");
     fs::create_dir_all(&db_dir).expect("Failed to create db dir");
-    fs::create_dir_all(&cache_dir).expect("Failed to create cache dir");
-    fs::create_dir_all(&storage_dir).expect("Failed to create storage dir");
     let file_data = generate_test_files(&album_dir);
     info!("Generated {} test files", file_data.len());
     let db_file = db_dir.join("test.db");
@@ -362,57 +351,21 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
         .await
         .expect("Failed to create database");
     let encryption_service = Some(EncryptionService::new_with_key(&[0u8; 32]));
-    let cache_config = bae_core::cache::CacheConfig {
-        cache_dir: cache_dir.clone(),
-        max_size_bytes: 1024 * 1024 * 1024,
-        max_files: 10000,
-    };
-    let _cache_manager = CacheManager::with_config(cache_config)
-        .await
-        .expect("Failed to create cache manager");
     let library_manager = LibraryManager::new(database.clone(), test_encryption_service());
     let shared_library_manager =
         bae_core::library::SharedLibraryManager::new(library_manager.clone());
     let library_manager = Arc::new(library_manager);
-    let storage_profile =
-        create_storage_profile(&location, encrypted, storage_dir.to_str().unwrap());
-    let storage_profile_id = storage_profile.id.clone();
-    database
-        .insert_storage_profile(&storage_profile)
-        .await
-        .expect("Failed to insert storage profile");
-    info!(
-        "Created storage profile: {} (id: {})",
-        storage_profile.name, storage_profile_id
-    );
     let runtime_handle = tokio::runtime::Handle::current();
     let database_arc = Arc::new(database.clone());
 
-    // Create mock cloud storage for cloud tests
-    let mock_cloud: Option<Arc<MockCloudStorage>> = if location == StorageLocation::Cloud {
-        Some(Arc::new(MockCloudStorage::new()))
-    } else {
-        None
-    };
-
-    let import_handle = if let Some(ref cloud) = mock_cloud {
-        ImportService::start_with_cloud(
-            runtime_handle,
-            shared_library_manager,
-            encryption_service.clone(),
-            database_arc,
-            cloud.clone(),
-        )
-    } else {
-        ImportService::start(
-            runtime_handle,
-            shared_library_manager,
-            encryption_service.clone(),
-            database_arc,
-            bae_core::keys::KeyService::new(true, "test".to_string()),
-            std::env::temp_dir().join("bae-test-covers").into(),
-        )
-    };
+    let import_handle = ImportService::start(
+        runtime_handle,
+        shared_library_manager,
+        encryption_service.clone(),
+        database_arc,
+        bae_core::keys::KeyService::new(true, "test".to_string()),
+        bae_core::library_dir::LibraryDir::new(db_dir.clone()),
+    );
     let discogs_release = create_test_discogs_release();
     let master_year = discogs_release.year.unwrap_or(2024);
     let selected_cover = "scans/back.jpg".to_string();
@@ -422,7 +375,7 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
             mb_release: None,
             folder: album_dir.clone(),
             master_year,
-            storage_profile_id: Some(storage_profile_id.clone()),
+            managed: true,
             selected_cover: Some(CoverSelection::Local(selected_cover.clone())),
             import_id: uuid::Uuid::new_v4().to_string(),
         })
@@ -446,7 +399,7 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
                     assert_eq!(
                         *phase,
                         Some(ImportPhase::Store),
-                        "Storage import progress should have phase=Chunk",
+                        "Storage import progress should have phase=Store",
                     );
                     progress_events_with_chunk_phase += 1;
                     release_progress_received = true;
@@ -475,16 +428,19 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
             _ => {}
         }
     }
-    let release_storage = database
-        .get_release_storage(&release_id)
+
+    // Verify release is managed locally
+    let release = database
+        .get_release_by_id(&release_id)
         .await
-        .expect("Failed to query release_storage")
-        .expect("release_storage record should exist");
-    assert_eq!(
-        release_storage.storage_profile_id, storage_profile_id,
-        "release_storage should link to correct profile",
+        .expect("Failed to query release")
+        .expect("release should exist");
+    assert!(
+        release.managed_locally,
+        "Managed import should set managed_locally"
     );
-    info!("✓ release_storage record exists");
+    info!("Release is managed locally");
+
     let releases = library_manager
         .get_releases_for_album(&_album_id)
         .await
@@ -503,7 +459,7 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
             track.import_status,
         );
     }
-    info!("✓ All {} tracks are Complete", tracks.len());
+    info!("All {} tracks are Complete", tracks.len());
     assert!(
         release_complete_received,
         "Should receive ImportProgress::Complete event for release",
@@ -516,7 +472,7 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
         tracks.len(),
         track_complete_ids,
     );
-    info!("✓ Received Complete events for all {} tracks", tracks.len());
+    info!("Received Complete events for all {} tracks", tracks.len());
     assert!(
         release_progress_received,
         "Should receive ImportProgress::Progress events for release during import",
@@ -527,10 +483,10 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
     );
     assert!(
         progress_events_with_chunk_phase > 0,
-        "Should receive multiple Progress events with phase=Chunk",
+        "Should receive multiple Progress events with phase=Store",
     );
     info!(
-        "✓ Received {} Progress events for release (max: {}%, phase=Chunk)",
+        "Received {} Progress events for release (max: {}%, phase=Store)",
         progress_events_with_chunk_phase, max_release_percent
     );
     let files = library_manager
@@ -538,14 +494,19 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
         .await
         .expect("Failed to get files");
     assert!(!files.is_empty(), "Should have file records");
+
+    // Verify files exist at derived storage paths
+    let library_dir = bae_core::library_dir::LibraryDir::new(db_dir.clone());
     for file in &files {
+        let storage_path = file.local_storage_path(&library_dir);
         assert!(
-            file.source_path.is_some(),
-            "File '{}' should have source_path",
+            storage_path.exists(),
+            "File '{}' should exist at derived path: {:?}",
             file.original_filename,
+            storage_path,
         );
     }
-    info!("✓ {} DbFile records with source_path", files.len());
+    info!("{} DbFile records with storage paths", files.len());
 
     // Verify audio format records for tracks
     for track in &tracks {
@@ -564,7 +525,7 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
             "Track '{}' audio_format should have a file_id",
             track.title
         );
-        info!("✓ Track '{}' has audio format with file_id", track.title);
+        info!("Track '{}' has audio format with file_id", track.title);
     }
 
     let cover = library_manager
@@ -586,7 +547,7 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
         selected_cover,
         source_url,
     );
-    info!("✓ Cover library_image record exists with correct source");
+    info!("Cover library_image record exists with correct source");
     let album_id = library_manager
         .get_album_id_for_release(&release_id)
         .await
@@ -601,31 +562,27 @@ async fn run_storage_test(location: StorageLocation, encrypted: bool) {
         Some(&release_id),
         "Album cover_release_id should match the release",
     );
-    info!("✓ Album cover_release_id is set correctly");
-    verify_storage_state(location, encrypted, &files, mock_cloud.as_ref()).await;
-    verify_roundtrip(&tracks, &library_manager, encrypted).await;
-    info!(
-        "\n✅ Test passed: {:?} / encrypted={}\n",
-        location, encrypted
-    );
-}
+    info!("Album cover_release_id is set correctly");
 
-fn create_storage_profile(
-    location: &StorageLocation,
-    encrypted: bool,
-    storage_path: &str,
-) -> DbStorageProfile {
-    let name = format!(
-        "Test-{:?}-{}",
-        location,
-        if encrypted { "encrypted" } else { "plain" },
-    );
-    match location {
-        StorageLocation::Local => DbStorageProfile::new_local(&name, storage_path, encrypted),
-        StorageLocation::Cloud => {
-            DbStorageProfile::new_cloud(&name, "test-bucket", "us-east-1", None, encrypted)
-        }
+    // Verify roundtrip: audio format records exist with file_id
+    for track in &tracks {
+        let audio_format = library_manager
+            .get_audio_format_by_track_id(&track.id)
+            .await
+            .expect("Failed to get audio format")
+            .expect("Audio format should exist for single-file track");
+        assert_eq!(
+            audio_format.content_type,
+            ContentType::Flac,
+            "Should be FLAC format"
+        );
+        assert!(
+            audio_format.file_id.is_some(),
+            "Track '{}' audio_format should have a file_id",
+            track.title
+        );
     }
+    info!("Managed import test passed");
 }
 
 fn create_test_discogs_release() -> DiscogsRelease {
@@ -720,94 +677,8 @@ fn generate_test_files(dir: &Path) -> Vec<Vec<u8>> {
         .collect()
 }
 
-async fn verify_storage_state(
-    location: StorageLocation,
-    encrypted: bool,
-    files: &[bae_core::db::DbFile],
-    mock_cloud: Option<&Arc<MockCloudStorage>>,
-) {
-    match location {
-        StorageLocation::Local => {
-            // Verify local files exist
-            for file in files {
-                if let Some(ref source_path) = file.source_path {
-                    let path = PathBuf::from(source_path);
-                    assert!(path.exists(), "Local file should exist at: {}", source_path);
-                    if encrypted && file.content_type == ContentType::Flac {
-                        let data = fs::read(&path).expect("Failed to read file");
-                        assert!(
-                            data.len() < 4 || &data[0..4] != b"fLaC",
-                            "Encrypted file should not have plain FLAC header",
-                        );
-                        info!(
-                            "✓ File '{}' is encrypted (no fLaC header)",
-                            file.original_filename
-                        );
-                    }
-                }
-            }
-            info!("✓ Local storage files verified");
-        }
-        StorageLocation::Cloud => {
-            // Verify files exist in mock cloud storage
-            let cloud = mock_cloud.expect("Mock cloud should exist for cloud tests");
-            let stored_files = cloud.files.lock().unwrap();
-            for file in files {
-                if let Some(ref source_path) = file.source_path {
-                    assert!(
-                        stored_files.contains_key(source_path),
-                        "File should exist in cloud storage: {}",
-                        source_path
-                    );
-                    let data = stored_files.get(source_path).unwrap();
-                    if encrypted && file.content_type == ContentType::Flac {
-                        assert!(
-                            data.len() < 4 || &data[0..4] != b"fLaC",
-                            "Encrypted file should not have plain FLAC header",
-                        );
-                        info!(
-                            "✓ File '{}' is encrypted in cloud (no fLaC header)",
-                            file.original_filename
-                        );
-                    }
-                }
-            }
-            info!(
-                "✓ Cloud storage files verified ({} files in mock)",
-                stored_files.len()
-            );
-        }
-    }
-}
-
-async fn verify_roundtrip(
-    tracks: &[bae_core::db::DbTrack],
-    library_manager: &LibraryManager,
-    _encrypted: bool,
-) {
-    for track in tracks {
-        let audio_format = library_manager
-            .get_audio_format_by_track_id(&track.id)
-            .await
-            .expect("Failed to get audio format")
-            .expect("Audio format should exist for single-file track");
-        assert_eq!(
-            audio_format.content_type,
-            ContentType::Flac,
-            "Should be FLAC format"
-        );
-        assert!(
-            audio_format.file_id.is_some(),
-            "Track '{}' audio_format should have a file_id",
-            track.title
-        );
-        info!("✓ Track '{}' has audio format with file_id", track.title);
-    }
-    info!("✓ Roundtrip verification passed");
-}
-
 /// Test with a real album - run with:
-/// REAL_ALBUM_PATH="/path/to/album" cargo test --test test_storage_permutations --features test-utils test_real_album -- --ignored --nocapture
+/// REAL_ALBUM_PATH="/path/to/album" cargo test --test test_storage --features test-utils test_real_album -- --ignored --nocapture
 #[tokio::test]
 #[ignore]
 async fn test_real_album() {
@@ -818,21 +689,14 @@ async fn test_real_album() {
     if !real_album_path.exists() {
         panic!("Real album path does not exist: {:?}", real_album_path);
     }
-    run_real_album_test(real_album_path, StorageLocation::Local, false).await;
+    run_real_album_test(real_album_path).await;
 }
 
-async fn run_real_album_test(album_dir: PathBuf, location: StorageLocation, encrypted: bool) {
-    info!(
-        "\n\n========== Testing REAL ALBUM: {:?} / encrypted={} ==========\n",
-        location, encrypted
-    );
+async fn run_real_album_test(album_dir: PathBuf) {
+    info!("\n\n========== Testing REAL ALBUM ==========\n");
     let temp_root = TempDir::new().expect("Failed to create temp root");
     let db_dir = temp_root.path().join("db");
-    let cache_dir = temp_root.path().join("cache");
-    let storage_dir = temp_root.path().join("storage");
     fs::create_dir_all(&db_dir).expect("Failed to create db dir");
-    fs::create_dir_all(&cache_dir).expect("Failed to create cache dir");
-    fs::create_dir_all(&storage_dir).expect("Failed to create storage dir");
     let entries: Vec<_> = fs::read_dir(&album_dir)
         .expect("Failed to read album dir")
         .filter_map(|e| e.ok())
@@ -850,17 +714,6 @@ async fn run_real_album_test(album_dir: PathBuf, location: StorageLocation, encr
     let shared_library_manager =
         bae_core::library::SharedLibraryManager::new(library_manager.clone());
     let library_manager = Arc::new(library_manager);
-    let storage_profile =
-        create_storage_profile(&location, encrypted, storage_dir.to_str().unwrap());
-    let storage_profile_id = storage_profile.id.clone();
-    database
-        .insert_storage_profile(&storage_profile)
-        .await
-        .expect("Failed to insert storage profile");
-    info!(
-        "Created storage profile: {} (id: {})",
-        storage_profile.name, storage_profile_id
-    );
     let runtime_handle = tokio::runtime::Handle::current();
     let database_arc = Arc::new(database.clone());
     let import_handle = ImportService::start(
@@ -869,7 +722,7 @@ async fn run_real_album_test(album_dir: PathBuf, location: StorageLocation, encr
         encryption_service.clone(),
         database_arc.clone(),
         bae_core::keys::KeyService::new(true, "test".to_string()),
-        std::env::temp_dir().join("bae-test-covers").into(),
+        bae_core::library_dir::LibraryDir::new(db_dir.clone()),
     );
     let (_album_id, release_id) = import_handle
         .send_request(ImportRequest::Folder {
@@ -877,7 +730,7 @@ async fn run_real_album_test(album_dir: PathBuf, location: StorageLocation, encr
             mb_release: None,
             folder: album_dir.clone(),
             master_year: 1981,
-            storage_profile_id: Some(storage_profile_id.clone()),
+            managed: true,
             selected_cover: None,
             import_id: uuid::Uuid::new_v4().to_string(),
         })
@@ -888,7 +741,7 @@ async fn run_real_album_test(album_dir: PathBuf, location: StorageLocation, encr
     while let Some(progress) = progress_rx.recv().await {
         match &progress {
             ImportProgress::Complete { .. } => {
-                info!("✓ Import completed!");
+                info!("Import completed!");
                 break;
             }
             ImportProgress::Failed { error, .. } => {
@@ -900,11 +753,12 @@ async fn run_real_album_test(album_dir: PathBuf, location: StorageLocation, encr
         }
     }
     info!("\n--- Verifying database state ---");
-    let release_storage = database
-        .get_release_storage(&release_id)
+    let release = database
+        .get_release_by_id(&release_id)
         .await
-        .expect("Failed to get release_storage");
-    info!("release_storage: {:?}", release_storage);
+        .expect("Failed to get release")
+        .expect("release should exist");
+    info!("managed_locally: {}", release.managed_locally);
     let tracks = library_manager
         .get_tracks(&release_id)
         .await
@@ -937,11 +791,7 @@ async fn run_real_album_test(album_dir: PathBuf, location: StorageLocation, encr
         .expect("Failed to get files");
     info!("\nFiles ({}):", files.len());
     for file in &files {
-        info!(
-            "  - '{}' source_path={:?}",
-            file.original_filename,
-            file.source_path.as_ref().map(|s| &s[..s.len().min(60)])
-        );
+        info!("  - '{}'", file.original_filename);
     }
     let complete_count = tracks
         .iter()
@@ -971,6 +821,6 @@ async fn run_real_album_test(album_dir: PathBuf, location: StorageLocation, encr
         .await
         .expect("Failed to get cover");
     assert!(cover.is_some(), "Should have a cover in library_images");
-    info!("✓ Cover library_image record exists");
-    info!("\n✅ All tracks are Complete!");
+    info!("Cover library_image record exists");
+    info!("\nAll tracks are Complete!");
 }

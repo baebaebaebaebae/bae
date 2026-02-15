@@ -2,7 +2,6 @@ use crate::library::LibraryError;
 use crate::library::SharedLibraryManager;
 use crate::library_dir::LibraryDir;
 use crate::share_token::{validate_share_token, ShareKind, ShareTokenError};
-use crate::storage::create_storage_reader;
 use axum::{
     body::Body,
     extract::{Query, Request, State},
@@ -815,11 +814,11 @@ enum TrackAudioSource {
 /// Pre-fetched DB data needed to stream a track.
 struct TrackLookup {
     audio_format: crate::db::DbAudioFormat,
-    storage_profile: Option<crate::db::DbStorageProfile>,
+    release: crate::db::DbRelease,
     audio_file: crate::db::DbFile,
 }
 
-/// Fetch all DB data needed to stream a track (audio_format, track, storage_profile, file).
+/// Fetch all DB data needed to stream a track (audio_format, release, file).
 async fn lookup_track(
     library_manager: &SharedLibraryManager,
     track_id: &str,
@@ -838,11 +837,13 @@ async fn lookup_track(
         .map_err(|e| format!("Database error: {}", e))?
         .ok_or_else(|| format!("Track not found: {}", track_id))?;
 
-    let storage_profile = library_manager
+    let release = library_manager
         .get()
-        .get_storage_profile_for_release(&track.release_id)
+        .database()
+        .get_release_by_id(&track.release_id)
         .await
-        .map_err(|e| format!("Database error: {}", e))?;
+        .map_err(|e| format!("Database error: {}", e))?
+        .ok_or_else(|| format!("Release not found: {}", track.release_id))?;
 
     let audio_file = match &audio_format.file_id {
         Some(file_id) => library_manager
@@ -872,9 +873,25 @@ async fn lookup_track(
 
     Ok(TrackLookup {
         audio_format,
-        storage_profile,
+        release,
         audio_file,
     })
+}
+
+/// Derive the filesystem path for a file based on its release's storage flags.
+fn resolve_file_path(
+    file: &crate::db::DbFile,
+    release: &crate::db::DbRelease,
+    library_dir: &LibraryDir,
+) -> Option<PathBuf> {
+    if release.managed_locally {
+        Some(file.local_storage_path(library_dir))
+    } else {
+        release
+            .unmanaged_path
+            .as_ref()
+            .map(|p| std::path::Path::new(p).join(&file.original_filename))
+    }
 }
 
 /// Resolve how to serve a track's audio: either stream directly from a local
@@ -885,27 +902,23 @@ async fn resolve_track_audio(
 ) -> Result<TrackAudioSource, Box<dyn std::error::Error + Send + Sync>> {
     let lookup = lookup_track(&state.library_manager, track_id).await?;
 
-    let is_encrypted = lookup
-        .storage_profile
-        .as_ref()
-        .map(|p| p.encrypted)
-        .unwrap_or(false);
-    let is_cloud = lookup
-        .storage_profile
-        .as_ref()
-        .map(|p| p.location == crate::db::StorageLocation::Cloud)
-        .unwrap_or(false);
+    let is_encrypted = lookup.release.managed_locally && state.encryption_service.is_some();
     let needs_byte_slicing = lookup.audio_format.start_byte_offset.is_some()
         && lookup.audio_format.end_byte_offset.is_some();
     let needs_headers =
         lookup.audio_format.needs_headers && lookup.audio_format.flac_headers.is_some();
 
     // Fast path: local, unencrypted, no processing needed -> stream from disk
-    if !is_encrypted && !is_cloud && !needs_byte_slicing && !needs_headers {
-        if let Some(source_path) = &lookup.audio_file.source_path {
-            debug!("Fast path: streaming directly from {}", source_path);
+    if !is_encrypted && !needs_byte_slicing && !needs_headers {
+        let source_path =
+            resolve_file_path(&lookup.audio_file, &lookup.release, &state.library_dir);
+        if let Some(source_path) = source_path {
+            debug!(
+                "Fast path: streaming directly from {}",
+                source_path.display()
+            );
             return Ok(TrackAudioSource::DirectFile {
-                path: PathBuf::from(source_path),
+                path: source_path,
                 content_type: lookup.audio_format.content_type,
             });
         }
@@ -913,8 +926,8 @@ async fn resolve_track_audio(
 
     // Slow path: need decryption, byte-range slicing, or header prepend
     debug!(
-        "Buffered path: encrypted={}, cloud={}, byte_slicing={}, headers={}",
-        is_encrypted, is_cloud, needs_byte_slicing, needs_headers
+        "Buffered path: encrypted={}, byte_slicing={}, headers={}",
+        is_encrypted, needs_byte_slicing, needs_headers
     );
 
     let (data, content_type) = buffer_track_audio(state, lookup).await?;
@@ -1209,45 +1222,24 @@ async fn buffer_track_audio(
 ) -> Result<(Vec<u8>, crate::content_type::ContentType), Box<dyn std::error::Error + Send + Sync>> {
     let TrackLookup {
         audio_format,
-        storage_profile,
+        release,
         audio_file,
     } = lookup;
 
     info!("Loading audio for file: {}", audio_file.id);
 
-    // Read file data from source_path
-    let source_path = audio_file
-        .source_path
-        .as_ref()
-        .ok_or("No source_path for audio file")?;
+    // Derive file path from release storage flags
+    let source_path = resolve_file_path(&audio_file, &release, &state.library_dir)
+        .ok_or("Cannot determine file path for audio file")?;
 
-    let file_data = if let Some(ref profile) = storage_profile {
-        if profile.location == crate::db::StorageLocation::Cloud {
-            let storage = create_storage_reader(profile, &state.key_service)
-                .await
-                .map_err(|e| format!("Failed to create storage reader: {}", e))?;
-
-            debug!("Downloading from storage: {}", source_path);
-            storage
-                .download(source_path)
-                .await
-                .map_err(|e| format!("Failed to download file: {}", e))?
-        } else {
-            debug!("Reading from local file: {}", source_path);
-            tokio::fs::read(source_path)
-                .await
-                .map_err(|e| format!("Failed to read file: {}", e))?
-        }
-    } else {
-        // Self-managed: read from original location
-        debug!("Reading from local file: {}", source_path);
-        tokio::fs::read(source_path)
-            .await
-            .map_err(|e| format!("Failed to read file: {}", e))?
-    };
+    debug!("Reading from local file: {}", source_path.display());
+    let file_data = tokio::fs::read(&source_path)
+        .await
+        .map_err(|e| format!("Failed to read file: {}", e))?;
 
     // Decrypt if needed
-    let decrypted = if storage_profile.map(|p| p.encrypted).unwrap_or(false) {
+    let is_encrypted = release.managed_locally && state.encryption_service.is_some();
+    let decrypted = if is_encrypted {
         let enc = state
             .encryption_service
             .as_ref()

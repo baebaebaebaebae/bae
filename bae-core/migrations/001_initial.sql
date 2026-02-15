@@ -66,6 +66,9 @@ CREATE TABLE releases (
     country TEXT,
     barcode TEXT,
     import_status TEXT NOT NULL DEFAULT 'queued',
+    managed_locally BOOLEAN NOT NULL DEFAULT FALSE,
+    managed_in_cloud BOOLEAN NOT NULL DEFAULT FALSE,
+    unmanaged_path TEXT,
     _updated_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY (album_id) REFERENCES albums (id) ON DELETE CASCADE,
@@ -105,7 +108,6 @@ CREATE TABLE release_files (
     original_filename TEXT NOT NULL,
     file_size INTEGER NOT NULL,
     content_type TEXT NOT NULL,
-    source_path TEXT,
     encryption_nonce BLOB,
     _updated_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
@@ -171,30 +173,6 @@ CREATE TABLE library_images (
     created_at TEXT NOT NULL
 );
 
-CREATE TABLE storage_profiles (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
-    location TEXT NOT NULL,
-    location_path TEXT NOT NULL,
-    encrypted BOOLEAN NOT NULL DEFAULT FALSE,
-    is_default BOOLEAN NOT NULL DEFAULT FALSE,
-    is_home BOOLEAN NOT NULL DEFAULT FALSE,
-    cloud_bucket TEXT,
-    cloud_region TEXT,
-    cloud_endpoint TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE release_storage (
-    id TEXT PRIMARY KEY,
-    release_id TEXT NOT NULL UNIQUE,
-    storage_profile_id TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (release_id) REFERENCES releases (id) ON DELETE CASCADE,
-    FOREIGN KEY (storage_profile_id) REFERENCES storage_profiles (id)
-);
-
 CREATE TABLE imports (
     id TEXT PRIMARY KEY,
     status TEXT NOT NULL DEFAULT 'preparing',
@@ -223,6 +201,5 @@ CREATE INDEX idx_torrents_info_hash ON torrents (info_hash);
 CREATE INDEX idx_torrent_piece_mappings_torrent_id ON torrent_piece_mappings (torrent_id);
 CREATE INDEX idx_audio_formats_track_id ON audio_formats (track_id);
 CREATE INDEX idx_library_images_type ON library_images (type);
-CREATE INDEX idx_release_storage_profile_id ON release_storage (storage_profile_id);
 CREATE INDEX idx_imports_status ON imports (status);
 CREATE INDEX idx_imports_release_id ON imports (release_id);

@@ -15,7 +15,7 @@ use bae_ui::display_types::{
 };
 use bae_ui::stores::import::ImportStateStoreExt;
 use bae_ui::stores::import::{CandidateEvent, PrefetchState};
-use bae_ui::stores::{AppStateStoreExt, StorageProfilesStateStoreExt};
+use bae_ui::stores::AppStateStoreExt;
 use bae_ui::ImportSource;
 use dioxus::prelude::*;
 use tracing::{info, warn};
@@ -31,8 +31,6 @@ pub fn FolderImport() -> Element {
 
     // Get lenses for reactive props - pass directly for granular reactivity
     let import_state = app.state.import();
-    let storage_profiles = app.state.storage_profiles().profiles();
-
     // Extract values needed by handlers (handlers need current values, not lenses)
     let current_candidate_key = import_state.current_candidate_key().read().clone();
 
@@ -565,20 +563,15 @@ pub fn FolderImport() -> Element {
         }
     };
 
-    // Storage profile change
-    let on_storage_profile_change = {
+    // Managed flag change
+    let on_managed_change = {
         let app = app.clone();
-        move |profile_id: Option<String>| {
+        move |managed: bool| {
             app.state
                 .import()
                 .write()
-                .dispatch(CandidateEvent::SelectStorageProfile(profile_id));
+                .dispatch(CandidateEvent::SetManaged(managed));
         }
-    };
-
-    // Configure storage - navigate to settings
-    let on_configure_storage = move |_| {
-        navigator.push(Route::Settings {});
     };
 
     // View album in library
@@ -621,7 +614,6 @@ pub fn FolderImport() -> Element {
             state: import_state,
             viewing_index: ReadSignal::from(viewing_index),
             text_file_content,
-            storage_profiles,
             on_folder_select_click: on_folder_select,
             on_view_change: move |idx| viewing_index.set(idx),
             on_skip_detection,
@@ -642,10 +634,9 @@ pub fn FolderImport() -> Element {
             on_retry_cover,
             on_retry_discid_lookup,
             on_select_cover,
-            on_storage_profile_change,
+            on_managed_change,
             on_edit,
             on_confirm,
-            on_configure_storage,
             on_view_in_library,
         }
     }

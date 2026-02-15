@@ -5,8 +5,8 @@
 use super::session_ext::{Changeset, Session};
 
 /// The 11 tables that participate in changeset sync.
-/// Device-specific tables (storage_profiles, release_storage, torrents,
-/// torrent_piece_mappings, imports) are NOT attached.
+/// Device-specific tables (torrents, torrent_piece_mappings, imports)
+/// are NOT attached.
 pub const SYNCED_TABLES: &[&str] = &[
     "artists",
     "albums",

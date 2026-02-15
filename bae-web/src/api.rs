@@ -265,6 +265,9 @@ pub async fn fetch_album(album_id: &str) -> Result<AlbumDetailState, String> {
         barcode: None,
         discogs_release_id: None,
         musicbrainz_release_id: None,
+        managed_locally: false,
+        managed_in_cloud: false,
+        unmanaged_path: None,
     }];
 
     Ok(AlbumDetailState {
@@ -282,7 +285,9 @@ pub async fn fetch_album(album_id: &str) -> Result<AlbumDetailState, String> {
         error: None,
         import_progress: None,
         import_error: None,
-        storage_profile: None,
+        managed_locally: false,
+        managed_in_cloud: false,
+        is_unmanaged: false,
         transfer_progress: None,
         transfer_error: None,
         remote_covers: vec![],

@@ -9,8 +9,8 @@
 /// reports it via `FOREIGN_KEY` type and the tracker notes it for the caller.
 ///
 /// For `release_files` DATA conflicts where incoming wins, the local
-/// `source_path` and `encryption_nonce` values are restored after applying
-/// because those columns are device-specific.
+/// `encryption_nonce` value is restored after applying because that column
+/// is device-specific.
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, CStr, CString};
 use std::ptr;
@@ -31,8 +31,6 @@ pub struct ApplyResult {
 
 /// Snapshot of device-specific columns for a single release_files row.
 struct DeviceLocalSnapshot {
-    /// Local `source_path` value (None means NULL).
-    source_path: Option<String>,
     /// Local `encryption_nonce` as raw bytes (None means NULL).
     encryption_nonce: Option<Vec<u8>>,
 }
@@ -74,13 +72,13 @@ pub unsafe fn apply_changeset_lww(
     })
 }
 
-/// Read `source_path` and `encryption_nonce` for all existing release_files rows.
+/// Read `encryption_nonce` for all existing release_files rows.
 unsafe fn snapshot_device_local_columns(
     db: *mut ffi::sqlite3,
 ) -> HashMap<String, DeviceLocalSnapshot> {
     let mut map = HashMap::new();
 
-    let sql = "SELECT id, source_path, encryption_nonce FROM release_files";
+    let sql = "SELECT id, encryption_nonce FROM release_files";
     let c_sql = CString::new(sql).unwrap();
     let mut stmt: *mut ffi::sqlite3_stmt = ptr::null_mut();
     let rc = ffi::sqlite3_prepare_v2(db, c_sql.as_ptr(), -1, &mut stmt, ptr::null_mut());
@@ -102,29 +100,12 @@ unsafe fn snapshot_device_local_columns(
             .unwrap_or("")
             .to_string();
 
-        // Column 1: source_path (TEXT, nullable)
-        let source_path = if ffi::sqlite3_column_type(stmt, 1) == ffi::SQLITE_NULL as c_int {
+        // Column 1: encryption_nonce (BLOB, nullable)
+        let encryption_nonce = if ffi::sqlite3_column_type(stmt, 1) == ffi::SQLITE_NULL as c_int {
             None
         } else {
-            let ptr = ffi::sqlite3_column_text(stmt, 1);
-            if ptr.is_null() {
-                None
-            } else {
-                Some(
-                    CStr::from_ptr(ptr as *const c_char)
-                        .to_str()
-                        .unwrap_or("")
-                        .to_string(),
-                )
-            }
-        };
-
-        // Column 2: encryption_nonce (BLOB, nullable)
-        let encryption_nonce = if ffi::sqlite3_column_type(stmt, 2) == ffi::SQLITE_NULL as c_int {
-            None
-        } else {
-            let blob_ptr = ffi::sqlite3_column_blob(stmt, 2);
-            let blob_len = ffi::sqlite3_column_bytes(stmt, 2) as usize;
+            let blob_ptr = ffi::sqlite3_column_blob(stmt, 1);
+            let blob_len = ffi::sqlite3_column_bytes(stmt, 1) as usize;
             if blob_ptr.is_null() || blob_len == 0 {
                 None
             } else {
@@ -133,27 +114,21 @@ unsafe fn snapshot_device_local_columns(
             }
         };
 
-        map.insert(
-            id,
-            DeviceLocalSnapshot {
-                source_path,
-                encryption_nonce,
-            },
-        );
+        map.insert(id, DeviceLocalSnapshot { encryption_nonce });
     }
 
     ffi::sqlite3_finalize(stmt);
     map
 }
 
-/// Restore local `source_path` and `encryption_nonce` on a release_files row
-/// after an incoming changeset overwrote them.
+/// Restore local `encryption_nonce` on a release_files row after an incoming
+/// changeset overwrote it.
 unsafe fn restore_device_local_columns(
     db: *mut ffi::sqlite3,
     row_id: &str,
     snap: &DeviceLocalSnapshot,
 ) {
-    let sql = "UPDATE release_files SET source_path = ?1, encryption_nonce = ?2 WHERE id = ?3";
+    let sql = "UPDATE release_files SET encryption_nonce = ?1 WHERE id = ?2";
     let c_sql = CString::new(sql).unwrap();
     let mut stmt: *mut ffi::sqlite3_stmt = ptr::null_mut();
     let rc = ffi::sqlite3_prepare_v2(db, c_sql.as_ptr(), -1, &mut stmt, ptr::null_mut());
@@ -163,15 +138,14 @@ unsafe fn restore_device_local_columns(
         "prepare restore_device_local_columns failed"
     );
 
-    // Bind source_path (param 1)
-    match &snap.source_path {
-        Some(val) => {
-            let c_val = CString::new(val.as_str()).unwrap();
-            ffi::sqlite3_bind_text(
+    // Bind encryption_nonce (param 1) as BLOB
+    match &snap.encryption_nonce {
+        Some(bytes) => {
+            ffi::sqlite3_bind_blob(
                 stmt,
                 1,
-                c_val.as_ptr(),
-                val.len() as c_int,
+                bytes.as_ptr() as *const _,
+                bytes.len() as c_int,
                 ffi::SQLITE_TRANSIENT(),
             );
         }
@@ -180,27 +154,11 @@ unsafe fn restore_device_local_columns(
         }
     }
 
-    // Bind encryption_nonce (param 2) as BLOB
-    match &snap.encryption_nonce {
-        Some(bytes) => {
-            ffi::sqlite3_bind_blob(
-                stmt,
-                2,
-                bytes.as_ptr() as *const _,
-                bytes.len() as c_int,
-                ffi::SQLITE_TRANSIENT(),
-            );
-        }
-        None => {
-            ffi::sqlite3_bind_null(stmt, 2);
-        }
-    }
-
-    // Bind row id (param 3)
+    // Bind row id (param 2)
     let c_id = CString::new(row_id).unwrap();
     ffi::sqlite3_bind_text(
         stmt,
-        3,
+        2,
         c_id.as_ptr(),
         row_id.len() as c_int,
         ffi::SQLITE_TRANSIENT(),

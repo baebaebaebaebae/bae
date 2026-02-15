@@ -144,8 +144,8 @@ pub struct ConfirmingState {
     pub confirmed_candidate: MatchCandidate,
     /// Selected cover art
     pub selected_cover: Option<SelectedCover>,
-    /// Selected storage profile ID
-    pub selected_profile_id: Option<String>,
+    /// Whether to copy files into managed local storage
+    pub managed: bool,
     /// Current phase within Confirm step
     pub phase: ConfirmPhase,
     /// Cached auto-match results (for returning to Identify)
@@ -257,7 +257,7 @@ pub enum CandidateEvent {
     /// User selects cover art
     SelectCover(Option<SelectedCover>),
     /// User selects storage profile
-    SelectStorageProfile(Option<String>),
+    SetManaged(bool),
     /// User clicks "Import" button
     StartImport,
     /// Import is preparing (from async operation)
@@ -368,7 +368,7 @@ impl IdentifyingState {
                             metadata: self.metadata,
                             confirmed_candidate: candidate,
                             selected_cover,
-                            selected_profile_id: None,
+                            managed: true,
                             phase: ConfirmPhase::Ready,
                             auto_matches: self.auto_matches,
                             search_state: self.search_state,
@@ -409,7 +409,7 @@ impl IdentifyingState {
                                 metadata: state.metadata,
                                 confirmed_candidate: candidate,
                                 selected_cover,
-                                selected_profile_id: None,
+                                managed: true,
                                 phase: ConfirmPhase::Ready,
                                 auto_matches: state.auto_matches,
                                 search_state: state.search_state,
@@ -475,7 +475,7 @@ impl IdentifyingState {
                         metadata: state.metadata,
                         confirmed_candidate: candidate,
                         selected_cover,
-                        selected_profile_id: None,
+                        managed: true,
                         phase: ConfirmPhase::Ready,
                         auto_matches: matches,
                         search_state: state.search_state,
@@ -593,7 +593,7 @@ impl IdentifyingState {
                                 metadata: state.metadata,
                                 confirmed_candidate: candidate,
                                 selected_cover,
-                                selected_profile_id: None,
+                                managed: true,
                                 phase: ConfirmPhase::Ready,
                                 auto_matches: state.auto_matches,
                                 search_state: state.search_state,
@@ -627,7 +627,7 @@ impl IdentifyingState {
                             metadata: state.metadata,
                             confirmed_candidate: candidate,
                             selected_cover,
-                            selected_profile_id: None,
+                            managed: true,
                             phase: ConfirmPhase::Ready,
                             auto_matches: state.auto_matches,
                             search_state: state.search_state,
@@ -639,7 +639,7 @@ impl IdentifyingState {
             }
             CandidateEvent::GoBackToIdentify
             | CandidateEvent::SelectCover(_)
-            | CandidateEvent::SelectStorageProfile(_)
+            | CandidateEvent::SetManaged(_)
             | CandidateEvent::StartImport
             | CandidateEvent::ImportPreparing(_)
             | CandidateEvent::ImportStarted
@@ -676,9 +676,9 @@ impl ConfirmingState {
                 state.selected_cover = cover;
                 CandidateState::Confirming(Box::new(state))
             }
-            CandidateEvent::SelectStorageProfile(profile) => {
+            CandidateEvent::SetManaged(managed) => {
                 let mut state = self;
-                state.selected_profile_id = profile;
+                state.managed = managed;
                 CandidateState::Confirming(Box::new(state))
             }
             CandidateEvent::StartImport => {
@@ -1003,12 +1003,14 @@ impl ImportState {
         }
     }
 
-    /// Get selected storage profile ID from current candidate state
-    pub fn get_storage_profile_id(&self) -> Option<String> {
-        self.current_candidate_state().and_then(|s| match s {
-            CandidateState::Confirming(cs) => cs.selected_profile_id.clone(),
-            _ => None,
-        })
+    /// Get whether files should be managed (copied to library storage)
+    pub fn get_managed(&self) -> bool {
+        self.current_candidate_state()
+            .map(|s| match s {
+                CandidateState::Confirming(cs) => cs.managed,
+                _ => true,
+            })
+            .unwrap_or(true)
     }
 
     /// Get detected candidates with status computed from state machine
