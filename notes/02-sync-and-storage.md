@@ -276,10 +276,6 @@ snapshot.db.enc   # overwritten each time
 
 New devices start from the snapshot, then replay only changesets after it. Old changesets can be garbage collected after a grace period (30 days).
 
-#### What this replaces
-
-The `MetadataReplicator` -- which pushed a full `VACUUM INTO` snapshot plus all images to every non-home profile on every mutation -- is eliminated entirely. It is not reduced to local-only; it is removed. Sync goes through the single cloud home. Storage profiles (including external drives) hold release files only -- no DB, no images, no manifest.
-
 ### Shared libraries (layer 2)
 
 Currently a library has one writer (desktop). Adding users -- multiple people reading and writing the same library -- requires identity, authorization, and a trust model.

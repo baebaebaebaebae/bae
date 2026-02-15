@@ -4,13 +4,15 @@
 
 A **library** is the logical entity -- a music collection. It has an identity (`library_id`), a name, and an encryption key. It lives primarily at the **library home** (`~/.bae/libraries/{uuid}/`), where desktop writes the authoritative DB.
 
-A library can optionally have a **cloud home** -- a single cloud location (Google Drive folder, S3 bucket, etc.) that serves as the collaborative hub for multi-device sync. The cloud home holds changesets, snapshots, images, and release files. There is exactly one cloud home per library. It is configured in `config.yaml`.
+A library can optionally have a **cloud home** -- a single cloud location (Google Drive folder, S3 bucket, etc.) that serves as the collaborative hub for multi-device sync and multi-contributor access. The cloud home mirrors the library's data (encrypted) and adds the machinery for incremental sync and access control. There is exactly one cloud home per library. It is configured in `config.yaml`.
 
-Release files live in one of two places:
+Release files can live in one or more of these locations:
 
-- **Library home** (`~/.bae/libraries/{uuid}/storage/`) -- local files, always exists
-- **Cloud home** (`cloud-home/storage/`) -- encrypted, uploaded when cloud is configured
+- **Library home** (`~/.bae/libraries/{uuid}/storage/`) -- local copy, available offline
+- **Cloud home** (`cloud-home/storage/`) -- encrypted copy, available for sync to other devices
 - **Unmanaged** -- files stay wherever the user has them on disk, bae just indexes them
+
+A release can be local only, cloud only, or both. Cloud-only files are not available for offline playback.
 
 ```
 Library "My Music" (lib-111)
@@ -45,35 +47,39 @@ The library home is where desktop runs. It holds the authoritative DB, device-sp
   library.db                   # SQLite -- all metadata
   images/ab/cd/{id}            # library images (covers, artist photos -- no extension, content type in DB)
   storage/ab/cd/{file_id}      # release files (no extension, content type in DB)
+  manifest.json                # identifies this library (library_id, name, encryption fingerprint)
   pending_deletions.json       # deferred file deletion manifest
 ```
 
-**`config.yaml`** -- device-specific settings. Not synced, only at the library home. Contains keyring hint flags (`discogs_key_stored`, `encryption_key_stored`), torrent settings, subsonic settings, cloud home configuration, and device_id. Non-secret only -- credentials go in the keyring.
+**`config.yaml`** -- device-specific settings. Not synced, only at the library home. Includes things like cloud home configuration, subsonic settings, keyring hint flags, and more. Non-secret only -- credentials go in the keyring.
 
 ### Keyring (OS keyring, namespaced by library_id)
 
 Managed by `KeyService`. On macOS, uses the protected data store with iCloud Keychain sync.
 
 - `encryption_master_key` -- one per library, used for all file and metadata encryption
+- `cloud_home_credentials` -- serialized enum: S3 access+secret, OAuth token, or none (iCloud)
 - `discogs_api_key`
-- `s3_access_key:{profile_id}` -- per-profile S3 access key (cloud profiles only)
-- `s3_secret_key:{profile_id}` -- per-profile S3 secret key (cloud profiles only)
-- `cloud_home_access_key` -- access key for the cloud home (S3 providers)
-- `cloud_home_secret_key` -- secret key for the cloud home (S3 providers)
-- `cloud_home_oauth_token` -- OAuth refresh token for the cloud home (consumer cloud providers)
+- `subsonic_password`
+- `followed_password:{followed_id}` -- per-followed-library Subsonic password
+- `bae_user_signing_key` -- global (not library-scoped), Ed25519 signing key
+- `bae_user_public_key` -- global, Ed25519 public key
 
 ### Cloud home layout
 
-The cloud home is one location per library (a Google Drive folder, S3 bucket, Dropbox folder, etc.). It contains everything needed for multi-device sync, new-device bootstrap, and release files.
+The cloud home is one location per library (a Google Drive folder, S3 bucket, Dropbox folder, etc.). It mirrors the library's data and adds sync + access control machinery.
 
-```
-cloud-home/
-  snapshot.db.enc                    # full DB for bootstrapping new devices
-  changes/{device_id}/{seq}.enc      # binary changesets with metadata envelope
-  heads/{device_id}.json.enc         # per-device sequence numbers for cheap polling
-  images/ab/cd/{id}                  # all library images (encrypted)
-  storage/ab/cd/{file_id}            # release files (default storage location)
-```
+| Library home | Cloud home | Purpose |
+|---|---|---|
+| `library.db` | `snapshot.db.enc` | Full DB (bootstrap for new devices) |
+| — | `changes/{device_id}/{seq}.enc` | Incremental sync changesets |
+| — | `heads/{device_id}.json.enc` | Per-device sequence numbers (cheap polling) |
+| `images/` | `images/ab/cd/{id}` | Library images (encrypted in cloud) |
+| `storage/` | `storage/ab/cd/{file_id}` | Release files (encrypted in cloud) |
+| — | `membership/{pubkey}/{seq}.enc` | Multi-contributor access control |
+| — | `keys/{user_pubkey}.enc` | Per-user encrypted keys |
+| `config.yaml` | — | Device-specific, not synced |
+| `pending_deletions.json` | — | Device-specific, not synced |
 
 Images in the cloud home are encrypted. Release files use chunked encryption.
 
@@ -85,14 +91,15 @@ bae manages two fundamentally different kinds of files:
 
 ### Release files
 
-All files that came with a release -- audio tracks, cover scans, booklet pages, CUE sheets, logs. These are the user's data. bae stores them exactly as imported so they can be ejected intact or seeded as torrents.
+Whatever files came with a release (audio, images, CUE sheets, logs, etc.). These are the user's data. bae stores them exactly as imported so they can be ejected intact or seeded as torrents.
 
 Where they live:
 - **Library home**: bae copies files to `storage/ab/cd/{file_id}`. The originals are untouched.
 - **Cloud home**: bae encrypts and uploads to `cloud-home/storage/ab/cd/{file_id}`.
+- **Both**: a release can have files in both locations. Local copy enables offline playback; cloud copy enables sync.
 - **Unmanaged**: files stay where the user has them on disk. bae indexes but doesn't touch.
 
-The `release_files` table tracks each file with `source_path` pointing to the actual location (local path or cloud home key).
+Storage location is tracked on the `releases` table: `managed_locally` and `managed_in_cloud` booleans, plus `unmanaged_path` for unmanaged releases. Managed file paths are derived from the file ID (same `storage/ab/cd/{file_id}` layout).
 
 ### Metadata images
 
@@ -117,9 +124,10 @@ release_files
   original_filename TEXT NOT NULL    -- "01 - Track.flac", "cover.jpg", "disc.cue"
   file_size         INTEGER NOT NULL
   content_type      TEXT NOT NULL    -- "audio/flac", "image/jpeg", "text/plain"
-  source_path       TEXT             -- actual location (local path or s3:// key)
   encryption_nonce  BLOB
+  encryption_scheme TEXT             -- encryption algorithm identifier
   created_at        TEXT NOT NULL
+  _updated_at       TEXT NOT NULL    -- sync metadata
 ```
 
 Content types are stored as MIME strings and mapped to the `ContentType` enum in Rust for type-safe comparisons (`ContentType::Flac`, `ContentType::Jpeg`, etc.) with helpers like `is_audio()`, `is_image()`, `display_name()`, and `from_extension()`.
@@ -150,6 +158,7 @@ audio_formats
   audio_data_start    INTEGER NOT NULL -- byte offset where audio data begins
   file_id             TEXT FK -> release_files
   created_at          TEXT NOT NULL
+  _updated_at         TEXT NOT NULL    -- sync metadata
 ```
 
 ### `library_images` -- bae-managed metadata images
@@ -167,18 +176,19 @@ library_images
   source        TEXT NOT NULL    -- "local", "musicbrainz", "discogs"
   source_url    TEXT             -- see below
   created_at    TEXT NOT NULL
+  _updated_at   TEXT NOT NULL    -- sync metadata
 ```
 
 File location is deterministic from the id: `images/{prefix}/{subprefix}/{id}` (same hash-based layout as `storage/`). No extension on disk -- content type is in the DB. No `source_path` needed -- the path is derived.
 
 `source_url` values:
-- MusicBrainz: CAA numeric image ID (e.g., `"12345678901"`)
+- MusicBrainz: Cover Art Archive URL (e.g., `"https://coverartarchive.org/release/{mbid}/front-1200"`)
 - Discogs: image URL (e.g., `"https://i.discogs.com/..."`)
 - Local (selected from release files): `"release://{relative_path}"` (e.g., `"release://Artwork/front.jpg"`)
 
 ## Image server
 
-Desktop and bae-server run a localhost HTTP image server (axum, OS-assigned port, HMAC-signed URLs). Two endpoints:
+Images and release files are served over HTTP (axum, OS-assigned port, HMAC-signed URLs). Two endpoints:
 
 - `/image/{id}` -- serves library images (covers, artist photos). Looks up `library_images WHERE id = ?`, reads `images/.../{id}`, serves with correct Content-Type.
 - `/file/{file_id}` -- serves release files. Looks up `release_files WHERE id = ?`, reads from `source_path`, decrypts if needed, serves with correct Content-Type.
@@ -197,4 +207,4 @@ Desktop is the single writer. After mutations, it pushes changesets to the cloud
 
 **Cover picker -- download new cover**: user picks from MB/Discogs -> download, write to `images/.../{release_id}`, upsert `library_images` row.
 
-**Artist image fetch**: during import, fetch artist photo from Discogs/MB -> write to `images/.../{artist_id}`, upsert `library_images` row with `type = "artist"`.
+**Artist image fetch**: during import, fetch artist photo from Discogs -> write to `images/.../{artist_id}`, upsert `library_images` row with `type = "artist"`.
