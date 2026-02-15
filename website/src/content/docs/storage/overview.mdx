@@ -32,9 +32,10 @@ Supported providers:
 - **Dropbox** — sign in with OAuth
 - **OneDrive** — sign in with OAuth
 - **pCloud** — sign in with OAuth
+- **iCloud Drive** (macOS) — uses your iCloud container, no sign-in needed
 - **S3-compatible** — any bucket (AWS S3, Backblaze B2, Cloudflare R2, Wasabi, MinIO, etc.)
 
-Consumer cloud providers (Google Drive, Dropbox, etc.) use OAuth sign-in — no API keys or bucket configuration. S3-compatible providers require manual credential setup and are aimed at more technical users.
+Consumer cloud providers (Google Drive, Dropbox, etc.) use OAuth sign-in — no API keys or bucket configuration. iCloud Drive (macOS only) uses your existing iCloud container with no sign-in. S3-compatible providers require manual credential setup and are aimed at more technical users.
 
 When you import a release as managed, bae encrypts the files and uploads them to your cloud home. Your originals stay untouched.
 
