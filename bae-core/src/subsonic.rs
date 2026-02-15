@@ -802,12 +802,14 @@ enum TrackAudioSource {
     DirectFile {
         path: PathBuf,
         content_type: crate::content_type::ContentType,
+        original_filename: String,
     },
     /// Processed audio data (decrypted, byte-range sliced, headers prepended).
     /// Already in memory, serve as a single body.
     Buffered {
         data: Vec<u8>,
         content_type: crate::content_type::ContentType,
+        original_filename: String,
     },
 }
 
@@ -907,6 +909,7 @@ async fn resolve_track_audio(
         && lookup.audio_format.end_byte_offset.is_some();
     let needs_headers =
         lookup.audio_format.needs_headers && lookup.audio_format.flac_headers.is_some();
+    let original_filename = lookup.audio_file.original_filename.clone();
 
     // Fast path: local, unencrypted, no processing needed -> stream from disk
     if !is_encrypted && !needs_byte_slicing && !needs_headers {
@@ -920,6 +923,7 @@ async fn resolve_track_audio(
             return Ok(TrackAudioSource::DirectFile {
                 path: source_path,
                 content_type: lookup.audio_format.content_type,
+                original_filename,
             });
         }
     }
@@ -931,10 +935,22 @@ async fn resolve_track_audio(
     );
 
     let (data, content_type) = buffer_track_audio(state, lookup).await?;
-    Ok(TrackAudioSource::Buffered { data, content_type })
+    Ok(TrackAudioSource::Buffered {
+        data,
+        content_type,
+        original_filename,
+    })
 }
 
-/// Stream a song - read and decrypt audio file from storage
+/// Sanitize a filename for use in Content-Disposition headers.
+/// Replaces characters that break the quoted-string production (RFC 6266).
+fn sanitize_content_disposition_filename(name: &str) -> String {
+    name.replace(['\\', '"'], "_")
+}
+
+/// Stream a song - read and decrypt audio file from storage.
+/// Accepts both track and album share tokens. For album tokens, the `id`
+/// parameter must identify a track that belongs to the shared album.
 async fn stream_song(
     Query(params): Query<HashMap<String, String>>,
     State(state): State<SubsonicState>,
@@ -945,21 +961,52 @@ async fn stream_song(
             Err(resp) => return resp,
         };
 
-        if payload.kind != ShareKind::Track {
-            return (StatusCode::BAD_REQUEST, "Token is not for a track").into_response();
-        }
+        match payload.kind {
+            ShareKind::Track => {
+                if let Some(id) = params.get("id") {
+                    if id != &payload.id {
+                        return (
+                            StatusCode::FORBIDDEN,
+                            "Token does not match requested track",
+                        )
+                            .into_response();
+                    }
+                }
+                payload.id
+            }
+            ShareKind::Album => {
+                let track_id = match params.get("id") {
+                    Some(id) => id.clone(),
+                    None => {
+                        return (StatusCode::BAD_REQUEST, "Missing track ID for album share")
+                            .into_response();
+                    }
+                };
 
-        if let Some(id) = params.get("id") {
-            if id != &payload.id {
-                return (
-                    StatusCode::FORBIDDEN,
-                    "Token does not match requested track",
-                )
-                    .into_response();
+                // Verify the requested track belongs to the shared album
+                let album_id = match state
+                    .library_manager
+                    .get()
+                    .get_album_id_for_track(&track_id)
+                    .await
+                {
+                    Ok(id) => id,
+                    Err(_) => {
+                        return (StatusCode::NOT_FOUND, "Track not found").into_response();
+                    }
+                };
+
+                if album_id != payload.id {
+                    return (
+                        StatusCode::FORBIDDEN,
+                        "Track does not belong to the shared album",
+                    )
+                        .into_response();
+                }
+
+                track_id
             }
         }
-
-        payload.id
     } else {
         match params.get("id") {
             Some(id) => id.clone(),
@@ -969,47 +1016,75 @@ async fn stream_song(
         }
     };
 
+    let is_download = params.get("download").map(|v| v == "true").unwrap_or(false);
+
     info!("Streaming request for song ID: {}", song_id);
 
     match resolve_track_audio(&state, &song_id).await {
-        Ok(TrackAudioSource::DirectFile { path, content_type }) => {
-            match tokio::fs::File::open(&path).await {
-                Ok(file) => {
-                    let metadata = file.metadata().await;
-                    let stream = ReaderStream::new(file);
-                    let body = Body::from_stream(stream);
+        Ok(TrackAudioSource::DirectFile {
+            path,
+            content_type,
+            original_filename,
+        }) => match tokio::fs::File::open(&path).await {
+            Ok(file) => {
+                let metadata = file.metadata().await;
+                let stream = ReaderStream::new(file);
+                let body = Body::from_stream(stream);
 
-                    let mut builder = Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", content_type.as_str())
-                        .header("Accept-Ranges", "bytes");
+                let mut builder = Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", content_type.as_str())
+                    .header("Accept-Ranges", "bytes");
 
-                    if let Ok(meta) = metadata {
-                        builder = builder.header("Content-Length", meta.len().to_string());
-                    }
-
-                    builder.body(body).unwrap()
+                if let Ok(meta) = metadata {
+                    builder = builder.header("Content-Length", meta.len().to_string());
                 }
-                Err(e) => {
-                    error!("Failed to open file {:?}: {}", path, e);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to open file: {}", e),
-                    )
-                        .into_response()
+
+                if is_download {
+                    builder = builder.header(
+                        "Content-Disposition",
+                        format!(
+                            "attachment; filename=\"{}\"",
+                            sanitize_content_disposition_filename(&original_filename),
+                        ),
+                    );
                 }
+
+                builder.body(body).unwrap()
             }
-        }
-        Ok(TrackAudioSource::Buffered { data, content_type }) => {
+            Err(e) => {
+                error!("Failed to open file {:?}: {}", path, e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to open file: {}", e),
+                )
+                    .into_response()
+            }
+        },
+        Ok(TrackAudioSource::Buffered {
+            data,
+            content_type,
+            original_filename,
+        }) => {
             let content_length = data.len().to_string();
 
-            Response::builder()
+            let mut builder = Response::builder()
                 .status(StatusCode::OK)
                 .header("Content-Type", content_type.as_str())
                 .header("Content-Length", content_length)
-                .header("Accept-Ranges", "bytes")
-                .body(Body::from(data))
-                .unwrap()
+                .header("Accept-Ranges", "bytes");
+
+            if is_download {
+                builder = builder.header(
+                    "Content-Disposition",
+                    format!(
+                        "attachment; filename=\"{}\"",
+                        sanitize_content_disposition_filename(&original_filename),
+                    ),
+                );
+            }
+
+            builder.body(Body::from(data)).unwrap()
         }
         Err(e) => {
             error!("Streaming error for song {}: {}", song_id, e);
