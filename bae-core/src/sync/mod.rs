@@ -3,6 +3,7 @@ pub mod attestation;
 pub mod attestation_cache;
 pub mod attribution;
 pub mod bucket;
+pub mod changeset_scanner;
 pub mod cloud_home_bucket;
 pub mod conflict;
 pub mod envelope;

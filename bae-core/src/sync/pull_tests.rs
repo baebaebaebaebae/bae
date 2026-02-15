@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use libsqlite3_sys as ffi;
 
 use crate::keys::KeyService;
+use crate::library_dir::LibraryDir;
 use crate::sync::bucket::SyncBucketClient;
 use crate::sync::envelope;
 use crate::sync::pull;
@@ -15,6 +16,13 @@ use crate::sync::service::SyncService;
 use crate::sync::session::SyncSession;
 use crate::sync::session_ext::Session;
 use crate::sync::test_helpers::*;
+
+/// Create a temporary LibraryDir for tests.
+fn test_library_dir() -> (tempfile::TempDir, LibraryDir) {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let lib_dir = LibraryDir::new(tmp.path());
+    (tmp, lib_dir)
+}
 
 /// Helper: capture a changeset from a raw db using a session on specific tables.
 unsafe fn capture_changeset(db: *mut ffi::sqlite3, tables: &[&str], sql: &[&str]) -> Vec<u8> {
@@ -51,13 +59,15 @@ async fn pull_no_new_changesets() {
     unsafe {
         let db = open_memory_db();
         create_synced_schema(db);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let bucket = MockBucket::new();
         let cursors = HashMap::new();
 
-        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
-            .await
-            .expect("pull");
+        let (updated, result) =
+            pull::pull_changes(db, &bucket, "dev-local", &cursors, None, &lib_dir)
+                .await
+                .expect("pull");
 
         assert_eq!(result.changesets_applied, 0);
         assert_eq!(result.devices_pulled, 0);
@@ -72,6 +82,7 @@ async fn pull_cursors_up_to_date() {
     unsafe {
         let db = open_memory_db();
         create_synced_schema(db);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let bucket = MockBucket::new();
         // Remote device has seq=3, and our cursor is already at 3.
@@ -87,7 +98,7 @@ async fn pull_cursors_up_to_date() {
         let mut cursors = HashMap::new();
         cursors.insert("dev-remote".to_string(), 3);
 
-        let (_, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
+        let (_, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None, &lib_dir)
             .await
             .expect("pull");
 
@@ -104,6 +115,7 @@ async fn pull_new_changesets_from_one_device() {
     unsafe {
         let db = open_memory_db();
         create_synced_schema(db);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let remote_db = open_memory_db();
         create_synced_schema(remote_db);
@@ -126,9 +138,10 @@ async fn pull_new_changesets_from_one_device() {
         bucket.store_changeset("dev-remote", 2, &cs2, SCHEMA_VERSION);
 
         let cursors = HashMap::new();
-        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
-            .await
-            .expect("pull");
+        let (updated, result) =
+            pull::pull_changes(db, &bucket, "dev-local", &cursors, None, &lib_dir)
+                .await
+                .expect("pull");
 
         assert_eq!(result.changesets_applied, 2);
         assert_eq!(result.devices_pulled, 1);
@@ -150,6 +163,7 @@ async fn pull_new_changesets_from_multiple_devices() {
     unsafe {
         let db = open_memory_db();
         create_synced_schema(db);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let bucket = MockBucket::new();
 
@@ -174,9 +188,10 @@ async fn pull_new_changesets_from_multiple_devices() {
         bucket.store_changeset("dev-b", 1, &cs_b, SCHEMA_VERSION);
 
         let cursors = HashMap::new();
-        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
-            .await
-            .expect("pull");
+        let (updated, result) =
+            pull::pull_changes(db, &bucket, "dev-local", &cursors, None, &lib_dir)
+                .await
+                .expect("pull");
 
         assert_eq!(result.changesets_applied, 2);
         assert_eq!(result.devices_pulled, 2);
@@ -199,6 +214,7 @@ async fn pull_skips_own_device() {
     unsafe {
         let db = open_memory_db();
         create_synced_schema(db);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let bucket = MockBucket::new();
 
@@ -213,7 +229,7 @@ async fn pull_skips_own_device() {
         bucket.store_changeset("dev-local", 1, &cs, SCHEMA_VERSION);
 
         let cursors = HashMap::new();
-        let (_, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
+        let (_, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None, &lib_dir)
             .await
             .expect("pull");
 
@@ -231,6 +247,7 @@ async fn pull_skips_newer_schema_version() {
     unsafe {
         let db = open_memory_db();
         create_synced_schema(db);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let bucket = MockBucket::new();
 
@@ -245,9 +262,10 @@ async fn pull_skips_newer_schema_version() {
         bucket.store_changeset("dev-remote", 1, &cs, SCHEMA_VERSION + 1);
 
         let cursors = HashMap::new();
-        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
-            .await
-            .expect("pull");
+        let (updated, result) =
+            pull::pull_changes(db, &bucket, "dev-local", &cursors, None, &lib_dir)
+                .await
+                .expect("pull");
 
         assert_eq!(result.changesets_applied, 0);
         assert_eq!(result.skipped_schema, 1);
@@ -268,6 +286,7 @@ async fn pull_applies_current_schema_skips_future() {
     unsafe {
         let db = open_memory_db();
         create_synced_schema(db);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let bucket = MockBucket::new();
         let remote_db = open_memory_db();
@@ -290,9 +309,10 @@ async fn pull_applies_current_schema_skips_future() {
         bucket.store_changeset("dev-remote", 2, &cs2, SCHEMA_VERSION + 1);
 
         let cursors = HashMap::new();
-        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
-            .await
-            .expect("pull");
+        let (updated, result) =
+            pull::pull_changes(db, &bucket, "dev-local", &cursors, None, &lib_dir)
+                .await
+                .expect("pull");
 
         assert_eq!(result.changesets_applied, 1);
         assert_eq!(result.skipped_schema, 1);
@@ -314,6 +334,7 @@ async fn pull_cursor_advancement_is_incremental() {
     unsafe {
         let db = open_memory_db();
         create_synced_schema(db);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let bucket = MockBucket::new();
         let remote_db = open_memory_db();
@@ -333,14 +354,15 @@ async fn pull_cursor_advancement_is_incremental() {
 
         // First pull: from 0, gets all 3.
         let cursors = HashMap::new();
-        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
-            .await
-            .expect("pull");
+        let (updated, result) =
+            pull::pull_changes(db, &bucket, "dev-local", &cursors, None, &lib_dir)
+                .await
+                .expect("pull");
         assert_eq!(result.changesets_applied, 3);
         assert_eq!(updated.get("dev-remote"), Some(&3));
 
         // Second pull with updated cursors: nothing new.
-        let (_, result2) = pull::pull_changes(db, &bucket, "dev-local", &updated, None)
+        let (_, result2) = pull::pull_changes(db, &bucket, "dev-local", &updated, None, &lib_dir)
             .await
             .expect("pull2");
         assert_eq!(result2.changesets_applied, 0);
@@ -357,6 +379,7 @@ async fn pull_refuses_when_local_version_below_min() {
     unsafe {
         let db = open_memory_db();
         create_synced_schema(db);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let bucket = MockBucket::new();
         // Set min_schema_version higher than our SCHEMA_VERSION.
@@ -366,7 +389,7 @@ async fn pull_refuses_when_local_version_below_min() {
             .unwrap();
 
         let cursors = HashMap::new();
-        let result = pull::pull_changes(db, &bucket, "dev-local", &cursors, None).await;
+        let result = pull::pull_changes(db, &bucket, "dev-local", &cursors, None, &lib_dir).await;
 
         match result {
             Err(pull::PullError::SchemaVersionTooOld {
@@ -388,6 +411,7 @@ async fn pull_works_when_local_version_equals_min() {
     unsafe {
         let db = open_memory_db();
         create_synced_schema(db);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let bucket = MockBucket::new();
         // Set min_schema_version equal to our SCHEMA_VERSION.
@@ -404,9 +428,10 @@ async fn pull_works_when_local_version_equals_min() {
         bucket.store_changeset("dev-remote", 1, &cs, SCHEMA_VERSION);
 
         let cursors = HashMap::new();
-        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
-            .await
-            .expect("pull should succeed when local version equals min");
+        let (updated, result) =
+            pull::pull_changes(db, &bucket, "dev-local", &cursors, None, &lib_dir)
+                .await
+                .expect("pull should succeed when local version equals min");
 
         assert_eq!(result.changesets_applied, 1);
         assert_eq!(updated.get("dev-remote"), Some(&1));
@@ -424,13 +449,14 @@ async fn pull_works_when_local_version_above_min() {
     unsafe {
         let db = open_memory_db();
         create_synced_schema(db);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let bucket = MockBucket::new();
         // Set min_schema_version below our SCHEMA_VERSION (currently 2).
         bucket.set_min_schema_version(1).await.unwrap();
 
         let cursors = HashMap::new();
-        let (_, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
+        let (_, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None, &lib_dir)
             .await
             .expect("pull should succeed when local version is above min");
 
@@ -446,6 +472,7 @@ async fn pull_works_when_no_min_schema_version_set() {
     unsafe {
         let db = open_memory_db();
         create_synced_schema(db);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let bucket = MockBucket::new();
         // Don't set any min_schema_version -- default is None.
@@ -460,9 +487,10 @@ async fn pull_works_when_no_min_schema_version_set() {
         bucket.store_changeset("dev-remote", 1, &cs, SCHEMA_VERSION);
 
         let cursors = HashMap::new();
-        let (updated, result) = pull::pull_changes(db, &bucket, "dev-local", &cursors, None)
-            .await
-            .expect("pull should succeed when no min_schema_version is set");
+        let (updated, result) =
+            pull::pull_changes(db, &bucket, "dev-local", &cursors, None, &lib_dir)
+                .await
+                .expect("pull should succeed when no min_schema_version is set");
 
         assert_eq!(result.changesets_applied, 1);
         assert_eq!(updated.get("dev-remote"), Some(&1));
@@ -482,6 +510,7 @@ async fn sync_cycle_push_then_pull() {
         create_synced_schema(db1);
         let db2 = open_memory_db();
         create_synced_schema(db2);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let bucket = MockBucket::new();
 
@@ -507,6 +536,7 @@ async fn sync_cycle_push_then_pull() {
                 "Imported Kind of Blue",
                 &keypair,
                 None,
+                &lib_dir,
             )
             .await
             .expect("sync");
@@ -525,9 +555,10 @@ async fn sync_cycle_push_then_pull() {
 
         // Device 2: pull.
         let cursors2 = HashMap::new();
-        let (updated2, pull_result) = pull::pull_changes(db2, &bucket, "dev-2", &cursors2, None)
-            .await
-            .expect("pull");
+        let (updated2, pull_result) =
+            pull::pull_changes(db2, &bucket, "dev-2", &cursors2, None, &lib_dir)
+                .await
+                .expect("pull");
 
         assert_eq!(pull_result.changesets_applied, 1);
         assert_eq!(pull_result.devices_pulled, 1);
@@ -549,6 +580,7 @@ async fn sync_cycle_bidirectional() {
         create_synced_schema(db1);
         let db2 = open_memory_db();
         create_synced_schema(db2);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let bucket = MockBucket::new();
 
@@ -567,17 +599,19 @@ async fn sync_cycle_bidirectional() {
         bucket.store_changeset("dev-2", 1, &cs2_bytes, SCHEMA_VERSION);
 
         // Device 1 pulls (gets a2 from dev-2).
-        let (cursors1, r1) = pull::pull_changes(db1, &bucket, "dev-1", &HashMap::new(), None)
-            .await
-            .expect("pull1");
+        let (cursors1, r1) =
+            pull::pull_changes(db1, &bucket, "dev-1", &HashMap::new(), None, &lib_dir)
+                .await
+                .expect("pull1");
         assert_eq!(r1.changesets_applied, 1);
         let name_on_1 = query_text(db1, "SELECT name FROM artists WHERE id = 'a2'");
         assert_eq!(name_on_1, "From Dev2");
 
         // Device 2 pulls (gets a1 from dev-1).
-        let (cursors2, r2) = pull::pull_changes(db2, &bucket, "dev-2", &HashMap::new(), None)
-            .await
-            .expect("pull2");
+        let (cursors2, r2) =
+            pull::pull_changes(db2, &bucket, "dev-2", &HashMap::new(), None, &lib_dir)
+                .await
+                .expect("pull2");
         assert_eq!(r2.changesets_applied, 1);
         let name_on_2 = query_text(db2, "SELECT name FROM artists WHERE id = 'a1'");
         assert_eq!(name_on_2, "From Dev1");
@@ -600,6 +634,7 @@ async fn sync_cycle_no_local_changes_returns_none() {
     unsafe {
         let db = open_memory_db();
         create_synced_schema(db);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let bucket = MockBucket::new();
         let ks = KeyService::new(true, "test-sync-no-changes".to_string());
@@ -620,6 +655,7 @@ async fn sync_cycle_no_local_changes_returns_none() {
                 "",
                 &keypair,
                 None,
+                &lib_dir,
             )
             .await
             .expect("sync");
@@ -636,6 +672,7 @@ async fn sync_service_outgoing_has_correct_envelope() {
     unsafe {
         let db = open_memory_db();
         create_synced_schema(db);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let bucket = MockBucket::new();
         let ks = KeyService::new(true, "test-sync-envelope".to_string());
@@ -660,6 +697,7 @@ async fn sync_service_outgoing_has_correct_envelope() {
                 "Added Test artist",
                 &keypair,
                 None,
+                &lib_dir,
             )
             .await
             .expect("sync");
@@ -750,6 +788,7 @@ async fn pull_rejects_changeset_from_non_member() {
     unsafe {
         let db = open_memory_db();
         create_synced_schema(db);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let owner = gen_keypair();
         let outsider = gen_keypair();
@@ -776,7 +815,7 @@ async fn pull_rejects_changeset_from_non_member() {
 
         let cursors = HashMap::new();
         let (updated, result) =
-            pull::pull_changes(db, &bucket, "dev-local", &cursors, Some(&chain))
+            pull::pull_changes(db, &bucket, "dev-local", &cursors, Some(&chain), &lib_dir)
                 .await
                 .expect("pull");
 
@@ -796,6 +835,7 @@ async fn pull_accepts_changeset_from_valid_member() {
     unsafe {
         let db = open_memory_db();
         create_synced_schema(db);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let owner = gen_keypair();
         let member = gen_keypair();
@@ -821,7 +861,7 @@ async fn pull_accepts_changeset_from_valid_member() {
 
         let cursors = HashMap::new();
         let (updated, result) =
-            pull::pull_changes(db, &bucket, "dev-local", &cursors, Some(&chain))
+            pull::pull_changes(db, &bucket, "dev-local", &cursors, Some(&chain), &lib_dir)
                 .await
                 .expect("pull");
 
@@ -839,6 +879,7 @@ async fn pull_rejects_unsigned_changeset_after_chain_creation() {
     unsafe {
         let db = open_memory_db();
         create_synced_schema(db);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let owner = gen_keypair();
         let chain = build_chain(&owner, &[]);
@@ -864,7 +905,7 @@ async fn pull_rejects_unsigned_changeset_after_chain_creation() {
 
         let cursors = HashMap::new();
         let (updated, result) =
-            pull::pull_changes(db, &bucket, "dev-local", &cursors, Some(&chain))
+            pull::pull_changes(db, &bucket, "dev-local", &cursors, Some(&chain), &lib_dir)
                 .await
                 .expect("pull");
 
@@ -883,6 +924,7 @@ async fn pull_accepts_unsigned_changeset_before_chain_creation() {
     unsafe {
         let db = open_memory_db();
         create_synced_schema(db);
+        let (_tmp, lib_dir) = test_library_dir();
 
         let owner = gen_keypair();
         let chain = build_chain(&owner, &[]);
@@ -908,7 +950,7 @@ async fn pull_accepts_unsigned_changeset_before_chain_creation() {
 
         let cursors = HashMap::new();
         let (updated, result) =
-            pull::pull_changes(db, &bucket, "dev-local", &cursors, Some(&chain))
+            pull::pull_changes(db, &bucket, "dev-local", &cursors, Some(&chain), &lib_dir)
                 .await
                 .expect("pull");
 

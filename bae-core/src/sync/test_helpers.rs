@@ -428,12 +428,16 @@ impl SyncBucketClient for MockBucket {
         Ok(())
     }
 
-    async fn upload_image(&self, _id: &str, _data: Vec<u8>) -> Result<(), BucketError> {
+    async fn upload_image(&self, id: &str, data: Vec<u8>) -> Result<(), BucketError> {
+        let key = format!("images/{id}");
+        self.objects.lock().unwrap().insert(key, data);
         Ok(())
     }
 
     async fn download_image(&self, id: &str) -> Result<Vec<u8>, BucketError> {
-        Err(BucketError::NotFound(format!("images/{id}")))
+        let key = format!("images/{id}");
+        let objects = self.objects.lock().unwrap();
+        objects.get(&key).cloned().ok_or(BucketError::NotFound(key))
     }
 
     async fn put_snapshot(&self, _data: Vec<u8>) -> Result<(), BucketError> {

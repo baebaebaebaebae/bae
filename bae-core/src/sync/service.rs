@@ -13,11 +13,13 @@
 /// because session lifetime is tied to the write connection lock.
 use std::collections::HashMap;
 
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::keys::UserKeypair;
+use crate::library_dir::LibraryDir;
 
 use super::bucket::SyncBucketClient;
+use super::changeset_scanner;
 use super::envelope::{self, sign_envelope, ChangesetEnvelope};
 use super::membership::MembershipChain;
 use super::pull::{self, PullResult};
@@ -74,6 +76,7 @@ impl SyncService {
         message: &str,
         keypair: &UserKeypair,
         membership_chain: Option<&MembershipChain>,
+        library_dir: &LibraryDir,
     ) -> Result<SyncResult, SyncCycleError> {
         // Step 1: grab outgoing changeset from the session.
         let outgoing_cs = session.changeset().map_err(SyncCycleError::Session)?;
@@ -81,9 +84,13 @@ impl SyncService {
         // Step 2: end the session (drop it).
         drop(session);
 
-        // Step 3: prepare outgoing for push (caller will actually upload).
-        // TODO: Image sync is deferred -- outgoing images will be pushed here
-        // in a follow-up.
+        // Step 3: upload images referenced by the outgoing changeset before
+        // preparing the envelope. This ensures images are in the bucket before
+        // the changeset that references them, so pullers can download immediately.
+        if let Some(ref cs) = outgoing_cs {
+            upload_changeset_images(cs.as_bytes(), bucket, library_dir).await?;
+        }
+
         let outgoing = outgoing_cs.map(|cs| {
             let next_seq = local_seq + 1;
             let mut env = ChangesetEnvelope {
@@ -105,10 +112,16 @@ impl SyncService {
         });
 
         // Step 4 + 5: pull incoming changesets (no session active).
-        let (updated_cursors, pull_result) =
-            pull::pull_changes(db, bucket, &self.device_id, cursors, membership_chain)
-                .await
-                .map_err(SyncCycleError::Pull)?;
+        let (updated_cursors, pull_result) = pull::pull_changes(
+            db,
+            bucket,
+            &self.device_id,
+            cursors,
+            membership_chain,
+            library_dir,
+        )
+        .await
+        .map_err(SyncCycleError::Pull)?;
 
         if pull_result.changesets_applied > 0 {
             info!(
@@ -128,10 +141,46 @@ impl SyncService {
     }
 }
 
+/// Upload images referenced by an outgoing changeset.
+///
+/// Scans the changeset for upserted image IDs and uploads any that exist
+/// locally. Missing local files are logged and skipped (the file might have
+/// been deleted; the metadata changeset still syncs correctly).
+async fn upload_changeset_images(
+    changeset_bytes: &[u8],
+    bucket: &dyn SyncBucketClient,
+    library_dir: &LibraryDir,
+) -> Result<(), SyncCycleError> {
+    let scan = changeset_scanner::scan_changeset_for_images(changeset_bytes)
+        .map_err(SyncCycleError::ImageScan)?;
+
+    for image_id in &scan.upserted_image_ids {
+        let image_path = library_dir.image_path(image_id);
+        if !image_path.exists() {
+            warn!(image_id, "image file not found locally, skipping upload");
+            continue;
+        }
+
+        let bytes =
+            std::fs::read(&image_path).map_err(|e| SyncCycleError::ImageUpload(e.to_string()))?;
+
+        bucket
+            .upload_image(image_id, bytes)
+            .await
+            .map_err(|e| SyncCycleError::ImageUpload(e.to_string()))?;
+
+        info!(image_id, "uploaded image");
+    }
+
+    Ok(())
+}
+
 #[derive(Debug)]
 pub enum SyncCycleError {
     Session(super::session::SyncError),
     Pull(pull::PullError),
+    ImageScan(String),
+    ImageUpload(String),
 }
 
 impl std::fmt::Display for SyncCycleError {
@@ -139,6 +188,8 @@ impl std::fmt::Display for SyncCycleError {
         match self {
             SyncCycleError::Session(e) => write!(f, "session error: {e}"),
             SyncCycleError::Pull(e) => write!(f, "pull error: {e}"),
+            SyncCycleError::ImageScan(e) => write!(f, "image scan error: {e}"),
+            SyncCycleError::ImageUpload(e) => write!(f, "image upload error: {e}"),
         }
     }
 }

@@ -178,7 +178,7 @@ async fn main() {
 
     // Step 2: Pull changesets since the snapshot.
     // Open DB read-write via raw sqlite3 for changeset application.
-    let changesets_applied = apply_changesets(&bucket, &db_path, snapshot_seq).await;
+    let changesets_applied = apply_changesets(&bucket, &db_path, snapshot_seq, &library_dir).await;
     if changesets_applied > 0 {
         info!("Applied {changesets_applied} changesets since snapshot");
     } else {
@@ -275,6 +275,7 @@ async fn apply_changesets(
     bucket: &CloudHomeSyncBucket,
     db_path: &std::path::Path,
     snapshot_seq: u64,
+    library_dir: &LibraryDir,
 ) -> u64 {
     unsafe {
         let c_path = CString::new(db_path.to_str().unwrap()).unwrap();
@@ -308,13 +309,14 @@ async fn apply_changesets(
         // match any real device so pull_changes doesn't skip any heads.
         let server_device_id = "__bae-server__";
 
-        let result = match pull_changes(db, bucket, server_device_id, &cursors, None).await {
-            Ok((_updated_cursors, pull_result)) => pull_result.changesets_applied,
-            Err(e) => {
-                warn!("Failed to pull changesets: {e}");
-                0
-            }
-        };
+        let result =
+            match pull_changes(db, bucket, server_device_id, &cursors, None, library_dir).await {
+                Ok((_updated_cursors, pull_result)) => pull_result.changesets_applied,
+                Err(e) => {
+                    warn!("Failed to pull changesets: {e}");
+                    0
+                }
+            };
 
         libsqlite3_sys::sqlite3_close(db);
         result

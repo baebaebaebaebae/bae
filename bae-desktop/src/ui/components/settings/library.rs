@@ -593,13 +593,14 @@ async fn bootstrap_library(
             return Err("Failed to open database for changeset application".to_string());
         }
 
-        let result = match pull_changes(db, bucket_dyn, device_id, &cursors, None).await {
-            Ok((_updated_cursors, pull_result)) => pull_result.changesets_applied,
-            Err(e) => {
-                libsqlite3_sys::sqlite3_close(db);
-                return Err(format!("Failed to pull changesets: {e}"));
-            }
-        };
+        let result =
+            match pull_changes(db, bucket_dyn, device_id, &cursors, None, library_dir).await {
+                Ok((_updated_cursors, pull_result)) => pull_result.changesets_applied,
+                Err(e) => {
+                    libsqlite3_sys::sqlite3_close(db);
+                    return Err(format!("Failed to pull changesets: {e}"));
+                }
+            };
 
         libsqlite3_sys::sqlite3_close(db);
         result
