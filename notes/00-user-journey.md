@@ -36,4 +36,4 @@ For a close collaborator who wants to contribute to the same library -- not just
 
 The joiner shares their public key, the owner sends back an invite code. bae handles the rest -- grants storage access (shares the cloud home folder on consumer clouds, mints credentials on S3), wraps the encryption key to the joiner's pubkey, and bundles everything into the code. The joiner pastes it and syncs.
 
-Under the hood: membership chain, signed changesets, mutual read+write access. The two-step code exchange is the same regardless of cloud backend -- what adapts is how storage access is granted. See the CloudHome trait in `02-sync-and-storage.md`.
+Under the hood: membership chain, signed changesets, mutual read+write access. The two-step code exchange is the same regardless of cloud backend -- what adapts is how storage access is granted.

@@ -1,60 +1,10 @@
 # Sync
 
-bae starts local, adds cloud sync when configured, then collaboration and a decentralized network.
-
-## Tiers
-
-### Tier 1: Local (no setup)
-
-- Install bae, import music from folders/CDs
-- Files stored locally, plain SQLite DB, no encryption, no key
-- Library lives at `~/.bae/`
-
-### Tier 2: Cloud (one decision)
-
-Sign in with a cloud provider (Google Drive, Dropbox, OneDrive, pCloud) or configure an S3-compatible bucket. This creates your **cloud home** -- a single cloud location that mirrors the library's data (encrypted) and adds the machinery for incremental sync and access control. There is exactly one cloud home per library.
-
-Consumer clouds use OAuth sign-in. S3-compatible providers (Backblaze B2, Cloudflare R2, AWS, MinIO, Wasabi, etc.) require manual credential entry.
-
-Imported files go to the cloud home. Other devices pull from it.
-
-- bae generates an encryption key and stores it in the OS keyring
-- On macOS, iCloud Keychain syncs the encryption key to other devices automatically
-- Files, images, and DB snapshots are encrypted before upload
-- The encryption key is generated automatically -- no user input required
-
-### Tier 3: More technical users
-
-- Export/import encryption key manually
-- Run bae-server pointing at the cloud home
-- Key fingerprint visible in settings for verification
-
-## What a Library Is
-
-Desktop manages all libraries under `~/.bae/libraries/`. Each library is a directory:
-
-```
-~/.bae/
-  active-library               # UUID of the active library
-  libraries/
-    {uuid}/                    # one directory per library
-```
-
-On first launch, bae creates the library home.
-
-**`config.yaml`** -- device-specific settings. Not synced, only at the library home. Includes things like cloud home configuration, subsonic settings, keyring hint flags, and more. Non-secret only -- credentials go in the keyring.
-
-| Data | Tier 1 (local) | Tier 2+ (cloud) |
-|------|----------------|-----------------|
-| library.db | Plain SQLite | Plain locally, encrypted snapshot in cloud home |
-| Cover art | Plaintext | Encrypted in cloud home |
-| Release files | Local in library home | Encrypted in cloud home |
-| Encryption key | N/A | OS keyring (iCloud Keychain) |
-| config.yaml | Local | Local (device-specific, not synced) |
+When a library has a cloud home configured, bae syncs metadata and files to it. Multiple devices sync through the same cloud home. Multiple users can share a library through signed changesets and a membership chain. Cloud sync also enables bae-server, which serves the library by pulling from the cloud home.
 
 ## Encryption
 
-One key per library. Everything that goes to cloud gets encrypted with it.
+One symmetric encryption key per library, shared by all members. Everything that goes to cloud gets encrypted with it. This key is separate from per-user Ed25519 signing keys -- having the encryption key lets you read/write data but not sign changesets as someone else.
 
 **Key fingerprint:** SHA-256 of the key, truncated. Stored in `config.yaml`. Lets us detect the wrong key immediately instead of silently producing garbage.
 
@@ -252,7 +202,7 @@ Currently a library has one writer (desktop). Adding users -- multiple people re
 
 ### Identity = a keypair
 
-Each user generates a keypair locally (Ed25519 for signing, X25519 for encryption). No accounts, no server, no signup. Your public key is your identity. The keypair is global (not per-library) so attestations accumulate under one identity.
+Each user generates a keypair locally (Ed25519 for signing, X25519 for encryption). No accounts, no server, no signup. Your public key is your identity. The keypair is global (not per-library) -- the same identity across all libraries a user participates in.
 
 ### Bucket layout with users
 
@@ -271,14 +221,14 @@ Changesets stay keyed by device_id (a user may have multiple devices). Authorshi
 
 ### Membership chain
 
-An append-only log of membership changes, stored as individual files to avoid S3 overwrite races. Each entry is signed by an owner.
+An append-only log of membership changes, stored as individual files to avoid S3 overwrite races. Each entry is signed by an owner. The chain serves as the library's collective keychain -- it's the authoritative record of who is a member and what their public key is.
 
 ```json
 { "action": "add", "user_pubkey": "...", "role": "owner",
   "ts": "2026-01-01T...", "author_pubkey": "...", "sig": "..." }
 ```
 
-On read, clients download all membership entries, order by timestamp, and validate the chain.
+On read, clients download all membership entries, order by timestamp, and validate the chain. Changeset signatures are verified against public keys from this chain.
 
 ### Invitation flow
 
@@ -312,7 +262,7 @@ Before applying any changeset:
 
 ### Revocation
 
-Owner writes a Remove membership entry, calls `CloudHome::revoke_access` (unshares folder or deletes credentials), generates a new encryption key, re-wraps to remaining members. Old data: Bob had the old key, accept it pragmatically. New data is protected.
+Owner writes a Remove membership entry and calls `CloudHome::revoke_access` (unshares folder or deletes credentials). The encryption key is not rotated -- the revoked member had the key but can no longer access the cloud home. For a music library this is sufficient; the threat model is "someone left the group," not adversarial.
 
 ### Attribution
 
@@ -398,51 +348,13 @@ Off by default. Enable in settings. Per-release opt-out. Attestation-only mode o
 
 ## bae-server
 
-`bae-server` -- a headless, read-only Subsonic API server.
+`bae-server` -- a headless, read-only server that pulls from the cloud home.
 
 - Given cloud home URL + encryption key: downloads `snapshot.db.enc`, applies changesets, caches DB + images locally
 - Streams audio from the cloud home, decrypting on the fly
 - Optional `--web-dir` serves the bae-web frontend alongside the API
 - `--recovery-key` for encrypted libraries, `--refresh` to re-pull from cloud home
 - Stateless -- no writes, no migrations, ephemeral cache rebuilt from the cloud home
-
-## First-Run Flows
-
-### New library
-
-On first run (no `~/.bae/active-library`), desktop shows a welcome screen. User picks "Create new library":
-
-1. Generate a library UUID (e.g., `lib-111`)
-2. Create `~/.bae/libraries/lib-111/`
-3. Create empty `library.db`
-4. Write `config.yaml`, write `~/.bae/active-library` -> `lib-111`
-5. Re-exec binary -- desktop launches normally
-
-`storage/` is empty -- user imports their first album, files go into `storage/ab/cd/{file_id}`.
-
-### Restore from cloud home
-
-User picks "Restore from cloud home" and provides cloud home credentials + encryption key:
-
-1. Download + decrypt `snapshot.db.enc` (validates the key -- if decryption fails, wrong key)
-2. Create `~/.bae/libraries/{library_id}/`
-3. Write `config.yaml` (with cloud home config), keyring entries, `~/.bae/active-library` -> `{library_id}`
-4. Download images from the cloud home
-5. Pull and apply any changesets newer than the snapshot
-6. Re-exec binary
-
-Local `storage/` is empty -- release files stream from the cloud home. The user can optionally download files locally for offline playback.
-
-### Going from local to cloud
-
-1. User signs in with a cloud provider (OAuth) or enters S3 credentials
-2. bae creates the cloud home folder/bucket (or uses an existing one)
-3. bae generates encryption key if one doesn't exist, stores in keyring
-4. bae pushes a full snapshot + all images + release files to the cloud home
-5. Subsequent mutations push incremental changesets
-6. Another device can now join from the cloud home
-
-Everything lives in the cloud home.
 
 ## How It Composes
 
@@ -480,5 +392,4 @@ bae has no central server. All sync, membership, and sharing happens through the
 ## Open Questions
 
 - Second-device setup when iCloud Keychain is off -- QR code? Paste key?
-- Key rotation -- probably YAGNI for now
 - bae Cloud managed offering -- storage + always-on bae-server + `yourname.bae.fm` subdomain
