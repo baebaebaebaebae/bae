@@ -1,6 +1,6 @@
 # Share Links
 
-Share a track or album with anyone via a URL. Whoever has the link can play the track in their browser — no account, no app.
+Share a track or album with anyone via a URL. Whoever has the link can play the track in their browser — no account, no app. The share page also lets recipients download the track, or save it directly to their own bae library.
 
 ## Architecture
 
@@ -20,7 +20,7 @@ base64url(track_id + expiry + HMAC(secret, track_id + expiry))
 - **expiry** — optional timestamp after which the link stops working
 - **HMAC signature** — server-side secret prevents forging or tampering
 
-The token is the auth. Possession of the URL = permission to play that resource. No Subsonic credentials needed.
+The token is the auth. Possession of the URL = permission to play that resource. No credentials needed.
 
 ### Flow
 
@@ -44,4 +44,6 @@ The token is the auth. Possession of the URL = permission to play that resource.
 
 **bae-server in the cloud:** Operator runs `bae-server --s3-bucket ... --recovery-key ... --web-dir ./bae-web/dist --bind 0.0.0.0`. Same share link format, same token validation.
 
-Both paths use the same Subsonic API and bae-web frontend.
+Both paths use the same API and bae-web frontend.
+
+Both require the server to be reachable from the internet. For desktop users without a static IP or custom domain, options include Tailscale Funnel, ngrok, Cloudflare Tunnel, or UPnP port forwarding.

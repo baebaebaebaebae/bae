@@ -51,7 +51,7 @@ The library home is where desktop runs. It holds the authoritative DB, device-sp
   pending_deletions.json       # deferred file deletion manifest
 ```
 
-**`config.yaml`** -- device-specific settings. Not synced, only at the library home. Includes things like cloud home configuration, subsonic settings, keyring hint flags, and more. Non-secret only -- credentials go in the keyring.
+**`config.yaml`** -- device-specific settings. Not synced, only at the library home. Includes things like cloud home configuration, server settings, keyring hint flags, and more. Non-secret only -- credentials go in the keyring.
 
 ### Keyring (OS keyring, namespaced by library_id)
 
@@ -60,8 +60,8 @@ Managed by `KeyService`. On macOS, uses the protected data store with iCloud Key
 - `encryption_master_key` -- one per library, used for all file and metadata encryption
 - `cloud_home_credentials` -- serialized enum: S3 access+secret, OAuth token, or none (iCloud)
 - `discogs_api_key`
-- `subsonic_password`
-- `followed_password:{followed_id}` -- per-followed-library Subsonic password
+- `server_password`
+- `followed_password:{followed_id}` -- per-followed-library password
 - `bae_user_signing_key` -- global (not library-scoped), Ed25519 signing key
 - `bae_user_public_key` -- global, Ed25519 public key
 

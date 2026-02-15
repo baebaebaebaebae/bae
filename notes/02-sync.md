@@ -2,6 +2,8 @@
 
 When a library has a cloud home configured, bae syncs metadata and files to it. Multiple devices sync through the same cloud home. Multiple users can share a library through signed changesets and a membership chain. Cloud sync also enables bae-server, which serves the library by pulling from the cloud home.
 
+Users bring their own storage (Google Drive, Dropbox, S3). bae layers encryption, signed changesets, and a membership chain on top. The cloud provider stores opaque blobs -- all trust lives in cryptography, not in the storage backend.
+
 ## Encryption
 
 One symmetric encryption key per library, shared by all members. Everything that goes to cloud gets encrypted with it. This key is separate from per-user Ed25519 signing keys -- having the encryption key lets you read/write data but not sign changesets as someone else.
@@ -85,9 +87,9 @@ Consumer clouds support push-based change notifications (Google Drive `changes.w
 
 ## Changeset sync
 
-Use the SQLite session extension to capture exactly what changed, push the changeset to the cloud home, pull and apply on other devices with a conflict handler. No coordination server. The cloud home is a library-level concept -- one bucket/folder per library, configured in `config.yaml`. The cloud home can be an S3 bucket or a folder on a consumer cloud (Google Drive, Dropbox, etc.).
+A library can be used on multiple devices. Each device has a `device_id` (UUID, auto-generated on first startup, stored in `config.yaml`), its own local copy of `library.db`, and syncs changes through the cloud home. The sync mechanism uses the SQLite session extension to capture exactly what changed, push the changeset to the cloud home, and pull and apply on other devices with a conflict handler. No coordination server.
 
-Each device writes to its own keyspace on the shared bucket. No write contention by construction:
+Each device writes to its own keyspace in the cloud home. No write contention by construction:
 
 ```
 cloud-home/
@@ -98,28 +100,22 @@ cloud-home/
   storage/ab/cd/{file_id}          # release files (encrypted)
 ```
 
-**Push** = grab changeset from the session, encrypt, upload to `changes/{your_device}/`, update `heads/{your_device}`.
+**Push**: after a logical operation (import a release, delete a release, edit metadata), end the session to get the changeset, encrypt it, upload to `changes/{your_device}/{seq}.enc`, and update `heads/{your_device}.json.enc` with the new sequence number.
 
-**Pull** = list `heads/`, compare each device's seq to your local cursors. If anyone's ahead, fetch their new changesets, apply with conflict handler. Deterministic -- same changesets in the same order produce the same result.
+**Pull**: list `heads/`, compare each device's sequence number to your local cursors. If anyone's ahead, fetch their new changesets, decrypt, and apply with the conflict handler. Deterministic -- same changesets in the same order produce the same result.
 
 **Polling is cheap** -- listing `heads/` is one S3 LIST call. If all seqs match your cursors, nothing to do. Check on app open + periodic timer.
 
-### Why the session extension
-
-We considered and rejected several alternatives:
-
-- **Op log with method wrapping** -- requires intercepting ~63 write methods, maintaining a custom JSON op format, and building a custom merge algorithm
-- **SQLite triggers** -- same maintenance burden moved to SQL; must enumerate every column of every synced table
-- **CRDTs (Automerge/Loro)** -- hold full state in memory, don't scale to arbitrary entity counts
-- **cr-sqlite** -- stalled project, too risky as a dependency
-
-The session extension is built into SQLite. It tracks all changes (INSERT/UPDATE/DELETE) automatically at the C level. No triggers, no method wrapping, no column enumeration. The app writes normally. SQLite records what changed. We grab the changeset and push it.
-
-### Changesets, not operations
-
-The session extension produces a compact changeset that represents the diff between the database before and after. A changeset contains only the rows and columns that actually changed.
-
-For an import that creates an album + release + 12 tracks + 12 files, a JSON op log approach would generate ~50 operations. The session extension produces a single changeset blob. Smaller, faster, and no custom serialization.
+> **Why the session extension?**
+>
+> We considered and rejected several alternatives:
+>
+> - **Op log with method wrapping** -- requires intercepting every write method, maintaining a custom JSON op format, and building a custom merge algorithm. An import that creates an album + release + 12 tracks + 12 files would generate ~50 operations. The session extension produces a single compact changeset containing only the rows and columns that actually changed.
+> - **SQLite triggers** -- same maintenance burden moved to SQL; must enumerate every column of every synced table
+> - **CRDTs (Automerge/Loro)** -- hold full state in memory, don't scale to arbitrary entity counts
+> - **cr-sqlite** -- stalled project, too risky as a dependency
+>
+> The session extension is built into SQLite. It tracks all changes (INSERT/UPDATE/DELETE) automatically at the C level. No triggers, no method wrapping, no column enumeration. The app writes normally. SQLite records what changed. We grab the changeset and push it.
 
 ### Conflict resolution: row-level LWW
 
@@ -154,8 +150,10 @@ For a music library this is fine -- conflicts are rare and low-stakes. Worst cas
 
 ### The sync protocol
 
+A **session** is the session extension's recording context — you attach it to specific tables and it silently records all changes (INSERT/UPDATE/DELETE) made through that connection. When you're ready to sync, you extract the accumulated changeset and end the session.
+
 ```
-1. Start session (attach synced tables)
+1. Start session
 2. App writes normally...
 3. Time to sync:
    a. Grab changeset from session
@@ -166,15 +164,13 @@ For a music library this is fine -- conflicts are rare and low-stakes. Worst cas
    f. Start new session
 ```
 
-**Key rule:** Never apply someone else's changeset while your session is recording. Otherwise your next outgoing changeset contains their changes as duplicates.
-
 ### Sync triggers
 
 Sync pushes after `LibraryEvent::AlbumsChanged` (import, delete, edit) with debounce. If the cloud home is unreachable, sync is skipped and retried next time.
 
 ### Database architecture
 
-The session extension attaches to a single connection and only captures changes made through that connection. The `Database` struct is refactored to use a dedicated write connection (with session attached) and a read pool. Write methods use the dedicated connection; read methods use the pool. This matches SQLite's single-writer-multiple-reader architecture.
+The session extension attaches to a single connection and only captures changes made through that connection. The database uses a dedicated write connection (with session attached) and a read pool. This matches SQLite's single-writer-multiple-reader architecture.
 
 ### Schema evolution
 
@@ -188,21 +184,21 @@ Every changeset envelope carries a `schema_version` integer so receivers know wh
 
 ### Snapshots
 
-The changeset log grows forever without intervention. Periodically, any device writes a snapshot -- a full DB `VACUUM INTO`:
+The changeset log grows forever without intervention. Periodically, any device writes a snapshot -- a full DB `VACUUM INTO`. The snapshot includes its cursors (per-device sequence numbers at the time it was written), so a new device knows exactly where to start pulling changesets from.
 
 ```
-snapshot.db.enc   # overwritten each time
+snapshot.db.enc   # overwritten each time, includes cursors
 ```
 
-New devices start from the snapshot, then replay only changesets after it. Old changesets can be garbage collected after a grace period (30 days).
+New devices start from the snapshot, then replay only changesets after it. Garbage collection is separate from snapshots -- a changeset can only be deleted when every device's cursor (from `heads/`) has moved past it, meaning all devices have already applied it.
 
 ## Shared libraries
 
-Currently a library has one writer (desktop). Adding users -- multiple people reading and writing the same library -- requires identity, authorization, and a trust model.
+A solo library has one writer. Adding users -- multiple people reading and writing the same library -- requires identity, authorization, and a trust model.
 
 ### Identity = a keypair
 
-Each user generates a keypair locally (Ed25519 for signing, X25519 for encryption). No accounts, no server, no signup. Your public key is your identity. The keypair is global (not per-library) -- the same identity across all libraries a user participates in.
+Each user generates a keypair locally (Ed25519 for signing, X25519 for encryption). The public key is the user's identity. The keypair is global (not per-library) -- the same identity across all libraries a user participates in.
 
 ### Bucket layout with users
 
@@ -268,84 +264,6 @@ Owner writes a Remove membership entry and calls `CloudHome::revoke_access` (uns
 
 Every changeset envelope carries `author_pubkey`, so changes are attributed to the user who made them.
 
-## Discovery network
-
-Every bae user who imports a release and matches it to a MusicBrainz ID creates a mapping:
-
-```
-MusicBrainz ID (universal -- "what this music IS")
-        <->
-Content hash / infohash (universal -- "the actual bytes")
-```
-
-This is a curation mapping -- someone verified that these bytes are this release. Sharing it publicly enables decentralized discovery without a central authority.
-
-### Three-layer lookup
-
-```
-MBID                -> content hashes (the curation mapping)
-Content hash        -> peers who have it (the DHT)
-Peer                -> actual bytes (BitTorrent)
-```
-
-### The DHT as rendezvous
-
-The BitTorrent Mainline DHT is used for peer discovery, not as a database. For each MBID, derive a rendezvous key:
-
-```
-rendezvous = hash("bae:mbid:" + MBID_X)
-```
-
-Every bae client that has a release matched to MBID X announces on that rendezvous key (standard DHT announce).
-
-### Forward lookup: "I want Kind of Blue"
-
-```
-User knows MBID X (from MusicBrainz search)
-  -> DHT: find peers announcing hash("bae:mbid:" + MBID_X)
-  -> discovers Alice, Bob, Carlos are online
-  -> connects peer-to-peer
-  -> each peer sends their signed attestation:
-      Alice: { mbid: X, infohash: ABC, sig: "..." }
-      Bob:   { mbid: X, infohash: ABC, sig: "..." }
-      Carlos: { mbid: X, infohash: DEF, sig: "..." }
-  -> aggregate locally:
-      infohash ABC -- 2 attestations (probably the common CD rip)
-      infohash DEF -- 1 attestation (maybe a remaster)
-  -> pick one, use standard BitTorrent to download
-```
-
-### Reverse lookup: "I have these files, what are they?"
-
-```
-User has files with infohash ABC
-  -> DHT: find peers in the torrent swarm for infohash ABC
-  -> connect, ask via BEP 10 extended messages: "what MBID is this?"
-  -> peers respond with signed attestations
-  -> now the user has proper metadata without manual tagging
-```
-
-### Why not a blockchain?
-
-The attestation model doesn't need proof of work or consensus:
-
-- **No financial stakes** -- worst case is a bad mapping, not stolen money
-- **Identity-based** -- every attestation is signed by a keypair
-- **Confidence = attestation count** -- more independent signers = higher trust
-- **Bad mappings die naturally** -- zero corroboration, ignored
-
-### Attestation properties
-
-- **Signed**: every attestation is cryptographically signed by the author
-- **Cached**: clients cache attestations locally, re-share to future queries -- knowledge spreads epidemically
-- **Tamper-evident**: can't forge an attestation without the private key
-- **No single writer**: no one controls the mapping, no one can censor it
-- **Permissionless**: any bae client can participate
-
-### Participation controls
-
-Off by default. Enable in settings. Per-release opt-out. Attestation-only mode or full participation (attestations + seeding).
-
 ## bae-server
 
 `bae-server` -- a headless, read-only server that pulls from the cloud home.
@@ -372,24 +290,4 @@ Off by default. Enable in settings. Per-release opt-out. Attestation-only mode o
 
 Each capability is independent. Solo users only need changeset sync.
 
-## Constraints
 
-### Access control varies by backend
-
-See the CloudHome trait's access management table above. Consumer clouds and S3 have different mechanisms for access management, but the join flow and membership chain work the same across all of them. S3 always uses per-user credential minting — the difference is whether minting is automated (provider API) or manual (owner creates credentials in the provider console).
-
-**Bandwidth/request limits are the provider's problem.** bae can't enforce quotas regardless of backend.
-
-### No coordination server
-
-bae has no central server. All sync, membership, and sharing happens through the storage backend and peer-to-peer exchanges (code pasting, link sharing). This means:
-
-- **No push notifications for S3.** Devices poll on a timer. Consumer clouds support change notifications (Google Drive changes.watch, Dropbox longpoll) which are faster.
-- **No NAT traversal service.** Peer-to-peer connections depend on DHT and UPnP.
-- **No account recovery.** Lose your keypair and encryption key, lose access. iCloud Keychain helps but isn't guaranteed.
-- **No global directory.** You can't "search for a user" -- you need their public key or a follow/invite code exchanged out-of-band.
-
-## Open Questions
-
-- Second-device setup when iCloud Keychain is off -- QR code? Paste key?
-- bae Cloud managed offering -- storage + always-on bae-server + `yourname.bae.fm` subdomain

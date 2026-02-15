@@ -1,5 +1,10 @@
 # User Journey
 
+bae does two things:
+
+1. Uses encryption to coordinate curating and distributing your music library across devices and people -- no central server, just your own cloud storage.
+2. Lets users map their curations (MusicBrainz/Discogs matches) to bytes on the internet, enabling decentralized discovery.
+
 ## Stage 0: Click a share link
 
 Many people first encounter bae by receiving a link from a friend.
@@ -26,7 +31,7 @@ Leave bae-desktop running, or run bae-server, and you can generate share links -
 
 ## Stage 4: Follow
 
-A friend who also has bae wants to browse your full catalog, not just one-off links. You give them access to your bae-desktop or bae-server -- a URL and credentials. Their bae app connects and your library appears alongside their own as a read-only remote library.
+A friend who also has bae wants to browse your full catalog, not just one-off links. You generate a follow code and send it to them. They paste it into bae and your library appears alongside their own as a read-only remote library.
 
 Follow goes through bae-desktop or bae-server. The follower streams through your server, never touches the cloud home.
 
@@ -37,3 +42,5 @@ For a close collaborator who wants to contribute to the same library -- not just
 The joiner shares their public key, the owner sends back an invite code. bae handles the rest -- grants storage access (shares the cloud home folder on consumer clouds, mints credentials on S3), wraps the encryption key to the joiner's pubkey, and bundles everything into the code. The joiner pastes it and syncs.
 
 Under the hood: membership chain, signed changesets, mutual read+write access. The two-step code exchange is the same regardless of cloud backend -- what adapts is how storage access is granted.
+
+There is no global directory -- you can't search for a user by name. To follow, the owner generates a follow code. To join, the joiner sends their public key and the owner sends back an invite code. Both are exchanged out-of-band (in person, over a chat app, etc.).

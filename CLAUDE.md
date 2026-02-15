@@ -4,6 +4,8 @@
 
 This is "bae" - always stylized in lowercase. Never "Bae" or "BAE" in user-visible strings (UI, docs, errors, titles, file names, URLs). Code identifiers follow language conventions.
 
+Never use real artist or album names in docs, examples, tests, or UI mockups. Use generic placeholders like "this album", "the artist", "rel-123", "Album Title", "Artist Name", etc.
+
 ## Core Philosophy
 
 **YAGNI** - Don't leave dead code around. Remove unused code. Run clippy before commits.
