@@ -1,10 +1,5 @@
 # User Journey
 
-bae does two things:
-
-1. Uses encryption to coordinate curating and distributing your music library across devices and people -- no central server, just your own cloud storage.
-2. Lets users map their curations (MusicBrainz/Discogs matches) to bytes on the internet, enabling decentralized discovery.
-
 ## Stage 0: Click a share link
 
 Many people first encounter bae by receiving a link from a friend.
