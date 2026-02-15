@@ -3,30 +3,42 @@ title: Storage Overview
 description: How bae stores your music files
 ---
 
-bae gives you control over where your music is stored. Files can stay on your machine, or you can set up a cloud home for encrypted backup and multi-device sync.
+Release files can live in up to three places. When you import a release, you choose between **managed** and **unmanaged**. Managed files are copied into bae's storage; unmanaged files stay where they are.
 
 ## At a Glance
 
-|                          | Self-managed     | Cloud home (managed) |
-|--------------------------|------------------|----------------------|
-| Files live at            | Your location    | Cloud provider       |
-| Copies files on import   | No               | Yes (upload)         |
-| Encrypted at rest        | No               | Yes                  |
-| Sync across devices      | No               | Yes                  |
-| You manage the files     | Yes              | No                   |
-| Delete release removes files | No           | Yes                  |
+|                              | Unmanaged        | Library home       | Cloud home         |
+|------------------------------|------------------|--------------------|--------------------|
+| Files live at                | Your location    | `~/.bae/libraries/` | Cloud provider    |
+| bae copies files on import   | No               | Yes                | Yes (encrypted)    |
+| Available offline            | Yes              | Yes                | No                 |
+| Encrypted at rest            | No               | No                 | Yes                |
+| Syncs to other devices       | No               | No                 | Yes                |
+| Delete release removes files | No               | Yes                | Yes                |
 
-## Self-managed Storage
+A managed release can have files in the library home, the cloud home, or both. The library home is the local copy; the cloud home is the encrypted remote copy. If you have a cloud home configured, managed imports go to both.
+
+## Unmanaged
 
 Point bae at files you already have organized. bae indexes them but doesn't move, copy, or touch anything. If you already have terabytes of music arranged your way, this lets you catalog it without duplicating a single byte.
 
-The tradeoff: bae can't encrypt, sync, or back up self-managed files. If you move or rename them outside bae, it loses track.
+The tradeoff: bae can't encrypt, sync, or back up unmanaged files.
+
+## Library Home
+
+Every library has a home directory on your machine (`~/.bae/libraries/{uuid}/`). This is where bae keeps its database, images, and — for managed releases — a local copy of the release files.
+
+When you import a release as managed, bae copies the files into the library home. Your originals are untouched. The local copy is what bae plays from.
 
 ## Cloud Home
 
-A cloud home is a single storage location that holds your entire library — encrypted music files, metadata changesets, artwork, and snapshots. Setting one up enables multi-device sync and cloud backup.
+A cloud home is a single remote storage location that holds encrypted release files, metadata changesets, artwork, and snapshots. Setting one up enables multi-device sync and cloud backup.
 
-Supported providers:
+When you import a managed release with a cloud home configured, bae copies files to the library home *and* encrypts and uploads them to the cloud home. Both happen at import time.
+
+A release that only exists in the cloud home (e.g., synced from another device that hasn't downloaded it yet) is not available for offline playback until the files are pulled to the local library home.
+
+### Supported providers
 
 - **Google Drive** — sign in with OAuth, bae creates a folder in your Drive
 - **Dropbox** — sign in with OAuth
@@ -37,13 +49,11 @@ Supported providers:
 
 Consumer cloud providers (Google Drive, Dropbox, etc.) use OAuth sign-in — no API keys or bucket configuration. iCloud Drive (macOS only) uses your existing iCloud container with no sign-in. S3-compatible providers require manual credential setup and are aimed at more technical users.
 
-When you import a release as managed, bae encrypts the files and uploads them to your cloud home. Your originals stay untouched.
-
 ## How It Works
 
-1. Set up a cloud home in **Settings → Sync** (OAuth sign-in or S3 credentials)
-2. When importing a release, choose **bae-managed** or **Self-managed**
-3. Managed imports are encrypted and uploaded to your cloud home
+1. Import a release — choose **managed** or **unmanaged**
+2. Managed imports copy files to the library home (local)
+3. If a cloud home is configured, managed imports also encrypt and upload files there
 4. Other devices connected to the same cloud home sync automatically
 
 See [Sync](/storage/sync) for how multi-device sync works and [Encryption](/storage/encryption) for how files are encrypted.

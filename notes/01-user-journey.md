@@ -14,7 +14,7 @@ Everything is local to the machine.
 
 ## Stage 2: Sync across devices
 
-You get a second machine or want cloud backup. Sign in with a cloud provider (Google Drive, Dropbox, OneDrive, pCloud) or configure an S3-compatible bucket. This creates your cloud home -- one location that holds everything.
+You get a second machine or want cloud backup. Sign in with a commercial cloud provider or configure an S3-compatible bucket. This creates your cloud home -- one location that holds everything.
 
 Consumer clouds are the primary path (OAuth sign-in). S3-compatible providers (Backblaze B2, Cloudflare R2, AWS, Wasabi, etc.) are for more technical users.
 
