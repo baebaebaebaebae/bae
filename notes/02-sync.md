@@ -1,6 +1,6 @@
-# Sync & Storage
+# Sync
 
-bae starts local, scales to cloud, then to collaboration and a decentralized network. Progressive complexity -- each layer is independently useful, and you never pay for capabilities you don't use.
+bae starts local, adds cloud sync when configured, then collaboration and a decentralized network.
 
 ## Tiers
 
@@ -12,16 +12,16 @@ bae starts local, scales to cloud, then to collaboration and a decentralized net
 
 ### Tier 2: Cloud (one decision)
 
-Sign in with a cloud provider (Google Drive, Dropbox, OneDrive, pCloud) or configure an S3-compatible bucket. This creates your **cloud home** -- a single cloud location that holds everything: changesets, snapshots, images, and your release files. There is exactly one cloud home per library.
+Sign in with a cloud provider (Google Drive, Dropbox, OneDrive, pCloud) or configure an S3-compatible bucket. This creates your **cloud home** -- a single cloud location that mirrors the library's data (encrypted) and adds the machinery for incremental sync and access control. There is exactly one cloud home per library.
 
-Consumer clouds are the primary path -- OAuth sign-in, zero configuration, everyone already has an account. S3-compatible providers (Backblaze B2, Cloudflare R2, AWS, MinIO, Wasabi, etc.) are for more technical users who want full control or self-hosting.
+Consumer clouds use OAuth sign-in. S3-compatible providers (Backblaze B2, Cloudflare R2, AWS, MinIO, Wasabi, etc.) require manual credential entry.
 
-Your cloud home is your default cloud storage. When you import music, files go there. When another device joins, it pulls everything from there. One location, one sign-in.
+Imported files go to the cloud home. Other devices pull from it.
 
 - bae generates an encryption key and stores it in the OS keyring
 - On macOS, iCloud Keychain syncs the encryption key to other devices automatically
-- Files encrypt on upload, images encrypt in the cloud home, DB snapshots encrypted for bootstrap
-- The user never typed an encryption key. They might not even know they have one.
+- Files, images, and DB snapshots are encrypted before upload
+- The encryption key is generated automatically -- no user input required
 
 ### Tier 3: More technical users
 
@@ -42,7 +42,7 @@ Desktop manages all libraries under `~/.bae/libraries/`. Each library is a direc
 
 On first launch, bae creates the library home.
 
-**`config.yaml`** -- device-specific settings (torrent ports, subsonic config, keyring hint flags, cloud home configuration, device_id). Not synced. Only at the library home.
+**`config.yaml`** -- device-specific settings. Not synced, only at the library home. Includes things like cloud home configuration, subsonic settings, keyring hint flags, and more. Non-secret only -- credentials go in the keyring.
 
 | Data | Tier 1 (local) | Tier 2+ (cloud) |
 |------|----------------|-----------------|
@@ -58,19 +58,19 @@ One key per library. Everything that goes to cloud gets encrypted with it.
 
 **Key fingerprint:** SHA-256 of the key, truncated. Stored in `config.yaml`. Lets us detect the wrong key immediately instead of silently producing garbage.
 
-You shouldn't have to think about encryption, keys, or cloud storage until the moment you want cloud. And when you do, encryption just happens -- it's not a feature you configure, it's a consequence of going cloud.
+Encryption is automatic when cloud is configured -- there's no separate setup step.
 
 ## The CloudHome Trait
 
-The `CloudHome` trait is the core abstraction that makes bae backend-agnostic. Everything above this trait is universal — the sync protocol, encryption, membership chain, cloud home layout, join flow. Everything below it adapts to the specific cloud provider.
+The `CloudHome` trait is the core abstraction that makes bae backend-agnostic. Everything above this trait is universal -- the sync protocol, encryption, membership chain, cloud home layout, join flow. Everything below it adapts to the specific cloud provider.
 
 ### What's universal (above the trait)
 
-- **Cloud home layout**: `changes/`, `heads/`, `snapshot.db.enc`, `images/`, `storage/` — same logical paths regardless of backend
+- **Cloud home layout**: `changes/`, `heads/`, `snapshot.db.enc`, `images/`, `storage/` -- same logical paths regardless of backend
 - **Encryption**: one master key per library, everything encrypted before it leaves the device
-- **Sync protocol**: changesets, snapshots, conflict resolution via LWW — same algorithm everywhere
+- **Sync protocol**: changesets, snapshots, conflict resolution via LWW -- same algorithm everywhere
 - **Membership chain**: append-only log with Ed25519 signatures, encryption key wrapped to each member's pubkey
-- **Join flow**: two-step code exchange (pubkey then invite code) — same ceremony regardless of backend
+- **Join flow**: two-step code exchange (pubkey then invite code) -- same ceremony regardless of backend
 
 ### What varies (below the trait)
 
@@ -83,7 +83,7 @@ The `CloudHome` trait is the core abstraction that makes bae backend-agnostic. E
 
 ```rust
 trait CloudHome {
-    // storage — same interface, different API underneath
+    // storage -- same interface, different API underneath
     fn write(path, data) -> Result
     fn read(path) -> Result<Bytes>
     fn read_range(path, start, end) -> Result<Bytes>
@@ -91,17 +91,17 @@ trait CloudHome {
     fn delete(path) -> Result
     fn exists(path) -> Result<bool>
 
-    // access management — varies by backend
+    // access management -- varies by backend
     fn grant_access(member_email_or_id) -> Result<JoinInfo>
     fn revoke_access(member_email_or_id) -> Result
 }
 ```
 
-Implementations: S3 (via aws-sdk-s3), Google Drive, Dropbox, OneDrive, pCloud (via their REST APIs).
+Implementations: S3 (via aws-sdk-s3), Google Drive, Dropbox, OneDrive, pCloud (via their REST APIs), iCloud Drive (via local filesystem).
 
 ### Storage operations
 
-Every cloud storage service supports basic file operations — the trait normalizes them into one interface:
+Every cloud storage service supports basic file operations -- the trait normalizes them into one interface:
 
 | Operation | S3 | Google Drive | Dropbox |
 |---|---|---|---|
@@ -129,39 +129,11 @@ How `grant_access` and `revoke_access` work depends on the backend:
 - **Consumer cloud**: provider type + folder ID. The joiner signs into their own account; the shared folder is already accessible.
 - **S3**: bucket + region + endpoint + credentials.
 
-### The join flow
-
-The same two-step code exchange regardless of backend:
-
-```
-1. Joiner shares their public key with the owner
-2. Owner's bae:
-   a. Calls grant_access (shares folder or mints credentials)
-   b. Wraps the encryption key to the joiner's pubkey (membership chain)
-   c. Bundles JoinInfo + wrapped key into an invite code
-3. Joiner pastes the invite code
-   a. Consumer cloud: signs into their own account, bae opens the shared folder
-   b. S3: bae uses the embedded credentials
-   c. Both: unwraps the encryption key, pulls snapshot, syncs
-```
-
-The membership chain is the same everywhere -- it's how the encryption key is shared securely (never in the clear). What adapts is the storage access layer.
-
 ### Change notifications
 
 Consumer clouds support push-based change notifications (Google Drive `changes.watch`, Dropbox longpoll, OneDrive delta API) which enable faster sync than S3's polling model. The `CloudHome` trait can optionally support a `watch` method for backends that have it.
 
-
-## Sync
-
-The design has four layers, each building on the previous:
-
-1. **Changeset sync** -- incremental sync via SQLite session extension changesets pushed to a shared cloud home
-2. **Shared libraries** -- multiple users writing to the same library with signed changesets and a membership chain
-
-Each layer is independently useful. A solo user benefits from layer 1. Friends sharing a library use layers 1-2.
-
-### Changeset sync (layer 1)
+## Changeset sync
 
 Use the SQLite session extension to capture exactly what changed, push the binary changeset to the cloud home, pull and apply on other devices with a conflict handler. No coordination server. The cloud home is a library-level concept -- one bucket/folder per library, configured in `config.yaml`. The cloud home can be an S3 bucket or a folder on a consumer cloud (Google Drive, Dropbox, etc.).
 
@@ -173,7 +145,7 @@ cloud-home/
   changes/{device_id}/{seq}.enc    # changeset blobs per device
   heads/{device_id}.json.enc       # "my latest seq is 42"
   images/ab/cd/{id}                # all library images (encrypted)
-  storage/ab/cd/{file_id}          # release files (optional -- bucket can double as file storage)
+  storage/ab/cd/{file_id}          # release files (encrypted)
 ```
 
 **Push** = grab changeset from the session, encrypt, upload to `changes/{your_device}/`, update `heads/{your_device}`.
@@ -182,7 +154,7 @@ cloud-home/
 
 **Polling is cheap** -- listing `heads/` is one S3 LIST call. If all seqs match your cursors, nothing to do. Check on app open + periodic timer.
 
-#### Why the session extension
+### Why the session extension
 
 We considered and rejected several alternatives:
 
@@ -193,13 +165,13 @@ We considered and rejected several alternatives:
 
 The session extension is built into SQLite. It tracks all changes (INSERT/UPDATE/DELETE) automatically at the C level. No triggers, no method wrapping, no column enumeration. The app writes normally. SQLite records what changed. We grab the binary changeset and push it.
 
-#### Changesets, not operations
+### Changesets, not operations
 
 The session extension produces a compact binary changeset that represents the diff between the database before and after. A changeset contains only the rows and columns that actually changed.
 
 For an import that creates an album + release + 12 tracks + 12 files, a JSON op log approach would generate ~50 operations. The session extension produces a single binary changeset blob. Smaller, faster, and no custom serialization.
 
-#### Conflict resolution: row-level LWW
+### Conflict resolution: row-level LWW
 
 When two devices change the same row, the later `_updated_at` timestamp wins. Every synced table has an `_updated_at` column maintained by a Hybrid Logical Clock (HLC).
 
@@ -230,7 +202,7 @@ Result: rel-123 is deleted (delete wins)
 
 For a music library this is fine -- conflicts are rare and low-stakes. Worst case someone re-edits a field.
 
-#### The sync protocol
+### The sync protocol
 
 ```
 1. Start session (attach synced tables)
@@ -238,7 +210,7 @@ For a music library this is fine -- conflicts are rare and low-stakes. Worst cas
 3. Time to sync:
    a. Grab changeset from session
    b. End session
-   c. Push changeset to S3
+   c. Push changeset to cloud home
    d. Pull incoming changesets (NO session active)
    e. Apply incoming with conflict handler
    f. Start new session
@@ -246,17 +218,15 @@ For a music library this is fine -- conflicts are rare and low-stakes. Worst cas
 
 **Key rule:** Never apply someone else's changeset while your session is recording. Otherwise your next outgoing changeset contains their changes as duplicates.
 
-#### Sync triggers
+### Sync triggers
 
-- After `LibraryEvent::AlbumsChanged` (import, delete) with debounce
-- Manual "Sync Now" button in settings
-- If the cloud home is unreachable, sync is skipped and retried next time
+Sync pushes after `LibraryEvent::AlbumsChanged` (import, delete, edit) with debounce. If the cloud home is unreachable, sync is skipped and retried next time.
 
-#### Database architecture
+### Database architecture
 
 The session extension attaches to a single connection and only captures changes made through that connection. The `Database` struct is refactored to use a dedicated write connection (with session attached) and a read pool. Write methods use the dedicated connection; read methods use the pool. This matches SQLite's single-writer-multiple-reader architecture.
 
-#### Schema evolution
+### Schema evolution
 
 The SQLite session extension identifies columns by index, not by name. This constrains how the schema can change once changeset sync is live.
 
@@ -266,7 +236,7 @@ The SQLite session extension identifies columns by index, not by name. This cons
 
 Every changeset envelope carries a `schema_version` integer so receivers know what schema produced it. In practice, schema changes for a music library are almost always additive (new fields), making breaking migrations rare.
 
-#### Snapshots
+### Snapshots
 
 The changeset log grows forever without intervention. Periodically, any device writes a snapshot -- a full DB `VACUUM INTO`:
 
@@ -276,21 +246,21 @@ snapshot.db.enc   # overwritten each time
 
 New devices start from the snapshot, then replay only changesets after it. Old changesets can be garbage collected after a grace period (30 days).
 
-### Shared libraries (layer 2)
+## Shared libraries
 
 Currently a library has one writer (desktop). Adding users -- multiple people reading and writing the same library -- requires identity, authorization, and a trust model.
 
-#### Identity = a keypair
+### Identity = a keypair
 
-Each user generates a keypair locally (Ed25519 for signing, X25519 for encryption). No accounts, no server, no signup. Your public key is your identity. The keypair is global (not per-library) so attestations in layer 4 accumulate under one identity.
+Each user generates a keypair locally (Ed25519 for signing, X25519 for encryption). No accounts, no server, no signup. Your public key is your identity. The keypair is global (not per-library) so attestations accumulate under one identity.
 
-#### Bucket layout with users
+### Bucket layout with users
 
 ```
 cloud-home/
   membership/{pubkey}/{seq}.enc     # signed membership entries (per author, avoids S3 overwrite races)
   keys/{user_pubkey}.enc            # library key wrapped to each member's public key
-  heads/{device_id}.json.enc        # per-device head pointer (unchanged from layer 1)
+  heads/{device_id}.json.enc        # per-device head pointer (unchanged)
   changes/{device_id}/{seq}.enc     # per-device changeset stream (signed)
   snapshot.db.enc
   images/ab/cd/{id}
@@ -299,7 +269,7 @@ cloud-home/
 
 Changesets stay keyed by device_id (a user may have multiple devices). Authorship is established cryptographically: each changeset envelope includes `author_pubkey` and a signature over the changeset bytes.
 
-#### Membership chain
+### Membership chain
 
 An append-only log of membership changes, stored as individual files to avoid S3 overwrite races. Each entry is signed by an owner.
 
@@ -310,39 +280,45 @@ An append-only log of membership changes, stored as individual files to avoid S3
 
 On read, clients download all membership entries, order by timestamp, and validate the chain.
 
-#### Invitation flow
+### Invitation flow
 
 ```
 Owner invites Alice:
   1. Alice generates a keypair, sends her public key to the owner
-  2. Owner wraps the library encryption key to Alice's public key
+  2. Owner's bae calls CloudHome::grant_access (shares folder or mints credentials)
+  3. Owner wraps the library encryption key to Alice's public key
      -> uploads keys/alice.enc
-  3. Owner writes membership entry: { action: "add", user: alice }
-  4. Gives Alice the bucket coordinates
+  4. Owner writes membership entry: { action: "add", user: alice }
+  5. Bundles JoinInfo + wrapped key into an invite code -> sends to Alice
 
 Alice's first sync:
-  1. Downloads keys/alice.enc -> unwraps library key
-  2. Downloads and validates membership entries
-  3. Downloads snapshot, pulls changesets -> applies -> has the full library
-  4. Can now push her own signed changesets
+  1. Pastes invite code
+  2. Consumer cloud: signs into her own account, bae opens the shared folder
+     S3: bae uses the embedded credentials
+  3. Downloads keys/alice.enc -> unwraps library key
+  4. Downloads and validates membership entries
+  5. Downloads snapshot, pulls changesets -> applies -> has the full library
+  6. Can now push her own signed changesets
 ```
 
-#### Changeset validation on pull
+The invite code contains everything Alice needs except the encryption key (which is wrapped to her pubkey in the cloud home). What's in the code depends on the backend.
+
+### Changeset validation on pull
 
 Before applying any changeset:
 1. Verify the signature against `author_pubkey`
 2. Was the author a valid member at that time?
 3. If either fails -> discard
 
-#### Revocation
+### Revocation
 
-Owner writes a Remove membership entry, generates a new encryption key, re-wraps to remaining members. Old data: Bob had the old key, accept it pragmatically. New data is protected.
+Owner writes a Remove membership entry, calls `CloudHome::revoke_access` (unshares folder or deletes credentials), generates a new encryption key, re-wraps to remaining members. Old data: Bob had the old key, accept it pragmatically. New data is protected.
 
-#### Attribution
+### Attribution
 
-Every changeset envelope carries `author_pubkey`. "Alice added this release," "Bob changed the cover." Free audit trail.
+Every changeset envelope carries `author_pubkey`, so changes are attributed to the user who made them.
 
-### Discovery network
+## Discovery network
 
 Every bae user who imports a release and matches it to a MusicBrainz ID creates a mapping:
 
@@ -352,9 +328,9 @@ MusicBrainz ID (universal -- "what this music IS")
 Content hash / infohash (universal -- "the actual bytes")
 ```
 
-This mapping is valuable. It's curation -- someone verified that these bytes are this release. Sharing it publicly enables decentralized music discovery without a central authority.
+This is a curation mapping -- someone verified that these bytes are this release. Sharing it publicly enables decentralized discovery without a central authority.
 
-#### Three-layer lookup
+### Three-layer lookup
 
 ```
 MBID                -> content hashes (the curation mapping)
@@ -362,7 +338,7 @@ Content hash        -> peers who have it (the DHT)
 Peer                -> actual bytes (BitTorrent)
 ```
 
-#### The DHT as rendezvous
+### The DHT as rendezvous
 
 The BitTorrent Mainline DHT is used for peer discovery, not as a database. For each MBID, derive a rendezvous key:
 
@@ -372,7 +348,7 @@ rendezvous = hash("bae:mbid:" + MBID_X)
 
 Every bae client that has a release matched to MBID X announces on that rendezvous key (standard DHT announce).
 
-#### Forward lookup: "I want Kind of Blue"
+### Forward lookup: "I want Kind of Blue"
 
 ```
 User knows MBID X (from MusicBrainz search)
@@ -389,7 +365,7 @@ User knows MBID X (from MusicBrainz search)
   -> pick one, use standard BitTorrent to download
 ```
 
-#### Reverse lookup: "I have these files, what are they?"
+### Reverse lookup: "I have these files, what are they?"
 
 ```
 User has files with infohash ABC
@@ -399,7 +375,7 @@ User has files with infohash ABC
   -> now the user has proper metadata without manual tagging
 ```
 
-#### Why not a blockchain?
+### Why not a blockchain?
 
 The attestation model doesn't need proof of work or consensus:
 
@@ -408,7 +384,7 @@ The attestation model doesn't need proof of work or consensus:
 - **Confidence = attestation count** -- more independent signers = higher trust
 - **Bad mappings die naturally** -- zero corroboration, ignored
 
-#### Attestation properties
+### Attestation properties
 
 - **Signed**: every attestation is cryptographically signed by the author
 - **Cached**: clients cache attestations locally, re-share to future queries -- knowledge spreads epidemically
@@ -416,7 +392,7 @@ The attestation model doesn't need proof of work or consensus:
 - **No single writer**: no one controls the mapping, no one can censor it
 - **Permissionless**: any bae client can participate
 
-#### Participation controls
+### Participation controls
 
 Off by default. Enable in settings. Per-release opt-out. Attestation-only mode or full participation (attestations + seeding).
 
@@ -466,23 +442,23 @@ Local `storage/` is empty -- release files stream from the cloud home. The user 
 5. Subsequent mutations push incremental changesets
 6. Another device can now join from the cloud home
 
-One sign-in, one location. Everything lives in the cloud home.
+Everything lives in the cloud home.
 
-## How the Layers Compose
+## How It Composes
 
-**Solo user, local only** (today):
-- Layer 1 replaces full-snapshot sync with incremental changesets to the cloud home
+**Solo user, local only**:
+- Changeset sync replaces full-snapshot sync with incremental changesets to the cloud home
 - Faster, uses less bandwidth
 
 **Solo user, multiple devices**:
-- Layer 1 syncs between devices via the shared cloud home
+- Changeset sync syncs between devices via the shared cloud home
 - Same user, different device IDs, merge via LWW
 
 **Friends sharing a library**:
-- Layers 1 + 2: multiple users, signed changesets, membership chain
+- Changeset sync + shared libraries: multiple users, signed changesets, membership chain
 - Everyone has the master key, full read/write access
 
-Each layer is opt-in. A user who never wants collaboration still benefits from incremental sync.
+Each capability is independent. Solo users only need changeset sync.
 
 ## Constraints
 
@@ -497,15 +473,9 @@ See the CloudHome trait's access management table above. The three tiers (consum
 bae has no central server. All sync, membership, and sharing happens through the storage backend and peer-to-peer exchanges (code pasting, link sharing). This means:
 
 - **No push notifications for S3.** Devices poll on a timer. Consumer clouds support change notifications (Google Drive changes.watch, Dropbox longpoll) which are faster.
-- **No NAT traversal service.** Peer-to-peer connections (layer 4) depend on DHT and UPnP.
+- **No NAT traversal service.** Peer-to-peer connections depend on DHT and UPnP.
 - **No account recovery.** Lose your keypair and encryption key, lose access. iCloud Keychain helps but isn't guaranteed.
 - **No global directory.** You can't "search for a user" -- you need their public key or a follow/invite code exchanged out-of-band.
-
-## What's Not Built Yet
-
-- Bidirectional sync / conflict resolution (Phase 1 of roadmap)
-- Periodic auto-upload
-- Write lock to prevent two desktops writing to the same library
 
 ## Open Questions
 
