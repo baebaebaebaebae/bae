@@ -1,11 +1,13 @@
 //! Sync status and configuration section view
 
+use crate::components::helpers::Tooltip;
 use crate::components::icons::{CheckIcon, CopyIcon};
 use crate::components::settings::cloud_provider::{CloudProviderOption, CloudProviderPicker};
 use crate::components::{
     Button, ButtonSize, ButtonVariant, ChromelessButton, SettingsCard, SettingsSection, TextInput,
     TextInputSize, TextInputType,
 };
+use crate::floating_ui::Placement;
 use crate::stores::config::CloudProvider;
 use crate::stores::{
     DeviceActivityInfo, InviteStatus, Member, MemberRole, ShareInfo, SharedReleaseDisplay,
@@ -178,15 +180,19 @@ pub fn SyncSectionView(
                         span { class: "text-gray-400 font-mono text-sm truncate",
                             {truncate_pubkey(pubkey)}
                         }
-                        ChromelessButton {
-                            class: Some("text-gray-400 hover:text-white transition-colors".to_string()),
-                            title: Some("Copy public key to clipboard".to_string()),
-                            aria_label: Some("Copy public key to clipboard".to_string()),
-                            onclick: handle_copy,
-                            if *copied.read() {
-                                CheckIcon { class: "w-4 h-4 text-green-400" }
-                            } else {
-                                CopyIcon { class: "w-4 h-4" }
+                        Tooltip {
+                            text: "Copy public key to clipboard",
+                            placement: Placement::Top,
+                            nowrap: true,
+                            ChromelessButton {
+                                class: Some("text-gray-400 hover:text-white transition-colors".to_string()),
+                                aria_label: Some("Copy public key to clipboard".to_string()),
+                                onclick: handle_copy,
+                                if *copied.read() {
+                                    CheckIcon { class: "w-4 h-4 text-green-400" }
+                                } else {
+                                    CopyIcon { class: "w-4 h-4" }
+                                }
                             }
                         }
                     }

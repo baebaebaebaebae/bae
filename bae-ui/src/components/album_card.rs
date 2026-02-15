@@ -1,5 +1,6 @@
 //! Album card component - pure view with callbacks
 
+use crate::components::helpers::Tooltip;
 use crate::components::icons::{EllipsisIcon, ImageIcon, PlayIcon, PlusIcon};
 use crate::components::{MenuDropdown, MenuItem, Placement, TextLink};
 use crate::display_types::{Album, Artist};
@@ -85,10 +86,11 @@ pub fn AlbumCard(
                 }
             }
             div { class: "p-4",
-                h3 {
-                    class: "font-bold text-white text-lg mb-1 truncate",
-                    title: "{album_title}",
-                    "{album_title}"
+                Tooltip {
+                    text: album_title.clone(),
+                    placement: Placement::Bottom,
+                    nowrap: true,
+                    h3 { class: "font-bold text-white text-lg mb-1 truncate", "{album_title}" }
                 }
                 p { class: "text-gray-400 text-sm truncate",
                     if artists.is_empty() {

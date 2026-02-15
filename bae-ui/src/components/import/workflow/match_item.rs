@@ -1,10 +1,12 @@
 //! Match item view component
 
+use crate::components::helpers::Tooltip;
 use crate::components::icons::{
     ChevronDownIcon, ChevronRightIcon, ImageIcon, LoaderIcon, RefreshIcon,
 };
 use crate::components::{Button, ButtonSize, ButtonVariant};
 use crate::display_types::{CandidateTrack, MatchCandidate};
+use crate::floating_ui::Placement;
 use crate::stores::import::PrefetchState;
 use dioxus::prelude::*;
 
@@ -100,14 +102,18 @@ pub fn MatchItemView(
                             class: "w-full h-full object-cover text-transparent",
                         }
                     } else if candidate.cover_fetch_failed {
-                        div {
-                            class: "w-full h-full flex items-center justify-center text-gray-500 hover:text-gray-300 cursor-pointer",
-                            title: "Cover art failed to load. Click to retry.",
-                            onclick: move |e| {
-                                e.stop_propagation();
-                                on_retry_cover.call(());
-                            },
-                            RefreshIcon { class: "w-4 h-4" }
+                        Tooltip {
+                            text: "Cover art failed to load. Click to retry.",
+                            placement: Placement::Top,
+                            nowrap: true,
+                            div {
+                                class: "w-full h-full flex items-center justify-center text-gray-500 hover:text-gray-300 cursor-pointer",
+                                onclick: move |e| {
+                                    e.stop_propagation();
+                                    on_retry_cover.call(());
+                                },
+                                RefreshIcon { class: "w-4 h-4" }
+                            }
                         }
                     } else {
                         div { class: "w-full h-full flex items-center justify-center text-gray-500",

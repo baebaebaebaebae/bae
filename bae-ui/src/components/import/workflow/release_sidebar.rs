@@ -127,22 +127,30 @@ pub fn ReleaseSidebarView(
                             LoaderIcon { class: "w-3.5 h-3.5 text-gray-400 animate-spin" }
                         }
                         if detected.is_empty() {
-                            button {
-                                class: "p-1.5 text-gray-400 hover:text-white transition-colors rounded-md hover:bg-white/5",
-                                onclick: move |_| on_add_folder.call(()),
-                                title: "Scan folder",
-                                PlusIcon { class: "w-4 h-4" }
+                            Tooltip {
+                                text: "Scan folder",
+                                placement: Placement::Top,
+                                nowrap: true,
+                                button {
+                                    class: "p-1.5 text-gray-400 hover:text-white transition-colors rounded-md hover:bg-white/5",
+                                    onclick: move |_| on_add_folder.call(()),
+                                    PlusIcon { class: "w-4 h-4" }
+                                }
                             }
                         } else {
-                            button {
-                                id: "{anchor_id}",
-                                class: "p-1.5 text-gray-400 hover:text-white transition-colors rounded-md hover:bg-white/5",
-                                onclick: move |evt| {
-                                    evt.stop_propagation();
-                                    show_menu.set(!show_menu());
-                                },
-                                title: "More",
-                                EllipsisIcon { class: "w-4 h-4" }
+                            Tooltip {
+                                text: "More",
+                                placement: Placement::Top,
+                                nowrap: true,
+                                button {
+                                    id: "{anchor_id}",
+                                    class: "p-1.5 text-gray-400 hover:text-white transition-colors rounded-md hover:bg-white/5",
+                                    onclick: move |evt| {
+                                        evt.stop_propagation();
+                                        show_menu.set(!show_menu());
+                                    },
+                                    EllipsisIcon { class: "w-4 h-4" }
+                                }
                             }
                         }
                     }
@@ -358,14 +366,15 @@ fn CandidateRow(
             }
 
             if is_removable {
-                button {
-                    class: "flex-shrink-0 opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-white rounded transition-opacity",
-                    title: "Remove",
-                    onclick: move |e: MouseEvent| {
-                        e.stop_propagation();
-                        on_remove.call(index);
-                    },
-                    XIcon { class: "w-3.5 h-3.5" }
+                Tooltip { text: "Remove", placement: Placement::Top, nowrap: true,
+                    button {
+                        class: "flex-shrink-0 opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-white rounded transition-opacity",
+                        onclick: move |e: MouseEvent| {
+                            e.stop_propagation();
+                            on_remove.call(index);
+                        },
+                        XIcon { class: "w-3.5 h-3.5" }
+                    }
                 }
             }
         }
