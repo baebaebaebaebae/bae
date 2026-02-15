@@ -258,18 +258,18 @@ pub struct ConfigYaml {
     pub network_participation: ParticipationMode,
     /// Enable the Subsonic API server
     #[serde(default = "default_true")]
-    pub subsonic_enabled: bool,
+    pub server_enabled: bool,
     /// Subsonic server port
-    pub subsonic_port: Option<u16>,
+    pub server_port: Option<u16>,
     /// Subsonic server bind address (default: 127.0.0.1, set to 0.0.0.0 for LAN/external access)
     #[serde(default)]
-    pub subsonic_bind_address: Option<String>,
-    /// Whether Subsonic authentication is required
+    pub server_bind_address: Option<String>,
+    /// Whether server authentication is required
     #[serde(default)]
-    pub subsonic_auth_enabled: bool,
-    /// Subsonic username (password stored in keyring)
+    pub server_auth_enabled: bool,
+    /// Server username (password stored in keyring)
     #[serde(default)]
-    pub subsonic_username: Option<String>,
+    pub server_username: Option<String>,
 
     // Cloud home configuration
     /// Selected cloud provider for the cloud home. None = not configured.
@@ -316,21 +316,21 @@ pub struct ConfigYaml {
     #[serde(default = "default_share_signing_version")]
     pub share_signing_key_version: u32,
 
-    /// Remote Subsonic servers the user is following (read-only browsing + streaming)
+    /// Remote servers the user is following (read-only browsing + streaming)
     #[serde(default)]
     pub followed_libraries: Vec<FollowedLibrary>,
 }
 
-/// A remote Subsonic server the user is "following" (read-only browsing + streaming).
+/// A remote server the user is "following" (read-only browsing + streaming).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FollowedLibrary {
     /// Unique ID (UUID)
     pub id: String,
     /// User-chosen display name
     pub name: String,
-    /// Subsonic server URL (e.g. "http://192.168.1.100:4533")
+    /// Server URL (e.g. "http://192.168.1.100:4533")
     pub server_url: String,
-    /// Subsonic username (password stored in keyring)
+    /// Username (password stored in keyring)
     pub username: String,
 }
 
@@ -369,14 +369,14 @@ pub struct Config {
     pub torrent_max_uploads: Option<i32>,
     pub torrent_max_uploads_per_torrent: Option<i32>,
     pub network_participation: ParticipationMode,
-    pub subsonic_enabled: bool,
-    pub subsonic_port: u16,
+    pub server_enabled: bool,
+    pub server_port: u16,
     /// Subsonic server bind address (default: 127.0.0.1)
-    pub subsonic_bind_address: String,
-    /// Whether Subsonic authentication is required
-    pub subsonic_auth_enabled: bool,
-    /// Subsonic username (password stored in keyring)
-    pub subsonic_username: Option<String>,
+    pub server_bind_address: String,
+    /// Whether server authentication is required
+    pub server_auth_enabled: bool,
+    /// Server username (password stored in keyring)
+    pub server_username: Option<String>,
     /// Selected cloud provider for the cloud home. None = not configured.
     pub cloud_provider: Option<CloudProvider>,
     /// S3 bucket name for cloud home
@@ -405,7 +405,7 @@ pub struct Config {
     pub share_default_expiry_days: Option<u32>,
     /// Signing key version for share tokens. Incrementing invalidates all outstanding links.
     pub share_signing_key_version: u32,
-    /// Remote Subsonic servers the user is following
+    /// Remote servers the user is following
     pub followed_libraries: Vec<FollowedLibrary>,
 }
 
@@ -572,13 +572,13 @@ impl Config {
             torrent_max_uploads: yaml_config.torrent_max_uploads,
             torrent_max_uploads_per_torrent: yaml_config.torrent_max_uploads_per_torrent,
             network_participation: yaml_config.network_participation,
-            subsonic_enabled: yaml_config.subsonic_enabled,
-            subsonic_port: yaml_config.subsonic_port.unwrap_or(4533),
-            subsonic_bind_address: yaml_config
-                .subsonic_bind_address
+            server_enabled: yaml_config.server_enabled,
+            server_port: yaml_config.server_port.unwrap_or(4533),
+            server_bind_address: yaml_config
+                .server_bind_address
                 .unwrap_or_else(|| "127.0.0.1".to_string()),
-            subsonic_auth_enabled: yaml_config.subsonic_auth_enabled,
-            subsonic_username: yaml_config.subsonic_username,
+            server_auth_enabled: yaml_config.server_auth_enabled,
+            server_username: yaml_config.server_username,
             cloud_provider: yaml_config.cloud_provider,
             cloud_home_s3_bucket: yaml_config.cloud_home_s3_bucket,
             cloud_home_s3_region: yaml_config.cloud_home_s3_region,
@@ -667,11 +667,11 @@ impl Config {
             torrent_max_uploads: self.torrent_max_uploads,
             torrent_max_uploads_per_torrent: self.torrent_max_uploads_per_torrent,
             network_participation: self.network_participation,
-            subsonic_enabled: self.subsonic_enabled,
-            subsonic_port: Some(self.subsonic_port),
-            subsonic_bind_address: Some(self.subsonic_bind_address.clone()),
-            subsonic_auth_enabled: self.subsonic_auth_enabled,
-            subsonic_username: self.subsonic_username.clone(),
+            server_enabled: self.server_enabled,
+            server_port: Some(self.server_port),
+            server_bind_address: Some(self.server_bind_address.clone()),
+            server_auth_enabled: self.server_auth_enabled,
+            server_username: self.server_username.clone(),
             cloud_provider: self.cloud_provider.clone(),
             cloud_home_s3_bucket: self.cloud_home_s3_bucket.clone(),
             cloud_home_s3_region: self.cloud_home_s3_region.clone(),
@@ -728,11 +728,11 @@ impl Config {
             torrent_max_uploads: None,
             torrent_max_uploads_per_torrent: None,
             network_participation: ParticipationMode::Off,
-            subsonic_enabled: true,
-            subsonic_port: 4533,
-            subsonic_bind_address: "127.0.0.1".to_string(),
-            subsonic_auth_enabled: false,
-            subsonic_username: None,
+            server_enabled: true,
+            server_port: 4533,
+            server_bind_address: "127.0.0.1".to_string(),
+            server_auth_enabled: false,
+            server_username: None,
             cloud_provider: None,
             cloud_home_s3_bucket: None,
             cloud_home_s3_region: None,
@@ -917,11 +917,11 @@ mod tests {
             torrent_max_uploads: None,
             torrent_max_uploads_per_torrent: None,
             network_participation: ParticipationMode::Off,
-            subsonic_enabled: true,
-            subsonic_port: 4533,
-            subsonic_bind_address: "127.0.0.1".to_string(),
-            subsonic_auth_enabled: false,
-            subsonic_username: None,
+            server_enabled: true,
+            server_port: 4533,
+            server_bind_address: "127.0.0.1".to_string(),
+            server_auth_enabled: false,
+            server_username: None,
             cloud_provider: None,
             cloud_home_s3_bucket: None,
             cloud_home_s3_region: None,

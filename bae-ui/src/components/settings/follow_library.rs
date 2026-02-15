@@ -1,4 +1,4 @@
-//! Follow library view -- form for adding a remote Subsonic server to follow.
+//! Follow library view -- form for adding a remote server to follow.
 
 use crate::components::{
     Button, ButtonSize, ButtonVariant, LoadingSpinner, SettingsSection, TextInput, TextInputSize,
@@ -17,9 +17,11 @@ pub enum FollowTestStatus {
     Error(String),
 }
 
-/// Pure view component for following a remote Subsonic server.
+/// Pure view component for following a remote server.
 #[component]
 pub fn FollowLibraryView(
+    follow_code: String,
+    code_error: Option<String>,
     name: String,
     server_url: String,
     username: String,
@@ -27,6 +29,7 @@ pub fn FollowLibraryView(
     test_status: Option<FollowTestStatus>,
     is_saving: bool,
 
+    on_code_change: EventHandler<String>,
     on_name_change: EventHandler<String>,
     on_server_url_change: EventHandler<String>,
     on_username_change: EventHandler<String>,
@@ -55,11 +58,36 @@ pub fn FollowLibraryView(
             div {
                 h2 { class: "text-xl font-semibold text-white", "Follow Server" }
                 p { class: "text-sm text-gray-400 mt-1",
-                    "Connect to a remote Subsonic-compatible server to browse and stream its library."
+                    "Paste a follow code, or enter connection details manually."
                 }
             }
 
-            div { class: "space-y-4 mt-4",
+            // Follow code input
+            div { class: "mt-4",
+                label { class: "block text-sm font-medium text-gray-300 mb-1", "Follow Code" }
+                TextInput {
+                    value: follow_code,
+                    on_input: move |v| on_code_change.call(v),
+                    size: TextInputSize::Medium,
+                    input_type: TextInputType::Text,
+                    placeholder: "Paste a follow code to auto-fill...",
+                    disabled: is_saving,
+                }
+                if let Some(ref err) = code_error {
+                    p { class: "text-sm text-red-400 mt-1", "{err}" }
+                }
+            }
+
+            div { class: "relative my-4",
+                div { class: "absolute inset-0 flex items-center",
+                    div { class: "w-full border-t border-gray-700" }
+                }
+                div { class: "relative flex justify-center text-xs",
+                    span { class: "bg-gray-900 px-2 text-gray-500", "or enter manually" }
+                }
+            }
+
+            div { class: "space-y-4",
                 // Display name
                 div {
                     label { class: "block text-sm font-medium text-gray-300 mb-1",
@@ -75,7 +103,6 @@ pub fn FollowLibraryView(
                         disabled: is_saving,
                     }
                 }
-
                 // Server URL
                 div {
                     label { class: "block text-sm font-medium text-gray-300 mb-1",
@@ -91,7 +118,6 @@ pub fn FollowLibraryView(
                         disabled: is_saving,
                     }
                 }
-
                 // Username
                 div {
                     label { class: "block text-sm font-medium text-gray-300 mb-1",
@@ -107,7 +133,6 @@ pub fn FollowLibraryView(
                         disabled: is_saving,
                     }
                 }
-
                 // Password
                 div {
                     label { class: "block text-sm font-medium text-gray-300 mb-1",

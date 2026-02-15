@@ -267,21 +267,21 @@ fn main() {
     #[cfg(target_os = "macos")]
     ui::shortcuts::init_playback_channel();
 
-    if config.subsonic_enabled {
+    if config.server_enabled {
         let subsonic_library = library_manager.clone();
         let subsonic_encryption = encryption_service.clone();
-        let subsonic_port = config.subsonic_port;
-        let subsonic_bind_address = config.subsonic_bind_address.clone();
+        let subsonic_port = config.server_port;
+        let subsonic_bind_address = config.server_bind_address.clone();
         let subsonic_library_dir = config.library_dir.clone();
         let subsonic_key_service = key_service.clone();
         let subsonic_share_base_url = config.share_base_url.clone();
         let subsonic_share_signing_key_version = config.share_signing_key_version;
 
-        let subsonic_auth = if config.subsonic_auth_enabled {
-            let password = key_service.get_subsonic_password();
+        let subsonic_auth = if config.server_auth_enabled {
+            let password = key_service.get_server_password();
             bae_core::subsonic::SubsonicAuth {
-                enabled: config.subsonic_username.is_some() && password.is_some(),
-                username: config.subsonic_username.clone(),
+                enabled: config.server_username.is_some() && password.is_some(),
+                username: config.server_username.clone(),
                 password,
             }
         } else {

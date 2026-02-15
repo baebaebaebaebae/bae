@@ -79,15 +79,15 @@ struct Args {
     #[arg(long, default_value = "1", env = "BAE_SHARE_SIGNING_KEY_VERSION")]
     share_signing_key_version: u32,
 
-    /// Subsonic username for authentication.
+    /// Server username for authentication.
     /// When both username and password are provided, authentication is required.
-    #[arg(long, env = "BAE_SUBSONIC_USERNAME")]
-    subsonic_username: Option<String>,
+    #[arg(long, env = "BAE_SERVER_USERNAME")]
+    server_username: Option<String>,
 
-    /// Subsonic password for authentication.
+    /// Server password for authentication.
     /// When both username and password are provided, authentication is required.
-    #[arg(long, env = "BAE_SUBSONIC_PASSWORD")]
-    subsonic_password: Option<String>,
+    #[arg(long, env = "BAE_SERVER_PASSWORD")]
+    server_password: Option<String>,
 }
 
 fn configure_logging() {
@@ -205,9 +205,9 @@ async fn main() {
     let library_manager =
         SharedLibraryManager::new(LibraryManager::new(database, Some(encryption.clone())));
 
-    let auth = match (&args.subsonic_username, &args.subsonic_password) {
+    let auth = match (&args.server_username, &args.server_password) {
         (Some(username), Some(password)) => {
-            info!("Subsonic authentication enabled for user: {username}");
+            info!("Authentication enabled for user: {username}");
             bae_core::subsonic::SubsonicAuth {
                 enabled: true,
                 username: Some(username.clone()),
@@ -215,7 +215,7 @@ async fn main() {
             }
         }
         (Some(_), None) | (None, Some(_)) => {
-            warn!("Both --subsonic-username and --subsonic-password must be set to enable auth; running without authentication");
+            warn!("Both --server-username and --server-password must be set to enable auth; running without authentication");
             bae_core::subsonic::SubsonicAuth {
                 enabled: false,
                 username: None,

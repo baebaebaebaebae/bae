@@ -30,17 +30,17 @@ pub struct ConfigState {
     /// SHA-256 fingerprint of the encryption key (for display and validation)
     pub encryption_key_fingerprint: Option<String>,
 
-    // Subsonic settings
+    // Server settings
     /// Whether the Subsonic API server is enabled
-    pub subsonic_enabled: bool,
+    pub server_enabled: bool,
     /// Subsonic server port
-    pub subsonic_port: u16,
+    pub server_port: u16,
     /// Subsonic server bind address (default: 127.0.0.1)
-    pub subsonic_bind_address: String,
-    /// Whether Subsonic authentication is required
-    pub subsonic_auth_enabled: bool,
-    /// Subsonic username
-    pub subsonic_username: Option<String>,
+    pub server_bind_address: String,
+    /// Whether server authentication is required
+    pub server_auth_enabled: bool,
+    /// Server username
+    pub server_username: Option<String>,
 
     // BitTorrent settings
     /// Interface to bind torrent client to
@@ -64,11 +64,11 @@ pub struct ConfigState {
     pub share_default_expiry_days: Option<u32>,
     /// Signing key version for share tokens
     pub share_signing_key_version: u32,
-    /// Followed remote Subsonic libraries
+    /// Followed remote libraries
     pub followed_libraries: Vec<FollowedLibraryInfo>,
 }
 
-/// Info about a followed remote Subsonic library (UI display type)
+/// Info about a followed remote library (UI display type)
 #[derive(Clone, Debug, PartialEq)]
 pub struct FollowedLibraryInfo {
     pub id: String,
@@ -82,7 +82,7 @@ pub struct FollowedLibraryInfo {
 pub enum LibrarySource {
     /// The local library (default)
     Local,
-    /// A followed remote Subsonic library, by ID
+    /// A followed remote library, by ID
     Followed(String),
 }
 

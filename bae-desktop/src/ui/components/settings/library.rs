@@ -67,6 +67,8 @@ pub fn LibrarySection() -> Element {
     let mut join_status = use_signal(|| Option::<JoinStatus>::None);
 
     // Follow form state
+    let mut follow_code_input = use_signal(String::new);
+    let mut follow_code_error = use_signal(|| Option::<String>::None);
     let mut follow_name = use_signal(String::new);
     let mut follow_url = use_signal(String::new);
     let mut follow_username = use_signal(String::new);
@@ -201,6 +203,8 @@ pub fn LibrarySection() -> Element {
 
     // Follow form callbacks
     let on_follow_start = move |_| {
+        follow_code_input.set(String::new());
+        follow_code_error.set(None);
         follow_name.set(String::new());
         follow_url.set(String::new());
         follow_username.set(String::new());
@@ -208,6 +212,29 @@ pub fn LibrarySection() -> Element {
         follow_test_status.set(None);
         follow_saving.set(false);
         sub_view.set(LibrarySubView::Follow);
+    };
+
+    let on_follow_code_change = move |value: String| {
+        follow_code_input.set(value.clone());
+        if value.trim().is_empty() {
+            follow_code_error.set(None);
+            return;
+        }
+        match bae_core::follow_code::decode(&value) {
+            Ok((url, user, pass, name)) => {
+                follow_code_error.set(None);
+                follow_url.set(url);
+                follow_username.set(user);
+                follow_password.set(pass);
+                if let Some(n) = name {
+                    follow_name.set(n);
+                }
+                follow_test_status.set(None);
+            }
+            Err(e) => {
+                follow_code_error.set(Some(e.to_string()));
+            }
+        }
     };
 
     let on_follow_cancel = move |_| {
@@ -315,6 +342,19 @@ pub fn LibrarySection() -> Element {
         }
     };
 
+    let on_copy_follow_code = {
+        let app = app.clone();
+        move |id: String| match app.generate_follow_code(&id) {
+            Ok(code) => match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&code)) {
+                Ok(()) => info!("Copied follow code to clipboard"),
+                Err(e) => error!("Failed to copy follow code to clipboard: {e}"),
+            },
+            Err(e) => {
+                error!("Failed to generate follow code: {e}");
+            }
+        }
+    };
+
     let on_switch_source = {
         let app = app.clone();
         move |source: LibrarySource| {
@@ -376,12 +416,15 @@ pub fn LibrarySection() -> Element {
     } else if is_follow {
         rsx! {
             FollowLibraryView {
+                follow_code: follow_code_input.read().clone(),
+                code_error: follow_code_error.read().clone(),
                 name: follow_name.read().clone(),
                 server_url: follow_url.read().clone(),
                 username: follow_username.read().clone(),
                 password: follow_password.read().clone(),
                 test_status: follow_test_status.read().clone(),
                 is_saving: *follow_saving.read(),
+                on_code_change: on_follow_code_change,
                 on_name_change: move |v| follow_name.set(v),
                 on_server_url_change: move |v| follow_url.set(v),
                 on_username_change: move |v| follow_username.set(v),
@@ -402,6 +445,7 @@ pub fn LibrarySection() -> Element {
                 on_join: on_join_start,
                 on_follow: on_follow_start,
                 on_unfollow,
+                on_copy_follow_code,
                 on_switch_source,
                 on_rename,
                 on_remove,
@@ -647,11 +691,11 @@ async fn bootstrap_library(
         torrent_max_uploads: None,
         torrent_max_uploads_per_torrent: None,
         network_participation: bae_core::sync::participation::ParticipationMode::Off,
-        subsonic_enabled: true,
-        subsonic_port: 4533,
-        subsonic_bind_address: "127.0.0.1".to_string(),
-        subsonic_auth_enabled: false,
-        subsonic_username: None,
+        server_enabled: true,
+        server_port: 4533,
+        server_bind_address: "127.0.0.1".to_string(),
+        server_auth_enabled: false,
+        server_username: None,
         cloud_provider: Some(bae_core::config::CloudProvider::S3),
         cloud_home_s3_bucket: Some(bucket.to_string()),
         cloud_home_s3_region: Some(region.to_string()),

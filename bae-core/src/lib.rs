@@ -12,6 +12,7 @@ pub mod db;
 pub mod discogs;
 pub mod encryption;
 pub mod file_service;
+pub mod follow_code;
 pub mod hmac_utils;
 pub mod image_server;
 pub mod import;
