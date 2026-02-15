@@ -348,8 +348,6 @@ fn ensure_manifest(
         library_id: config.library_id.clone(),
         library_name: config.library_name.clone(),
         encryption_key_fingerprint: encryption_service.map(|e| e.fingerprint()),
-        profile_id: String::new(),
-        profile_name: "Local".to_string(),
     };
 
     match serde_json::to_string_pretty(&manifest) {
