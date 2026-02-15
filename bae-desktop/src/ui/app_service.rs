@@ -479,6 +479,13 @@ impl AppService {
     /// Subscribe to incoming `bae://` URLs from Apple Events or CLI arguments.
     fn subscribe_url_events(&self) {
         let mut rx = crate::ui::shortcuts::subscribe_url();
+
+        // Drain any URL that arrived before this subscriber existed (cold launch)
+        if let Some(url) = crate::ui::shortcuts::take_buffered_url() {
+            tracing::info!("URL received in app (buffered): {url}");
+            // TODO: Parse bae://share/{token} and trigger import
+        }
+
         spawn(async move {
             while let Ok(url) = rx.recv().await {
                 tracing::info!("URL received in app: {url}");
