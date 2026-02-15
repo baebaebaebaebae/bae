@@ -18,7 +18,6 @@ use bae_ui::{
     FollowLibraryView, FollowTestStatus, JoinLibraryView, JoinStatus, LibrarySectionView,
 };
 use dioxus::prelude::*;
-use std::collections::HashMap;
 use std::ffi::CString;
 use std::path::PathBuf;
 use tracing::{error, info};
@@ -607,27 +606,22 @@ async fn bootstrap_library(
     // Step 6: Bootstrap from snapshot.
     let db_path = library_dir.db_path();
     let bucket_dyn: &dyn SyncBucketClient = real_bucket;
-    let snapshot_seq = bootstrap_from_snapshot(bucket_dyn, encryption, &db_path)
+    let bootstrap_result = bootstrap_from_snapshot(bucket_dyn, encryption, &db_path)
         .await
         .map_err(|e| format!("Failed to bootstrap from snapshot: {e}"))?;
 
-    info!("Bootstrapped from snapshot (snapshot_seq: {snapshot_seq})");
+    info!(
+        "Bootstrapped from snapshot ({} device cursors)",
+        bootstrap_result.cursors.len()
+    );
 
     // Step 7: Pull changesets since the snapshot.
     status.set(Some(JoinStatus::Joining(
         "Applying recent changes...".to_string(),
     )));
 
-    // Build cursors before opening the raw connection to avoid leaking the handle.
-    let heads = bucket_dyn
-        .list_heads()
-        .await
-        .map_err(|e| format!("Failed to list heads: {e}"))?;
-
-    let mut cursors = HashMap::new();
-    for head in &heads {
-        cursors.insert(head.device_id.clone(), snapshot_seq);
-    }
+    // Use per-device cursors from snapshot metadata.
+    let cursors = bootstrap_result.cursors;
 
     let changesets_applied = unsafe {
         let c_path = CString::new(db_path.to_str().unwrap()).unwrap();

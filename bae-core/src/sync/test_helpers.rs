@@ -495,4 +495,12 @@ impl SyncBucketClient for MockBucket {
         self.objects.lock().unwrap().remove(&key);
         Ok(())
     }
+
+    async fn put_snapshot_meta(&self, _data: Vec<u8>) -> Result<(), BucketError> {
+        Ok(())
+    }
+
+    async fn get_snapshot_meta(&self) -> Result<Vec<u8>, BucketError> {
+        Err(BucketError::NotFound("snapshot_meta.json.enc".into()))
+    }
 }

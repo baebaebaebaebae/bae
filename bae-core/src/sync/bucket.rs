@@ -6,6 +6,7 @@
 /// heads/{device_id}.json.enc             -- encrypted head pointers
 /// images/{ab}/{cd}/{id}                  -- encrypted library images
 /// snapshot.db.enc                        -- full DB snapshot for bootstrapping
+/// snapshot_meta.json.enc                 -- per-device cursors at snapshot time
 /// membership/{author_pubkey}/{seq}.enc   -- encrypted membership entries
 /// keys/{user_pubkey}.enc                 -- wrapped library keys per member
 /// ```
@@ -153,4 +154,12 @@ pub trait SyncBucketClient: Send + Sync {
     /// Delete a wrapped library key.
     /// Removes `keys/{user_pubkey_hex}.enc`.
     async fn delete_wrapped_key(&self, user_pubkey: &str) -> Result<(), BucketError>;
+
+    /// Upload snapshot metadata (plaintext -- the implementation encrypts it).
+    /// Writes to `snapshot_meta.json.enc`.
+    async fn put_snapshot_meta(&self, data: Vec<u8>) -> Result<(), BucketError>;
+
+    /// Download snapshot metadata (decrypted).
+    /// Reads from `snapshot_meta.json.enc`. Returns NotFound if no metadata exists.
+    async fn get_snapshot_meta(&self) -> Result<Vec<u8>, BucketError>;
 }
