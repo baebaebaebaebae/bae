@@ -78,7 +78,6 @@ pub async fn consume_scan_events(app: AppService, mut rx: broadcast::Receiver<Sc
                     let display_candidate = bae_ui::display_types::DetectedCandidate {
                         name: candidate.name.clone(),
                         path: key.clone(),
-                        status: bae_ui::display_types::DetectedCandidateStatus::Pending,
                     };
 
                     {

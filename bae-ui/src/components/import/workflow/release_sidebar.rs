@@ -1,5 +1,7 @@
 //! Candidate sidebar view component for import
 
+use std::collections::HashMap;
+
 use crate::components::helpers::{ConfirmDialogView, Tooltip, TOOLTIP_PADDING_X};
 use crate::components::icons::{
     CheckIcon, EllipsisIcon, FolderIcon, LoaderIcon, PlusIcon, TrashIcon, XIcon,
@@ -8,12 +10,43 @@ use crate::components::{MenuDropdown, MenuItem};
 use crate::display_types::{AudioContentInfo, DetectedCandidateStatus};
 use crate::floating_ui::Placement;
 use crate::platform;
-use crate::stores::import::{ImportState, ImportStateStoreExt};
+use crate::stores::import::{CandidateState, ImportState, ImportStateStoreExt};
 use dioxus::prelude::*;
 
 pub const MIN_SIDEBAR_WIDTH: f64 = 350.0;
 pub const MAX_SIDEBAR_WIDTH: f64 = 500.0;
 pub const DEFAULT_SIDEBAR_WIDTH: f64 = 375.0; // w-100
+
+/// Compute the display status of a candidate from its state machine.
+fn compute_status(
+    candidate_states: &HashMap<String, CandidateState>,
+    path: &str,
+) -> DetectedCandidateStatus {
+    candidate_states
+        .get(path)
+        .map(|s| {
+            let files = s.files();
+            if files.bad_audio_count > 0 || files.bad_image_count > 0 {
+                let good_audio_count = match &files.audio {
+                    AudioContentInfo::CueFlacPairs(p) => p.len(),
+                    AudioContentInfo::TrackFiles(t) => t.len(),
+                };
+                return DetectedCandidateStatus::Incomplete {
+                    bad_audio_count: files.bad_audio_count,
+                    total_audio_count: good_audio_count + files.bad_audio_count,
+                    bad_image_count: files.bad_image_count,
+                };
+            }
+            if s.is_imported() {
+                DetectedCandidateStatus::Imported
+            } else if s.is_importing() {
+                DetectedCandidateStatus::Importing
+            } else {
+                DetectedCandidateStatus::Pending
+            }
+        })
+        .unwrap_or(DetectedCandidateStatus::Pending)
+}
 
 /// Sidebar showing detected candidates with selection and status
 ///
@@ -40,50 +73,17 @@ pub fn ReleaseSidebarView(
     let candidate_states = state.candidate_states().read().clone();
     let current_key = state.current_candidate_key().read().clone();
 
-    // Inline get_detected_candidates_display: compute status from candidate_states
-    let candidates: Vec<crate::display_types::DetectedCandidate> = detected
-        .iter()
-        .map(|c| {
-            let status = candidate_states
-                .get(&c.path)
-                .map(|s| {
-                    let files = s.files();
-                    if files.bad_audio_count > 0 || files.bad_image_count > 0 {
-                        let good_audio_count = match &files.audio {
-                            AudioContentInfo::CueFlacPairs(p) => p.len(),
-                            AudioContentInfo::TrackFiles(t) => t.len(),
-                        };
-                        return DetectedCandidateStatus::Incomplete {
-                            bad_audio_count: files.bad_audio_count,
-                            total_audio_count: good_audio_count + files.bad_audio_count,
-                            bad_image_count: files.bad_image_count,
-                        };
-                    }
-                    if s.is_imported() {
-                        DetectedCandidateStatus::Imported
-                    } else if s.is_importing() {
-                        DetectedCandidateStatus::Importing
-                    } else {
-                        DetectedCandidateStatus::Pending
-                    }
-                })
-                .unwrap_or(DetectedCandidateStatus::Pending);
-            crate::display_types::DetectedCandidate {
-                name: c.name.clone(),
-                path: c.path.clone(),
-                status,
-            }
-        })
-        .collect();
-
     // Inline get_selected_candidate_index
     let selected_index = current_key
         .as_ref()
         .and_then(|key| detected.iter().position(|c| &c.path == key));
 
-    let has_incomplete = candidates
-        .iter()
-        .any(|c| matches!(c.status, DetectedCandidateStatus::Incomplete { .. }));
+    let has_incomplete = detected.iter().any(|c| {
+        matches!(
+            compute_status(&candidate_states, &c.path),
+            DetectedCandidateStatus::Incomplete { .. }
+        )
+    });
 
     let mut show_menu = use_signal(|| false);
     let is_open: ReadSignal<bool> = show_menu.into();
@@ -112,7 +112,7 @@ pub fn ReleaseSidebarView(
                 div { class: "relative pt-2.5 px-3 pb-1 flex items-center justify-between",
                     span { class: "text-xs font-medium text-gray-300",
                         {
-                            let count = candidates.len();
+                            let count = detected.len();
                             if count == 0 {
                                 "".to_string()
                             } else if count == 1 {
@@ -126,7 +126,7 @@ pub fn ReleaseSidebarView(
                         if is_scanning {
                             LoaderIcon { class: "w-3.5 h-3.5 text-gray-400 animate-spin" }
                         }
-                        if candidates.is_empty() {
+                        if detected.is_empty() {
                             button {
                                 class: "p-1.5 text-gray-400 hover:text-white transition-colors rounded-md hover:bg-white/5",
                                 onclick: move |_| on_add_folder.call(()),
@@ -149,7 +149,7 @@ pub fn ReleaseSidebarView(
                 }
 
                 // Dropdown menu for candidates list
-                if !candidates.is_empty() {
+                if !detected.is_empty() {
                     MenuDropdown {
                         anchor_id: anchor_id.to_string(),
                         is_open,
@@ -188,13 +188,13 @@ pub fn ReleaseSidebarView(
 
                 // Folder list
                 div { class: "flex-1 flex flex-col overflow-y-auto p-1.5 pt-0 space-y-0.5 min-w-0",
-                    for (index , candidate) in candidates.iter().enumerate() {
+                    for (index , candidate) in detected.iter().enumerate() {
                         CandidateRow {
                             key: "{index}",
                             index,
                             name: candidate.name.clone(),
                             path: candidate.path.clone(),
-                            status: candidate.status.clone(),
+                            status: compute_status(&candidate_states, &candidate.path),
                             is_selected: selected_index == Some(index),
                             on_select: move |index: usize| {
                                 if *show_menu.peek() {
