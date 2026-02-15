@@ -34,6 +34,19 @@ impl LibraryDir {
         self.images_dir().join(&hex[..2]).join(&hex[2..4]).join(id)
     }
 
+    pub fn storage_dir(&self) -> PathBuf {
+        self.path.join("storage")
+    }
+
+    /// Hash-based storage path: `storage/{ab}/{cd}/{file_id}`
+    pub fn storage_file_path(&self, file_id: &str) -> PathBuf {
+        let hex = file_id.replace('-', "");
+        self.storage_dir()
+            .join(&hex[..2])
+            .join(&hex[2..4])
+            .join(file_id)
+    }
+
     pub fn manifest_path(&self) -> PathBuf {
         self.path.join("manifest.json")
     }
@@ -44,7 +57,7 @@ impl LibraryDir {
 
     /// All asset directories that should be synced/created.
     pub fn asset_dirs(&self) -> Vec<PathBuf> {
-        vec![self.images_dir()]
+        vec![self.images_dir(), self.storage_dir()]
     }
 }
 
