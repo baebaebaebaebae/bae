@@ -413,9 +413,8 @@ impl SelectedCover {
 }
 
 /// Status of a detected candidate during import
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum DetectedCandidateStatus {
-    #[default]
     Pending,
     /// Import in progress (preparing or importing)
     Importing,
@@ -441,8 +440,6 @@ pub struct DetectedCandidate {
     pub name: String,
     /// Full path to the candidate folder
     pub path: String,
-    /// Import status
-    pub status: DetectedCandidateStatus,
 }
 
 /// CD drive info for selection UI

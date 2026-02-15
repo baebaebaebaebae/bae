@@ -1013,48 +1013,6 @@ impl ImportState {
             .unwrap_or(true)
     }
 
-    /// Get detected candidates with status computed from state machine
-    pub fn get_detected_candidates_display(&self) -> Vec<DetectedCandidate> {
-        self.detected_candidates
-            .iter()
-            .map(|c| {
-                let status = self
-                    .candidate_states
-                    .get(&c.path)
-                    .map(|s| {
-                        let files = s.files();
-
-                        // Check for incomplete/corrupt files first
-                        if files.bad_audio_count > 0 || files.bad_image_count > 0 {
-                            let good_audio_count = match &files.audio {
-                                crate::display_types::AudioContentInfo::CueFlacPairs(p) => p.len(),
-                                crate::display_types::AudioContentInfo::TrackFiles(t) => t.len(),
-                            };
-                            return crate::display_types::DetectedCandidateStatus::Incomplete {
-                                bad_audio_count: files.bad_audio_count,
-                                total_audio_count: good_audio_count + files.bad_audio_count,
-                                bad_image_count: files.bad_image_count,
-                            };
-                        }
-
-                        if s.is_imported() {
-                            crate::display_types::DetectedCandidateStatus::Imported
-                        } else if s.is_importing() {
-                            crate::display_types::DetectedCandidateStatus::Importing
-                        } else {
-                            crate::display_types::DetectedCandidateStatus::Pending
-                        }
-                    })
-                    .unwrap_or(crate::display_types::DetectedCandidateStatus::Pending);
-                DetectedCandidate {
-                    name: c.name.clone(),
-                    path: c.path.clone(),
-                    status,
-                }
-            })
-            .collect()
-    }
-
     /// Get selected candidate index from current candidate key
     pub fn get_selected_candidate_index(&self) -> Option<usize> {
         self.current_candidate_key

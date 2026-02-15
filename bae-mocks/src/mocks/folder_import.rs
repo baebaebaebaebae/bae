@@ -6,10 +6,9 @@ use bae_ui::stores::import::{
     ManualSearchState, TabSearchState,
 };
 use bae_ui::{
-    AudioContentInfo, CategorizedFileInfo, CueFlacPairInfo, DetectedCandidate,
-    DetectedCandidateStatus, FileInfo, FolderImportView, FolderMetadata, IdentifyMode,
-    ImportSource, ImportStep, ImportView, MatchCandidate, MatchSourceType, SearchSource, SearchTab,
-    SelectedCover,
+    AudioContentInfo, CategorizedFileInfo, CueFlacPairInfo, DetectedCandidate, FileInfo,
+    FolderImportView, FolderMetadata, IdentifyMode, ImportSource, ImportStep, ImportView,
+    MatchCandidate, MatchSourceType, SearchSource, SearchTab, SelectedCover,
 };
 use dioxus::prelude::*;
 use std::collections::HashMap;
@@ -208,7 +207,6 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                 name: "The Midnight Signal - Neon Frequencies (2023) [FLAC 24-96]".to_string(),
                 path: "/Users/demo/Music/Imports/The Midnight Signal - Neon Frequencies (2023) [FLAC 24-96]"
                     .to_string(),
-                status: DetectedCandidateStatus::Pending,
             },
             CategorizedFileInfo {
                 audio: AudioContentInfo::TrackFiles(vec![
@@ -239,7 +237,6 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                 name: "Glass Harbor - 2022 - Pacific Standard".to_string(),
                 path: "/Users/demo/Music/Imports/Glass Harbor - 2022 - Pacific Standard"
                     .to_string(),
-                status: DetectedCandidateStatus::Pending,
             },
             CategorizedFileInfo {
                 audio: AudioContentInfo::CueFlacPairs(vec![mock_cue_flac(
@@ -259,7 +256,6 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                 name: "Velvet_Mathematics-Proof_by_Induction-2021-FLAC".to_string(),
                 path: "/Users/demo/Music/Imports/Velvet_Mathematics-Proof_by_Induction-2021-FLAC"
                     .to_string(),
-                status: DetectedCandidateStatus::Pending,
             },
             CategorizedFileInfo {
                 audio: AudioContentInfo::TrackFiles(vec![
@@ -291,7 +287,6 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             DetectedCandidate {
                 name: "Apartment Garden - Grow Light".to_string(),
                 path: "/Users/demo/Downloads/Apartment Garden - Grow Light".to_string(),
-                status: DetectedCandidateStatus::Pending,
             },
             CategorizedFileInfo {
                 audio: AudioContentInfo::TrackFiles(vec![
@@ -312,7 +307,6 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                 name: "The Cold Equations - Fuel Weight (Vinyl Rip) [24-96]".to_string(),
                 path: "/Users/demo/Music/Vinyl Rips/The Cold Equations - Fuel Weight (Vinyl Rip) [24-96]"
                     .to_string(),
-                status: DetectedCandidateStatus::Pending,
             },
             CategorizedFileInfo {
                 audio: AudioContentInfo::TrackFiles(vec![
