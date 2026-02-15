@@ -61,15 +61,13 @@ impl LibraryDir {
     }
 }
 
-/// Manifest identifying a library and its owning profile.
-/// Present at the root of every profile directory/bucket.
+/// Manifest identifying a library.
+/// Present at the root of the library directory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub library_id: String,
     pub library_name: Option<String>,
     pub encryption_key_fingerprint: Option<String>,
-    pub profile_id: String,
-    pub profile_name: String,
 }
 
 impl Deref for LibraryDir {
