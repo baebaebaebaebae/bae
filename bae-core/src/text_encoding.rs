@@ -5,32 +5,51 @@
 
 use std::path::Path;
 
+/// Result of decoding text with detected encoding info.
+pub struct DecodedText {
+    pub text: String,
+    /// The encoding that was detected or used, e.g. "UTF-8", "Shift_JIS", "windows-1252".
+    pub encoding: String,
+}
+
 /// Decode raw bytes to a String, detecting encoding automatically.
 ///
 /// 1. BOM: UTF-8 (EF BB BF), UTF-16 LE (FF FE), UTF-16 BE (FE FF)
 /// 2. No BOM: try UTF-8
 /// 3. Not valid UTF-8: chardetng detection, decode via encoding_rs
-pub fn decode_text(bytes: &[u8]) -> String {
+pub fn decode_text(bytes: &[u8]) -> DecodedText {
     // UTF-8 BOM
     if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        return String::from_utf8_lossy(&bytes[3..]).into_owned();
+        return DecodedText {
+            text: String::from_utf8_lossy(&bytes[3..]).into_owned(),
+            encoding: "UTF-8".to_string(),
+        };
     }
 
     // UTF-16 LE BOM
     if bytes.starts_with(&[0xFF, 0xFE]) {
         let (decoded, _, _) = encoding_rs::UTF_16LE.decode(&bytes[2..]);
-        return decoded.into_owned();
+        return DecodedText {
+            text: decoded.into_owned(),
+            encoding: "UTF-16LE".to_string(),
+        };
     }
 
     // UTF-16 BE BOM
     if bytes.starts_with(&[0xFE, 0xFF]) {
         let (decoded, _, _) = encoding_rs::UTF_16BE.decode(&bytes[2..]);
-        return decoded.into_owned();
+        return DecodedText {
+            text: decoded.into_owned(),
+            encoding: "UTF-16BE".to_string(),
+        };
     }
 
     // Try UTF-8
     if let Ok(s) = std::str::from_utf8(bytes) {
-        return s.to_owned();
+        return DecodedText {
+            text: s.to_owned(),
+            encoding: "UTF-8".to_string(),
+        };
     }
 
     // Fallback: detect legacy encoding
@@ -38,13 +57,31 @@ pub fn decode_text(bytes: &[u8]) -> String {
     detector.feed(bytes, true);
     let encoding = detector.guess(None, true);
     let (decoded, _, _) = encoding.decode(bytes);
-    decoded.into_owned()
+    DecodedText {
+        text: decoded.into_owned(),
+        encoding: encoding.name().to_string(),
+    }
+}
+
+/// Decode bytes using a specific encoding by name.
+/// Returns None if the encoding name is not recognized.
+pub fn decode_text_as(bytes: &[u8], encoding_name: &str) -> Option<String> {
+    let encoding = encoding_rs::Encoding::for_label(encoding_name.as_bytes())?;
+    let (decoded, _, _) = encoding.decode(bytes);
+    Some(decoded.into_owned())
 }
 
 /// Read a file and decode its contents, detecting encoding automatically.
-pub fn read_text_file(path: &Path) -> std::io::Result<String> {
+pub fn read_text_file(path: &Path) -> std::io::Result<DecodedText> {
     let bytes = std::fs::read(path)?;
     Ok(decode_text(&bytes))
+}
+
+/// Read a text file with a specific encoding override.
+/// Returns None if the encoding name is not recognized.
+pub fn read_text_file_as(path: &Path, encoding_name: &str) -> std::io::Result<Option<String>> {
+    let bytes = std::fs::read(path)?;
+    Ok(decode_text_as(&bytes, encoding_name))
 }
 
 #[cfg(test)]
@@ -54,14 +91,18 @@ mod tests {
     #[test]
     fn utf8_no_bom() {
         let input = "Hello, world!".as_bytes();
-        assert_eq!(decode_text(input), "Hello, world!");
+        let result = decode_text(input);
+        assert_eq!(result.text, "Hello, world!");
+        assert_eq!(result.encoding, "UTF-8");
     }
 
     #[test]
     fn utf8_with_bom() {
         let mut input = vec![0xEF, 0xBB, 0xBF];
         input.extend_from_slice("Hello, world!".as_bytes());
-        assert_eq!(decode_text(&input), "Hello, world!");
+        let result = decode_text(&input);
+        assert_eq!(result.text, "Hello, world!");
+        assert_eq!(result.encoding, "UTF-8");
     }
 
     #[test]
@@ -71,7 +112,9 @@ mod tests {
         for ch in text.encode_utf16() {
             input.extend_from_slice(&ch.to_le_bytes());
         }
-        assert_eq!(decode_text(&input), "Hello");
+        let result = decode_text(&input);
+        assert_eq!(result.text, "Hello");
+        assert_eq!(result.encoding, "UTF-16LE");
     }
 
     #[test]
@@ -81,7 +124,9 @@ mod tests {
         for ch in text.encode_utf16() {
             input.extend_from_slice(&ch.to_be_bytes());
         }
-        assert_eq!(decode_text(&input), "Hello");
+        let result = decode_text(&input);
+        assert_eq!(result.text, "Hello");
+        assert_eq!(result.encoding, "UTF-16BE");
     }
 
     #[test]
@@ -89,10 +134,13 @@ mod tests {
         // "caf\xe9" = "cafe" with e-acute in Windows-1252
         let input = b"caf\xe9";
         let result = decode_text(input);
-        assert!(result.contains("caf"), "should decode the ASCII portion");
+        assert!(
+            result.text.contains("caf"),
+            "should decode the ASCII portion"
+        );
         // chardetng should detect this as a Latin encoding and decode the e-acute
         assert!(
-            result.contains('\u{00e9}') || result.len() == 4,
+            result.text.contains('\u{00e9}') || result.text.len() == 4,
             "should decode e-acute"
         );
     }
@@ -102,6 +150,20 @@ mod tests {
         // Encode a known Shift-JIS string: "テスト" (test)
         let (encoded, _, _) = encoding_rs::SHIFT_JIS.encode("テスト");
         let result = decode_text(&encoded);
-        assert_eq!(result, "テスト");
+        assert_eq!(result.text, "テスト");
+        assert_eq!(result.encoding, "Shift_JIS");
+    }
+
+    #[test]
+    fn decode_text_as_known_encoding() {
+        let (encoded, _, _) = encoding_rs::SHIFT_JIS.encode("テスト");
+        let result = decode_text_as(&encoded, "Shift_JIS");
+        assert_eq!(result, Some("テスト".to_string()));
+    }
+
+    #[test]
+    fn decode_text_as_unknown_encoding() {
+        let result = decode_text_as(b"hello", "not-a-real-encoding");
+        assert_eq!(result, None);
     }
 }

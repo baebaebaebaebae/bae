@@ -74,6 +74,7 @@ pub fn CoverPickerWrapper(
                 content: Some(Ok(
                     "Fetching covers from MusicBrainz and Discogs...".to_string()
                 )),
+                detected_encoding: None,
             },
         });
     }
@@ -95,6 +96,7 @@ pub fn CoverPickerWrapper(
                     show.set(false);
                 }
             },
+            on_encoding_change: |_| {},
         }
     }
 }

@@ -584,12 +584,15 @@ pub fn FolderImport() -> Element {
 
     // Gallery lightbox viewing index (None = closed)
     let mut viewing_index = use_signal(|| None::<usize>);
+    let mut encoding_override: Signal<Option<String>> = use_signal(|| None);
 
     // Load text file contents when the viewed gallery item is a document.
     // Gallery ordering: artwork first, then documents.
+    // Returns (Result<String, String>, Option<String>) — text content and detected encoding.
     let folder_path = current_candidate_key.clone();
     let text_file_contents_resource = use_resource(move || {
         let idx = *viewing_index.read();
+        let override_enc = encoding_override.read().clone();
         let folder = folder_path.clone().unwrap_or_default();
         let key = import_state.current_candidate_key().read().clone();
         let states = import_state.candidate_states().read().clone();
@@ -603,19 +606,40 @@ pub fn FolderImport() -> Element {
             let artwork_count = files.artwork.len();
             let doc = files.documents.get(idx.checked_sub(artwork_count)?)?;
             let path = std::path::Path::new(&folder).join(&doc.name);
-            Some(bae_core::text_encoding::read_text_file(&path).map_err(|e| e.to_string()))
+            if let Some(enc) = override_enc {
+                let text = bae_core::text_encoding::read_text_file_as(&path, &enc)
+                    .map_err(|e| e.to_string())
+                    .and_then(|opt| opt.ok_or_else(|| format!("Unknown encoding: {enc}")));
+                Some((text, Some(enc)))
+            } else {
+                match bae_core::text_encoding::read_text_file(&path) {
+                    Ok(decoded) => Some((Ok(decoded.text), Some(decoded.encoding))),
+                    Err(e) => Some((Err(e.to_string()), None)),
+                }
+            }
         }
     });
 
-    let text_file_content = text_file_contents_resource.read().clone().unwrap_or(None);
+    let (text_file_content, text_file_encoding) =
+        match text_file_contents_resource.read().clone().unwrap_or(None) {
+            Some((result, encoding)) => (Some(result), encoding),
+            None => (None, None),
+        };
 
     rsx! {
         FolderImportView {
             state: import_state,
             viewing_index: ReadSignal::from(viewing_index),
             text_file_content,
+            text_file_encoding,
             on_folder_select_click: on_folder_select,
-            on_view_change: move |idx| viewing_index.set(idx),
+            on_view_change: move |idx| {
+                encoding_override.set(None);
+                viewing_index.set(idx);
+            },
+            on_encoding_change: move |(_, encoding): (usize, String)| {
+                encoding_override.set(Some(encoding));
+            },
             on_skip_detection,
             on_exact_match_select,
             on_confirm_exact_match,

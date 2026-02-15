@@ -642,8 +642,10 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                                 }
                             })
                     },
+                    text_file_encoding: Some("UTF-8".to_string()),
                     on_folder_select_click: |_| {},
                     on_view_change: move |idx| viewing_index.set(idx),
+                    on_encoding_change: |_| {},
                     on_skip_detection: |_| {},
                     on_exact_match_select: move |idx| selected_match_index.set(Some(idx)),
                     on_confirm_exact_match: |_| {},

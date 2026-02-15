@@ -697,6 +697,7 @@ fn GalleryLightboxWrapper(state: ReadStore<AlbumDetailState>, show: Signal<bool>
             on_navigate: move |_: usize| {},
             selected_index: None,
             on_select: move |_: usize| {},
+            on_encoding_change: |_| {},
         }
     }
 }

@@ -52,10 +52,14 @@ pub struct FolderImportViewProps {
     /// Loaded text file content (for viewed file, if it's a text file)
     #[props(default)]
     pub text_file_content: Option<Result<String, String>>,
+    /// Detected encoding of the text file (for encoding selector)
+    #[props(default)]
+    pub text_file_encoding: Option<String>,
 
     // === Callbacks ===
     pub on_folder_select_click: EventHandler<()>,
     pub on_view_change: EventHandler<Option<usize>>,
+    pub on_encoding_change: EventHandler<(usize, String)>,
     pub on_skip_detection: EventHandler<()>,
     pub on_exact_match_select: EventHandler<usize>,
     pub on_confirm_exact_match: EventHandler<MatchCandidate>,
@@ -117,7 +121,9 @@ pub fn FolderImportView(props: FolderImportViewProps) -> Element {
                         state,
                         viewing_index: props.viewing_index,
                         text_file_content: props.text_file_content.clone(),
+                        text_file_encoding: props.text_file_encoding.clone(),
                         on_view_change: props.on_view_change,
+                        on_encoding_change: props.on_encoding_change,
                     }
 
                     // Right: Workflow (main, fills remaining space)
@@ -493,7 +499,9 @@ fn FilesColumn(
     state: ReadStore<ImportState>,
     viewing_index: ReadSignal<Option<usize>>,
     text_file_content: Option<Result<String, String>>,
+    text_file_encoding: Option<String>,
     on_view_change: EventHandler<Option<usize>>,
+    on_encoding_change: EventHandler<(usize, String)>,
 ) -> Element {
     let files = state
         .current_candidate_key()
@@ -532,7 +540,9 @@ fn FilesColumn(
                     files,
                     viewing_index,
                     text_file_content,
+                    text_file_encoding,
                     on_view_change,
+                    on_encoding_change,
                 }
             }
         }

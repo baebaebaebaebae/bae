@@ -368,7 +368,7 @@ fn extract_track_offsets_from_log(
 pub fn calculate_mb_discid_from_log(log_path: &Path) -> Result<String, MetadataDetectionError> {
     info!("🎵 Calculating MusicBrainz DiscID from LOG: {:?}", log_path);
     info!("📄 Reading LOG file: {:?}", log_path);
-    let log_content = crate::text_encoding::read_text_file(log_path)?;
+    let log_content = crate::text_encoding::read_text_file(log_path)?.text;
 
     info!("📄 LOG file decoded, length: {} chars", log_content.len());
     let (track_offsets, raw_track_sectors) = extract_track_offsets_from_log(&log_content)?;
@@ -436,7 +436,7 @@ pub fn calculate_mb_discid_from_cue_flac(
         "🎵 Calculating MusicBrainz DiscID from CUE: {:?}, FLAC: {:?}",
         cue_path, flac_path
     );
-    let cue_content = crate::text_encoding::read_text_file(cue_path)?;
+    let cue_content = crate::text_encoding::read_text_file(cue_path)?.text;
     let (track_offsets, raw_track_sectors) = extract_track_offsets_from_cue(&cue_content)?;
     info!("📊 Found {} track(s) in CUE file", track_offsets.len());
     info!(
@@ -642,7 +642,8 @@ pub fn detect_metadata(folder_path: PathBuf) -> Result<FolderMetadata, MetadataD
     );
     for cue_path in &cue_files {
         debug!("Reading CUE file: {:?}", cue_path);
-        if let Ok(content) = crate::text_encoding::read_text_file(cue_path) {
+        if let Ok(decoded) = crate::text_encoding::read_text_file(cue_path) {
+            let content = decoded.text;
             let is_cue_flac_release = is_single_file_cue(&content);
             if !is_cue_flac_release {
                 debug!(
