@@ -25,7 +25,7 @@ import { Image } from 'astro:assets';
 		<section class="hero">
 			<div class="hero-content">
 				<h1>Your music<br/><span class="accent">easy as streaming</span></h1>
-				<p class="tagline">Scale your collection effortlessly and listen anywhere — without leaving <em>your</em> library behind.</p>
+				<p class="tagline">Listen anywhere, scale effortlessly</p>
 				<div class="cta-group">
 					<a href="https://github.com/bae-fm/bae/releases/latest/download/bae.dmg" class="btn primary">
 						<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -35,8 +35,7 @@ import { Image } from 'astro:assets';
 					</a>
 					<a href="/getting-started/installation" class="btn secondary">Read the docs</a>
 				</div>
-				<p class="platform-note">Windows & Linux coming soon</p>
-			</div>
+				</div>
 			<div class="hero-visual">
 				<img
 					src="/screenshots/library-grid.png"
@@ -105,9 +104,9 @@ import { Image } from 'astro:assets';
 				<div class="feature">
 					<h3>Import</h3>
 					<ul>
+						<li>Automatic identification</li>
 						<li>MusicBrainz and Discogs lookup</li>
 						<li>Automatic cover art</li>
-						<li>Automatic identification</li>
 					</ul>
 				</div>
 				<div class="feature">
@@ -137,16 +136,16 @@ import { Image } from 'astro:assets';
 				<div class="feature">
 					<h3>Sharing</h3>
 					<ul>
+						<li>Multi-contributor libraries</li>
 						<li>Share and follow libraries</li>
-						<li>Curate together</li>
 						<li>One-click listening via share links</li>
 					</ul>
 				</div>
 				<div class="feature">
 					<h3>Server</h3>
 					<ul>
-						<li>Subsonic-compatible</li>
 						<li>Headless, streams from cloud</li>
+						<li>Subsonic-compatible</li>
 						<li>Browser frontend for share links</li>
 					</ul>
 				</div>
@@ -329,11 +328,6 @@ import { Image } from 'astro:assets';
 	.btn.large {
 		padding: 1rem 2rem;
 		font-size: 1.1rem;
-	}
-
-	.platform-note {
-		font-size: 0.85rem;
-		color: var(--text-muted);
 	}
 
 	.hero-visual {
