@@ -299,6 +299,8 @@ const ENCODINGS: &[&str] = &[
 
 #[component]
 fn EncodingSelector(current_encoding: String, on_change: EventHandler<String>) -> Element {
+    let show_extra = !ENCODINGS.iter().any(|&e| e == current_encoding);
+
     rsx! {
         select {
             class: "bg-gray-700 text-gray-300 text-xs rounded px-2 py-1 border border-gray-600 cursor-pointer",
@@ -306,6 +308,9 @@ fn EncodingSelector(current_encoding: String, on_change: EventHandler<String>) -
             onchange: move |evt: Event<FormData>| {
                 on_change.call(evt.value().to_string());
             },
+            if show_extra {
+                option { value: "{current_encoding}", selected: true, "{current_encoding}" }
+            }
             for enc in ENCODINGS {
                 option { value: *enc, selected: current_encoding == *enc, "{enc}" }
             }
