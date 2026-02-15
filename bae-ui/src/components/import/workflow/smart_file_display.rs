@@ -59,7 +59,9 @@ pub fn SmartFileDisplayView(
     files: CategorizedFileInfo,
     viewing_index: ReadSignal<Option<usize>>,
     text_file_content: Option<Result<String, String>>,
+    text_file_encoding: Option<String>,
     on_view_change: EventHandler<Option<usize>>,
+    on_encoding_change: EventHandler<(usize, String)>,
 ) -> Element {
     if files.is_empty() {
         return rsx! {
@@ -88,7 +90,10 @@ pub fn SmartFileDisplayView(
     for doc in files.documents.iter() {
         gallery_items.push(GalleryItem {
             label: doc.name.clone(),
-            content: GalleryItemContent::Text { content: None },
+            content: GalleryItemContent::Text {
+                content: None,
+                detected_encoding: None,
+            },
         });
     }
 
@@ -98,6 +103,7 @@ pub fn SmartFileDisplayView(
             if matches!(item.content, GalleryItemContent::Text { .. }) {
                 item.content = GalleryItemContent::Text {
                     content: text_file_content.clone(),
+                    detected_encoding: text_file_encoding.clone(),
                 };
             }
         }
@@ -174,6 +180,7 @@ pub fn SmartFileDisplayView(
                     on_navigate: move |idx| on_view_change.call(Some(idx)),
                     selected_index: None::<usize>,
                     on_select: |_| {},
+                    on_encoding_change,
                 }
             }
         }

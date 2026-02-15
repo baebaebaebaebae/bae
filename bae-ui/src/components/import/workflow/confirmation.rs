@@ -295,6 +295,7 @@ pub fn ConfirmationView(
                             show_cover_picker.set(false);
                         }
                     },
+                    on_encoding_change: |_| {},
                 }
             }
         }

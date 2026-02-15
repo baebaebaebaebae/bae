@@ -23,6 +23,7 @@ pub enum GalleryItemContent {
     },
     Text {
         content: Option<Result<String, String>>,
+        detected_encoding: Option<String>,
     },
 }
 
@@ -48,6 +49,7 @@ pub fn GalleryLightbox(
     on_navigate: EventHandler<usize>,
     selected_index: Option<usize>,
     on_select: EventHandler<usize>,
+    on_encoding_change: EventHandler<(usize, String)>,
 ) -> Element {
     let mut current_index = use_signal(|| initial_index);
     let mut last_initial = use_signal(|| initial_index);
@@ -189,17 +191,27 @@ pub fn GalleryLightbox(
                                 div { class: "mt-4 text-gray-300 text-sm", {label.clone()} }
                             }
                         },
-                        GalleryItemContent::Text { content: Some(Ok(text)) } => rsx! {
-                            div { class: "flex flex-col items-center",
-                                div { class: "bg-gray-800 rounded-lg w-[min(42rem,90vw)] max-h-[80vh] overflow-auto shadow-2xl",
-                                    pre { class: "text-sm text-gray-300 font-mono whitespace-pre-wrap select-text p-4",
-                                        {text.clone()}
+                        GalleryItemContent::Text { content: Some(Ok(text)), detected_encoding } => {
+                            rsx! {
+                                div { class: "flex flex-col items-center",
+                                    div { class: "bg-gray-800 rounded-lg w-[min(42rem,90vw)] max-h-[80vh] overflow-auto shadow-2xl",
+                                        pre { class: "text-sm text-gray-300 font-mono whitespace-pre-wrap select-text p-4",
+                                            {text.clone()}
+                                        }
+                                    }
+                                    div { class: "mt-4 flex items-center gap-3",
+                                        span { class: "text-gray-300 text-sm", {label.clone()} }
+                                        if let Some(enc) = detected_encoding {
+                                            EncodingSelector {
+                                                current_encoding: enc.clone(),
+                                                on_change: move |encoding: String| on_encoding_change.call((idx, encoding)),
+                                            }
+                                        }
                                     }
                                 }
-                                div { class: "mt-4 text-gray-300 text-sm", {label.clone()} }
                             }
-                        },
-                        GalleryItemContent::Text { content: Some(Err(err)) } => rsx! {
+                        }
+                        GalleryItemContent::Text { content: Some(Err(err)), .. } => rsx! {
                             div { class: "flex flex-col items-center",
                                 div { class: "bg-gray-800 rounded-lg w-[min(42rem,90vw)] p-8 flex items-center justify-center shadow-2xl",
                                     span { class: "text-red-400 text-sm", "Could not read file: {err}" }
@@ -207,7 +219,7 @@ pub fn GalleryLightbox(
                                 div { class: "mt-4 text-gray-300 text-sm", {label.clone()} }
                             }
                         },
-                        GalleryItemContent::Text { content: None } => rsx! {
+                        GalleryItemContent::Text { content: None, .. } => rsx! {
                             div { class: "flex flex-col items-center",
                                 div { class: "bg-gray-800 rounded-lg w-[min(42rem,90vw)] p-8 flex items-center justify-center shadow-2xl",
                                     span { class: "text-gray-400 text-sm", "Loading..." }
@@ -266,6 +278,41 @@ pub fn GalleryLightbox(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Common encodings for the override dropdown.
+const ENCODINGS: &[&str] = &[
+    "UTF-8",
+    "windows-1252",
+    "ISO-8859-1",
+    "Shift_JIS",
+    "EUC-JP",
+    "EUC-KR",
+    "Big5",
+    "GBK",
+    "ISO-8859-15",
+    "KOI8-R",
+];
+
+#[component]
+fn EncodingSelector(current_encoding: String, on_change: EventHandler<String>) -> Element {
+    let show_extra = !ENCODINGS.iter().any(|&e| e == current_encoding);
+
+    rsx! {
+        select {
+            class: "bg-gray-700 text-gray-300 text-xs rounded px-2 py-1 border border-gray-600 cursor-pointer",
+            value: current_encoding.clone(),
+            onchange: move |evt: Event<FormData>| {
+                on_change.call(evt.value().to_string());
+            },
+            if show_extra {
+                option { value: "{current_encoding}", selected: true, "{current_encoding}" }
+            }
+            for enc in ENCODINGS {
+                option { value: *enc, selected: current_encoding == *enc, "{enc}" }
             }
         }
     }
