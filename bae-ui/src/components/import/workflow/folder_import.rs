@@ -22,12 +22,14 @@ use super::{
     ConfirmationView, DiscIdPill, DiscIdSource, LoadingIndicator, ManualSearchPanelView,
     MultipleExactMatchesView, SmartFileDisplayView,
 };
+use crate::components::helpers::Tooltip;
 use crate::components::icons::{CloudOffIcon, LoaderIcon};
 use crate::components::{Button, ButtonSize, ButtonVariant};
 use crate::components::{PanelPosition, ResizablePanel, ResizeDirection};
 use crate::display_types::{
     IdentifyMode, ImportStep, MatchCandidate, SearchSource, SearchTab, SelectedCover,
 };
+use crate::floating_ui::Placement;
 use crate::stores::import::{CandidateState, ConfirmPhase, ImportState, ImportStateStoreExt};
 use dioxus::prelude::*;
 
@@ -470,9 +472,11 @@ fn DetailHeader(state: ReadStore<ImportState>) -> Element {
 
     rsx! {
         div { class: "flex-shrink-0 px-4 py-4 bg-gray-800/30",
-            div { class: "cursor-default", title: "{tooltip}",
-                span { class: "text-[0.9375rem] font-medium text-gray-300 truncate select-text",
-                    "{name}"
+            Tooltip { text: tooltip, placement: Placement::Bottom, nowrap: false,
+                div { class: "cursor-default",
+                    span { class: "text-[0.9375rem] font-medium text-gray-300 truncate select-text",
+                        "{name}"
+                    }
                 }
             }
         }

@@ -3,8 +3,10 @@
 //! Pure, props-based content for the imports dropdown.
 //! Positioning and visibility are handled by the Dropdown component in the title bar.
 
+use crate::components::helpers::Tooltip;
 use crate::components::icons::{CheckIcon, DownloadIcon, FileTextIcon, ImageIcon, XIcon};
 use crate::display_types::{ActiveImport, ImportStatus};
+use crate::floating_ui::Placement;
 use dioxus::prelude::*;
 
 /// Content for the imports dropdown: header + items list
@@ -174,14 +176,18 @@ fn ImportItemView(
                 }
 
                 // Dismiss button
-                button {
-                    class: "flex-shrink-0 p-1.5 text-gray-600 hover:text-white hover:bg-gray-700 rounded-lg transition-all opacity-0 group-hover:opacity-100",
-                    onclick: move |e: Event<MouseData>| {
-                        e.stop_propagation();
-                        on_dismiss.call(import_id_for_dismiss.clone());
-                    },
-                    title: "Dismiss",
-                    XIcon { class: "h-4 w-4" }
+                Tooltip {
+                    text: "Dismiss",
+                    placement: Placement::Top,
+                    nowrap: true,
+                    button {
+                        class: "flex-shrink-0 p-1.5 text-gray-600 hover:text-white hover:bg-gray-700 rounded-lg transition-all opacity-0 group-hover:opacity-100",
+                        onclick: move |e: Event<MouseData>| {
+                            e.stop_propagation();
+                            on_dismiss.call(import_id_for_dismiss.clone());
+                        },
+                        XIcon { class: "h-4 w-4" }
+                    }
                 }
             }
         }

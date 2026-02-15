@@ -1,6 +1,8 @@
 //! Selected source display view
 
+use crate::components::helpers::Tooltip;
 use crate::components::icons::{FolderIcon, XIcon};
+use crate::floating_ui::Placement;
 use dioxus::prelude::*;
 use std::path::PathBuf;
 
@@ -27,19 +29,27 @@ pub fn SelectedSourceView(
             div { class: "flex items-center justify-between gap-2 px-3 py-2 bg-gray-900/50 rounded",
                 div { class: "flex items-center gap-2 min-w-0",
                     // Folder icon - clickable to reveal in Finder
-                    button {
-                        class: "text-gray-400 hover:text-gray-200 flex-shrink-0 transition-colors",
-                        title: crate::platform::reveal_in_file_manager(),
-                        onclick: move |_| on_reveal.call(()),
-                        FolderIcon { class: "w-4 h-4" }
+                    Tooltip {
+                        text: crate::platform::reveal_in_file_manager().to_string(),
+                        placement: Placement::Top,
+                        nowrap: true,
+                        button {
+                            class: "text-gray-400 hover:text-gray-200 flex-shrink-0 transition-colors",
+                            onclick: move |_| on_reveal.call(()),
+                            FolderIcon { class: "w-4 h-4" }
+                        }
                     }
                     span { class: "text-sm text-gray-100 truncate", {display_name} }
                 }
-                button {
-                    class: "p-1 text-gray-400 hover:text-gray-200 flex-shrink-0 rounded hover:bg-gray-700/50 transition-colors",
-                    title: "Clear selection",
-                    onclick: move |_| on_clear.call(()),
-                    XIcon { class: "w-4 h-4" }
+                Tooltip {
+                    text: "Clear selection",
+                    placement: Placement::Top,
+                    nowrap: true,
+                    button {
+                        class: "p-1 text-gray-400 hover:text-gray-200 flex-shrink-0 rounded hover:bg-gray-700/50 transition-colors",
+                        onclick: move |_| on_clear.call(()),
+                        XIcon { class: "w-4 h-4" }
+                    }
                 }
             }
 
