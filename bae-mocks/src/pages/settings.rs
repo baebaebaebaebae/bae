@@ -99,6 +99,10 @@ pub fn Settings() -> Element {
                         on_accept_grant_text_change: |_| {},
                         on_accept_grant: |_| {},
                         on_revoke_shared_release: |_| {},
+                        // Recovery key
+                        recovery_key: None,
+                        on_reveal_recovery_key: |_| {},
+                        on_copy_recovery_key: |_| {},
                     }
                 },
                 SettingsTab::Discogs => rsx! {

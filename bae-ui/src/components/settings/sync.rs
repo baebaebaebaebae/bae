@@ -139,9 +139,18 @@ pub fn SyncSectionView(
     on_accept_grant: EventHandler<String>,
     /// Called when the user clicks Remove on a shared release.
     on_revoke_shared_release: EventHandler<String>,
+
+    // --- Recovery key props ---
+    /// The revealed encryption key (hex). None = not yet revealed.
+    recovery_key: Option<String>,
+    /// Called when the user clicks "Show Recovery Key".
+    on_reveal_recovery_key: EventHandler<()>,
+    /// Called when the user clicks "Copy" on the recovery key.
+    on_copy_recovery_key: EventHandler<()>,
 ) -> Element {
     let mut copied = use_signal(|| false);
     let mut share_copied = use_signal(|| false);
+    let mut recovery_copied = use_signal(|| false);
     let mut confirming_remove_pubkey = use_signal(|| Option::<String>::None);
 
     let handle_copy = move |_| {
@@ -610,6 +619,51 @@ pub fn SyncSectionView(
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            // Recovery key
+            SettingsCard {
+                h3 { class: "text-lg font-medium text-white mb-2", "Recovery key" }
+                p { class: "text-sm text-gray-400 mb-4",
+                    "Use this key to unlock your library on another device when iCloud Keychain sync is off."
+                }
+                if let Some(ref key) = recovery_key {
+                    div { class: "flex items-center gap-3",
+                        div { class: "flex-1 bg-gray-700 rounded-lg p-3 border border-gray-600 overflow-clip",
+                            span { class: "font-mono text-xs text-white break-all select-all",
+                                "{key}"
+                            }
+                        }
+                        ChromelessButton {
+                            class: Some("text-gray-400 hover:text-white transition-colors flex-shrink-0".to_string()),
+                            title: Some("Copy recovery key to clipboard".to_string()),
+                            aria_label: Some("Copy recovery key to clipboard".to_string()),
+                            onclick: move |_| {
+                                on_copy_recovery_key.call(());
+                                recovery_copied.set(true);
+                                spawn(async move {
+                                    sleep_ms(2000).await;
+                                    recovery_copied.set(false);
+                                });
+                            },
+                            if *recovery_copied.read() {
+                                CheckIcon { class: "w-4 h-4 text-green-400" }
+                            } else {
+                                CopyIcon { class: "w-4 h-4" }
+                            }
+                        }
+                    }
+                    p { class: "text-xs text-gray-500 mt-3",
+                        "Keep this key safe. Anyone with it can decrypt your library."
+                    }
+                } else {
+                    Button {
+                        variant: ButtonVariant::Secondary,
+                        size: ButtonSize::Small,
+                        onclick: move |_| on_reveal_recovery_key.call(()),
+                        "Show Recovery Key"
                     }
                 }
             }
