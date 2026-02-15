@@ -1686,13 +1686,132 @@ impl AppService {
         spawn(async move {
             let result: Result<(), String> = async {
                 match provider {
-                    bae_ui::stores::config::CloudProvider::GoogleDrive => Err(
-                        "Google Drive sign-in requires a client_id. Not yet configured."
-                            .to_string(),
-                    ),
+                    bae_ui::stores::config::CloudProvider::GoogleDrive => {
+                        let oauth_config =
+                            bae_core::cloud_home::google_drive::GoogleDriveCloudHome::oauth_config();
+
+                        if oauth_config.client_id.is_empty() {
+                            return Err("Google Drive client_id not configured. Set BAE_GOOGLE_DRIVE_CLIENT_ID environment variable.".to_string());
+                        }
+
+                        let tokens = bae_core::oauth::authorize(&oauth_config)
+                            .await
+                            .map_err(|e| format!("Google Drive authorization failed: {e}"))?;
+
+                        // Create a folder in the user's Drive
+                        let lib_name = config
+                            .library_name
+                            .clone()
+                            .unwrap_or_else(|| config.library_id.clone());
+                        let folder_name = format!("bae - {}", lib_name);
+
+                        let client = reqwest::Client::new();
+
+                        // Search for an existing folder first to avoid duplicates
+                        let search_query = format!(
+                            "name = '{}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+                            folder_name.replace('\'', "\\'")
+                        );
+                        let existing_folder_id = async {
+                            let resp = client
+                                .get("https://www.googleapis.com/drive/v3/files")
+                                .bearer_auth(&tokens.access_token)
+                                .query(&[("q", &search_query), ("fields", &"files(id)".to_string())])
+                                .send()
+                                .await
+                                .ok()?;
+                            let json: serde_json::Value = resp.json().await.ok()?;
+                            json["files"][0]["id"].as_str().map(|s| s.to_string())
+                        }
+                        .await;
+
+                        let folder_id = if let Some(id) = existing_folder_id {
+                            id
+                        } else {
+                            let create_body = serde_json::json!({
+                                "name": folder_name,
+                                "mimeType": "application/vnd.google-apps.folder",
+                            });
+                            let resp = client
+                                .post("https://www.googleapis.com/drive/v3/files")
+                                .bearer_auth(&tokens.access_token)
+                                .json(&create_body)
+                                .send()
+                                .await
+                                .map_err(|e| format!("Failed to create Google Drive folder: {e}"))?;
+
+                            if !resp.status().is_success() {
+                                let body = resp.text().await.unwrap_or_default();
+                                return Err(format!(
+                                    "Failed to create Google Drive folder: {body}"
+                                ));
+                            }
+
+                            let folder_resp: serde_json::Value = resp
+                                .json()
+                                .await
+                                .map_err(|e| format!("Failed to parse folder response: {e}"))?;
+                            folder_resp["id"]
+                                .as_str()
+                                .ok_or("Google Drive folder response missing 'id'")?
+                                .to_string()
+                        };
+
+                        // Get user email for display
+                        let account_resp = client
+                            .get("https://www.googleapis.com/drive/v3/about?fields=user")
+                            .bearer_auth(&tokens.access_token)
+                            .send()
+                            .await
+                            .ok();
+                        let account_display = if let Some(resp) = account_resp {
+                            resp.text().await.ok().and_then(|body| {
+                                let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+                                json["user"]["emailAddress"]
+                                    .as_str()
+                                    .map(|s| s.to_string())
+                            })
+                        } else {
+                            None
+                        };
+
+                        // Save tokens to keyring
+                        let token_json = serde_json::to_string(&tokens)
+                            .map_err(|e| format!("Failed to serialize tokens: {e}"))?;
+                        key_service
+                            .set_cloud_home_credentials(
+                                &bae_core::keys::CloudHomeCredentials::OAuth { token_json },
+                            )
+                            .map_err(|e| format!("Failed to save OAuth token: {e}"))?;
+
+                        // Save config
+                        config.cloud_provider = Some(config::CloudProvider::GoogleDrive);
+                        config.cloud_home_google_drive_folder_id = Some(folder_id);
+                        config
+                            .save()
+                            .map_err(|e| format!("Failed to save config: {e}"))?;
+
+                        // Update store
+                        state
+                            .config()
+                            .cloud_provider()
+                            .set(Some(bae_ui::stores::config::CloudProvider::GoogleDrive));
+                        state.config().cloud_account_display().set(account_display);
+                        state
+                            .sync()
+                            .cloud_home_configured()
+                            .set(config.sync_enabled(&key_service));
+
+                        Ok(())
+                    }
                     bae_ui::stores::config::CloudProvider::Dropbox => {
                         let oauth_config =
                             bae_core::cloud_home::dropbox::DropboxCloudHome::oauth_config();
+
+                        if oauth_config.client_id.is_empty() {
+                            return Err("Dropbox client_id not configured. Set BAE_DROPBOX_CLIENT_ID environment variable.".to_string());
+                        }
+
                         let tokens = bae_core::oauth::authorize(&oauth_config)
                             .await
                             .map_err(|e| format!("Dropbox authorization failed: {e}"))?;
@@ -2722,7 +2841,10 @@ async fn sign_in_onedrive(
     let oauth_config = bae_core::cloud_home::onedrive::OneDriveCloudHome::oauth_config();
 
     if oauth_config.client_id.is_empty() {
-        return Err("OneDrive sign-in requires a client_id. Not yet configured.".to_string());
+        return Err(
+            "OneDrive client_id not configured. Set BAE_ONEDRIVE_CLIENT_ID environment variable."
+                .to_string(),
+        );
     }
 
     // Step 1: OAuth authorization (opens browser)
@@ -2856,6 +2978,25 @@ async fn sign_in_pcloud(
     use bae_core::cloud_home::pcloud::PCloudCloudHome;
 
     let oauth_config = PCloudCloudHome::oauth_config();
+
+    if oauth_config.client_id.is_empty() {
+        return Err(
+            "pCloud client_id not configured. Set BAE_PCLOUD_CLIENT_ID environment variable."
+                .to_string(),
+        );
+    }
+
+    if oauth_config
+        .client_secret
+        .as_ref()
+        .is_some_and(|s| s.is_empty())
+    {
+        return Err(
+            "pCloud client_secret not configured. Set BAE_PCLOUD_CLIENT_SECRET environment variable."
+                .to_string(),
+        );
+    }
+
     let tokens = bae_core::oauth::authorize(&oauth_config)
         .await
         .map_err(|e| format!("pCloud authorization failed: {e}"))?;
