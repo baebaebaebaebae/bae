@@ -200,9 +200,22 @@ pub async fn load_track_audio(
             };
 
             debug!("Reading from local file: {}", source_path.display());
-            tokio::fs::read(&source_path)
+
+            let raw = tokio::fs::read(&source_path)
                 .await
-                .map_err(|e| PlaybackError::io(format!("Failed to read file: {}", e)))?
+                .map_err(|e| PlaybackError::io(format!("Failed to read file: {}", e)))?;
+
+            crate::file_service::decrypt_if_needed(audio_file, encryption_service, raw)
+                .await
+                .map_err(|e| match e {
+                    crate::file_service::FileError::EncryptionNotConfigured => {
+                        PlaybackError::decrypt(crate::encryption::EncryptionError::KeyManagement(
+                            "Cannot play encrypted files: encryption not configured".into(),
+                        ))
+                    }
+                    crate::file_service::FileError::Decryption(e) => PlaybackError::decrypt(e),
+                    other => PlaybackError::io(other.to_string()),
+                })?
         }
     };
 

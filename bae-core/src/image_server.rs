@@ -1,3 +1,4 @@
+use crate::encryption::EncryptionService;
 use crate::hmac_utils::{hmac_sign, hmac_verify};
 use crate::library::SharedLibraryManager;
 use crate::library_dir::LibraryDir;
@@ -17,6 +18,7 @@ use tracing::{debug, warn};
 struct ImageServerState {
     library_manager: SharedLibraryManager,
     library_dir: LibraryDir,
+    encryption_service: Option<EncryptionService>,
     secret: [u8; 32],
 }
 
@@ -72,6 +74,7 @@ impl ImageServerHandle {
 pub async fn start_image_server(
     library_manager: SharedLibraryManager,
     library_dir: LibraryDir,
+    encryption_service: Option<EncryptionService>,
     host: &str,
 ) -> ImageServerHandle {
     let mut secret = [0u8; 32];
@@ -81,6 +84,7 @@ pub async fn start_image_server(
     let state = ImageServerState {
         library_manager,
         library_dir: library_dir.clone(),
+        encryption_service,
         secret,
     };
 
@@ -192,51 +196,16 @@ async fn handle_file(
 
     debug!("Serving file: {}", file_id);
 
-    let file = match state.library_manager.get().get_file_by_id(&file_id).await {
-        Ok(Some(f)) => f,
-        Ok(None) => {
-            warn!("File not found: {}", file_id);
-            return StatusCode::NOT_FOUND.into_response();
-        }
-        Err(e) => {
-            warn!("Database error looking up file {}: {}", file_id, e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
-
-    // Derive path from the release's storage flags
-    let release = match state
-        .library_manager
-        .get()
-        .database()
-        .get_release_by_id(&file.release_id)
-        .await
+    let db = state.library_manager.get().database();
+    match crate::file_service::read_file(
+        db,
+        &file_id,
+        &state.library_dir,
+        state.encryption_service.as_ref(),
+    )
+    .await
     {
-        Ok(Some(r)) => r,
-        Ok(None) => {
-            warn!("Release not found for file {}", file_id);
-            return StatusCode::NOT_FOUND.into_response();
-        }
-        Err(e) => {
-            warn!(
-                "Database error looking up release for file {}: {}",
-                file_id, e
-            );
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
-
-    let source_path = if release.managed_locally {
-        file.local_storage_path(&state.library_dir)
-    } else if let Some(ref unmanaged_path) = release.unmanaged_path {
-        StdPath::new(unmanaged_path).join(&file.original_filename)
-    } else {
-        warn!("File {} has no readable location", file_id);
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    match tokio::fs::read(&source_path).await {
-        Ok(data) => {
+        Ok((file, data)) => {
             let content_type = file.content_type.to_string();
             (
                 StatusCode::OK,
@@ -245,9 +214,17 @@ async fn handle_file(
             )
                 .into_response()
         }
-        Err(e) => {
-            warn!("Failed to read file {}: {}", source_path.display(), e);
+        Err(crate::file_service::FileError::NotFound(id)) => {
+            warn!("File not found: {}", id);
             StatusCode::NOT_FOUND.into_response()
+        }
+        Err(crate::file_service::FileError::NoLocation(id)) => {
+            warn!("File {} has no readable location", id);
+            StatusCode::NOT_FOUND.into_response()
+        }
+        Err(e) => {
+            warn!("Failed to serve file {}: {}", file_id, e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
 }

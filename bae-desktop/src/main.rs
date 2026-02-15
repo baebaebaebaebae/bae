@@ -239,6 +239,7 @@ fn main() {
     let image_server = runtime_handle.block_on(image_server::start_image_server(
         library_manager.clone(),
         config.library_dir.clone(),
+        encryption_service.clone(),
         "127.0.0.1",
     ));
 
