@@ -300,4 +300,17 @@ impl SyncBucketClient for CloudHomeSyncBucket {
         self.home.delete(&key).await?;
         Ok(())
     }
+
+    async fn put_snapshot_meta(&self, data: Vec<u8>) -> Result<(), BucketError> {
+        let encrypted = self.enc().encrypt(&data);
+        self.home.write("snapshot_meta.json.enc", encrypted).await?;
+        Ok(())
+    }
+
+    async fn get_snapshot_meta(&self) -> Result<Vec<u8>, BucketError> {
+        let encrypted = self.home.read("snapshot_meta.json.enc").await?;
+        self.enc()
+            .decrypt(&encrypted)
+            .map_err(|e| BucketError::Decryption(format!("snapshot_meta: {e}")))
+    }
 }

@@ -167,18 +167,22 @@ async fn main() {
     let db_path = library_dir.db_path();
 
     info!("Downloading snapshot...");
-    let snapshot_seq = bootstrap_from_snapshot(&bucket, &encryption, &db_path)
+    let bootstrap_result = bootstrap_from_snapshot(&bucket, &encryption, &db_path)
         .await
         .unwrap_or_else(|e| {
             error!("Failed to bootstrap from snapshot: {e}");
             std::process::exit(1);
         });
 
-    info!("Snapshot restored (snapshot_seq: {snapshot_seq})");
+    info!(
+        "Snapshot restored ({} device cursors)",
+        bootstrap_result.cursors.len()
+    );
 
     // Step 2: Pull changesets since the snapshot.
     // Open DB read-write via raw sqlite3 for changeset application.
-    let changesets_applied = apply_changesets(&bucket, &db_path, snapshot_seq, &library_dir).await;
+    let changesets_applied =
+        apply_changesets(&bucket, &db_path, &bootstrap_result.cursors, &library_dir).await;
     if changesets_applied > 0 {
         info!("Applied {changesets_applied} changesets since snapshot");
     } else {
@@ -274,7 +278,7 @@ async fn main() {
 async fn apply_changesets(
     bucket: &CloudHomeSyncBucket,
     db_path: &std::path::Path,
-    snapshot_seq: u64,
+    snapshot_cursors: &HashMap<String, u64>,
     library_dir: &LibraryDir,
 ) -> u64 {
     unsafe {
@@ -286,24 +290,9 @@ async fn apply_changesets(
             std::process::exit(1);
         }
 
-        // Build cursors: since we bootstrapped from a fresh snapshot,
-        // we know all devices' data is covered up to snapshot_seq.
-        // We need to pull only changesets with seq > snapshot_seq.
-        let heads = match bucket.list_heads().await {
-            Ok(h) => h,
-            Err(e) => {
-                warn!("Failed to list heads for changeset pull: {e}");
-                libsqlite3_sys::sqlite3_close(db);
-                return 0;
-            }
-        };
-
-        let mut cursors = HashMap::new();
-        for head in &heads {
-            // The snapshot covers everything up to snapshot_seq,
-            // so we set all cursors to snapshot_seq.
-            cursors.insert(head.device_id.clone(), snapshot_seq);
-        }
+        // Use per-device cursors from the snapshot metadata.
+        // pull_changes will only fetch changesets with seq > cursor for each device.
+        let cursors = snapshot_cursors.clone();
 
         // bae-server is a passive consumer -- use a device ID that won't
         // match any real device so pull_changes doesn't skip any heads.

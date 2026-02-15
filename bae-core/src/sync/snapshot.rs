@@ -7,10 +7,12 @@
 ///
 /// Snapshot creation policy: after every N changesets (default 100) or
 /// T hours (default 24) since the last snapshot.
+use std::collections::HashMap;
 use std::ffi::CString;
 use std::path::Path;
 
 use libsqlite3_sys as ffi;
+use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use super::bucket::{BucketError, SyncBucketClient};
@@ -33,6 +35,24 @@ pub enum SnapshotError {
     Bucket(#[from] BucketError),
     #[error("decryption failed: {0}")]
     Decryption(String),
+}
+
+/// Metadata stored alongside a snapshot in `snapshot_meta.json.enc`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotMeta {
+    /// Per-device cursors at snapshot time: device_id -> head seq.
+    /// A bootstrapping device uses these as initial sync_cursors.
+    pub cursors: HashMap<String, u64>,
+    /// RFC 3339 timestamp when the snapshot was created.
+    pub created_at: String,
+}
+
+/// Result of bootstrapping from a snapshot.
+#[derive(Debug)]
+pub struct BootstrapResult {
+    /// Per-device cursors from the snapshot metadata.
+    /// The bootstrapping device should use these as initial sync_cursors.
+    pub cursors: HashMap<String, u64>,
 }
 
 /// Create a snapshot of the database as encrypted bytes.
@@ -92,6 +112,10 @@ pub unsafe fn create_snapshot(
 }
 
 /// Upload a snapshot to the sync bucket and update the device head.
+///
+/// Also uploads per-device cursor metadata (`snapshot_meta.json.enc`) so that
+/// bootstrapping devices know where each device was at snapshot time, and GC
+/// can safely delete only changesets covered by the snapshot.
 pub async fn push_snapshot(
     bucket: &dyn SyncBucketClient,
     encrypted_snapshot: Vec<u8>,
@@ -103,6 +127,22 @@ pub async fn push_snapshot(
 
     // Upload snapshot (overwrites previous).
     bucket.put_snapshot(encrypted_snapshot).await?;
+
+    // Read all heads and build per-device cursor map for snapshot metadata.
+    let heads = bucket.list_heads().await?;
+    let mut cursors: HashMap<String, u64> =
+        heads.iter().map(|h| (h.device_id.clone(), h.seq)).collect();
+    // Ensure our own current_seq is included (our head hasn't been updated yet).
+    cursors.insert(device_id.to_string(), current_seq);
+
+    let meta = SnapshotMeta {
+        cursors,
+        created_at: timestamp.clone(),
+    };
+    let meta_json =
+        serde_json::to_vec(&meta).map_err(|e| SnapshotError::Io(std::io::Error::other(e)))?;
+
+    bucket.put_snapshot_meta(meta_json).await?;
 
     // Update head with snapshot_seq.
     bucket
@@ -152,22 +192,42 @@ pub fn should_create_snapshot(
 
 /// Delete changesets that are superseded by a snapshot.
 ///
-/// For each device in the bucket, deletes changesets with seq <= `snapshot_seq`.
-/// This is safe because the snapshot contains the full database state up to
-/// that point. Any device that missed these changesets can bootstrap from
-/// the snapshot instead.
+/// Reads snapshot metadata to get per-device cursors at snapshot time.
+/// For each device, only deletes changesets with seq <= the device's cursor
+/// in the snapshot. This ensures changesets pushed AFTER the snapshot are
+/// preserved, even if their seq is below another device's snapshot seq.
 ///
-/// The caller is responsible for the 30-day grace period -- only call this
-/// when enough time has passed since the snapshot was created.
-pub async fn garbage_collect(
-    bucket: &dyn SyncBucketClient,
-    snapshot_seq: u64,
-) -> Result<GcResult, SnapshotError> {
+/// Devices that don't appear in the snapshot metadata are skipped entirely
+/// (they appeared after the snapshot was created).
+pub async fn garbage_collect(bucket: &dyn SyncBucketClient) -> Result<GcResult, SnapshotError> {
+    // Read snapshot metadata.
+    let meta_json = match bucket.get_snapshot_meta().await {
+        Ok(data) => data,
+        Err(BucketError::NotFound(_)) => {
+            // No snapshot metadata -- nothing to GC.
+            info!("no snapshot metadata found, skipping GC");
+            return Ok(GcResult {
+                deleted: 0,
+                errors: 0,
+            });
+        }
+        Err(e) => return Err(SnapshotError::Bucket(e)),
+    };
+
+    let meta: SnapshotMeta = serde_json::from_slice(&meta_json)
+        .map_err(|e| SnapshotError::Io(std::io::Error::other(e)))?;
+
     let heads = bucket.list_heads().await?;
     let mut deleted = 0u64;
     let mut errors = 0u64;
 
     for head in &heads {
+        // Only GC changesets up to what the snapshot covers for THIS device.
+        let safe_seq = match meta.cursors.get(&head.device_id) {
+            Some(&seq) => seq,
+            None => continue, // Device appeared after snapshot -- don't touch.
+        };
+
         let seqs = match bucket.list_changesets(&head.device_id).await {
             Ok(s) => s,
             Err(e) => {
@@ -182,7 +242,7 @@ pub async fn garbage_collect(
         };
 
         for seq in seqs {
-            if seq > snapshot_seq {
+            if seq > safe_seq {
                 continue;
             }
 
@@ -201,7 +261,7 @@ pub async fn garbage_collect(
         }
     }
 
-    info!(deleted, errors, snapshot_seq, "garbage collection complete");
+    info!(deleted, errors, "garbage collection complete");
 
     Ok(GcResult { deleted, errors })
 }
@@ -219,15 +279,15 @@ pub struct GcResult {
 ///
 /// Downloads `snapshot.db.enc`, decrypts, and writes the plaintext database
 /// to `target_path`. The caller should then open this as their local database
-/// and pull any changesets with seq > the snapshot's seq.
+/// and pull any changesets newer than the per-device cursors in the result.
 ///
-/// Returns the snapshot_seq (maximum across all device heads) so the caller
-/// knows where to start pulling changesets from.
+/// Returns a `BootstrapResult` with per-device cursors so the caller knows
+/// where to start pulling changesets from each device.
 pub async fn bootstrap_from_snapshot(
     bucket: &dyn SyncBucketClient,
     encryption: &EncryptionService,
     target_path: &Path,
-) -> Result<u64, SnapshotError> {
+) -> Result<BootstrapResult, SnapshotError> {
     // Download encrypted snapshot.
     let encrypted = bucket.get_snapshot().await?;
 
@@ -242,22 +302,37 @@ pub async fn bootstrap_from_snapshot(
     }
     std::fs::write(target_path, &plaintext)?;
 
-    // Determine the snapshot_seq from the heads.
-    let heads = bucket.list_heads().await?;
-    let snapshot_seq = heads
-        .iter()
-        .filter_map(|h| h.snapshot_seq)
-        .max()
-        .unwrap_or(0);
+    // Read snapshot metadata for per-device cursors.
+    let cursors = match bucket.get_snapshot_meta().await {
+        Ok(meta_json) => {
+            let meta: SnapshotMeta = serde_json::from_slice(&meta_json)
+                .map_err(|e| SnapshotError::Io(std::io::Error::other(e)))?;
+            meta.cursors
+        }
+        Err(BucketError::NotFound(_)) => {
+            // Fallback for old snapshots without metadata.
+            let heads = bucket.list_heads().await?;
+            let snapshot_seq = heads
+                .iter()
+                .filter_map(|h| h.snapshot_seq)
+                .max()
+                .unwrap_or(0);
+            heads
+                .iter()
+                .map(|h| (h.device_id.clone(), snapshot_seq.min(h.seq)))
+                .collect()
+        }
+        Err(e) => return Err(SnapshotError::Bucket(e)),
+    };
 
     info!(
-        snapshot_seq,
+        num_devices = cursors.len(),
         db_size = plaintext.len(),
         path = %target_path.display(),
         "bootstrapped from snapshot"
     );
 
-    Ok(snapshot_seq)
+    Ok(BootstrapResult { cursors })
 }
 
 #[cfg(test)]
@@ -275,6 +350,7 @@ mod tests {
         changesets: Mutex<HashMap<String, Vec<u8>>>,
         heads: Mutex<HashMap<String, (u64, Option<u64>)>>,
         snapshot: Mutex<Option<Vec<u8>>>,
+        snapshot_meta: Mutex<Option<Vec<u8>>>,
         min_schema_version: Mutex<Option<u32>>,
     }
 
@@ -284,6 +360,7 @@ mod tests {
                 changesets: Mutex::new(HashMap::new()),
                 heads: Mutex::new(HashMap::new()),
                 snapshot: Mutex::new(None),
+                snapshot_meta: Mutex::new(None),
                 min_schema_version: Mutex::new(None),
             }
         }
@@ -308,6 +385,11 @@ mod tests {
         /// Get stored snapshot data.
         fn get_stored_snapshot(&self) -> Option<Vec<u8>> {
             self.snapshot.lock().unwrap().clone()
+        }
+
+        /// Get stored snapshot metadata.
+        fn get_stored_snapshot_meta(&self) -> Option<Vec<u8>> {
+            self.snapshot_meta.lock().unwrap().clone()
         }
     }
 
@@ -444,6 +526,19 @@ mod tests {
         async fn delete_wrapped_key(&self, _user_pubkey: &str) -> Result<(), BucketError> {
             Ok(())
         }
+
+        async fn put_snapshot_meta(&self, data: Vec<u8>) -> Result<(), BucketError> {
+            *self.snapshot_meta.lock().unwrap() = Some(data);
+            Ok(())
+        }
+
+        async fn get_snapshot_meta(&self) -> Result<Vec<u8>, BucketError> {
+            self.snapshot_meta
+                .lock()
+                .unwrap()
+                .clone()
+                .ok_or(BucketError::NotFound("snapshot_meta.json.enc".into()))
+        }
     }
 
     fn test_encryption() -> EncryptionService {
@@ -578,6 +673,11 @@ mod tests {
     #[tokio::test]
     async fn push_snapshot_uploads_and_updates_head() {
         let bucket = MockBucket::new();
+        // Simulate another device that already has a head.
+        bucket
+            .put_head("dev-2", 15, None, "2026-02-10T00:00:00Z")
+            .await
+            .unwrap();
         let data = vec![1, 2, 3, 4, 5];
 
         push_snapshot(&bucket, data.clone(), "dev-1", 42)
@@ -589,16 +689,24 @@ mod tests {
 
         // Head should be updated with snapshot_seq.
         let heads = bucket.list_heads().await.unwrap();
-        assert_eq!(heads.len(), 1);
-        assert_eq!(heads[0].device_id, "dev-1");
-        assert_eq!(heads[0].seq, 42);
-        assert_eq!(heads[0].snapshot_seq, Some(42));
+        let dev1_head = heads.iter().find(|h| h.device_id == "dev-1").unwrap();
+        assert_eq!(dev1_head.seq, 42);
+        assert_eq!(dev1_head.snapshot_seq, Some(42));
+
+        // Snapshot metadata should contain cursors for both devices.
+        let meta_json = bucket
+            .get_stored_snapshot_meta()
+            .expect("metadata should be written");
+        let meta: SnapshotMeta = serde_json::from_slice(&meta_json).unwrap();
+        assert_eq!(meta.cursors.get("dev-1"), Some(&42));
+        assert_eq!(meta.cursors.get("dev-2"), Some(&15));
+        assert_eq!(meta.cursors.len(), 2);
     }
 
     // ---- garbage_collect tests ----
 
     #[tokio::test]
-    async fn gc_deletes_changesets_up_to_snapshot_seq() {
+    async fn gc_deletes_changesets_per_device_cursors() {
         let bucket = MockBucket::new();
 
         // Device A: changesets 1-5.
@@ -612,19 +720,29 @@ mod tests {
 
         assert_eq!(bucket.changeset_count(), 8);
 
-        // Snapshot at seq 3 -- delete changesets <= 3 from all devices.
-        let result = garbage_collect(&bucket, 3).await.expect("gc");
+        // Snapshot metadata: dev-a was at seq 3, dev-b was at seq 2.
+        let meta = SnapshotMeta {
+            cursors: HashMap::from([("dev-a".to_string(), 3), ("dev-b".to_string(), 2)]),
+            created_at: "2026-02-10T00:00:00Z".to_string(),
+        };
+        bucket
+            .put_snapshot_meta(serde_json::to_vec(&meta).unwrap())
+            .await
+            .unwrap();
 
-        assert_eq!(result.deleted, 6); // dev-a: 1,2,3 + dev-b: 1,2,3
+        let result = garbage_collect(&bucket).await.expect("gc");
+
+        // dev-a: 1,2,3 deleted (<=3), dev-b: 1,2 deleted (<=2)
+        assert_eq!(result.deleted, 5);
         assert_eq!(result.errors, 0);
-        assert_eq!(bucket.changeset_count(), 2); // dev-a: 4,5 remain
+        assert_eq!(bucket.changeset_count(), 3); // dev-a: 4,5 + dev-b: 3
 
         // Verify remaining changesets.
         let remaining_a = bucket.list_changesets("dev-a").await.unwrap();
         assert_eq!(remaining_a, vec![4, 5]);
 
         let remaining_b = bucket.list_changesets("dev-b").await.unwrap();
-        assert!(remaining_b.is_empty());
+        assert_eq!(remaining_b, vec![3]);
     }
 
     #[tokio::test]
@@ -632,7 +750,17 @@ mod tests {
         let bucket = MockBucket::new();
         bucket.add_changeset("dev-a", 10, vec![10]);
 
-        let result = garbage_collect(&bucket, 5).await.expect("gc");
+        // Snapshot metadata says dev-a was at seq 5 -- changeset 10 is newer.
+        let meta = SnapshotMeta {
+            cursors: HashMap::from([("dev-a".to_string(), 5)]),
+            created_at: "2026-02-10T00:00:00Z".to_string(),
+        };
+        bucket
+            .put_snapshot_meta(serde_json::to_vec(&meta).unwrap())
+            .await
+            .unwrap();
+
+        let result = garbage_collect(&bucket).await.expect("gc");
 
         assert_eq!(result.deleted, 0);
         assert_eq!(bucket.changeset_count(), 1);
@@ -641,8 +769,9 @@ mod tests {
     #[tokio::test]
     async fn gc_with_empty_bucket() {
         let bucket = MockBucket::new();
+        // No snapshot metadata -- GC should be a no-op.
 
-        let result = garbage_collect(&bucket, 100).await.expect("gc");
+        let result = garbage_collect(&bucket).await.expect("gc");
 
         assert_eq!(result.deleted, 0);
         assert_eq!(result.errors, 0);
@@ -660,7 +789,7 @@ mod tests {
             exec(
                 db,
                 "INSERT INTO artists (id, name, _updated_at, created_at) \
-                 VALUES ('a1', 'Miles Davis', '0000000001000-0000-dev1', '2026-01-01')",
+                 VALUES ('a1', 'Artist One', '0000000001000-0000-dev1', '2026-01-01')",
             );
 
             let temp = tempfile::tempdir().unwrap();
@@ -669,22 +798,29 @@ mod tests {
             let encrypted = create_snapshot(db, temp.path(), &enc).expect("snapshot");
             ffi::sqlite3_close(db);
 
-            // Put snapshot in mock bucket.
+            // Put snapshot in mock bucket with metadata.
             let bucket = MockBucket::new();
             bucket.put_snapshot(encrypted).await.unwrap();
-            // Set a head with snapshot_seq so bootstrap can find it.
+
+            let meta = SnapshotMeta {
+                cursors: HashMap::from([("dev-1".to_string(), 10), ("dev-2".to_string(), 7)]),
+                created_at: "2026-02-10T00:00:00Z".to_string(),
+            };
             bucket
-                .put_head("dev-1", 10, Some(10), "2026-02-10T00:00:00Z")
+                .put_snapshot_meta(serde_json::to_vec(&meta).unwrap())
                 .await
                 .unwrap();
 
             // Bootstrap a new database.
             let target = temp.path().join("bootstrapped.db");
-            let snapshot_seq = bootstrap_from_snapshot(&bucket, &enc, &target)
+            let result = bootstrap_from_snapshot(&bucket, &enc, &target)
                 .await
                 .expect("bootstrap");
 
-            assert_eq!(snapshot_seq, 10);
+            // Should have per-device cursors from metadata.
+            assert_eq!(result.cursors.get("dev-1"), Some(&10));
+            assert_eq!(result.cursors.get("dev-2"), Some(&7));
+            assert_eq!(result.cursors.len(), 2);
             assert!(target.exists());
 
             // Open the bootstrapped DB and verify data.
@@ -694,7 +830,7 @@ mod tests {
             assert_eq!(rc, ffi::SQLITE_OK);
 
             let name = query_text(db2, "SELECT name FROM artists WHERE id = 'a1'");
-            assert_eq!(name, "Miles Davis");
+            assert_eq!(name, "Artist One");
 
             ffi::sqlite3_close(db2);
         }
@@ -725,12 +861,12 @@ mod tests {
             exec(
                 db,
                 "INSERT INTO artists (id, name, _updated_at, created_at) \
-                 VALUES ('a1', 'Miles Davis', '0000000001000-0000-dev1', '2026-01-01')",
+                 VALUES ('a1', 'Artist One', '0000000001000-0000-dev1', '2026-01-01')",
             );
             exec(
                 db,
                 "INSERT INTO albums (id, title, _updated_at, created_at) \
-                 VALUES ('al1', 'Kind of Blue', '0000000001000-0000-dev1', '2026-01-01')",
+                 VALUES ('al1', 'Album One', '0000000001000-0000-dev1', '2026-01-01')",
             );
 
             let temp = tempfile::tempdir().unwrap();
@@ -747,11 +883,11 @@ mod tests {
 
             // Device 2 bootstraps.
             let target = temp.path().join("device2.db");
-            let snapshot_seq = bootstrap_from_snapshot(&bucket, &enc, &target)
+            let result = bootstrap_from_snapshot(&bucket, &enc, &target)
                 .await
                 .expect("bootstrap");
 
-            assert_eq!(snapshot_seq, 5);
+            assert_eq!(result.cursors.get("dev-1"), Some(&5));
 
             // Open and verify.
             let c_path = CString::new(target.to_str().unwrap()).unwrap();
@@ -760,12 +896,12 @@ mod tests {
             assert_eq!(rc, ffi::SQLITE_OK);
 
             let name = query_text(db2, "SELECT name FROM artists WHERE id = 'a1'");
-            assert_eq!(name, "Miles Davis");
+            assert_eq!(name, "Artist One");
 
             let title = query_text(db2, "SELECT title FROM albums WHERE id = 'al1'");
-            assert_eq!(title, "Kind of Blue");
+            assert_eq!(title, "Album One");
 
-            // Device 2 can now pull only changesets > snapshot_seq.
+            // Device 2 can now pull only changesets > per-device cursors.
             // (Not tested here since pull is already tested in pull_tests.rs.)
 
             ffi::sqlite3_close(db2);
@@ -790,12 +926,12 @@ mod tests {
             exec(
                 db_source,
                 "INSERT INTO artists (id, name, _updated_at, created_at) \
-                 VALUES ('a1', 'Miles Davis', '0000000001000-0000-dev1', '2026-01-01')",
+                 VALUES ('a1', 'Artist One', '0000000001000-0000-dev1', '2026-01-01')",
             );
             exec(
                 db_source,
                 "INSERT INTO artists (id, name, _updated_at, created_at) \
-                 VALUES ('a2', 'John Coltrane', '0000000002000-0000-dev1', '2026-01-01')",
+                 VALUES ('a2', 'Artist Two', '0000000002000-0000-dev1', '2026-01-01')",
             );
             let cs1 = session1.changeset().unwrap().unwrap();
             let cs1_bytes = cs1.as_bytes().to_vec();
@@ -810,11 +946,11 @@ mod tests {
             exec(
                 db_source,
                 "INSERT INTO artists (id, name, _updated_at, created_at) \
-                 VALUES ('a3', 'Bill Evans', '0000000003000-0000-dev1', '2026-01-01')",
+                 VALUES ('a3', 'Artist Three', '0000000003000-0000-dev1', '2026-01-01')",
             );
             exec(
                 db_source,
-                "UPDATE artists SET name = 'Miles Dewey Davis' \
+                "UPDATE artists SET name = 'Artist One Updated' \
                  WHERE id = 'a1'",
             );
             let cs2 = session2.changeset().unwrap().unwrap();
@@ -860,15 +996,139 @@ mod tests {
             let name_a = query_text(db_a, "SELECT name FROM artists WHERE id = 'a1'");
             let name_b = query_text(db_b, "SELECT name FROM artists WHERE id = 'a1'");
             assert_eq!(name_a, name_b);
-            assert_eq!(name_a, "Miles Dewey Davis");
+            assert_eq!(name_a, "Artist One Updated");
 
             let name_a3 = query_text(db_a, "SELECT name FROM artists WHERE id = 'a3'");
             let name_b3 = query_text(db_b, "SELECT name FROM artists WHERE id = 'a3'");
             assert_eq!(name_a3, name_b3);
-            assert_eq!(name_a3, "Bill Evans");
+            assert_eq!(name_a3, "Artist Three");
 
             ffi::sqlite3_close(db_a);
             ffi::sqlite3_close(db_b);
+        }
+    }
+
+    // ---- new safety tests ----
+
+    /// Device A creates snapshot when Device B is at seq 30. Device B later
+    /// pushes seq 31-35. GC must NOT delete Device B's 31-35.
+    #[tokio::test]
+    async fn gc_does_not_delete_post_snapshot_changesets() {
+        let bucket = MockBucket::new();
+
+        // Device A: changesets 1-50. Device B: changesets 1-35.
+        for seq in 1..=50 {
+            bucket.add_changeset("dev-a", seq, vec![seq as u8]);
+        }
+        for seq in 1..=35 {
+            bucket.add_changeset("dev-b", seq, vec![seq as u8]);
+        }
+
+        // Snapshot taken when dev-a was at 50, dev-b was at 30.
+        // (Dev-b pushed 31-35 after the snapshot.)
+        let meta = SnapshotMeta {
+            cursors: HashMap::from([("dev-a".to_string(), 50), ("dev-b".to_string(), 30)]),
+            created_at: "2026-02-10T00:00:00Z".to_string(),
+        };
+        bucket
+            .put_snapshot_meta(serde_json::to_vec(&meta).unwrap())
+            .await
+            .unwrap();
+
+        let result = garbage_collect(&bucket).await.expect("gc");
+
+        // dev-a: all 50 deleted (<=50), dev-b: 1-30 deleted (<=30)
+        assert_eq!(result.deleted, 80);
+        assert_eq!(result.errors, 0);
+
+        // dev-b's 31-35 must survive.
+        let remaining_b = bucket.list_changesets("dev-b").await.unwrap();
+        assert_eq!(remaining_b, vec![31, 32, 33, 34, 35]);
+
+        // dev-a has nothing remaining.
+        let remaining_a = bucket.list_changesets("dev-a").await.unwrap();
+        assert!(remaining_a.is_empty());
+    }
+
+    /// Device C appears after snapshot was created. GC should not touch
+    /// any of Device C's changesets.
+    #[tokio::test]
+    async fn gc_ignores_device_not_in_snapshot_meta() {
+        let bucket = MockBucket::new();
+
+        // Device A: changesets 1-5 (present in snapshot).
+        for seq in 1..=5 {
+            bucket.add_changeset("dev-a", seq, vec![seq as u8]);
+        }
+        // Device C: changesets 1-3 (NOT in snapshot metadata).
+        for seq in 1..=3 {
+            bucket.add_changeset("dev-c", seq, vec![seq as u8]);
+        }
+
+        // Snapshot only knows about dev-a.
+        let meta = SnapshotMeta {
+            cursors: HashMap::from([("dev-a".to_string(), 5)]),
+            created_at: "2026-02-10T00:00:00Z".to_string(),
+        };
+        bucket
+            .put_snapshot_meta(serde_json::to_vec(&meta).unwrap())
+            .await
+            .unwrap();
+
+        let result = garbage_collect(&bucket).await.expect("gc");
+
+        // Only dev-a's changesets should be deleted.
+        assert_eq!(result.deleted, 5);
+        assert_eq!(result.errors, 0);
+
+        // dev-c's changesets are untouched.
+        let remaining_c = bucket.list_changesets("dev-c").await.unwrap();
+        assert_eq!(remaining_c, vec![1, 2, 3]);
+    }
+
+    /// When no `snapshot_meta.json.enc` exists (old snapshots), bootstrap
+    /// falls back to using max snapshot_seq from heads.
+    #[tokio::test]
+    async fn bootstrap_without_metadata_falls_back() {
+        unsafe {
+            let db = open_memory_db();
+            create_synced_schema(db);
+
+            exec(
+                db,
+                "INSERT INTO artists (id, name, _updated_at, created_at) \
+                 VALUES ('a1', 'Artist One', '0000000001000-0000-dev1', '2026-01-01')",
+            );
+
+            let temp = tempfile::tempdir().unwrap();
+            let enc = test_encryption();
+
+            let encrypted = create_snapshot(db, temp.path(), &enc).expect("snapshot");
+            ffi::sqlite3_close(db);
+
+            // Put snapshot in bucket WITHOUT metadata (simulating old behavior).
+            let bucket = MockBucket::new();
+            bucket.put_snapshot(encrypted).await.unwrap();
+            bucket
+                .put_head("dev-1", 20, Some(15), "2026-02-10T00:00:00Z")
+                .await
+                .unwrap();
+            bucket
+                .put_head("dev-2", 10, None, "2026-02-10T00:00:00Z")
+                .await
+                .unwrap();
+
+            // Bootstrap -- no metadata, should fall back.
+            let target = temp.path().join("fallback.db");
+            let result = bootstrap_from_snapshot(&bucket, &enc, &target)
+                .await
+                .expect("bootstrap");
+
+            // Fallback: max snapshot_seq is 15. Each device cursor is min(15, seq).
+            assert_eq!(result.cursors.get("dev-1"), Some(&15));
+            assert_eq!(result.cursors.get("dev-2"), Some(&10));
+            assert_eq!(result.cursors.len(), 2);
+            assert!(target.exists());
         }
     }
 }
