@@ -41,7 +41,7 @@ pub async fn create_shared_release_storage(
         .await
         .map_err(PlaybackError::cloud)?;
     let storage: Arc<dyn CloudStorage> = Arc::new(storage);
-    let encryption = Arc::new(EncryptionService::from_key(shared.release_key));
+    let encryption = Arc::new(EncryptionService::from_key(shared.library_key));
     let storage_key = crate::storage::storage_path(file_id);
 
     Ok(SharedReleaseStorage {

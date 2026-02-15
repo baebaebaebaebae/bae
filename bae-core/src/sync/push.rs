@@ -5,7 +5,7 @@
 //! This module holds the shared types and the schema version constant.
 
 /// Current schema version -- matches the latest migration number.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// An outgoing changeset ready to be pushed to the sync bucket.
 pub struct OutgoingChangeset {

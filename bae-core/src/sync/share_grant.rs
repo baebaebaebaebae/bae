@@ -4,7 +4,7 @@
 /// passed out-of-band (paste, QR, file). It contains:
 /// - Bucket coordinates (where the release files live)
 /// - A wrapped payload encrypted to the recipient's X25519 key containing:
-///   - The per-release derived encryption key
+///   - The library encryption key
 ///   - Optional S3 credentials for accessing the bucket
 ///
 /// The grant is signed by the sender's Ed25519 key so the recipient can verify
@@ -25,7 +25,7 @@ pub struct ShareGrant {
     pub bucket: String,
     pub region: String,
     pub endpoint: Option<String>,
-    /// Release key + optional S3 creds, sealed-box encrypted to recipient's X25519 key.
+    /// Library key + optional S3 creds, sealed-box encrypted to recipient's X25519 key.
     #[serde(with = "hex_vec")]
     pub wrapped_payload: Vec<u8>,
     /// RFC 3339 expiry timestamp, or None for no expiry.
@@ -37,8 +37,9 @@ pub struct ShareGrant {
 /// The inner payload encrypted to the recipient.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GrantPayload {
+    /// The library encryption key (used to decrypt all files in the library).
     #[serde(with = "hex_array_32")]
-    pub release_key: [u8; 32],
+    pub library_key: [u8; 32],
     pub s3_access_key: Option<String>,
     pub s3_secret_key: Option<String>,
 }
@@ -79,7 +80,7 @@ fn canonical_bytes(grant: &ShareGrant) -> Vec<u8> {
 
 /// Create a share grant for a release.
 ///
-/// Derives the per-release key, wraps it (+ optional S3 creds) to the
+/// Wraps the library encryption key (+ optional S3 creds) to the
 /// recipient's X25519 key, and signs the grant.
 pub fn create_share_grant(
     sender_keypair: &UserKeypair,
@@ -102,12 +103,9 @@ pub fn create_share_grant(
             .map_err(|_| ShareGrantError::Crypto("recipient pubkey wrong length".to_string()))?;
     let x25519_pk = keys::ed25519_to_x25519_public_key(&ed25519_pk);
 
-    // Derive the per-release key.
-    let release_key = encryption_service.derive_release_key(release_id);
-
-    // Build and serialize the payload.
+    // Build and serialize the payload with the library key.
     let payload = GrantPayload {
-        release_key,
+        library_key: encryption_service.key_bytes(),
         s3_access_key: s3_access_key.map(|s| s.to_string()),
         s3_secret_key: s3_secret_key.map(|s| s.to_string()),
     };
@@ -270,7 +268,7 @@ mod tests {
 
         // Accept.
         let payload = accept_share_grant(&grant, &recipient).unwrap();
-        assert_eq!(payload.release_key, enc.derive_release_key(release_id));
+        assert_eq!(payload.library_key, enc.key_bytes());
         assert_eq!(payload.s3_access_key.as_deref(), Some("AKID"));
         assert_eq!(payload.s3_secret_key.as_deref(), Some("secret123"));
     }
@@ -379,8 +377,8 @@ mod tests {
         let payload = accept_share_grant(&grant, &recipient).unwrap();
         assert!(payload.s3_access_key.is_none());
         assert!(payload.s3_secret_key.is_none());
-        // Release key should still be correct.
-        assert_eq!(payload.release_key, enc.derive_release_key("rel-1"));
+        // Library key should still be correct.
+        assert_eq!(payload.library_key, enc.key_bytes());
     }
 
     #[test]
@@ -410,7 +408,7 @@ mod tests {
 
         // Accept the deserialized grant.
         let payload = accept_share_grant(&deserialized, &recipient).unwrap();
-        assert_eq!(payload.release_key, enc.derive_release_key("rel-1"));
+        assert_eq!(payload.library_key, enc.key_bytes());
         assert_eq!(payload.s3_access_key.as_deref(), Some("AK"));
     }
 
@@ -436,7 +434,7 @@ mod tests {
         .unwrap();
 
         let payload = accept_share_grant(&grant, &recipient).unwrap();
-        assert_eq!(payload.release_key, enc.derive_release_key("rel-1"));
+        assert_eq!(payload.library_key, enc.key_bytes());
     }
 
     #[test]

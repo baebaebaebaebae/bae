@@ -19,7 +19,7 @@ pub struct SharedRelease {
     pub bucket: String,
     pub region: String,
     pub endpoint: Option<String>,
-    pub release_key: [u8; 32],
+    pub library_key: [u8; 32],
     pub s3_access_key: Option<String>,
     pub s3_secret_key: Option<String>,
     pub expires: Option<String>,
@@ -51,7 +51,7 @@ pub async fn accept_and_store_grant(
 
     let now = Utc::now().to_rfc3339();
     let id = uuid::Uuid::new_v4().to_string();
-    let release_key_hex = hex::encode(payload.release_key);
+    let library_key_hex = hex::encode(payload.library_key);
 
     // Store the grant with the unwrapped key and creds.
     let db_grant = DbShareGrant {
@@ -67,7 +67,7 @@ pub async fn accept_and_store_grant(
         signature: grant.signature.clone(),
         accepted_at: Some(now),
         created_at: Utc::now().to_rfc3339(),
-        release_key_hex: Some(release_key_hex),
+        release_key_hex: Some(library_key_hex),
         s3_access_key: payload.s3_access_key.clone(),
         s3_secret_key: payload.s3_secret_key.clone(),
     };
@@ -82,7 +82,7 @@ pub async fn accept_and_store_grant(
         bucket: grant.bucket.clone(),
         region: grant.region.clone(),
         endpoint: grant.endpoint.clone(),
-        release_key: payload.release_key,
+        library_key: payload.library_key,
         s3_access_key: payload.s3_access_key,
         s3_secret_key: payload.s3_secret_key,
         expires: grant.expires.clone(),
@@ -151,7 +151,7 @@ fn try_resolve_grant(grant: &DbShareGrant) -> Result<Option<SharedRelease>, Shar
     // Decode the stored key.
     let key_bytes = hex::decode(release_key_hex)
         .map_err(|e| SharedReleaseError::InvalidKey(format!("bad hex: {e}")))?;
-    let release_key: [u8; 32] = key_bytes
+    let library_key: [u8; 32] = key_bytes
         .try_into()
         .map_err(|_| SharedReleaseError::InvalidKey("not 32 bytes".to_string()))?;
 
@@ -163,7 +163,7 @@ fn try_resolve_grant(grant: &DbShareGrant) -> Result<Option<SharedRelease>, Shar
         bucket: grant.bucket.clone(),
         region: grant.region.clone(),
         endpoint: grant.endpoint.clone(),
-        release_key,
+        library_key,
         s3_access_key: grant.s3_access_key.clone(),
         s3_secret_key: grant.s3_secret_key.clone(),
         expires: grant.expires.clone(),
@@ -243,7 +243,7 @@ mod tests {
 
         assert_eq!(shared.release_id, release_id);
         assert_eq!(shared.bucket, "test-bucket");
-        assert_eq!(shared.release_key, enc.derive_release_key(release_id));
+        assert_eq!(shared.library_key, enc.key_bytes());
         assert_eq!(shared.s3_access_key.as_deref(), Some("AKID"));
         assert_eq!(shared.s3_secret_key.as_deref(), Some("secret123"));
 
@@ -251,7 +251,7 @@ mod tests {
         let resolved = resolve_release(&db, release_id).await.unwrap();
         assert!(resolved.is_some());
         let resolved = resolved.unwrap();
-        assert_eq!(resolved.release_key, shared.release_key);
+        assert_eq!(resolved.library_key, shared.library_key);
         assert_eq!(resolved.grant_id, shared.grant_id);
     }
 
