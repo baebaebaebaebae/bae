@@ -4,6 +4,17 @@
 <dict>
     <key>CFBundleDisplayName</key>
     <string>bae</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.bae.app</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>bae</string>
+            </array>
+        </dict>
+    </array>
     <key>NSLocalNetworkUsageDescription</key>
     <string>bae uses your local network for BitTorrent peer discovery.</string>
     <!-- Sparkle auto-update configuration -->

@@ -261,11 +261,23 @@ fn main() {
     };
     let _keep_alive = media_controls;
 
-    // Initialize navigation + playback channels for menu shortcuts (must be before menu setup)
+    // Initialize navigation + playback + URL channels (must be before menu/handler setup)
     ui::shortcuts::init_nav_channel();
+    ui::shortcuts::init_url_channel();
 
     #[cfg(target_os = "macos")]
     ui::shortcuts::init_playback_channel();
+
+    #[cfg(target_os = "macos")]
+    ui::window_activation::register_url_handler();
+
+    // On cold launch, macOS may pass the URL as a CLI argument
+    for arg in std::env::args().skip(1) {
+        if arg.starts_with("bae://") {
+            info!("URL from CLI argument: {arg}");
+            ui::shortcuts::send_url(arg);
+        }
+    }
 
     if config.server_enabled {
         let subsonic_library = library_manager.clone();

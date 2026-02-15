@@ -47,6 +47,8 @@ static NAV_SENDER: OnceLock<broadcast::Sender<NavAction>> = OnceLock::new();
 #[cfg(target_os = "macos")]
 static PLAYBACK_SENDER: OnceLock<broadcast::Sender<PlaybackAction>> = OnceLock::new();
 
+static URL_SENDER: OnceLock<broadcast::Sender<String>> = OnceLock::new();
+
 /// Initialize the navigation channel. Call once at startup.
 pub fn init_nav_channel() {
     let (tx, _rx) = broadcast::channel(16);
@@ -76,6 +78,27 @@ pub fn subscribe_playback_actions() -> broadcast::Receiver<PlaybackAction> {
     PLAYBACK_SENDER
         .get()
         .expect("playback channel not initialized")
+        .subscribe()
+}
+
+/// Initialize the URL channel. Call once at startup.
+pub fn init_url_channel() {
+    let (tx, _rx) = broadcast::channel(8);
+    URL_SENDER.set(tx).expect("url channel already initialized");
+}
+
+/// Send a URL received from the OS (called from Apple Event handler or CLI args).
+pub fn send_url(url: String) {
+    if let Some(tx) = URL_SENDER.get() {
+        let _ = tx.send(url);
+    }
+}
+
+/// Subscribe to incoming URLs.
+pub fn subscribe_url() -> broadcast::Receiver<String> {
+    URL_SENDER
+        .get()
+        .expect("url channel not initialized")
         .subscribe()
 }
 

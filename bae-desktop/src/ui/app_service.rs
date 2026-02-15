@@ -115,6 +115,7 @@ impl AppService {
         self.subscribe_library_events();
         self.subscribe_folder_scan_events();
         self.subscribe_sync_events();
+        self.subscribe_url_events();
         self.load_initial_data();
         self.process_pending_deletions();
     }
@@ -472,6 +473,17 @@ impl AppService {
                 &mut trigger_rx,
             )
             .await;
+        });
+    }
+
+    /// Subscribe to incoming `bae://` URLs from Apple Events or CLI arguments.
+    fn subscribe_url_events(&self) {
+        let mut rx = crate::ui::shortcuts::subscribe_url();
+        spawn(async move {
+            while let Ok(url) = rx.recv().await {
+                tracing::info!("URL received in app: {url}");
+                // TODO: Parse bae://share/{token} and trigger import
+            }
         });
     }
 
