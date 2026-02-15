@@ -53,6 +53,7 @@ pub fn Library() -> Element {
                 artists_by_album,
                 loading: false,
                 error: None,
+                active_source: Default::default(),
             });
 
             let sort_state = use_store(LibrarySortState::default);
