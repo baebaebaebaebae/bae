@@ -7,7 +7,7 @@ Release files can live in up to three places. When you import a release, you cho
 
 ## At a Glance
 
-|                              | Unmanaged        | Library home       | Cloud home         |
+|                              | Unmanaged        | Managed — local    | Managed — cloud    |
 |------------------------------|------------------|--------------------|--------------------|
 | Files live at                | Your location    | `~/.bae/libraries/` | Cloud provider    |
 | bae copies files on import   | No               | Yes                | Yes (encrypted)    |
@@ -16,7 +16,7 @@ Release files can live in up to three places. When you import a release, you cho
 | Syncs to other devices       | No               | No                 | Yes                |
 | Delete release removes files | No               | Yes                | Yes                |
 
-A managed release can have files in the library home, the cloud home, or both. The library home is the local copy; the cloud home is the encrypted remote copy. If you have a cloud home configured, managed imports go to both.
+A managed release can have files locally, in the cloud, or both. If you have a cloud home configured, managed imports go to both.
 
 ## Unmanaged
 
@@ -24,19 +24,19 @@ Point bae at files you already have organized. bae indexes them but doesn't move
 
 The tradeoff: bae can't encrypt, sync, or back up unmanaged files.
 
-## Library Home
+## Managed — local
 
 Every library has a home directory on your machine (`~/.bae/libraries/{uuid}/`). This is where bae keeps its database, images, and — for managed releases — a local copy of the release files.
 
 When you import a release as managed, bae copies the files into the library home. Your originals are untouched. The local copy is what bae plays from.
 
-## Cloud Home
+## Managed — cloud
 
 A cloud home is a single remote storage location that holds encrypted release files, metadata changesets, artwork, and snapshots. Setting one up enables multi-device sync and cloud backup.
 
 When you import a managed release with a cloud home configured, bae copies files to the library home *and* encrypts and uploads them to the cloud home. Both happen at import time.
 
-A release that only exists in the cloud home (e.g., synced from another device that hasn't downloaded it yet) is not available for offline playback until the files are pulled to the local library home.
+A release that only exists in the cloud home (e.g., synced from another device that hasn't downloaded it yet) is not available for offline playback until the files are pulled locally.
 
 ### Supported providers
 
