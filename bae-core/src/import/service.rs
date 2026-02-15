@@ -570,6 +570,8 @@ impl ImportService {
             import_id: import_id.map(|s| s.to_string()),
         });
 
+        self.library_manager.notify_albums_changed();
+
         Ok(())
     }
 

@@ -411,6 +411,9 @@ impl LibraryManager {
         self.database
             .set_album_cover_release(album_id, cover_release_id)
             .await?;
+
+        self.notify_albums_changed();
+
         Ok(())
     }
 
