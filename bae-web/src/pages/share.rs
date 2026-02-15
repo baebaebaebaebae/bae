@@ -15,6 +15,10 @@ fn download_url(track_id: &str, token: &str) -> String {
     format!("/rest/stream?id={track_id}&shareToken={token}&download=true")
 }
 
+fn bae_url(token: &str) -> String {
+    format!("bae://share/{token}")
+}
+
 fn format_duration(secs: i64) -> String {
     let mins = secs / 60;
     let remaining = secs % 60;
@@ -48,6 +52,7 @@ pub fn ShareView(token: String) -> Element {
             let cover_url = cover_art_url(&track.cover_art_id, &token);
             let audio_src = stream_url(&track.id, &token);
             let dl_url = download_url(&track.id, &token);
+            let open_url = bae_url(&token);
 
             rsx! {
                 SharePageShell {
@@ -57,13 +62,19 @@ pub fn ShareView(token: String) -> Element {
                         secondary_line: track.artist.clone(),
                         tertiary_line: if track.album.is_empty() { None } else { Some(track.album.clone()) },
                         audio { class: "w-full mt-4", controls: true, src: audio_src }
-                        div { class: "flex justify-center mt-3",
+                        div { class: "flex justify-center gap-3 mt-3",
                             a {
                                 class: "inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-surface-input)] text-gray-300 hover:text-white hover:bg-[var(--color-hover)] transition-colors text-sm",
                                 href: dl_url,
                                 download: true,
                                 DownloadIcon {}
                                 "Download"
+                            }
+                            a {
+                                class: "inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity text-sm",
+                                href: open_url,
+                                ExternalLinkIcon {}
+                                "Open in bae"
                             }
                         }
                     }
@@ -154,6 +165,7 @@ fn ShareCard(
 fn AlbumShareCard(album: SharedAlbum, token: String) -> Element {
     let mut current_track_id: Signal<Option<String>> = use_signal(|| None);
     let cover_url = cover_art_url(&album.cover_art_id, &token);
+    let open_url = bae_url(&token);
 
     let tertiary = album.year.map(|y| format!("({y})"));
 
@@ -199,6 +211,16 @@ fn AlbumShareCard(album: SharedAlbum, token: String) -> Element {
                             }
                         }
                     },
+                }
+            }
+
+            // Open in bae
+            div { class: "flex justify-center mt-3",
+                a {
+                    class: "inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity text-sm",
+                    href: open_url,
+                    ExternalLinkIcon {}
+                    "Open in bae"
                 }
             }
         }
@@ -264,6 +286,24 @@ fn DownloadIcon() -> Element {
             path { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }
             polyline { points: "7 10 12 15 17 10" }
             line { x1: "12", y1: "15", x2: "12", y2: "3" }
+        }
+    }
+}
+
+#[component]
+fn ExternalLinkIcon() -> Element {
+    rsx! {
+        svg {
+            class: "w-4 h-4",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            view_box: "0 0 24 24",
+            path { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }
+            polyline { points: "15 3 21 3 21 9" }
+            line { x1: "10", y1: "14", x2: "21", y2: "3" }
         }
     }
 }
