@@ -2,7 +2,7 @@
 mod macos_window;
 #[cfg(target_os = "macos")]
 pub use macos_window::{
-    set_playback_repeat_mode, setup_app_menu, setup_macos_window_activation,
+    register_url_handler, set_playback_repeat_mode, setup_app_menu, setup_macos_window_activation,
     setup_transparent_titlebar,
 };
 #[cfg(not(target_os = "macos"))]

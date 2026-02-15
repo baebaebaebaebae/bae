@@ -13,6 +13,7 @@ use objc::runtime::{Class, Object, Sel};
 use objc::{class, msg_send, sel, sel_impl};
 use tracing::{error, info};
 
+static URL_HANDLER_CLASS_REGISTERED: std::sync::Once = std::sync::Once::new();
 static MENU_HANDLER_CLASS_REGISTERED: std::sync::Once = std::sync::Once::new();
 static MENU_DELEGATE_CLASS_REGISTERED: std::sync::Once = std::sync::Once::new();
 static UPDATE_MENU_ITEM: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -28,6 +29,79 @@ pub fn setup_macos_window_activation() {
         app.activateIgnoringOtherApps_(cocoa::base::YES);
         info!("macOS window activation configured");
     }
+}
+
+/// Register an Apple Event handler for `kAEGetURL` so macOS delivers `bae://` URLs to us.
+///
+/// Uses `NSAppleEventManager` rather than overriding the AppDelegate, which avoids
+/// conflicts with Dioxus's own delegate setup.
+pub fn register_url_handler() {
+    Queue::main().exec_async(|| unsafe {
+        URL_HANDLER_CLASS_REGISTERED.call_once(|| {
+            let superclass = Class::get("NSObject").unwrap();
+            let mut decl = ClassDecl::new("BaeUrlHandler", superclass).unwrap();
+
+            extern "C" fn handle_get_url(_this: &Object, _sel: Sel, event: id, _reply_event: id) {
+                unsafe {
+                    // The URL is in the direct-object parameter of the Apple Event
+                    // keyDirectObject = '----' = 0x2d2d2d2d
+                    let keyword: u32 = 0x2d2d_2d2d; // '----' (keyDirectObject)
+                    let url_descriptor: id = msg_send![event, paramDescriptorForKeyword: keyword];
+                    if url_descriptor == nil {
+                        return;
+                    }
+                    let url_string: id = msg_send![url_descriptor, stringValue];
+                    if url_string == nil {
+                        return;
+                    }
+                    let bytes: *const u8 = msg_send![url_string, UTF8String];
+                    if bytes.is_null() {
+                        return;
+                    }
+                    let c_str = std::ffi::CStr::from_ptr(bytes as *const _);
+                    if let Ok(s) = c_str.to_str() {
+                        let url = s.to_string();
+
+                        info!("Received URL via Apple Event: {url}");
+
+                        crate::ui::shortcuts::send_url(url);
+                    }
+                }
+            }
+
+            decl.add_method(
+                sel!(handleGetURLEvent:withReplyEvent:),
+                handle_get_url as extern "C" fn(&Object, Sel, id, id),
+            );
+
+            decl.register();
+        });
+
+        // Create handler instance and register for kInternetEventClass / kAEGetURL
+        let handler_class = Class::get("BaeUrlHandler").unwrap();
+        let handler: id = msg_send![handler_class, alloc];
+        let handler: id = msg_send![handler, init];
+
+        // Leak the handler — it needs to live for the process lifetime
+        let _: () = msg_send![handler, retain];
+
+        let event_manager: id = msg_send![class!(NSAppleEventManager), sharedAppleEventManager];
+
+        // kInternetEventClass = 'GURL' = 0x4755524c
+        // kAEGetURL           = 'GURL' = 0x4755524c
+        let event_class: u32 = 0x4755_524c;
+        let event_id: u32 = 0x4755_524c;
+
+        let _: () = msg_send![
+            event_manager,
+            setEventHandler: handler
+            andSelector: sel!(handleGetURLEvent:withReplyEvent:)
+            forEventClass: event_class
+            andEventID: event_id
+        ];
+
+        info!("Registered Apple Event handler for bae:// URLs");
+    });
 }
 
 /// Register a custom Objective-C class to handle menu actions

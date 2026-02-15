@@ -11,7 +11,7 @@ use bae_ui::stores::{
     AppStateStoreExt, PlaybackUiStateStoreExt, SidebarStateStoreExt, UiStateStoreExt,
 };
 use dioxus::prelude::*;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use tokio::sync::broadcast;
 
 /// Navigation actions that can be triggered by shortcuts or menus.
@@ -47,6 +47,9 @@ static NAV_SENDER: OnceLock<broadcast::Sender<NavAction>> = OnceLock::new();
 #[cfg(target_os = "macos")]
 static PLAYBACK_SENDER: OnceLock<broadcast::Sender<PlaybackAction>> = OnceLock::new();
 
+static URL_SENDER: OnceLock<broadcast::Sender<String>> = OnceLock::new();
+static BUFFERED_URL: Mutex<Option<String>> = Mutex::new(None);
+
 /// Initialize the navigation channel. Call once at startup.
 pub fn init_nav_channel() {
     let (tx, _rx) = broadcast::channel(16);
@@ -76,6 +79,43 @@ pub fn subscribe_playback_actions() -> broadcast::Receiver<PlaybackAction> {
     PLAYBACK_SENDER
         .get()
         .expect("playback channel not initialized")
+        .subscribe()
+}
+
+/// Initialize the URL channel. Call once at startup.
+pub fn init_url_channel() {
+    let (tx, _rx) = broadcast::channel(8);
+    URL_SENDER.set(tx).expect("url channel already initialized");
+}
+
+/// Send a URL received from the OS (called from Apple Event handler or CLI args).
+///
+/// If no subscriber exists yet (cold launch), the URL is buffered so
+/// `take_buffered_url()` can retrieve it once the UI is ready.
+pub fn send_url(url: String) {
+    if let Some(tx) = URL_SENDER.get() {
+        if tx.receiver_count() > 0 {
+            let _ = tx.send(url);
+            return;
+        }
+    }
+
+    // No subscriber yet -- buffer for later retrieval
+    if let Ok(mut buf) = BUFFERED_URL.lock() {
+        *buf = Some(url);
+    }
+}
+
+/// Drain the buffered URL, if any. Called once when the URL subscriber starts.
+pub fn take_buffered_url() -> Option<String> {
+    BUFFERED_URL.lock().ok()?.take()
+}
+
+/// Subscribe to incoming URLs.
+pub fn subscribe_url() -> broadcast::Receiver<String> {
+    URL_SENDER
+        .get()
+        .expect("url channel not initialized")
         .subscribe()
 }
 
