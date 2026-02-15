@@ -30,6 +30,7 @@ pub fn LibrarySectionView(
 ) -> Element {
     let mut renaming_path = use_signal(|| None::<String>);
     let mut rename_value = use_signal(String::new);
+    let mut confirming_create = use_signal(|| false);
     let mut confirming_switch = use_signal(|| None::<String>);
     let mut confirming_delete = use_signal(|| None::<String>);
     let mut confirming_unfollow = use_signal(|| None::<String>);
@@ -58,11 +59,28 @@ pub fn LibrarySectionView(
                     h2 { class: "text-xl font-semibold text-white", "Library" }
                     p { class: "text-sm text-gray-400 mt-1", "Manage your music libraries" }
                 }
-                div { class: "flex gap-2",
-                    button {
-                        class: "px-3 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded-md transition-colors",
-                        onclick: move |_| on_create.call(()),
-                        "New Library"
+                div { class: "flex items-center gap-2",
+                    if confirming_create() {
+                        span { class: "text-xs text-gray-400", "App will restart. Create?" }
+                        button {
+                            class: "px-2 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded transition-colors",
+                            onclick: move |_| {
+                                confirming_create.set(false);
+                                on_create.call(());
+                            },
+                            "Yes"
+                        }
+                        button {
+                            class: "px-2 py-1 text-xs text-gray-400 hover:text-white transition-colors",
+                            onclick: move |_| confirming_create.set(false),
+                            "No"
+                        }
+                    } else {
+                        button {
+                            class: "px-3 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded-md transition-colors",
+                            onclick: move |_| confirming_create.set(true),
+                            "New Library"
+                        }
                     }
                     button {
                         class: "px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded-md transition-colors",
