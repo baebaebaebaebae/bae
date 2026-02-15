@@ -17,18 +17,6 @@ Files are encrypted with XChaCha20-Poly1305 in 64 KB chunks. Each file gets a ra
 - Files can be decrypted independently (no dependency between files)
 - Chunk-based encryption supports efficient range requests for streaming
 
-## Per-release keys
-
-For sharing individual releases across libraries, bae derives a unique key for each release using HKDF-SHA256:
-
-```
-release_key = HKDF-SHA256(master_key, salt, "bae-release-v1:" + release_id)
-```
-
-The salt is deterministically derived from the master key, so it doesn't need to be distributed separately. Per-release keys allow sharing a single release without exposing the full library key.
-
-New imports use per-release derived keys by default. Legacy files encrypted with the master key continue to work — bae tracks the encryption scheme per file and uses the correct key automatically.
-
 ## Cloud home encryption
 
 Everything in the cloud home is encrypted:
