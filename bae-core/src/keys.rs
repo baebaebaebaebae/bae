@@ -1,4 +1,5 @@
 use crate::sodium_ffi;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{info, warn};
 
@@ -10,6 +11,20 @@ pub enum KeyError {
     DevMode,
     #[error("Crypto error: {0}")]
     Crypto(String),
+}
+
+/// Credentials for the cloud home, stored as a single JSON keyring entry.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum CloudHomeCredentials {
+    /// S3-compatible providers: access key + secret key.
+    S3 {
+        access_key: String,
+        secret_key: String,
+    },
+    /// Consumer cloud providers (Google Drive, Dropbox, OneDrive, pCloud): OAuth token JSON.
+    OAuth { token_json: String },
+    /// iCloud: no credentials needed (macOS handles auth).
+    None,
 }
 
 /// Ed25519 keypair for signing changesets and membership changes.
@@ -404,148 +419,62 @@ impl KeyService {
     }
 
     // -------------------------------------------------------------------------
-    // Cloud home credentials (library-scoped)
+    // Cloud home credentials (library-scoped, single entry)
     // -------------------------------------------------------------------------
 
-    /// Read the cloud home access key. Returns None if not set.
+    /// Read cloud home credentials. Returns None if not set.
     ///
-    /// Dev mode: reads `BAE_CLOUD_HOME_ACCESS_KEY` env var.
+    /// Dev mode: reads `BAE_CLOUD_HOME_CREDENTIALS` env var (JSON).
     /// Prod mode: reads from OS keyring.
-    pub fn get_cloud_home_access_key(&self) -> Option<String> {
-        if self.dev_mode {
-            std::env::var("BAE_CLOUD_HOME_ACCESS_KEY")
+    pub fn get_cloud_home_credentials(&self) -> Option<CloudHomeCredentials> {
+        let json = if self.dev_mode {
+            std::env::var("BAE_CLOUD_HOME_CREDENTIALS")
                 .ok()
                 .filter(|k| !k.is_empty())
         } else {
-            let account = self.account("cloud_home_access_key");
+            let account = self.account("cloud_home_credentials");
             keyring_core::Entry::new("bae", &account)
                 .ok()
                 .and_then(|e| e.get_password().ok())
                 .filter(|k| !k.is_empty())
-        }
+        };
+
+        json.and_then(|j| serde_json::from_str(&j).ok())
     }
 
-    /// Save the cloud home access key.
+    /// Save cloud home credentials.
     ///
     /// Dev mode: sets the env var.
     /// Prod mode: writes to OS keyring.
-    pub fn set_cloud_home_access_key(&self, value: &str) -> Result<(), KeyError> {
+    pub fn set_cloud_home_credentials(&self, creds: &CloudHomeCredentials) -> Result<(), KeyError> {
+        let json = serde_json::to_string(creds)
+            .map_err(|e| KeyError::Crypto(format!("serialize credentials: {e}")))?;
+
         if self.dev_mode {
-            std::env::set_var("BAE_CLOUD_HOME_ACCESS_KEY", value);
+            std::env::set_var("BAE_CLOUD_HOME_CREDENTIALS", &json);
             return Ok(());
         }
 
-        let account = self.account("cloud_home_access_key");
-        keyring_core::Entry::new("bae", &account)?.set_password(value)?;
-        info!("Cloud home access key saved to keyring");
+        let account = self.account("cloud_home_credentials");
+        keyring_core::Entry::new("bae", &account)?.set_password(&json)?;
+        info!("Cloud home credentials saved to keyring");
         Ok(())
     }
 
-    /// Read the cloud home secret key. Returns None if not set.
-    ///
-    /// Dev mode: reads `BAE_CLOUD_HOME_SECRET_KEY` env var.
-    /// Prod mode: reads from OS keyring.
-    pub fn get_cloud_home_secret_key(&self) -> Option<String> {
-        if self.dev_mode {
-            std::env::var("BAE_CLOUD_HOME_SECRET_KEY")
-                .ok()
-                .filter(|k| !k.is_empty())
-        } else {
-            let account = self.account("cloud_home_secret_key");
-            keyring_core::Entry::new("bae", &account)
-                .ok()
-                .and_then(|e| e.get_password().ok())
-                .filter(|k| !k.is_empty())
-        }
-    }
-
-    /// Save the cloud home secret key.
-    ///
-    /// Dev mode: sets the env var.
-    /// Prod mode: writes to OS keyring.
-    pub fn set_cloud_home_secret_key(&self, value: &str) -> Result<(), KeyError> {
-        if self.dev_mode {
-            std::env::set_var("BAE_CLOUD_HOME_SECRET_KEY", value);
-            return Ok(());
-        }
-
-        let account = self.account("cloud_home_secret_key");
-        keyring_core::Entry::new("bae", &account)?.set_password(value)?;
-        info!("Cloud home secret key saved to keyring");
-        Ok(())
-    }
-
-    /// Delete cloud home S3 access key and secret key.
-    ///
-    /// Dev mode: removes env vars.
-    /// Prod mode: deletes from OS keyring. Silently ignores missing entries.
-    pub fn delete_cloud_home_s3_keys(&self) -> Result<(), KeyError> {
-        if self.dev_mode {
-            std::env::remove_var("BAE_CLOUD_HOME_ACCESS_KEY");
-            std::env::remove_var("BAE_CLOUD_HOME_SECRET_KEY");
-            return Ok(());
-        }
-
-        for key_type in ["cloud_home_access_key", "cloud_home_secret_key"] {
-            let account = self.account(key_type);
-            match keyring_core::Entry::new("bae", &account)?.delete_credential() {
-                Ok(()) => info!("Deleted {key_type} from keyring"),
-                Err(keyring_core::Error::NoEntry) => {}
-                Err(e) => return Err(KeyError::Keyring(e)),
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Read the cloud home OAuth refresh token. Returns None if not set.
-    ///
-    /// Dev mode: reads `BAE_CLOUD_HOME_OAUTH_TOKEN` env var.
-    /// Prod mode: reads from OS keyring.
-    pub fn get_cloud_home_oauth_token(&self) -> Option<String> {
-        if self.dev_mode {
-            std::env::var("BAE_CLOUD_HOME_OAUTH_TOKEN")
-                .ok()
-                .filter(|k| !k.is_empty())
-        } else {
-            let account = self.account("cloud_home_oauth_token");
-            keyring_core::Entry::new("bae", &account)
-                .ok()
-                .and_then(|e| e.get_password().ok())
-                .filter(|k| !k.is_empty())
-        }
-    }
-
-    /// Save the cloud home OAuth refresh token.
-    ///
-    /// Dev mode: sets the env var.
-    /// Prod mode: writes to OS keyring.
-    pub fn set_cloud_home_oauth_token(&self, token: &str) -> Result<(), KeyError> {
-        if self.dev_mode {
-            std::env::set_var("BAE_CLOUD_HOME_OAUTH_TOKEN", token);
-            return Ok(());
-        }
-
-        let account = self.account("cloud_home_oauth_token");
-        keyring_core::Entry::new("bae", &account)?.set_password(token)?;
-        info!("Cloud home OAuth token saved to keyring");
-        Ok(())
-    }
-
-    /// Delete the cloud home OAuth refresh token.
+    /// Delete cloud home credentials.
     ///
     /// Dev mode: removes the env var.
     /// Prod mode: deletes from OS keyring. Silently ignores missing entries.
-    pub fn delete_cloud_home_oauth_token(&self) -> Result<(), KeyError> {
+    pub fn delete_cloud_home_credentials(&self) -> Result<(), KeyError> {
         if self.dev_mode {
-            std::env::remove_var("BAE_CLOUD_HOME_OAUTH_TOKEN");
+            std::env::remove_var("BAE_CLOUD_HOME_CREDENTIALS");
             return Ok(());
         }
 
-        let account = self.account("cloud_home_oauth_token");
+        let account = self.account("cloud_home_credentials");
         match keyring_core::Entry::new("bae", &account)?.delete_credential() {
             Ok(()) => {
-                info!("Cloud home OAuth token deleted from keyring");
+                info!("Cloud home credentials deleted from keyring");
                 Ok(())
             }
             Err(keyring_core::Error::NoEntry) => Ok(()),

@@ -1637,11 +1637,11 @@ impl AppService {
 
         // Save credentials to keyring
         key_service
-            .set_cloud_home_access_key(&config_data.access_key)
-            .map_err(|e| format!("Failed to save access key: {}", e))?;
-        key_service
-            .set_cloud_home_secret_key(&config_data.secret_key)
-            .map_err(|e| format!("Failed to save secret key: {}", e))?;
+            .set_cloud_home_credentials(&bae_core::keys::CloudHomeCredentials::S3 {
+                access_key: config_data.access_key.clone(),
+                secret_key: config_data.secret_key.clone(),
+            })
+            .map_err(|e| format!("Failed to save credentials: {}", e))?;
 
         // Update store
         state
@@ -1753,7 +1753,9 @@ impl AppService {
                         let token_json = serde_json::to_string(&tokens)
                             .map_err(|e| format!("Failed to serialize tokens: {e}"))?;
                         key_service
-                            .set_cloud_home_oauth_token(&token_json)
+                            .set_cloud_home_credentials(
+                                &bae_core::keys::CloudHomeCredentials::OAuth { token_json },
+                            )
                             .map_err(|e| format!("Failed to save OAuth token: {e}"))?;
 
                         // Save config
@@ -1870,12 +1872,9 @@ impl AppService {
             return;
         }
 
-        // Delete all cloud home credentials from keyring
-        if let Err(e) = key_service.delete_cloud_home_oauth_token() {
-            tracing::warn!("Failed to delete OAuth token: {e}");
-        }
-        if let Err(e) = key_service.delete_cloud_home_s3_keys() {
-            tracing::warn!("Failed to delete S3 keys: {e}");
+        // Delete cloud home credentials from keyring
+        if let Err(e) = key_service.delete_cloud_home_credentials() {
+            tracing::warn!("Failed to delete cloud home credentials: {e}");
         }
 
         // Update store
@@ -2809,7 +2808,7 @@ async fn sign_in_onedrive(
         serde_json::to_string(&tokens).map_err(|e| format!("Failed to serialize tokens: {e}"))?;
 
     key_service
-        .set_cloud_home_oauth_token(&token_json)
+        .set_cloud_home_credentials(&bae_core::keys::CloudHomeCredentials::OAuth { token_json })
         .map_err(|e| format!("Failed to save OAuth token: {e}"))?;
 
     // Step 5: Save config
@@ -2865,7 +2864,7 @@ async fn sign_in_pcloud(
     let token_json =
         serde_json::to_string(&tokens).map_err(|e| format!("serialize tokens: {e}"))?;
     key_service
-        .set_cloud_home_oauth_token(&token_json)
+        .set_cloud_home_credentials(&bae_core::keys::CloudHomeCredentials::OAuth { token_json })
         .map_err(|e| format!("failed to save OAuth token: {e}"))?;
 
     // Determine API host from the token exchange response.
@@ -3506,8 +3505,13 @@ async fn create_share_grant_async(
     let endpoint = config.cloud_home_s3_endpoint.as_deref();
 
     // Read S3 credentials from keyring.
-    let access_key = key_service.get_cloud_home_access_key();
-    let secret_key = key_service.get_cloud_home_secret_key();
+    let (access_key, secret_key) = match key_service.get_cloud_home_credentials() {
+        Some(bae_core::keys::CloudHomeCredentials::S3 {
+            access_key,
+            secret_key,
+        }) => (Some(access_key), Some(secret_key)),
+        _ => (None, None),
+    };
 
     let grant = bae_core::sync::share_grant::create_share_grant(
         keypair,

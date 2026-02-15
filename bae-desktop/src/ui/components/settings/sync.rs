@@ -273,14 +273,14 @@ pub fn SyncSection() -> Element {
                             .clone()
                             .unwrap_or_default(),
                     );
-                edit_access_key
-                    .set(
-                        app_for_edit.key_service.get_cloud_home_access_key().unwrap_or_default(),
-                    );
-                edit_secret_key
-                    .set(
-                        app_for_edit.key_service.get_cloud_home_secret_key().unwrap_or_default(),
-                    );
+                let (ak, sk) = match app_for_edit.key_service.get_cloud_home_credentials() {
+                    Some(bae_core::keys::CloudHomeCredentials::S3 { access_key, secret_key }) => {
+                        (access_key, secret_key)
+                    }
+                    _ => (String::new(), String::new()),
+                };
+                edit_access_key.set(ak);
+                edit_secret_key.set(sk);
                 is_editing.set(true);
             },
             on_cancel_edit: move |_| {

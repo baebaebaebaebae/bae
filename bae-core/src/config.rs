@@ -603,37 +603,32 @@ impl Config {
 
     /// Whether sync is configured: a cloud provider is selected with necessary credentials.
     pub fn sync_enabled(&self, key_service: &crate::keys::KeyService) -> bool {
+        use crate::keys::CloudHomeCredentials;
+
+        let creds = key_service.get_cloud_home_credentials();
+        let has_s3 = matches!(creds, Some(CloudHomeCredentials::S3 { .. }));
+        let has_oauth = matches!(creds, Some(CloudHomeCredentials::OAuth { .. }));
+
         match self.cloud_provider {
             Some(CloudProvider::S3) => {
-                self.cloud_home_s3_bucket.is_some()
-                    && self.cloud_home_s3_region.is_some()
-                    && key_service.get_cloud_home_access_key().is_some()
-                    && key_service.get_cloud_home_secret_key().is_some()
+                self.cloud_home_s3_bucket.is_some() && self.cloud_home_s3_region.is_some() && has_s3
             }
             Some(CloudProvider::GoogleDrive) => {
-                self.cloud_home_google_drive_folder_id.is_some()
-                    && key_service.get_cloud_home_oauth_token().is_some()
+                self.cloud_home_google_drive_folder_id.is_some() && has_oauth
             }
             Some(CloudProvider::Dropbox) => {
-                self.cloud_home_dropbox_folder_path.is_some()
-                    && key_service.get_cloud_home_oauth_token().is_some()
+                self.cloud_home_dropbox_folder_path.is_some() && has_oauth
             }
             Some(CloudProvider::OneDrive) => {
                 self.cloud_home_onedrive_drive_id.is_some()
                     && self.cloud_home_onedrive_folder_id.is_some()
-                    && key_service.get_cloud_home_oauth_token().is_some()
+                    && has_oauth
             }
-            Some(CloudProvider::PCloud) => {
-                self.cloud_home_pcloud_folder_id.is_some()
-                    && key_service.get_cloud_home_oauth_token().is_some()
-            }
+            Some(CloudProvider::PCloud) => self.cloud_home_pcloud_folder_id.is_some() && has_oauth,
             Some(CloudProvider::ICloud) => self.cloud_home_icloud_container_path.is_some(),
             None => {
                 // Backwards compat: check S3 fields directly (pre-cloud_provider configs)
-                self.cloud_home_s3_bucket.is_some()
-                    && self.cloud_home_s3_region.is_some()
-                    && key_service.get_cloud_home_access_key().is_some()
-                    && key_service.get_cloud_home_secret_key().is_some()
+                self.cloud_home_s3_bucket.is_some() && self.cloud_home_s3_region.is_some() && has_s3
             }
         }
     }

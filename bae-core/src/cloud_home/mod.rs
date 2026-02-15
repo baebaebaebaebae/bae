@@ -85,6 +85,19 @@ pub trait CloudHome: Send + Sync {
     async fn revoke_access(&self, member_id: &str) -> Result<(), CloudHomeError>;
 }
 
+/// Extract the OAuth token JSON from cloud home credentials, or return a storage error.
+fn require_oauth_token(
+    key_service: &crate::keys::KeyService,
+    provider_name: &str,
+) -> Result<String, CloudHomeError> {
+    match key_service.get_cloud_home_credentials() {
+        Some(crate::keys::CloudHomeCredentials::OAuth { token_json }) => Ok(token_json),
+        _ => Err(CloudHomeError::Storage(format!(
+            "{provider_name} OAuth token not in keyring"
+        ))),
+    }
+}
+
 /// Construct a CloudHome from config + keyring tokens.
 pub async fn create_cloud_home(
     config: &crate::config::Config,
@@ -103,12 +116,18 @@ pub async fn create_cloud_home(
                 .clone()
                 .ok_or_else(|| CloudHomeError::Storage("S3 region not configured".to_string()))?;
             let endpoint = config.cloud_home_s3_endpoint.clone();
-            let access_key = key_service.get_cloud_home_access_key().ok_or_else(|| {
-                CloudHomeError::Storage("S3 access key not in keyring".to_string())
-            })?;
-            let secret_key = key_service.get_cloud_home_secret_key().ok_or_else(|| {
-                CloudHomeError::Storage("S3 secret key not in keyring".to_string())
-            })?;
+
+            let (access_key, secret_key) = match key_service.get_cloud_home_credentials() {
+                Some(crate::keys::CloudHomeCredentials::S3 {
+                    access_key,
+                    secret_key,
+                }) => (access_key, secret_key),
+                _ => {
+                    return Err(CloudHomeError::Storage(
+                        "S3 credentials not in keyring".to_string(),
+                    ))
+                }
+            };
 
             let s3 = s3::S3CloudHome::new(bucket, region, endpoint, access_key, secret_key).await?;
             Ok(Box::new(s3))
@@ -121,10 +140,7 @@ pub async fn create_cloud_home(
                     CloudHomeError::Storage("Google Drive folder ID not configured".to_string())
                 })?;
 
-            let token_json = key_service.get_cloud_home_oauth_token().ok_or_else(|| {
-                CloudHomeError::Storage("Google Drive OAuth token not in keyring".to_string())
-            })?;
-
+            let token_json = require_oauth_token(key_service, "Google Drive")?;
             let tokens: crate::oauth::OAuthTokens = serde_json::from_str(&token_json)
                 .map_err(|e| CloudHomeError::Storage(format!("invalid OAuth token JSON: {e}")))?;
 
@@ -151,10 +167,7 @@ pub async fn create_cloud_home(
                     CloudHomeError::Storage("Dropbox folder path not configured".to_string())
                 })?;
 
-            let token_json = key_service.get_cloud_home_oauth_token().ok_or_else(|| {
-                CloudHomeError::Storage("Dropbox OAuth token not in keyring".to_string())
-            })?;
-
+            let token_json = require_oauth_token(key_service, "Dropbox")?;
             let tokens: crate::oauth::OAuthTokens = serde_json::from_str(&token_json)
                 .map_err(|e| CloudHomeError::Storage(format!("invalid OAuth token JSON: {e}")))?;
 
@@ -172,10 +185,7 @@ pub async fn create_cloud_home(
                     CloudHomeError::Storage("OneDrive folder ID not configured".to_string())
                 })?;
 
-            let token_json = key_service.get_cloud_home_oauth_token().ok_or_else(|| {
-                CloudHomeError::Storage("OneDrive OAuth token not in keyring".to_string())
-            })?;
-
+            let token_json = require_oauth_token(key_service, "OneDrive")?;
             let tokens: crate::oauth::OAuthTokens = serde_json::from_str(&token_json)
                 .map_err(|e| CloudHomeError::Storage(format!("invalid OAuth token JSON: {e}")))?;
 
@@ -193,10 +203,7 @@ pub async fn create_cloud_home(
                 .clone()
                 .unwrap_or_else(|| "api.pcloud.com".to_string());
 
-            let token_json = key_service.get_cloud_home_oauth_token().ok_or_else(|| {
-                CloudHomeError::Storage("pCloud OAuth token not in keyring".to_string())
-            })?;
-
+            let token_json = require_oauth_token(key_service, "pCloud")?;
             let tokens: crate::oauth::OAuthTokens = serde_json::from_str(&token_json)
                 .map_err(|e| CloudHomeError::Storage(format!("invalid OAuth token JSON: {e}")))?;
 

@@ -94,7 +94,8 @@ impl DropboxCloudHome {
         // Persist to keyring
         let json = serde_json::to_string(&new_tokens)
             .map_err(|e| CloudHomeError::Storage(format!("serialize tokens: {e}")))?;
-        if let Err(e) = self.key_service.set_cloud_home_oauth_token(&json) {
+        let creds = crate::keys::CloudHomeCredentials::OAuth { token_json: json };
+        if let Err(e) = self.key_service.set_cloud_home_credentials(&creds) {
             warn!("Failed to persist refreshed OAuth tokens: {e}");
         }
 
