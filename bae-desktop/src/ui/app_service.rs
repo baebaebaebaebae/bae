@@ -378,20 +378,11 @@ impl AppService {
     fn subscribe_import_progress(&self) {
         let state = self.state;
         let import_handle = self.import_handle.clone();
-        let library_manager = self.library_manager.clone();
-        let imgs = self.image_server.clone();
 
         spawn(async move {
             let mut progress_rx = import_handle.subscribe_all_imports();
             while let Some(event) = progress_rx.recv().await {
-                // Reload library when import completes
-                let should_reload = matches!(event, ImportProgress::Complete { .. });
-
                 handle_import_progress(&state, event);
-
-                if should_reload {
-                    load_library(&state, &library_manager, &imgs).await;
-                }
             }
         });
     }
