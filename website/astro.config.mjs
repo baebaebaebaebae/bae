@@ -8,7 +8,7 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'bae',
-			description: 'Album-oriented desktop music player',
+			description: 'Music library manager with encrypted sync and sharing',
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/bae-fm/bae' }
 			],
@@ -32,7 +32,6 @@ export default defineConfig({
 					label: 'Storage',
 					items: [
 						{ label: 'Overview', slug: 'storage/overview' },
-						{ label: 'Profiles', slug: 'storage/profiles' },
 						{ label: 'Sync', slug: 'storage/sync' },
 						{ label: 'Encryption', slug: 'storage/encryption' },
 					],
@@ -42,7 +41,8 @@ export default defineConfig({
 					items: [
 						{ label: 'Browsing', slug: 'library/browsing' },
 						{ label: 'Metadata', slug: 'library/metadata' },
-						{ label: 'Sharing', slug: 'library/sharing' },
+						{ label: 'Share Links', slug: 'library/share-links' },
+						{ label: 'Sharing a Library', slug: 'library/sharing' },
 						{ label: 'Share Grants', slug: 'library/share-grants' },
 					],
 				},

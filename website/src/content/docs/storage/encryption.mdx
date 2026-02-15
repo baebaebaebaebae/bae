@@ -3,7 +3,7 @@ title: Encryption
 description: How bae encrypts your data
 ---
 
-bae encrypts your music files and library metadata before they leave your machine. The bucket provider stores ciphertext only.
+bae encrypts your music files and library metadata before they leave your machine. The storage provider sees ciphertext only.
 
 ## Library key
 
@@ -31,7 +31,7 @@ New imports use per-release derived keys by default. Legacy files encrypted with
 
 ## Sync bucket encryption
 
-Everything in the sync bucket is encrypted:
+Everything in the cloud home is encrypted:
 
 - **Changesets** — encrypted with the library key
 - **Snapshots** — encrypted with the library key
@@ -39,7 +39,7 @@ Everything in the sync bucket is encrypted:
 - **Membership entries** — encrypted with the library key
 - **Wrapped keys** — encrypted to individual members via sealed boxes (see [Sharing](/library/sharing))
 
-Head files (per-device sequence numbers) are also encrypted. The bucket provider sees only opaque blobs and key paths.
+Head files (per-device sequence numbers) are also encrypted. The storage provider sees only opaque blobs and key paths.
 
 ## Key management
 

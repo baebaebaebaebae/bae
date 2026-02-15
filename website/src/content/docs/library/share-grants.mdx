@@ -10,7 +10,7 @@ Share grants let you share a single release with someone without giving them acc
 A share grant is a self-contained token that gives the recipient access to one release. It contains:
 
 - The release's per-release encryption key (derived via HKDF, not your master key)
-- Your sync bucket coordinates so they can fetch the files
+- Your cloud home coordinates so they can fetch the files
 - Optionally, S3 credentials for bucket access
 - An expiration date (optional)
 - Your signature, so the recipient can verify it came from you
@@ -37,7 +37,7 @@ When you receive a share grant:
 3. The encrypted payload is unwrapped with your private key
 4. The release becomes available in your library
 
-The shared release plays back directly from the sharer's sync bucket. You don't need to download or store the files yourself.
+The shared release plays back directly from the sharer's cloud home. You don't need to download or store the files yourself.
 
 ## Security properties
 
