@@ -35,10 +35,8 @@ impl PCloudCloudHome {
 
     pub fn oauth_config() -> OAuthConfig {
         OAuthConfig {
-            // Placeholder: the actual client_id is set per-deployment.
-            client_id: String::new(),
-            // pCloud requires client_secret (no PKCE support). Set per-deployment.
-            client_secret: Some(String::new()),
+            client_id: std::env::var("BAE_PCLOUD_CLIENT_ID").unwrap_or_default(),
+            client_secret: Some(std::env::var("BAE_PCLOUD_CLIENT_SECRET").unwrap_or_default()),
             auth_url: "https://my.pcloud.com/oauth2/authorize".to_string(),
             // Token URL needs the api_host, but at OAuth time we don't know
             // the region yet. The authorize endpoint works from either host.

@@ -33,11 +33,9 @@ impl GoogleDriveCloudHome {
         }
     }
 
-    fn oauth_config() -> OAuthConfig {
+    pub fn oauth_config() -> OAuthConfig {
         OAuthConfig {
-            // Placeholder: the actual client_id is set per-deployment.
-            // In production this comes from the app's Google Cloud Console project.
-            client_id: String::new(),
+            client_id: std::env::var("BAE_GOOGLE_DRIVE_CLIENT_ID").unwrap_or_default(),
             client_secret: None,
             auth_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
             token_url: "https://oauth2.googleapis.com/token".to_string(),
