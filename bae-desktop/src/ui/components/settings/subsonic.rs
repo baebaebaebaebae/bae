@@ -25,14 +25,14 @@ pub fn SubsonicSection() -> Element {
 
     // Read config from Store
     let config_store = app.state.config();
-    let store_enabled = *config_store.subsonic_enabled().read();
-    let store_port = *config_store.subsonic_port().read();
+    let store_enabled = *config_store.server_enabled().read();
+    let store_port = *config_store.server_port().read();
     let store_share_base_url = config_store.share_base_url().read().clone();
     let store_share_expiry = *config_store.share_default_expiry_days().read();
     let store_share_version = *config_store.share_signing_key_version().read();
-    let store_auth_enabled = *config_store.subsonic_auth_enabled().read();
-    let store_username = config_store.subsonic_username().read().clone();
-    let store_password_set = app.key_service.get_subsonic_password().is_some();
+    let store_auth_enabled = *config_store.server_auth_enabled().read();
+    let store_username = config_store.server_username().read().clone();
+    let store_password_set = app.key_service.get_server_password().is_some();
 
     // Server settings edit state
     let mut is_editing = use_signal(|| false);
@@ -81,7 +81,7 @@ pub fn SubsonicSection() -> Element {
 
             // Save password to keyring if changed
             if !new_password.is_empty() {
-                if let Err(e) = app.key_service.set_subsonic_password(&new_password) {
+                if let Err(e) = app.key_service.set_server_password(&new_password) {
                     save_error.set(Some(format!("Failed to save password: {}", e)));
                     is_saving.set(false);
                     return;
@@ -90,16 +90,16 @@ pub fn SubsonicSection() -> Element {
 
             // If auth is being disabled, clean up the password from keyring
             if !new_auth_enabled && store_auth_enabled {
-                if let Err(e) = app.key_service.delete_subsonic_password() {
-                    tracing::warn!("Failed to delete subsonic password: {}", e);
+                if let Err(e) = app.key_service.delete_server_password() {
+                    tracing::warn!("Failed to delete server password: {}", e);
                 }
             }
 
             app.save_config(move |config| {
-                config.subsonic_enabled = new_enabled;
-                config.subsonic_port = new_port;
-                config.subsonic_auth_enabled = new_auth_enabled;
-                config.subsonic_username = if new_auth_enabled && !new_username.is_empty() {
+                config.server_enabled = new_enabled;
+                config.server_port = new_port;
+                config.server_auth_enabled = new_auth_enabled;
+                config.server_username = if new_auth_enabled && !new_username.is_empty() {
                     Some(new_username)
                 } else {
                     None

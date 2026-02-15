@@ -24,6 +24,7 @@ pub fn LibrarySectionView(
     on_join: EventHandler<()>,
     on_follow: EventHandler<()>,
     on_unfollow: EventHandler<String>,
+    on_copy_follow_code: EventHandler<String>,
     on_switch_source: EventHandler<LibrarySource>,
     on_rename: EventHandler<(String, String)>,
     on_remove: EventHandler<String>,
@@ -227,6 +228,7 @@ pub fn LibrarySectionView(
                             {
                                 let flib_id = flib.id.clone();
                                 let flib_id_switch = flib.id.clone();
+                                let flib_id_copy = flib.id.clone();
                                 let flib_id_confirm = flib.id.clone();
                                 let is_active = active_source == LibrarySource::Followed(flib.id.clone());
                                 let is_confirming = confirming_unfollow.read().as_ref() == Some(&flib.id);
@@ -256,6 +258,11 @@ pub fn LibrarySectionView(
                                                     onclick: move |_| on_switch_source.call(LibrarySource::Followed(flib_id_switch.clone())),
                                                     "Browse"
                                                 }
+                                            }
+                                            button {
+                                                class: "px-2 py-1 text-xs text-gray-400 hover:text-white transition-colors",
+                                                onclick: move |_| on_copy_follow_code.call(flib_id_copy.clone()),
+                                                "Copy Code"
                                             }
                                             if is_confirming {
                                                 span { class: "text-xs text-red-400 mr-1", "Unfollow?" }

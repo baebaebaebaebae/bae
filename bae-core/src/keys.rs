@@ -483,20 +483,20 @@ impl KeyService {
     }
 
     // -------------------------------------------------------------------------
-    // Subsonic password (library-scoped)
+    // Server password (library-scoped)
     // -------------------------------------------------------------------------
 
-    /// Read the Subsonic password. Returns None if not set.
+    /// Read the server password. Returns None if not set.
     ///
-    /// Dev mode: reads `BAE_SUBSONIC_PASSWORD` env var.
+    /// Dev mode: reads `BAE_SERVER_PASSWORD` env var.
     /// Prod mode: reads from OS keyring.
-    pub fn get_subsonic_password(&self) -> Option<String> {
+    pub fn get_server_password(&self) -> Option<String> {
         if self.dev_mode {
-            std::env::var("BAE_SUBSONIC_PASSWORD")
+            std::env::var("BAE_SERVER_PASSWORD")
                 .ok()
                 .filter(|k| !k.is_empty())
         } else {
-            let account = self.account("subsonic_password");
+            let account = self.account("server_password");
             keyring_core::Entry::new("bae", &account)
                 .ok()
                 .and_then(|e| e.get_password().ok())
@@ -504,37 +504,37 @@ impl KeyService {
         }
     }
 
-    /// Save the Subsonic password to the OS keyring.
+    /// Save the server password to the OS keyring.
     ///
     /// Dev mode: sets the env var.
     /// Prod mode: writes to OS keyring.
-    pub fn set_subsonic_password(&self, password: &str) -> Result<(), KeyError> {
+    pub fn set_server_password(&self, password: &str) -> Result<(), KeyError> {
         if self.dev_mode {
-            std::env::set_var("BAE_SUBSONIC_PASSWORD", password);
+            std::env::set_var("BAE_SERVER_PASSWORD", password);
             return Ok(());
         }
 
-        let account = self.account("subsonic_password");
+        let account = self.account("server_password");
         keyring_core::Entry::new("bae", &account)?.set_password(password)?;
 
-        info!("Subsonic password saved to keyring");
+        info!("Server password saved to keyring");
         Ok(())
     }
 
-    /// Delete the Subsonic password from the OS keyring.
+    /// Delete the server password from the OS keyring.
     ///
     /// Dev mode: removes env var.
     /// Prod mode: deletes from OS keyring. Silently ignores missing entries.
-    pub fn delete_subsonic_password(&self) -> Result<(), KeyError> {
+    pub fn delete_server_password(&self) -> Result<(), KeyError> {
         if self.dev_mode {
-            std::env::remove_var("BAE_SUBSONIC_PASSWORD");
+            std::env::remove_var("BAE_SERVER_PASSWORD");
             return Ok(());
         }
 
-        let account = self.account("subsonic_password");
+        let account = self.account("server_password");
         match keyring_core::Entry::new("bae", &account)?.delete_credential() {
             Ok(()) => {
-                info!("Subsonic password deleted from keyring");
+                info!("Server password deleted from keyring");
                 Ok(())
             }
             Err(keyring_core::Error::NoEntry) => Ok(()),

@@ -29,6 +29,7 @@ pub fn Settings() -> Element {
                         on_join: |_| {},
                         on_follow: |_| {},
                         on_unfollow: |_| {},
+                        on_copy_follow_code: |_| {},
                         on_switch_source: |_| {},
                         on_rename: |_| {},
                         on_remove: |_| {},

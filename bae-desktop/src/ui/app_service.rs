@@ -525,24 +525,21 @@ impl AppService {
             .set(config.encryption_key_fingerprint.clone());
         self.state
             .config()
-            .subsonic_enabled()
-            .set(config.subsonic_enabled);
+            .server_enabled()
+            .set(config.server_enabled);
+        self.state.config().server_port().set(config.server_port);
         self.state
             .config()
-            .subsonic_port()
-            .set(config.subsonic_port);
+            .server_bind_address()
+            .set(config.server_bind_address.clone());
         self.state
             .config()
-            .subsonic_bind_address()
-            .set(config.subsonic_bind_address.clone());
+            .server_auth_enabled()
+            .set(config.server_auth_enabled);
         self.state
             .config()
-            .subsonic_auth_enabled()
-            .set(config.subsonic_auth_enabled);
-        self.state
-            .config()
-            .subsonic_username()
-            .set(config.subsonic_username.clone());
+            .server_username()
+            .set(config.server_username.clone());
         self.state
             .config()
             .torrent_bind_interface()
@@ -699,7 +696,7 @@ impl AppService {
         });
     }
 
-    /// Load albums from a followed Subsonic server into the library state.
+    /// Load albums from a followed server into the library state.
     pub fn load_followed_library(&self, followed_id: &str) {
         let state = self.state;
         let key_service = self.key_service.clone();
@@ -733,6 +730,29 @@ impl AppService {
             load_followed_library(&state, &followed.server_url, &followed.username, &password)
                 .await;
         });
+    }
+
+    /// Generate a follow code for an existing followed library.
+    pub fn generate_follow_code(&self, followed_id: &str) -> Result<String, String> {
+        // Read from the Store (not the stale boot-time config) so newly-added
+        // followed libraries are found during the same session.
+        let followed_libs = self.state.read().config.followed_libraries.clone();
+        let followed = followed_libs
+            .iter()
+            .find(|f| f.id == followed_id)
+            .ok_or_else(|| format!("Followed library '{followed_id}' not found"))?;
+
+        let password = self
+            .key_service
+            .get_followed_password(followed_id)
+            .ok_or_else(|| "No password found for followed library".to_string())?;
+
+        Ok(bae_core::follow_code::encode(
+            &followed.server_url,
+            &followed.username,
+            &password,
+            Some(&followed.name),
+        ))
     }
 
     // =========================================================================
@@ -1156,24 +1176,24 @@ impl AppService {
             .set(new_config.encryption_key_fingerprint.clone());
         self.state
             .config()
-            .subsonic_enabled()
-            .set(new_config.subsonic_enabled);
+            .server_enabled()
+            .set(new_config.server_enabled);
         self.state
             .config()
-            .subsonic_port()
-            .set(new_config.subsonic_port);
+            .server_port()
+            .set(new_config.server_port);
         self.state
             .config()
-            .subsonic_bind_address()
-            .set(new_config.subsonic_bind_address.clone());
+            .server_bind_address()
+            .set(new_config.server_bind_address.clone());
         self.state
             .config()
-            .subsonic_auth_enabled()
-            .set(new_config.subsonic_auth_enabled);
+            .server_auth_enabled()
+            .set(new_config.server_auth_enabled);
         self.state
             .config()
-            .subsonic_username()
-            .set(new_config.subsonic_username.clone());
+            .server_username()
+            .set(new_config.server_username.clone());
         self.state
             .config()
             .torrent_bind_interface()
