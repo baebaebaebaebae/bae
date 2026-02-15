@@ -1,14 +1,14 @@
 //! Storage abstraction layer
 //!
-//! Provides flexible storage options for releases. Storage is configured via
-//! StorageProfile (location + encrypted) and implemented by a single
-//! ReleaseStorageImpl that applies transforms based on the profile.
+//! Provides local managed storage for releases. Files are stored at
+//! content-addressed paths under `storage/{ab}/{cd}/{file_id}` with
+//! optional encryption.
 pub mod cleanup;
 mod reader;
 mod traits;
 pub mod transfer;
 
-pub use reader::create_storage_reader;
+pub use reader::LocalFileStorage;
 pub use traits::{ReleaseStorage, ReleaseStorageImpl};
 
 /// Hash-based storage path for a file: `storage/{ab}/{cd}/{file_id}`

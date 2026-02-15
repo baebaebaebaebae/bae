@@ -2,11 +2,12 @@ use crate::cache::CacheManager;
 use crate::cloud_storage::CloudStorageError;
 use crate::db::{
     Database, DbAlbum, DbAlbumArtist, DbArtist, DbAudioFormat, DbFile, DbImport, DbLibraryImage,
-    DbRelease, DbStorageProfile, DbTorrent, DbTrack, DbTrackArtist, ImportOperationStatus,
-    ImportStatus, LibraryImageType, LibrarySearchResults, StorageLocation,
+    DbRelease, DbTorrent, DbTrack, DbTrackArtist, ImportOperationStatus, ImportStatus,
+    LibraryImageType, LibrarySearchResults,
 };
 use crate::encryption::EncryptionService;
 use crate::library::export::ExportService;
+use crate::library_dir::LibraryDir;
 use crate::storage::cleanup::{append_pending_deletions, PendingDeletion};
 use std::path::Path;
 use thiserror::Error;
@@ -243,19 +244,6 @@ impl LibraryManager {
         Ok(self.database.get_audio_format_by_track_id(track_id).await?)
     }
 
-    /// Batch-update source_path (and encryption fields) on existing file records.
-    ///
-    /// All updates are applied in a single transaction.
-    pub async fn batch_update_file_source_paths(
-        &self,
-        updates: &[(&str, &str, Option<&[u8]>, &str)],
-    ) -> Result<(), LibraryError> {
-        Ok(self
-            .database
-            .batch_update_file_source_paths(updates)
-            .await?)
-    }
-
     /// Get release ID for a track
     pub async fn get_release_id_for_track(&self, track_id: &str) -> Result<String, LibraryError> {
         let track = self
@@ -426,19 +414,19 @@ impl LibraryManager {
         Ok(())
     }
 
-    /// Queue all files for a release into the pending deletions manifest.
+    /// Queue all locally-managed files for a release into the pending deletions manifest.
     ///
-    /// Only queues files that have a storage profile (bae-managed storage).
-    /// Self-managed files (no profile) are left untouched.
-    async fn queue_release_files_for_deletion(&self, release_id: &str, library_path: &Path) {
-        let profile = match self
-            .database
-            .get_storage_profile_for_release(release_id)
-            .await
-        {
-            Ok(Some(profile)) => profile,
+    /// Only queues files for releases with `managed_locally = true`.
+    /// Unmanaged files and cloud-only files are left untouched.
+    async fn queue_release_files_for_deletion(&self, release_id: &str, library_dir: &LibraryDir) {
+        let release = match self.database.get_release_by_id(release_id).await {
+            Ok(Some(r)) => r,
             _ => return,
         };
+
+        if !release.managed_locally {
+            return;
+        }
 
         let files = match self.get_files_for_release(release_id).await {
             Ok(files) => files,
@@ -450,23 +438,13 @@ impl LibraryManager {
 
         let pending: Vec<PendingDeletion> = files
             .iter()
-            .filter_map(|f| {
-                let source_path = f.source_path.as_ref()?;
-                if profile.location == StorageLocation::Cloud {
-                    Some(PendingDeletion::Cloud {
-                        profile_id: profile.id.clone(),
-                        key: source_path.clone(),
-                    })
-                } else {
-                    Some(PendingDeletion::Local {
-                        path: source_path.clone(),
-                    })
-                }
+            .map(|f| PendingDeletion::Local {
+                path: f.local_storage_path(library_dir).display().to_string(),
             })
             .collect();
 
         if !pending.is_empty() {
-            if let Err(e) = append_pending_deletions(library_path, &pending).await {
+            if let Err(e) = append_pending_deletions(library_dir.as_ref(), &pending).await {
                 warn!("Failed to queue deferred deletions: {}", e);
             }
         }
@@ -484,12 +462,12 @@ impl LibraryManager {
     pub async fn delete_release(
         &self,
         release_id: &str,
-        library_path: &Path,
+        library_dir: &LibraryDir,
     ) -> Result<(), LibraryError> {
         let album_id = self.get_album_id_for_release(release_id).await?;
 
         // Queue files for deferred deletion before removing DB records
-        self.queue_release_files_for_deletion(release_id, library_path)
+        self.queue_release_files_for_deletion(release_id, library_dir)
             .await;
 
         self.database.delete_release(release_id).await?;
@@ -516,11 +494,11 @@ impl LibraryManager {
     pub async fn delete_album(
         &self,
         album_id: &str,
-        library_path: &Path,
+        library_dir: &LibraryDir,
     ) -> Result<(), LibraryError> {
         let releases = self.get_releases_for_album(album_id).await?;
         for release in &releases {
-            self.queue_release_files_for_deletion(&release.id, library_path)
+            self.queue_release_files_for_deletion(&release.id, library_dir)
                 .await;
         }
 
@@ -540,7 +518,7 @@ impl LibraryManager {
         release_id: &str,
         target_dir: &Path,
         cache: &CacheManager,
-        key_service: &crate::keys::KeyService,
+        library_dir: &LibraryDir,
     ) -> Result<(), LibraryError> {
         ExportService::export_release(
             release_id,
@@ -548,7 +526,7 @@ impl LibraryManager {
             self,
             cache,
             self.encryption_service.as_ref(),
-            key_service,
+            library_dir,
         )
         .await
         .map_err(LibraryError::Import)
@@ -562,27 +540,11 @@ impl LibraryManager {
         track_id: &str,
         output_path: &Path,
         cache: &CacheManager,
-        key_service: &crate::keys::KeyService,
     ) -> Result<(), LibraryError> {
-        // Get storage profile for track's release
-        let track = self
-            .get_track(track_id)
-            .await?
-            .ok_or_else(|| LibraryError::Import(format!("Track not found: {}", track_id)))?;
-        let storage_profile = self
-            .database
-            .get_storage_profile_for_release(&track.release_id)
-            .await?
-            .ok_or_else(|| LibraryError::Import("No storage profile for release".to_string()))?;
-        let storage = crate::storage::create_storage_reader(&storage_profile, key_service)
-            .await
-            .map_err(LibraryError::CloudStorage)?;
-
         ExportService::export_track(
             track_id,
             output_path,
             self,
-            storage,
             cache,
             self.encryption_service.as_ref(),
         )
@@ -617,64 +579,6 @@ impl LibraryManager {
             .find_album_by_mb_ids(release_id, release_group_id)
             .await?)
     }
-    /// Get all storage profiles
-    pub async fn get_all_storage_profiles(&self) -> Result<Vec<DbStorageProfile>, LibraryError> {
-        Ok(self.database.get_all_storage_profiles().await?)
-    }
-    /// Get the default storage profile
-    pub async fn get_default_storage_profile(
-        &self,
-    ) -> Result<Option<DbStorageProfile>, LibraryError> {
-        Ok(self.database.get_default_storage_profile().await?)
-    }
-    /// Insert a new storage profile
-    pub async fn insert_storage_profile(
-        &self,
-        profile: &DbStorageProfile,
-    ) -> Result<(), LibraryError> {
-        Ok(self.database.insert_storage_profile(profile).await?)
-    }
-    /// Set a profile as the default
-    pub async fn set_default_storage_profile(&self, profile_id: &str) -> Result<(), LibraryError> {
-        Ok(self
-            .database
-            .set_default_storage_profile(profile_id)
-            .await?)
-    }
-    /// Update a storage profile
-    pub async fn update_storage_profile(
-        &self,
-        profile: &DbStorageProfile,
-    ) -> Result<(), LibraryError> {
-        Ok(self.database.update_storage_profile(profile).await?)
-    }
-    /// Delete a storage profile
-    pub async fn delete_storage_profile(&self, profile_id: &str) -> Result<(), LibraryError> {
-        Ok(self.database.delete_storage_profile(profile_id).await?)
-    }
-    /// Get the storage profile for a release
-    pub async fn get_storage_profile_for_release(
-        &self,
-        release_id: &str,
-    ) -> Result<Option<DbStorageProfile>, LibraryError> {
-        Ok(self
-            .database
-            .get_storage_profile_for_release(release_id)
-            .await?)
-    }
-    /// Delete release storage link
-    pub async fn delete_release_storage(&self, release_id: &str) -> Result<(), LibraryError> {
-        Ok(self.database.delete_release_storage(release_id).await?)
-    }
-
-    /// Set release storage link (insert or replace atomically)
-    pub async fn set_release_storage(
-        &self,
-        release_storage: &crate::db::DbReleaseStorage,
-    ) -> Result<(), LibraryError> {
-        Ok(self.database.set_release_storage(release_storage).await?)
-    }
-
     /// Insert a new import operation record
     pub async fn insert_import(&self, import: &DbImport) -> Result<(), LibraryError> {
         Ok(self.database.insert_import(import).await?)
@@ -721,13 +625,14 @@ mod tests {
     use tempfile::TempDir;
     use uuid::Uuid;
 
-    async fn setup_test_manager() -> (LibraryManager, TempDir) {
+    async fn setup_test_manager() -> (LibraryManager, TempDir, LibraryDir) {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
         let database = Database::new(db_path.to_str().unwrap()).await.unwrap();
         let encryption_service = EncryptionService::new_with_key(&[0u8; 32]);
         let manager = LibraryManager::new(database, Some(encryption_service));
-        (manager, temp_dir)
+        let library_dir = LibraryDir::new(temp_dir.path().to_path_buf());
+        (manager, temp_dir, library_dir)
     }
 
     fn create_test_album() -> DbAlbum {
@@ -759,6 +664,9 @@ mod tests {
             country: None,
             barcode: None,
             import_status: ImportStatus::Complete,
+            managed_locally: false,
+            managed_in_cloud: false,
+            unmanaged_path: None,
             private: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -767,7 +675,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_release_with_single_release_deletes_album() {
-        let (manager, temp_dir) = setup_test_manager().await;
+        let (manager, _temp_dir, library_dir) = setup_test_manager().await;
         let album = create_test_album();
         let release = create_test_release(&album.id);
 
@@ -775,7 +683,7 @@ mod tests {
         manager.database.insert_release(&release).await.unwrap();
 
         manager
-            .delete_release(&release.id, temp_dir.path())
+            .delete_release(&release.id, &library_dir)
             .await
             .unwrap();
 
@@ -791,7 +699,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_release_with_multiple_releases_preserves_album() {
-        let (manager, temp_dir) = setup_test_manager().await;
+        let (manager, _temp_dir, library_dir) = setup_test_manager().await;
         let album = create_test_album();
         let release1 = create_test_release(&album.id);
         let release2 = create_test_release(&album.id);
@@ -801,7 +709,7 @@ mod tests {
         manager.database.insert_release(&release2).await.unwrap();
 
         manager
-            .delete_release(&release1.id, temp_dir.path())
+            .delete_release(&release1.id, &library_dir)
             .await
             .unwrap();
 
@@ -818,7 +726,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_album_deletes_all_releases() {
-        let (manager, temp_dir) = setup_test_manager().await;
+        let (manager, _temp_dir, library_dir) = setup_test_manager().await;
         let album = create_test_album();
         let release1 = create_test_release(&album.id);
         let release2 = create_test_release(&album.id);
@@ -827,10 +735,7 @@ mod tests {
         manager.database.insert_release(&release1).await.unwrap();
         manager.database.insert_release(&release2).await.unwrap();
 
-        manager
-            .delete_album(&album.id, temp_dir.path())
-            .await
-            .unwrap();
+        manager.delete_album(&album.id, &library_dir).await.unwrap();
 
         let album_result = manager.database.get_album_by_id(&album.id).await.unwrap();
         assert!(album_result.is_none());

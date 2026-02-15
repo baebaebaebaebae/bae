@@ -69,5 +69,8 @@ pub fn release_from_db_ref(db: &DbRelease) -> Release {
         barcode: db.barcode.clone(),
         discogs_release_id: db.discogs_release_id.clone(),
         musicbrainz_release_id: None,
+        managed_locally: db.managed_locally,
+        managed_in_cloud: db.managed_in_cloud,
+        unmanaged_path: db.unmanaged_path.clone(),
     }
 }

@@ -204,12 +204,35 @@ async fn handle_file(
         }
     };
 
-    let source_path = match &file.source_path {
-        Some(p) => p.clone(),
-        None => {
-            warn!("File {} has no source_path", file_id);
+    // Derive path from the release's storage flags
+    let release = match state
+        .library_manager
+        .get()
+        .database()
+        .get_release_by_id(&file.release_id)
+        .await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            warn!("Release not found for file {}", file_id);
             return StatusCode::NOT_FOUND.into_response();
         }
+        Err(e) => {
+            warn!(
+                "Database error looking up release for file {}: {}",
+                file_id, e
+            );
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let source_path = if release.managed_locally {
+        file.local_storage_path(&state.library_dir)
+    } else if let Some(ref unmanaged_path) = release.unmanaged_path {
+        StdPath::new(unmanaged_path).join(&file.original_filename)
+    } else {
+        warn!("File {} has no readable location", file_id);
+        return StatusCode::NOT_FOUND.into_response();
     };
 
     match tokio::fs::read(&source_path).await {
@@ -223,7 +246,7 @@ async fn handle_file(
                 .into_response()
         }
         Err(e) => {
-            warn!("Failed to read file {}: {}", source_path, e);
+            warn!("Failed to read file {}: {}", source_path.display(), e);
             StatusCode::NOT_FOUND.into_response()
         }
     }

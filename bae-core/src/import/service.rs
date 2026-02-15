@@ -7,7 +7,7 @@ use crate::content_type::ContentType;
 use crate::db::DbAlbum;
 #[cfg(feature = "cd-rip")]
 use crate::db::DbTrack;
-use crate::db::{Database, DbFile, DbRelease, DbStorageProfile};
+use crate::db::{Database, DbFile, DbRelease};
 use crate::encryption::EncryptionService;
 use crate::import::folder_scanner::scan_for_candidates_with_callback;
 #[cfg(feature = "torrent")]
@@ -84,13 +84,8 @@ pub struct ImportService {
     torrent_manager: LazyTorrentManager,
     /// Database for storage operations
     database: Arc<Database>,
-    /// Key service for reading S3 credentials from the OS keyring
-    key_service: KeyService,
     /// Library directory (for cover art cache)
     library_dir: LibraryDir,
-    /// Optional pre-built cloud storage (for testing with MockCloudStorage)
-    #[cfg(feature = "test-utils")]
-    injected_cloud: Option<Arc<dyn crate::cloud_storage::CloudStorage>>,
 }
 
 impl ImportService {
@@ -151,8 +146,6 @@ impl ImportService {
         let library_manager_for_worker = library_manager.clone();
         let database_for_handle = database.clone();
         let library_dir_for_handle = library_dir.clone();
-        let key_service_for_worker = key_service.clone();
-
         ImportService::start_scan_worker(&runtime_handle, scan_rx, scan_events_tx.clone());
 
         std::thread::spawn(move || {
@@ -165,10 +158,7 @@ impl ImportService {
                     encryption_service,
                     torrent_manager,
                     database,
-                    key_service: key_service_for_worker,
                     library_dir,
-                    #[cfg(feature = "test-utils")]
-                    injected_cloud: None,
                 };
 
                 info!("Worker started");
@@ -218,7 +208,6 @@ impl ImportService {
         let library_manager_for_worker = library_manager.clone();
         let database_for_handle = database.clone();
         let library_dir_for_handle = library_dir.clone();
-        let key_service_for_worker = key_service.clone();
 
         ImportService::start_scan_worker(&runtime_handle, scan_rx, scan_events_tx.clone());
 
@@ -231,10 +220,7 @@ impl ImportService {
                     library_manager: library_manager_for_worker,
                     encryption_service,
                     database,
-                    key_service: key_service_for_worker,
                     library_dir,
-                    #[cfg(feature = "test-utils")]
-                    injected_cloud: None,
                 };
 
                 info!("Worker started");
@@ -266,138 +252,6 @@ impl ImportService {
         )
     }
 
-    /// Start the import service with an injected cloud storage (for testing).
-    #[cfg(all(feature = "test-utils", feature = "torrent"))]
-    #[allow(dead_code)] // Used by integration tests
-    pub fn start_with_cloud(
-        _runtime_handle: tokio::runtime::Handle,
-        library_manager: SharedLibraryManager,
-        encryption_service: Option<EncryptionService>,
-        torrent_manager: LazyTorrentManager,
-        database: Arc<Database>,
-        cloud: Arc<dyn crate::cloud_storage::CloudStorage>,
-    ) -> ImportServiceHandle {
-        let (commands_tx, commands_rx) = mpsc::unbounded_channel();
-        let (progress_tx, progress_rx) = mpsc::unbounded_channel();
-        let (scan_tx, scan_rx) = mpsc::unbounded_channel();
-        let (scan_events_tx, _) = broadcast::channel(64);
-        let progress_tx_for_handle = progress_tx.clone();
-        let library_manager_for_worker = library_manager.clone();
-        let database_for_handle = database.clone();
-        let runtime_handle = tokio::runtime::Handle::current();
-
-        ImportService::start_scan_worker(&runtime_handle, scan_rx, scan_events_tx.clone());
-
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-            rt.block_on(async move {
-                let mut service = ImportService {
-                    commands_rx,
-                    progress_tx,
-                    library_manager: library_manager_for_worker,
-                    encryption_service,
-                    torrent_manager,
-                    database,
-                    key_service: KeyService::new(true, "test".to_string()),
-                    library_dir: LibraryDir::new(std::env::temp_dir().join("bae-test-covers")),
-                    injected_cloud: Some(cloud),
-                };
-
-                info!("Worker started (with injected cloud)");
-                loop {
-                    match service.commands_rx.recv().await {
-                        Some(command) => {
-                            service.do_import(command).await;
-                        }
-                        None => {
-                            info!("Worker receive channel closed");
-                            break;
-                        }
-                    }
-                }
-            });
-        });
-
-        ImportServiceHandle::new(
-            commands_tx,
-            progress_tx_for_handle,
-            progress_rx,
-            library_manager,
-            database_for_handle,
-            runtime_handle,
-            scan_tx,
-            scan_events_tx,
-            // Tests always run in dev mode
-            KeyService::new(true, "test".to_string()),
-            LibraryDir::new(std::env::temp_dir().join("bae-test-covers")),
-        )
-    }
-
-    /// Start the import service with an injected cloud storage (for testing, without torrent).
-    #[cfg(all(feature = "test-utils", not(feature = "torrent")))]
-    #[allow(dead_code)] // Used by integration tests
-    pub fn start_with_cloud(
-        _runtime_handle: tokio::runtime::Handle,
-        library_manager: SharedLibraryManager,
-        encryption_service: Option<EncryptionService>,
-        database: Arc<Database>,
-        cloud: Arc<dyn crate::cloud_storage::CloudStorage>,
-    ) -> ImportServiceHandle {
-        let (commands_tx, commands_rx) = mpsc::unbounded_channel();
-        let (progress_tx, progress_rx) = mpsc::unbounded_channel();
-        let (scan_tx, scan_rx) = mpsc::unbounded_channel();
-        let (scan_events_tx, _) = broadcast::channel(64);
-        let progress_tx_for_handle = progress_tx.clone();
-        let library_manager_for_worker = library_manager.clone();
-        let database_for_handle = database.clone();
-        let runtime_handle = tokio::runtime::Handle::current();
-
-        ImportService::start_scan_worker(&runtime_handle, scan_rx, scan_events_tx.clone());
-
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-            rt.block_on(async move {
-                let mut service = ImportService {
-                    commands_rx,
-                    progress_tx,
-                    library_manager: library_manager_for_worker,
-                    encryption_service,
-                    database,
-                    key_service: KeyService::new(true, "test".to_string()),
-                    library_dir: LibraryDir::new(std::env::temp_dir().join("bae-test-covers")),
-                    injected_cloud: Some(cloud),
-                };
-
-                info!("Worker started (with injected cloud)");
-                loop {
-                    match service.commands_rx.recv().await {
-                        Some(command) => {
-                            service.do_import(command).await;
-                        }
-                        None => {
-                            info!("Worker receive channel closed");
-                            break;
-                        }
-                    }
-                }
-            });
-        });
-
-        ImportServiceHandle::new(
-            commands_tx,
-            progress_tx_for_handle,
-            progress_rx,
-            library_manager,
-            database_for_handle,
-            runtime_handle,
-            scan_tx,
-            scan_events_tx,
-            // Tests always run in dev mode
-            KeyService::new(true, "test".to_string()),
-            LibraryDir::new(std::env::temp_dir().join("bae-test-covers")),
-        )
-    }
-
     async fn do_import(&self, command: ImportCommand) {
         let (release_id_for_error, import_id_for_error) = match &command {
             ImportCommand::Folder {
@@ -418,44 +272,34 @@ impl ImportService {
                 tracks_to_files,
                 discovered_files,
                 cue_flac_metadata,
-                storage_profile_id,
+                managed,
                 cover_image_path,
                 remote_cover_set,
                 import_id,
             } => {
                 info!("Starting folder import for '{}'", db_album.title);
-                match storage_profile_id {
-                    Some(profile_id) => {
-                        match self.database.get_storage_profile(&profile_id).await {
-                            Ok(Some(profile)) => {
-                                self.run_storage_import(
-                                    &db_release,
-                                    &discovered_files,
-                                    &tracks_to_files,
-                                    cue_flac_metadata,
-                                    profile,
-                                    cover_image_path.as_deref(),
-                                    &import_id,
-                                    remote_cover_set,
-                                )
-                                .await
-                            }
-                            Ok(None) => Err(format!("Storage profile not found: {}", profile_id)),
-                            Err(e) => Err(format!("Failed to fetch storage profile: {}", e)),
-                        }
-                    }
-                    None => {
-                        self.run_none_import(
-                            &db_release,
-                            &discovered_files,
-                            &tracks_to_files,
-                            cue_flac_metadata,
-                            cover_image_path.as_deref(),
-                            &import_id,
-                            remote_cover_set,
-                        )
-                        .await
-                    }
+                if managed {
+                    self.run_storage_import(
+                        &db_release,
+                        &discovered_files,
+                        &tracks_to_files,
+                        cue_flac_metadata,
+                        cover_image_path.as_deref(),
+                        &import_id,
+                        remote_cover_set,
+                    )
+                    .await
+                } else {
+                    self.run_none_import(
+                        &db_release,
+                        &discovered_files,
+                        &tracks_to_files,
+                        cue_flac_metadata,
+                        cover_image_path.as_deref(),
+                        &import_id,
+                        remote_cover_set,
+                    )
+                    .await
                 }
             }
             #[cfg(feature = "torrent")]
@@ -466,41 +310,31 @@ impl ImportService {
                 torrent_source,
                 torrent_metadata,
                 seed_after_download,
-                storage_profile_id,
+                managed,
                 selected_cover,
             } => {
                 info!("Starting torrent import for '{}'", db_album.title);
-                match storage_profile_id {
-                    Some(profile_id) => {
-                        match self.database.get_storage_profile(&profile_id).await {
-                            Ok(Some(profile)) => {
-                                self.run_torrent_import(
-                                    db_album,
-                                    db_release,
-                                    tracks_to_files,
-                                    torrent_source,
-                                    torrent_metadata,
-                                    seed_after_download,
-                                    selected_cover,
-                                    profile,
-                                )
-                                .await
-                            }
-                            Ok(None) => Err(format!("Storage profile not found: {}", profile_id)),
-                            Err(e) => Err(format!("Failed to fetch storage profile: {}", e)),
-                        }
-                    }
-                    None => {
-                        self.import_torrent_none_storage(
-                            db_album,
-                            db_release,
-                            tracks_to_files,
-                            torrent_source,
-                            torrent_metadata,
-                            selected_cover,
-                        )
-                        .await
-                    }
+                if managed {
+                    self.run_torrent_import(
+                        db_album,
+                        db_release,
+                        tracks_to_files,
+                        torrent_source,
+                        torrent_metadata,
+                        seed_after_download,
+                        selected_cover,
+                    )
+                    .await
+                } else {
+                    self.import_torrent_none_storage(
+                        db_album,
+                        db_release,
+                        tracks_to_files,
+                        torrent_source,
+                        torrent_metadata,
+                        selected_cover,
+                    )
+                    .await
                 }
             }
             #[cfg(feature = "cd-rip")]
@@ -510,40 +344,30 @@ impl ImportService {
                 db_tracks,
                 drive_path,
                 toc,
-                storage_profile_id,
+                managed,
                 cover_image_path,
             } => {
                 info!("Starting CD import for '{}'", db_album.title);
-                match storage_profile_id {
-                    Some(profile_id) => {
-                        match self.database.get_storage_profile(&profile_id).await {
-                            Ok(Some(profile)) => {
-                                self.run_cd_import(
-                                    db_album,
-                                    db_release,
-                                    db_tracks,
-                                    drive_path,
-                                    toc,
-                                    profile,
-                                    cover_image_path.as_deref(),
-                                )
-                                .await
-                            }
-                            Ok(None) => Err(format!("Storage profile not found: {}", profile_id)),
-                            Err(e) => Err(format!("Failed to fetch storage profile: {}", e)),
-                        }
-                    }
-                    None => {
-                        self.run_cd_import_none_storage(
-                            db_album,
-                            db_release,
-                            db_tracks,
-                            drive_path,
-                            toc,
-                            cover_image_path.as_deref(),
-                        )
-                        .await
-                    }
+                if managed {
+                    self.run_cd_import(
+                        db_album,
+                        db_release,
+                        db_tracks,
+                        drive_path,
+                        toc,
+                        cover_image_path.as_deref(),
+                    )
+                    .await
+                } else {
+                    self.run_cd_import_none_storage(
+                        db_album,
+                        db_release,
+                        db_tracks,
+                        drive_path,
+                        toc,
+                        cover_image_path.as_deref(),
+                    )
+                    .await
                 }
             }
         };
@@ -565,30 +389,13 @@ impl ImportService {
         }
     }
 
-    /// Create a storage implementation from a profile
-    async fn create_storage(
-        &self,
-        profile: DbStorageProfile,
-    ) -> Result<ReleaseStorageImpl, String> {
-        // In tests, use injected cloud if available
-        #[cfg(feature = "test-utils")]
-        if let Some(ref cloud) = self.injected_cloud {
-            return Ok(ReleaseStorageImpl::with_cloud(
-                profile,
-                self.encryption_service.clone(),
-                cloud.clone(),
-                self.database.clone(),
-            ));
-        }
-
-        ReleaseStorageImpl::from_profile(
-            profile,
+    /// Create a storage implementation for managed local storage
+    fn create_storage(&self) -> ReleaseStorageImpl {
+        ReleaseStorageImpl::new_local(
+            self.library_dir.clone(),
             self.encryption_service.clone(),
             self.database.clone(),
-            &self.key_service,
         )
-        .await
-        .map_err(|e| format!("Failed to create storage: {}", e))
     }
 
     /// Analyze CUE/FLAC files once and cache the results for reuse.
@@ -766,17 +573,16 @@ impl ImportService {
         Ok(())
     }
 
-    /// Import files using the storage trait.
+    /// Import files into managed local storage.
     ///
     /// Reads files and calls storage.write_file() for each.
-    /// The storage layer handles encryption and cloud upload based on the profile.
+    /// The storage layer handles encryption based on configuration.
     async fn run_storage_import(
         &self,
         db_release: &DbRelease,
         discovered_files: &[DiscoveredFile],
         tracks_to_files: &[TrackFile],
         cue_flac_metadata: Option<HashMap<PathBuf, CueFlacMetadata>>,
-        storage_profile: DbStorageProfile,
         cover_image_path: Option<&Path>,
         import_id: &str,
         remote_cover_set: bool,
@@ -792,13 +598,13 @@ impl ImportService {
             import_id: Some(import_id.to_string()),
         });
 
-        let release_storage = crate::db::DbReleaseStorage::new(&db_release.id, &storage_profile.id);
+        // Mark release as managed locally
         self.database
-            .set_release_storage(&release_storage)
+            .set_release_managed_locally(&db_release.id, true)
             .await
-            .map_err(|e| format!("Failed to link release to storage profile: {}", e))?;
+            .map_err(|e| format!("Failed to mark release as managed locally: {}", e))?;
 
-        let storage = self.create_storage(storage_profile).await?;
+        let storage = self.create_storage();
         let total_files = discovered_files.len();
 
         info!(
@@ -1318,7 +1124,7 @@ impl ImportService {
         Ok(audio_formats)
     }
 
-    /// Import for None storage: just record file paths, no storage management.
+    /// Import for unmanaged storage: just record file records, files stay in place.
     async fn run_none_import(
         &self,
         db_release: &DbRelease,
@@ -1342,9 +1148,22 @@ impl ImportService {
 
         let total_files = discovered_files.len();
         info!(
-            "Starting None storage import for release {} ({} files)",
+            "Starting unmanaged import for release {} ({} files)",
             db_release.id, total_files
         );
+
+        // Determine the common parent folder for unmanaged_path
+        if let Some(first_file) = discovered_files.first() {
+            if let Some(parent) = first_file.path.parent() {
+                let unmanaged_path = parent
+                    .to_str()
+                    .ok_or_else(|| format!("Cannot convert path to string: {:?}", parent))?;
+                self.database
+                    .set_release_unmanaged(&db_release.id, unmanaged_path)
+                    .await
+                    .map_err(|e| format!("Failed to set unmanaged path: {}", e))?;
+            }
+        }
 
         let file_to_tracks: HashMap<String, Vec<String>> = {
             let mut map: HashMap<String, Vec<String>> = HashMap::new();
@@ -1374,18 +1193,13 @@ impl ImportService {
                 .and_then(|e| e.to_str())
                 .unwrap_or("bin")
                 .to_lowercase();
-            let source_path = file
-                .path
-                .to_str()
-                .ok_or_else(|| format!("Cannot convert path to string: {:?}", file.path))?;
 
             let db_file = DbFile::new(
                 &db_release.id,
                 filename,
                 file.size as i64,
                 ContentType::from_extension(&ext),
-            )
-            .with_source_path(source_path);
+            );
             file_ids.insert(filename.to_string(), db_file.id.clone());
             db_files.push(db_file);
         }
@@ -1556,6 +1370,15 @@ impl ImportService {
             total_files
         );
 
+        // Set unmanaged_path for the torrent's temp folder
+        if let Some(first_file) = discovered_files.first() {
+            if let Some(parent) = first_file.path.parent() {
+                if let Some(p) = parent.to_str() {
+                    let _ = self.database.set_release_unmanaged(&db_release.id, p).await;
+                }
+            }
+        }
+
         // Build and batch-insert file records
         let mut db_files: Vec<DbFile> = Vec::with_capacity(total_files);
         for file in discovered_files.iter() {
@@ -1570,18 +1393,13 @@ impl ImportService {
                 .and_then(|e| e.to_str())
                 .unwrap_or("bin")
                 .to_lowercase();
-            let source_path = file
-                .path
-                .to_str()
-                .ok_or_else(|| format!("Cannot convert path to string: {:?}", file.path))?;
 
             let db_file = DbFile::new(
                 &db_release.id,
                 filename,
                 file.size as i64,
                 ContentType::from_extension(&ext),
-            )
-            .with_source_path(source_path);
+            );
             db_files.push(db_file);
         }
 
@@ -1642,7 +1460,7 @@ impl ImportService {
         Ok(())
     }
 
-    /// Torrent import using storage profile.
+    /// Torrent import into managed local storage.
     #[cfg(feature = "torrent")]
     #[allow(clippy::too_many_arguments)]
     async fn run_torrent_import(
@@ -1654,7 +1472,6 @@ impl ImportService {
         torrent_metadata: TorrentImportMetadata,
         seed_after_download: bool,
         selected_cover: Option<CoverSelection>,
-        storage_profile: DbStorageProfile,
     ) -> Result<(), String> {
         let library_manager = self.library_manager.get();
         library_manager
@@ -1760,13 +1577,12 @@ impl ImportService {
         // Use the import ID as a placeholder since torrent imports don't have one
         let import_id = format!("torrent-{}", db_release.id);
 
-        // Import using storage
+        // Import using managed local storage
         self.run_storage_import(
             &db_release,
             &discovered_files,
             &tracks_to_files,
             cue_flac_opt,
-            storage_profile,
             cover_image_path.as_deref(),
             &import_id,
             false,
@@ -1815,7 +1631,7 @@ impl ImportService {
         Ok(())
     }
 
-    /// CD import using storage profile.
+    /// CD import into managed local storage.
     #[cfg(feature = "cd-rip")]
     async fn run_cd_import(
         &self,
@@ -1824,7 +1640,6 @@ impl ImportService {
         db_tracks: Vec<DbTrack>,
         drive_path: PathBuf,
         toc: CdToc,
-        storage_profile: DbStorageProfile,
         cover_image_path: Option<&Path>,
     ) -> Result<(), String> {
         use crate::cd::{CdDrive, CdRipper, CueGenerator, LogGenerator};
@@ -1941,16 +1756,15 @@ impl ImportService {
         // Use the import ID as a placeholder
         let import_id = format!("cd-{}", db_release.id);
 
-        // Import using storage
+        // Import using managed local storage
         self.run_storage_import(
             &db_release,
             &discovered_files,
             &tracks_to_files,
             cue_flac_metadata,
-            storage_profile,
             cover_image_path,
             &import_id,
-            None,
+            false,
         )
         .await?;
 
@@ -2013,6 +1827,11 @@ impl ImportService {
 
         info!("CD ripping completed, {} tracks ripped", rip_results.len());
 
+        // Set unmanaged_path to the temp directory
+        if let Some(p) = temp_dir.to_str() {
+            let _ = self.database.set_release_unmanaged(&db_release.id, p).await;
+        }
+
         // Build and batch-insert file records
         let mut db_files: Vec<DbFile> = Vec::with_capacity(rip_results.len());
         for result in &rip_results {
@@ -2025,12 +1844,8 @@ impl ImportService {
                 .await
                 .map(|m| m.len() as i64)
                 .unwrap_or(0);
-            let source_path = result.output_path.to_str().ok_or_else(|| {
-                format!("Cannot convert path to string: {:?}", result.output_path)
-            })?;
 
-            let db_file = DbFile::new(&db_release.id, filename, file_size, ContentType::Flac)
-                .with_source_path(source_path);
+            let db_file = DbFile::new(&db_release.id, filename, file_size, ContentType::Flac);
             db_files.push(db_file);
         }
 

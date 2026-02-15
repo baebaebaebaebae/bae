@@ -10,7 +10,6 @@ mod discogs;
 mod follow_library;
 mod join_library;
 mod library;
-mod storage_profiles;
 mod subsonic;
 mod sync;
 mod view;
@@ -23,9 +22,6 @@ pub use discogs::DiscogsSectionView;
 pub use follow_library::{FollowLibraryView, FollowTestStatus};
 pub use join_library::{JoinLibraryView, JoinStatus};
 pub use library::{LibraryInfo, LibrarySectionView};
-pub use storage_profiles::{
-    StorageLocation, StorageProfile, StorageProfileEditorView, StorageProfilesSectionView,
-};
 pub use subsonic::SubsonicSectionView;
 pub use sync::{SyncBucketConfig, SyncSectionView};
 pub use view::{SettingsTab, SettingsView};

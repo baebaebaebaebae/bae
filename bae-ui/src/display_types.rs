@@ -128,6 +128,9 @@ pub struct Release {
     pub barcode: Option<String>,
     pub discogs_release_id: Option<String>,
     pub musicbrainz_release_id: Option<String>,
+    pub managed_locally: bool,
+    pub managed_in_cloud: bool,
+    pub unmanaged_path: Option<String>,
 }
 
 /// File display info

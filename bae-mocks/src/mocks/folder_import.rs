@@ -9,7 +9,7 @@ use bae_ui::{
     AudioContentInfo, CategorizedFileInfo, CueFlacPairInfo, DetectedCandidate,
     DetectedCandidateStatus, FileInfo, FolderImportView, FolderMetadata, IdentifyMode,
     ImportSource, ImportStep, ImportView, MatchCandidate, MatchSourceType, SearchSource, SearchTab,
-    SelectedCover, StorageLocation, StorageProfile,
+    SelectedCover,
 };
 use dioxus::prelude::*;
 use std::collections::HashMap;
@@ -168,7 +168,6 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
             source: String::new(),
         })
     });
-    let mut selected_profile_id = use_signal(|| Some("profile-1".to_string()));
     let mut viewing_index = use_signal(|| None::<usize>);
 
     // Parse state from registry
@@ -429,25 +428,6 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
         ],
     });
 
-    let storage_profiles = use_signal(|| {
-        vec![
-            StorageProfile {
-                id: "profile-1".to_string(),
-                name: "Cloud Storage".to_string(),
-                location: StorageLocation::Cloud,
-                is_default: true,
-                ..Default::default()
-            },
-            StorageProfile {
-                id: "profile-2".to_string(),
-                name: "Local Backup".to_string(),
-                location: StorageLocation::Local,
-                is_default: false,
-                ..Default::default()
-            },
-        ]
-    });
-
     let import_error = if confirm_phase_str == "Failed" {
         Some("Failed to import: Network timeout".to_string())
     } else {
@@ -568,7 +548,7 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                         tracks: vec![],
                     }),
                 selected_cover: selected_cover(),
-                selected_profile_id: selected_profile_id(),
+                managed: true,
                 phase,
                 auto_matches: exact_match_candidates.clone(),
                 search_state: mock_search_state,
@@ -668,7 +648,6 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                                 }
                             })
                     },
-                    storage_profiles,
                     on_folder_select_click: |_| {},
                     on_view_change: move |idx| viewing_index.set(idx),
                     on_skip_detection: |_| {},
@@ -689,10 +668,9 @@ pub fn FolderImportMock(initial_state: Option<String>) -> Element {
                     on_retry_cover: |_| {},
                     on_retry_discid_lookup: |_| {},
                     on_select_cover: move |cover| selected_cover.set(Some(cover)),
-                    on_storage_profile_change: move |id| selected_profile_id.set(id),
+                    on_managed_change: |_| {},
                     on_edit: |_| {},
                     on_confirm: |_| {},
-                    on_configure_storage: |_| {},
                     on_view_in_library: |_| {},
                 }
             }

@@ -229,10 +229,10 @@ pub async fn confirm_and_start_import(
     let import_id = uuid::Uuid::new_v4().to_string();
 
     // Get state from store
-    let (storage_profile_id, metadata, selected_cover) = {
+    let (managed, metadata, selected_cover) = {
         let state = import_store.read();
         (
-            state.get_storage_profile_id(),
+            state.get_managed(),
             state.get_metadata(),
             state.get_selected_cover(),
         )
@@ -269,7 +269,7 @@ pub async fn confirm_and_start_import(
                     mb_release: None,
                     folder: PathBuf::from(&candidate_key),
                     master_year,
-                    storage_profile_id: storage_profile_id.clone(),
+                    managed,
                     selected_cover: selected_cover.clone(),
                 }
             }
@@ -312,7 +312,7 @@ pub async fn confirm_and_start_import(
                     mb_release: Some(mb_release),
                     folder: PathBuf::from(&candidate_key),
                     master_year,
-                    storage_profile_id: storage_profile_id.clone(),
+                    managed,
                     selected_cover: selected_cover.clone(),
                 }
             }

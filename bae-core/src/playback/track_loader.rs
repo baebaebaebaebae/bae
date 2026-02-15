@@ -90,20 +90,17 @@ pub async fn load_track_audio(
         .find(|f| f.content_type == crate::content_type::ContentType::Flac)
         .ok_or_else(|| PlaybackError::not_found("Audio file", track_id))?;
 
-    // Read the file data from source_path
-    let source_path = audio_file
-        .source_path
-        .as_ref()
-        .ok_or_else(|| PlaybackError::not_found("source_path", track_id))?;
+    // Look up release to determine storage mode
+    let release = library_manager
+        .database()
+        .get_release_by_id(&track.release_id)
+        .await
+        .map_err(PlaybackError::database)?
+        .ok_or_else(|| PlaybackError::not_found("Release", &track.release_id))?;
 
     let file_data = if let Some(storage) = storage {
-        // Remote storage - download (and decrypt if needed)
-        let storage_profile = library_manager
-            .get_storage_profile_for_release(&track.release_id)
-            .await
-            .map_err(PlaybackError::database)?;
-
-        debug!("Downloading from cloud: {}", source_path);
+        // Remote storage passed in - download (and decrypt if needed)
+        debug!("Downloading from cloud storage");
 
         // Check cache first
         let cache_key = format!("file:{}", audio_file.id);
@@ -114,8 +111,9 @@ pub async fn load_track_audio(
             }
             Ok(None) | Err(_) => {
                 debug!("Cache miss - downloading file: {}", audio_file.id);
+                let storage_key = crate::storage::storage_path(&audio_file.id);
                 let data = storage
-                    .download(source_path)
+                    .download(&storage_key)
                     .await
                     .map_err(PlaybackError::cloud)?;
 
@@ -126,19 +124,11 @@ pub async fn load_track_audio(
             }
         };
 
-        // Decrypt if profile has encryption enabled
-        if storage_profile.map(|p| p.encrypted).unwrap_or(false) {
-            let encryption_service = encryption_service
-                .ok_or_else(|| {
-                    PlaybackError::decrypt(crate::encryption::EncryptionError::KeyManagement(
-                        "Cannot play encrypted files: encryption not configured".into(),
-                    ))
-                })?
-                .clone();
+        // Decrypt if encryption service is available (managed files are encrypted)
+        if let Some(enc) = encryption_service {
+            let enc = enc.clone();
             tokio::task::spawn_blocking(move || {
-                encryption_service
-                    .decrypt(&encrypted_data)
-                    .map_err(PlaybackError::decrypt)
+                enc.decrypt(&encrypted_data).map_err(PlaybackError::decrypt)
             })
             .await
             .map_err(PlaybackError::task)??
@@ -198,9 +188,19 @@ pub async fn load_track_audio(
             .await
             .map_err(PlaybackError::task)??
         } else {
-            // Local file - read directly from source_path
-            debug!("Reading from local file: {}", source_path);
-            tokio::fs::read(source_path)
+            // Local file - derive path from release storage flags
+            let source_path = if release.managed_locally {
+                audio_file.local_storage_path(&crate::library_dir::LibraryDir::new(
+                    std::path::PathBuf::from("."),
+                ))
+            } else if let Some(ref unmanaged_path) = release.unmanaged_path {
+                std::path::Path::new(unmanaged_path).join(&audio_file.original_filename)
+            } else {
+                return Err(PlaybackError::not_found("file location", track_id));
+            };
+
+            debug!("Reading from local file: {}", source_path.display());
+            tokio::fs::read(&source_path)
                 .await
                 .map_err(|e| PlaybackError::io(format!("Failed to read file: {}", e)))?
         }

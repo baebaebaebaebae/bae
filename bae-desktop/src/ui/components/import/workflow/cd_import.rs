@@ -9,7 +9,7 @@ use bae_core::cd::CdDrive;
 use bae_ui::components::import::CdImportView;
 use bae_ui::display_types::{CdDriveInfo, MatchCandidate, SearchSource, SearchTab};
 use bae_ui::stores::import::CandidateEvent;
-use bae_ui::stores::{AppStateStoreExt, StorageProfilesStateStoreExt};
+use bae_ui::stores::AppStateStoreExt;
 use bae_ui::ImportSource;
 use dioxus::prelude::*;
 use tracing::{info, warn};
@@ -53,8 +53,6 @@ pub fn CdImport() -> Element {
 
     // Get lenses for reactive props
     let import_state = app.state.import();
-    let storage_profiles = app.state.storage_profiles().profiles();
-
     // Drive select handler
     let on_drive_select = {
         let app = app.clone();
@@ -545,8 +543,6 @@ pub fn CdImport() -> Element {
             drives: drives.read().clone(),
             selected_drive: selected_drive.read().clone(),
             on_drive_select,
-            // External data
-            storage_profiles,
             // Callbacks
             on_exact_match_select,
             on_confirm_exact_match,
@@ -565,10 +561,9 @@ pub fn CdImport() -> Element {
             on_retry_cover,
             on_retry_discid_lookup,
             on_select_cover: |_| {},
-            on_storage_profile_change: |_| {},
+            on_managed_change: |_| {},
             on_edit,
             on_confirm,
-            on_configure_storage: |_| {},
             on_clear,
             on_view_in_library: move |album_id: String| {
                 navigator

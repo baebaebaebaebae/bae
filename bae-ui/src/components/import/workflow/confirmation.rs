@@ -4,9 +4,7 @@ use super::gallery_lightbox::{GalleryItem, GalleryItemContent, GalleryLightbox};
 use super::match_item::TrackListingCompact;
 use super::shared::ImportErrorDisplayView;
 use crate::components::icons::{CheckIcon, ImageIcon, PencilIcon};
-use crate::components::{
-    Button, ButtonSize, ButtonVariant, ChromelessButton, Select, SelectOption, StorageProfile,
-};
+use crate::components::{Button, ButtonSize, ButtonVariant, ChromelessButton};
 use crate::display_types::{FileInfo, MatchCandidate, MatchSourceType, SelectedCover};
 use dioxus::prelude::*;
 
@@ -23,10 +21,8 @@ pub fn ConfirmationView(
     artwork_files: Vec<FileInfo>,
     /// Remote cover URL from the match candidate
     remote_cover_url: Option<String>,
-    /// Available storage profiles
-    storage_profiles: ReadSignal<Vec<StorageProfile>>,
-    /// Currently selected storage profile ID
-    selected_profile_id: Option<String>,
+    /// Whether to copy files into managed storage
+    managed: bool,
     /// Whether import is in progress
     is_importing: bool,
     /// Whether import has completed
@@ -37,14 +33,12 @@ pub fn ConfirmationView(
     preparing_step_text: Option<String>,
     /// Called when user selects a cover
     on_select_cover: EventHandler<SelectedCover>,
-    /// Called when user changes storage profile
-    on_storage_profile_change: EventHandler<Option<String>>,
+    /// Called when user toggles managed storage
+    on_managed_change: EventHandler<bool>,
     /// Called when user clicks Edit to go back
     on_edit: EventHandler<()>,
     /// Called when user confirms import
     on_confirm: EventHandler<()>,
-    /// Called to navigate to settings
-    on_configure_storage: EventHandler<()>,
     /// Called to navigate to the album in the library
     on_view_in_library: EventHandler<String>,
     /// Import error message (shown between release card and action row)
@@ -224,37 +218,19 @@ pub fn ConfirmationView(
                     }
                 }
             } else {
-                // Storage profile selection + Import button
+                // Storage toggle + Import button
                 div { class: "flex items-center gap-3 px-5",
-                    label { class: "text-sm text-gray-400 ml-auto", "Storage:" }
-                    Select {
-                        value: selected_profile_id.clone().unwrap_or_else(|| "__none__".to_string()),
-                        disabled,
-                        onchange: move |val: String| {
-                            if val == "__none__" {
-                                on_storage_profile_change.call(None);
-                            } else {
-                                on_storage_profile_change.call(Some(val));
-                            }
-                        },
-                        SelectOption {
-                            value: "__none__",
-                            label: "No Storage (files stay in place)",
+                    label { class: "flex items-center gap-2 text-sm text-gray-400 ml-auto cursor-pointer",
+                        input {
+                            r#type: "checkbox",
+                            checked: managed,
+                            disabled,
+                            onchange: move |evt: Event<FormData>| {
+                                on_managed_change.call(evt.checked());
+                            },
+                            class: "w-4 h-4 rounded border-gray-600 bg-gray-700 text-indigo-500 focus:ring-indigo-500 cursor-pointer",
                         }
-                        for profile in storage_profiles.read().iter() {
-                            SelectOption {
-                                key: "{profile.id}",
-                                value: "{profile.id}",
-                                label: profile.name.clone(),
-                            }
-                        }
-                    }
-                    Button {
-                        variant: ButtonVariant::Ghost,
-                        size: ButtonSize::Small,
-                        disabled,
-                        onclick: move |_| on_configure_storage.call(()),
-                        "Configure"
+                        "Copy to library"
                     }
 
                     // Import status area: three visual states

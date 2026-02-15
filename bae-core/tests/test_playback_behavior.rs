@@ -2,12 +2,12 @@
 mod support;
 use crate::support::{test_encryption_service, tracing_init};
 use bae_core::cache::{CacheConfig, CacheManager};
-use bae_core::db::{Database, DbStorageProfile};
+use bae_core::db::Database;
 use bae_core::discogs::models::{DiscogsArtist, DiscogsRelease, DiscogsTrack};
 use bae_core::encryption::EncryptionService;
 use bae_core::import::ImportRequest;
-use bae_core::keys::KeyService;
 use bae_core::library::{LibraryManager, SharedLibraryManager};
+use bae_core::library_dir::LibraryDir;
 use bae_core::playback::{PlaybackProgress, PlaybackState};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -30,17 +30,7 @@ impl PlaybackTestFixture {
         std::fs::create_dir_all(&cache_dir)?;
         let album_dir = temp_dir.path().join("album");
         std::fs::create_dir_all(&album_dir)?;
-        let storage_dir = temp_dir.path().join("storage");
-        std::fs::create_dir_all(&storage_dir)?;
         let database = Database::new(db_path.to_str().unwrap()).await?;
-        // Create a local storage profile (playback tests use local storage now)
-        let storage_profile = DbStorageProfile::new_local(
-            "test-local",
-            storage_dir.to_str().unwrap(),
-            true, // encrypted
-        );
-        let storage_profile_id = storage_profile.id.clone();
-        database.insert_storage_profile(&storage_profile).await?;
         let encryption_service = Some(EncryptionService::new_with_key(&[0u8; 32]));
         let cache_config = CacheConfig {
             cache_dir,
@@ -62,7 +52,7 @@ impl PlaybackTestFixture {
             encryption_service.clone(),
             database_arc,
             bae_core::keys::KeyService::new(true, "test".to_string()),
-            std::env::temp_dir().join("bae-test-covers").into(),
+            LibraryDir::new(temp_dir.path().to_path_buf()),
         );
         let master_year = discogs_release.year.unwrap_or(2024);
         let import_id = uuid::Uuid::new_v4().to_string();
@@ -73,7 +63,7 @@ impl PlaybackTestFixture {
                 mb_release: None,
                 folder: album_dir.clone(),
                 master_year,
-                storage_profile_id: Some(storage_profile_id),
+                managed: false,
                 selected_cover: None,
             })
             .await?;
@@ -100,7 +90,7 @@ impl PlaybackTestFixture {
         let playback_handle = bae_core::playback::PlaybackService::start(
             library_manager_arc.as_ref().clone(),
             encryption_service,
-            KeyService::new(true, "test".to_string()),
+            LibraryDir::new(temp_dir.path().to_path_buf()),
             runtime_handle,
         );
         playback_handle.set_volume(0.0);
@@ -373,7 +363,7 @@ impl CueFlacTestFixture {
             encryption_service.clone(),
             database_arc,
             bae_core::keys::KeyService::new(true, "test".to_string()),
-            std::env::temp_dir().join("bae-test-covers").into(),
+            LibraryDir::new(temp_dir.path().to_path_buf()),
         );
 
         let master_year = discogs_release.year.unwrap_or(2024);
@@ -387,7 +377,7 @@ impl CueFlacTestFixture {
                 mb_release: None,
                 folder: album_dir.clone(),
                 master_year,
-                storage_profile_id: None, // No storage - direct local playback
+                managed: false, // No storage - direct local playback
                 selected_cover: None,
             })
             .await?;
@@ -417,7 +407,7 @@ impl CueFlacTestFixture {
         let playback_handle = bae_core::playback::PlaybackService::start(
             library_manager_arc.as_ref().clone(),
             encryption_service,
-            KeyService::new(true, "test".to_string()),
+            LibraryDir::new(temp_dir.path().to_path_buf()),
             runtime_handle,
         );
         playback_handle.set_volume(0.0);
@@ -2012,7 +2002,7 @@ impl HighSampleRateTestFixture {
             encryption_service.clone(),
             database_arc,
             bae_core::keys::KeyService::new(true, "test".to_string()),
-            std::env::temp_dir().join("bae-test-covers").into(),
+            LibraryDir::new(temp_dir.path().to_path_buf()),
         );
 
         let import_id = uuid::Uuid::new_v4().to_string();
@@ -2023,7 +2013,7 @@ impl HighSampleRateTestFixture {
                 mb_release: None,
                 folder: album_dir.clone(),
                 master_year: 2024,
-                storage_profile_id: None, // Local playback
+                managed: false, // Local playback
                 selected_cover: None,
             })
             .await?;
@@ -2061,7 +2051,7 @@ impl HighSampleRateTestFixture {
         let playback_handle = bae_core::playback::PlaybackService::start(
             library_manager_arc.as_ref().clone(),
             encryption_service,
-            KeyService::new(true, "test".to_string()),
+            LibraryDir::new(temp_dir.path().to_path_buf()),
             runtime_handle,
         );
         playback_handle.set_volume(0.0);
@@ -2462,11 +2452,12 @@ async fn test_real_library_cpu_usage() {
 
     // Start playback service
     let runtime_handle = tokio::runtime::Handle::current();
+    let bae_dir = dirs::home_dir().expect("home dir").join(".bae");
 
     let playback_handle = bae_core::playback::PlaybackService::start(
         library_manager.clone(),
         encryption_service,
-        KeyService::new(true, "test".to_string()),
+        LibraryDir::new(bae_dir),
         runtime_handle,
     );
     let mut progress_rx = playback_handle.subscribe_progress();
@@ -2636,11 +2627,12 @@ async fn test_pause_seek_cue_flac() {
     );
 
     let runtime_handle = tokio::runtime::Handle::current();
+    let bae_dir = dirs::home_dir().expect("home dir").join(".bae");
     eprintln!("Starting PlaybackService...");
     let playback_handle = bae_core::playback::PlaybackService::start(
         library_manager.clone(),
         encryption_service,
-        KeyService::new(true, "test".to_string()),
+        LibraryDir::new(bae_dir),
         runtime_handle,
     );
     playback_handle.set_volume(0.0); // Mute for test
@@ -2861,10 +2853,11 @@ async fn test_playing_seek_cue_flac() {
     );
 
     let runtime_handle = tokio::runtime::Handle::current();
+    let bae_dir = dirs::home_dir().expect("home dir").join(".bae");
     let playback_handle = bae_core::playback::PlaybackService::start(
         library_manager.clone(),
         encryption_service,
-        KeyService::new(true, "test".to_string()),
+        LibraryDir::new(bae_dir),
         runtime_handle,
     );
     playback_handle.set_volume(0.0);

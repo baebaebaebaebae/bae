@@ -76,8 +76,7 @@ pub use settings::{
     AboutSectionView, BitTorrentSectionView, BitTorrentSettings, CloudProviderOption,
     CloudProviderPicker, DiscogsSectionView, FollowLibraryView, FollowTestStatus, JoinLibraryView,
     JoinStatus, LibraryInfo, LibrarySectionView, SettingsCard, SettingsSection, SettingsTab,
-    SettingsView, StorageLocation, StorageProfile, StorageProfileEditorView,
-    StorageProfilesSectionView, SubsonicSectionView, SyncBucketConfig, SyncSectionView,
+    SettingsView, SubsonicSectionView, SyncBucketConfig, SyncSectionView,
 };
 pub use success_toast::SuccessToast;
 pub use text_input::{TextInput, TextInputSize, TextInputType};

@@ -155,6 +155,53 @@ impl Database {
         Ok(())
     }
 
+    fn row_to_release(row: &sqlx::sqlite::SqliteRow) -> DbRelease {
+        DbRelease {
+            id: row.get("id"),
+            album_id: row.get("album_id"),
+            release_name: row.get("release_name"),
+            year: row.get("year"),
+            discogs_release_id: row.get("discogs_release_id"),
+            bandcamp_release_id: row.get("bandcamp_release_id"),
+            format: row.get("format"),
+            label: row.get("label"),
+            catalog_number: row.get("catalog_number"),
+            country: row.get("country"),
+            barcode: row.get("barcode"),
+            import_status: row.get("import_status"),
+            managed_locally: row.get("managed_locally"),
+            managed_in_cloud: row.get("managed_in_cloud"),
+            unmanaged_path: row.get("unmanaged_path"),
+            private: row.get("private"),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
+                .unwrap()
+                .with_timezone(&Utc),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                .unwrap()
+                .with_timezone(&Utc),
+        }
+    }
+
+    fn row_to_file(row: &sqlx::sqlite::SqliteRow) -> DbFile {
+        DbFile {
+            id: row.get("id"),
+            release_id: row.get("release_id"),
+            original_filename: row.get("original_filename"),
+            file_size: row.get("file_size"),
+            content_type: ContentType::from_mime(&row.get::<String, _>("content_type")),
+            encryption_nonce: row.get("encryption_nonce"),
+            encryption_scheme: EncryptionScheme::from_db_str(
+                &row.get::<String, _>("encryption_scheme"),
+            ),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
+                .unwrap()
+                .with_timezone(&Utc),
+            created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
+                .unwrap()
+                .with_timezone(&Utc),
+        }
+    }
+
     fn row_to_artist(row: &sqlx::sqlite::SqliteRow) -> DbArtist {
         DbArtist {
             id: row.get("id"),
@@ -577,8 +624,9 @@ impl Database {
             INSERT INTO releases (
                 id, album_id, release_name, year, discogs_release_id,
                 bandcamp_release_id, format, label, catalog_number, country, barcode,
-                import_status, _updated_at, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                import_status, managed_locally, managed_in_cloud, unmanaged_path,
+                _updated_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&release.id)
@@ -593,6 +641,9 @@ impl Database {
         .bind(&release.country)
         .bind(&release.barcode)
         .bind(release.import_status)
+        .bind(release.managed_locally)
+        .bind(release.managed_in_cloud)
+        .bind(&release.unmanaged_path)
         .bind(release.updated_at.to_rfc3339())
         .bind(release.created_at.to_rfc3339())
         .execute(&mut *conn)
@@ -692,8 +743,9 @@ impl Database {
             INSERT INTO releases (
                 id, album_id, release_name, year, discogs_release_id,
                 bandcamp_release_id, format, label, catalog_number, country, barcode,
-                import_status, _updated_at, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                import_status, managed_locally, managed_in_cloud, unmanaged_path,
+                _updated_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&release.id)
@@ -708,6 +760,9 @@ impl Database {
         .bind(&release.country)
         .bind(&release.barcode)
         .bind(release.import_status)
+        .bind(release.managed_locally)
+        .bind(release.managed_in_cloud)
+        .bind(&release.unmanaged_path)
         .bind(release.updated_at.to_rfc3339())
         .bind(release.created_at.to_rfc3339())
         .execute(&mut *tx)
@@ -900,27 +955,7 @@ impl Database {
             .await?;
         let mut releases = Vec::new();
         for row in rows {
-            releases.push(DbRelease {
-                id: row.get("id"),
-                album_id: row.get("album_id"),
-                release_name: row.get("release_name"),
-                year: row.get("year"),
-                discogs_release_id: row.get("discogs_release_id"),
-                bandcamp_release_id: row.get("bandcamp_release_id"),
-                format: row.get("format"),
-                label: row.get("label"),
-                catalog_number: row.get("catalog_number"),
-                country: row.get("country"),
-                barcode: row.get("barcode"),
-                import_status: row.get("import_status"),
-                private: row.get("private"),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
-                    .unwrap()
-                    .with_timezone(&Utc),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
-                    .unwrap()
-                    .with_timezone(&Utc),
-            });
+            releases.push(Self::row_to_release(&row));
         }
         Ok(releases)
     }
@@ -998,8 +1033,8 @@ impl Database {
         sqlx::query(
             r#"
             INSERT INTO release_files (
-                id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, encryption_scheme, _updated_at, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, release_id, original_filename, file_size, content_type, encryption_nonce, encryption_scheme, _updated_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&file.id)
@@ -1007,7 +1042,6 @@ impl Database {
         .bind(&file.original_filename)
         .bind(file.file_size)
         .bind(file.content_type.as_str())
-        .bind(&file.source_path)
         .bind(&file.encryption_nonce)
         .bind(file.encryption_scheme.as_str())
         .bind(file.updated_at.to_rfc3339())
@@ -1025,28 +1059,7 @@ impl Database {
             .bind(release_id)
             .fetch_all(&self.inner.read_pool)
             .await?;
-        let mut files = Vec::new();
-        for row in rows {
-            files.push(DbFile {
-                id: row.get("id"),
-                release_id: row.get("release_id"),
-                original_filename: row.get("original_filename"),
-                file_size: row.get("file_size"),
-                content_type: ContentType::from_mime(&row.get::<String, _>("content_type")),
-                source_path: row.get("source_path"),
-                encryption_nonce: row.get("encryption_nonce"),
-                encryption_scheme: EncryptionScheme::from_db_str(
-                    &row.get::<String, _>("encryption_scheme"),
-                ),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
-                    .unwrap()
-                    .with_timezone(&Utc),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
-                    .unwrap()
-                    .with_timezone(&Utc),
-            });
-        }
-        Ok(files)
+        Ok(rows.iter().map(Self::row_to_file).collect())
     }
     /// Get a specific file by ID
     pub async fn get_file_by_id(&self, file_id: &str) -> Result<Option<DbFile>, sqlx::Error> {
@@ -1054,28 +1067,7 @@ impl Database {
             .bind(file_id)
             .fetch_optional(&self.inner.read_pool)
             .await?;
-        if let Some(row) = row {
-            Ok(Some(DbFile {
-                id: row.get("id"),
-                release_id: row.get("release_id"),
-                original_filename: row.get("original_filename"),
-                file_size: row.get("file_size"),
-                content_type: ContentType::from_mime(&row.get::<String, _>("content_type")),
-                source_path: row.get("source_path"),
-                encryption_nonce: row.get("encryption_nonce"),
-                encryption_scheme: EncryptionScheme::from_db_str(
-                    &row.get::<String, _>("encryption_scheme"),
-                ),
-                updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("_updated_at"))
-                    .unwrap()
-                    .with_timezone(&Utc),
-                created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
-                    .unwrap()
-                    .with_timezone(&Utc),
-            }))
-        } else {
-            Ok(None)
-        }
+        Ok(row.as_ref().map(Self::row_to_file))
     }
     /// Insert audio format for a track
     pub async fn insert_audio_format(
@@ -1149,37 +1141,6 @@ impl Database {
         }
     }
 
-    /// Batch-update source_path (and encryption fields) on existing file records.
-    ///
-    /// All updates are applied in a single transaction.
-    /// Each tuple is `(file_id, source_path, encryption_nonce, encryption_scheme)`.
-    pub async fn batch_update_file_source_paths(
-        &self,
-        updates: &[(&str, &str, Option<&[u8]>, &str)],
-    ) -> Result<(), sqlx::Error> {
-        let mut conn = self.writer()?.lock().await;
-        let mut tx = conn.begin().await?;
-        let now = chrono::Utc::now().to_rfc3339();
-
-        for &(file_id, source_path, encryption_nonce, encryption_scheme) in updates {
-            sqlx::query(
-                r#"UPDATE release_files
-                   SET source_path = ?, encryption_nonce = ?, encryption_scheme = ?, _updated_at = ?
-                   WHERE id = ?"#,
-            )
-            .bind(source_path)
-            .bind(encryption_nonce)
-            .bind(encryption_scheme)
-            .bind(&now)
-            .bind(file_id)
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        tx.commit().await?;
-        Ok(())
-    }
-
     /// Insert multiple files in a single transaction.
     pub async fn batch_insert_files(&self, files: &[DbFile]) -> Result<(), sqlx::Error> {
         if files.is_empty() {
@@ -1192,8 +1153,8 @@ impl Database {
             sqlx::query(
                 r#"
                 INSERT INTO release_files (
-                    id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, encryption_scheme, _updated_at, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    id, release_id, original_filename, file_size, content_type, encryption_nonce, encryption_scheme, _updated_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&file.id)
@@ -1201,7 +1162,6 @@ impl Database {
             .bind(&file.original_filename)
             .bind(file.file_size)
             .bind(file.content_type.as_str())
-            .bind(&file.source_path)
             .bind(&file.encryption_nonce)
             .bind(file.encryption_scheme.as_str())
             .bind(file.updated_at.to_rfc3339())
@@ -1819,257 +1779,79 @@ impl Database {
             .await?;
         Ok(())
     }
-    /// Insert a new storage profile
-    pub async fn insert_storage_profile(
+    /// Get a release by ID
+    pub async fn get_release_by_id(
         &self,
-        profile: &DbStorageProfile,
-    ) -> Result<(), sqlx::Error> {
-        let mut conn = self.writer()?.lock().await;
-        let mut tx = conn.begin().await?;
-
-        if profile.is_default {
-            sqlx::query("UPDATE storage_profiles SET is_default = FALSE WHERE is_default = TRUE")
-                .execute(&mut *tx)
-                .await?;
-        }
-
-        sqlx::query(
-            r#"
-            INSERT INTO storage_profiles (
-                id, name, location, location_path, encrypted, is_default, is_home,
-                cloud_bucket, cloud_region, cloud_endpoint,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            "#,
-        )
-        .bind(&profile.id)
-        .bind(&profile.name)
-        .bind(profile.location.as_str())
-        .bind(&profile.location_path)
-        .bind(profile.encrypted)
-        .bind(profile.is_default)
-        .bind(profile.is_home)
-        .bind(&profile.cloud_bucket)
-        .bind(&profile.cloud_region)
-        .bind(&profile.cloud_endpoint)
-        .bind(profile.created_at.to_rfc3339())
-        .bind(profile.updated_at.to_rfc3339())
-        .execute(&mut *tx)
-        .await?;
-
-        tx.commit().await?;
-        Ok(())
-    }
-    /// Get a storage profile by ID
-    pub async fn get_storage_profile(
-        &self,
-        profile_id: &str,
-    ) -> Result<Option<DbStorageProfile>, sqlx::Error> {
-        let row = sqlx::query("SELECT * FROM storage_profiles WHERE id = ?")
-            .bind(profile_id)
+        release_id: &str,
+    ) -> Result<Option<DbRelease>, sqlx::Error> {
+        let row = sqlx::query("SELECT * FROM releases WHERE id = ?")
+            .bind(release_id)
             .fetch_optional(&self.inner.read_pool)
             .await?;
-        Ok(row.map(|row| self.row_to_storage_profile(&row)))
+        Ok(row.as_ref().map(Self::row_to_release))
     }
-    /// Get all storage profiles
-    pub async fn get_all_storage_profiles(&self) -> Result<Vec<DbStorageProfile>, sqlx::Error> {
-        let rows = sqlx::query("SELECT * FROM storage_profiles ORDER BY name")
-            .fetch_all(&self.inner.read_pool)
-            .await?;
-        Ok(rows
-            .iter()
-            .map(|row| self.row_to_storage_profile(row))
-            .collect())
-    }
-    /// Get the default storage profile
-    pub async fn get_default_storage_profile(
+
+    /// Set managed_locally flag on a release
+    pub async fn set_release_managed_locally(
         &self,
-    ) -> Result<Option<DbStorageProfile>, sqlx::Error> {
-        let row = sqlx::query("SELECT * FROM storage_profiles WHERE is_default = TRUE")
-            .fetch_optional(&self.inner.read_pool)
-            .await?;
-        Ok(row.map(|row| self.row_to_storage_profile(&row)))
-    }
-    /// Update a storage profile
-    pub async fn update_storage_profile(
-        &self,
-        profile: &DbStorageProfile,
+        release_id: &str,
+        managed: bool,
     ) -> Result<(), sqlx::Error> {
         let mut conn = self.writer()?.lock().await;
-        let mut tx = conn.begin().await?;
-
-        if profile.is_default {
-            sqlx::query("UPDATE storage_profiles SET is_default = FALSE WHERE is_default = TRUE")
-                .execute(&mut *tx)
-                .await?;
-        }
-
-        sqlx::query(
-            r#"
-            UPDATE storage_profiles SET
-                name = ?, location = ?, location_path = ?, encrypted = ?,
-                is_default = ?,
-                cloud_bucket = ?, cloud_region = ?, cloud_endpoint = ?,
-                updated_at = ?
-            WHERE id = ?
-            "#,
-        )
-        .bind(&profile.name)
-        .bind(profile.location.as_str())
-        .bind(&profile.location_path)
-        .bind(profile.encrypted)
-        .bind(profile.is_default)
-        .bind(&profile.cloud_bucket)
-        .bind(&profile.cloud_region)
-        .bind(&profile.cloud_endpoint)
-        .bind(profile.updated_at.to_rfc3339())
-        .bind(&profile.id)
-        .execute(&mut *tx)
-        .await?;
-
-        tx.commit().await?;
-        Ok(())
-    }
-    /// Delete a storage profile. Fails if it is the home profile or if any releases are linked to it.
-    pub async fn delete_storage_profile(&self, profile_id: &str) -> Result<(), sqlx::Error> {
-        let mut conn = self.writer()?.lock().await;
-
-        let is_home: bool = sqlx::query_scalar("SELECT is_home FROM storage_profiles WHERE id = ?")
-            .bind(profile_id)
-            .fetch_optional(&mut *conn)
-            .await?
-            .unwrap_or(false);
-
-        if is_home {
-            return Err(sqlx::Error::Protocol(
-                "Cannot delete the home storage profile".to_string(),
-            ));
-        }
-
-        let count: i32 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM release_storage WHERE storage_profile_id = ?")
-                .bind(profile_id)
-                .fetch_one(&mut *conn)
-                .await?;
-
-        if count > 0 {
-            return Err(sqlx::Error::Protocol(format!(
-                "Cannot delete storage profile: {} release(s) are still linked to it",
-                count
-            )));
-        }
-
-        sqlx::query("DELETE FROM storage_profiles WHERE id = ?")
-            .bind(profile_id)
+        sqlx::query("UPDATE releases SET managed_locally = ?, _updated_at = ? WHERE id = ?")
+            .bind(managed)
+            .bind(Utc::now().to_rfc3339())
+            .bind(release_id)
             .execute(&mut *conn)
             .await?;
         Ok(())
     }
-    /// Set a profile as the default (clears other defaults)
-    pub async fn set_default_storage_profile(&self, profile_id: &str) -> Result<(), sqlx::Error> {
+
+    /// Set managed_in_cloud flag on a release
+    pub async fn set_release_managed_in_cloud(
+        &self,
+        release_id: &str,
+        managed: bool,
+    ) -> Result<(), sqlx::Error> {
         let mut conn = self.writer()?.lock().await;
-        let mut tx = conn.begin().await?;
-
-        sqlx::query("UPDATE storage_profiles SET is_default = FALSE WHERE is_default = TRUE")
-            .execute(&mut *tx)
+        sqlx::query("UPDATE releases SET managed_in_cloud = ?, _updated_at = ? WHERE id = ?")
+            .bind(managed)
+            .bind(Utc::now().to_rfc3339())
+            .bind(release_id)
+            .execute(&mut *conn)
             .await?;
-        sqlx::query("UPDATE storage_profiles SET is_default = TRUE WHERE id = ?")
-            .bind(profile_id)
-            .execute(&mut *tx)
-            .await?;
-
-        tx.commit().await?;
         Ok(())
     }
-    fn row_to_storage_profile(&self, row: &sqlx::sqlite::SqliteRow) -> DbStorageProfile {
-        let location_str: String = row.get("location");
-        let location = match location_str.as_str() {
-            "cloud" => StorageLocation::Cloud,
-            _ => StorageLocation::Local,
-        };
-        DbStorageProfile {
-            id: row.get("id"),
-            name: row.get("name"),
-            location,
-            location_path: row.get("location_path"),
-            encrypted: row.get("encrypted"),
-            is_default: row.get("is_default"),
-            is_home: row.get("is_home"),
-            cloud_bucket: row.get("cloud_bucket"),
-            cloud_region: row.get("cloud_region"),
-            cloud_endpoint: row.get("cloud_endpoint"),
-            created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
-                .unwrap()
-                .with_timezone(&Utc),
-            updated_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("updated_at"))
-                .unwrap()
-                .with_timezone(&Utc),
-        }
-    }
-    /// Set release storage link (upsert).
-    ///
-    /// If the release already has a storage link, updates the profile in place.
-    /// Otherwise inserts a new row.
-    pub async fn set_release_storage(
+
+    /// Set unmanaged_path on a release (clears managed flags)
+    pub async fn set_release_unmanaged(
         &self,
-        release_storage: &DbReleaseStorage,
+        release_id: &str,
+        path: &str,
     ) -> Result<(), sqlx::Error> {
         let mut conn = self.writer()?.lock().await;
         sqlx::query(
-            r#"
-            INSERT INTO release_storage (id, release_id, storage_profile_id, created_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(release_id) DO UPDATE SET storage_profile_id = excluded.storage_profile_id
-            "#,
+            "UPDATE releases SET unmanaged_path = ?, managed_locally = FALSE, managed_in_cloud = FALSE, _updated_at = ? WHERE id = ?",
         )
-        .bind(&release_storage.id)
-        .bind(&release_storage.release_id)
-        .bind(&release_storage.storage_profile_id)
-        .bind(release_storage.created_at.to_rfc3339())
+        .bind(path)
+        .bind(Utc::now().to_rfc3339())
+        .bind(release_id)
         .execute(&mut *conn)
         .await?;
         Ok(())
     }
-    /// Get storage configuration for a release
-    pub async fn get_release_storage(
+
+    /// Update the encryption nonce on a file record (after re-encryption during transfer)
+    pub async fn update_file_encryption_nonce(
         &self,
-        release_id: &str,
-    ) -> Result<Option<DbReleaseStorage>, sqlx::Error> {
-        let row = sqlx::query("SELECT * FROM release_storage WHERE release_id = ?")
-            .bind(release_id)
-            .fetch_optional(&self.inner.read_pool)
-            .await?;
-        Ok(row.map(|row| DbReleaseStorage {
-            id: row.get("id"),
-            release_id: row.get("release_id"),
-            storage_profile_id: row.get("storage_profile_id"),
-            created_at: DateTime::parse_from_rfc3339(&row.get::<String, _>("created_at"))
-                .unwrap()
-                .with_timezone(&Utc),
-        }))
-    }
-    /// Get storage profile for a release (joins release_storage with storage_profiles)
-    pub async fn get_storage_profile_for_release(
-        &self,
-        release_id: &str,
-    ) -> Result<Option<DbStorageProfile>, sqlx::Error> {
-        let row = sqlx::query(
-            r#"
-            SELECT sp.* FROM storage_profiles sp
-            JOIN release_storage rs ON rs.storage_profile_id = sp.id
-            WHERE rs.release_id = ?
-            "#,
-        )
-        .bind(release_id)
-        .fetch_optional(&self.inner.read_pool)
-        .await?;
-        Ok(row.map(|row| self.row_to_storage_profile(&row)))
-    }
-    /// Delete release storage link (release_storage row)
-    pub async fn delete_release_storage(&self, release_id: &str) -> Result<(), sqlx::Error> {
+        file_id: &str,
+        nonce: &[u8],
+    ) -> Result<(), sqlx::Error> {
         let mut conn = self.writer()?.lock().await;
-        sqlx::query("DELETE FROM release_storage WHERE release_id = ?")
-            .bind(release_id)
+        sqlx::query("UPDATE release_files SET encryption_nonce = ?, _updated_at = ? WHERE id = ?")
+            .bind(nonce)
+            .bind(Utc::now().to_rfc3339())
+            .bind(file_id)
             .execute(&mut *conn)
             .await?;
         Ok(())

@@ -10,8 +10,8 @@ use bae_core::db::Database;
 use bae_core::discogs::models::{DiscogsArtist, DiscogsRelease, DiscogsTrack};
 use bae_core::encryption::EncryptionService;
 use bae_core::import::ImportRequest;
-use bae_core::keys::KeyService;
 use bae_core::library::{LibraryManager, SharedLibraryManager};
+use bae_core::library_dir::LibraryDir;
 use bae_core::playback::{PlaybackProgress, PlaybackState};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -179,7 +179,7 @@ impl CueFlacTestFixture {
             encryption_service.clone(),
             database_arc,
             bae_core::keys::KeyService::new(true, "test".to_string()),
-            std::env::temp_dir().join("bae-test-covers").into(),
+            LibraryDir::new(temp_dir.path().to_path_buf()),
         );
 
         let master_year = discogs_release.year.unwrap_or(2024);
@@ -193,7 +193,7 @@ impl CueFlacTestFixture {
                 mb_release: None,
                 folder: album_dir.clone(),
                 master_year,
-                storage_profile_id: None,
+                managed: false,
                 selected_cover: None,
             })
             .await?;
@@ -223,7 +223,7 @@ impl CueFlacTestFixture {
         let playback_handle = bae_core::playback::PlaybackService::start(
             library_manager_arc.as_ref().clone(),
             encryption_service,
-            KeyService::new(true, "test".to_string()),
+            LibraryDir::new(temp_dir.path().to_path_buf()),
             runtime_handle,
         );
         playback_handle.set_volume(0.0);

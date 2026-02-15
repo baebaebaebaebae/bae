@@ -11,7 +11,7 @@ use bae_ui::display_types::{
     MatchCandidate, SearchSource, SearchTab, TorrentFileInfo, TorrentInfo as DisplayTorrentInfo,
 };
 use bae_ui::stores::import::CandidateEvent;
-use bae_ui::stores::{AppStateStoreExt, StorageProfilesStateStoreExt};
+use bae_ui::stores::AppStateStoreExt;
 use bae_ui::ImportSource;
 use bae_ui::TorrentInputMode;
 use dioxus::prelude::*;
@@ -83,8 +83,6 @@ pub fn TorrentImport() -> Element {
 
     // Get lenses for reactive props
     let import_state = app.state.import();
-    let storage_profiles = app.state.storage_profiles().profiles();
-
     // Prepare torrent display data from local signal
     let torrent_info_read = torrent_info_signal.read();
     let tracker_statuses = torrent_info_read
@@ -576,8 +574,6 @@ pub fn TorrentImport() -> Element {
             on_mode_change: move |mode| input_mode.set(mode),
             on_file_select,
             on_magnet_submit,
-            // External data
-            storage_profiles,
             // Callbacks
             on_exact_match_select,
             on_confirm_exact_match,
@@ -597,10 +593,9 @@ pub fn TorrentImport() -> Element {
             on_retry_discid_lookup,
             on_detect_metadata,
             on_select_cover: |_| {},
-            on_storage_profile_change: |_| {},
+            on_managed_change: |_| {},
             on_edit,
             on_confirm,
-            on_configure_storage: |_| {},
             on_clear,
             on_view_in_library: move |album_id: String| {
                 navigator

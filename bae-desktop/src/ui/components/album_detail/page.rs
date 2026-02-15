@@ -9,7 +9,7 @@ use bae_ui::display_types::{CoverChange, PlaybackDisplay};
 use bae_ui::stores::config::LibrarySource;
 use bae_ui::stores::{
     AlbumDetailStateStoreExt, AppStateStoreExt, ConfigStateStoreExt, LibraryStateStoreExt,
-    PlaybackStatus, PlaybackUiStateStoreExt, StorageProfilesStateStoreExt,
+    PlaybackStatus, PlaybackUiStateStoreExt,
 };
 use bae_ui::{ErrorToast, SuccessToast};
 use dioxus::prelude::*;
@@ -103,11 +103,9 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
     let on_track_export = EventHandler::new({
         let library_manager = library_manager.clone();
         let cache = cache.clone();
-        let key_service = app.key_service.clone();
         move |track_id: String| {
             let library_manager = library_manager.clone();
             let cache = cache.clone();
-            let key_service = key_service.clone();
             spawn(async move {
                 if let Some(file_handle) = AsyncFileDialog::new()
                     .set_title("Export Track")
@@ -119,7 +117,7 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
                     let output_path = file_handle.path().to_path_buf();
                     if let Err(e) = library_manager
                         .get()
-                        .export_track(&track_id, &output_path, &cache, &key_service)
+                        .export_track(&track_id, &output_path, &cache)
                         .await
                     {
                         error!("Failed to export track: {}", e);
@@ -212,11 +210,11 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
     let on_export_release = EventHandler::new({
         let library_manager = library_manager.clone();
         let cache = cache.clone();
-        let key_service = app.key_service.clone();
+        let library_dir = app.config.library_dir.clone();
         move |release_id: String| {
             let library_manager = library_manager.clone();
             let cache = cache.clone();
-            let key_service = key_service.clone();
+            let library_dir = library_dir.clone();
             spawn(async move {
                 if let Some(folder_handle) = AsyncFileDialog::new()
                     .set_title("Select Export Directory")
@@ -226,7 +224,7 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
                     let target_dir = folder_handle.path().to_path_buf();
                     if let Err(e) = library_manager
                         .get()
-                        .export_release(&release_id, &target_dir, &cache, &key_service)
+                        .export_release(&release_id, &target_dir, &cache, &library_dir)
                         .await
                     {
                         error!("Failed to export release: {}", e);
@@ -306,10 +304,10 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
     });
 
     // Transfer callbacks
-    let on_transfer_to_profile = EventHandler::new({
+    let on_transfer_to_managed = EventHandler::new({
         let app = app.clone();
-        move |(release_id, profile_id): (String, String)| {
-            app.transfer_release_storage(&release_id, &profile_id);
+        move |release_id: String| {
+            app.transfer_release_to_managed(&release_id);
         }
     });
     let on_eject = EventHandler::new({
@@ -354,9 +352,6 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
     let active_source = app.state.library().active_source().read().clone();
     let is_followed = matches!(active_source, LibrarySource::Followed(_));
 
-    // Available storage profiles for transfer
-    let available_profiles = app.state.storage_profiles().profiles().read().clone();
-
     // Release select callback - navigate to new URL which triggers data reload
     let on_release_select = {
         move |new_release_id: String| {
@@ -400,12 +395,11 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
                 on_artist_click,
                 on_play_album,
                 on_add_album_to_queue,
-                on_transfer_to_profile,
+                on_transfer_to_managed,
                 on_eject,
                 on_fetch_remote_covers,
                 on_select_cover,
                 on_create_share_grant,
-                available_profiles,
             }
 
             if let Some(ref msg) = success_toast() {

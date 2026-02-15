@@ -56,13 +56,12 @@ pub fn AlbumDetailView(
     on_artist_click: EventHandler<String>,
     on_play_album: EventHandler<Vec<String>>,
     on_add_album_to_queue: EventHandler<Vec<String>>,
-    on_transfer_to_profile: EventHandler<(String, String)>,
+    on_transfer_to_managed: EventHandler<String>,
     on_eject: EventHandler<String>,
     on_fetch_remote_covers: EventHandler<()>,
     on_select_cover: EventHandler<CoverChange>,
     /// Called with (release_id, recipient_pubkey_hex) to create a share grant
     on_create_share_grant: EventHandler<(String, String)>,
-    available_profiles: Vec<crate::components::settings::StorageProfile>,
     #[props(default)] torrent_info: std::collections::HashMap<String, ReleaseTorrentInfo>,
     #[props(default)] on_start_seeding: Option<EventHandler<String>>,
     #[props(default)] on_stop_seeding: Option<EventHandler<String>>,
@@ -185,9 +184,8 @@ pub fn AlbumDetailView(
         StorageModalWrapper {
             state,
             show: show_storage_modal,
-            on_transfer_to_profile,
+            on_transfer_to_managed,
             on_eject,
-            available_profiles: available_profiles.clone(),
         }
 
         ShareGrantDialogWrapper { state, show: show_share_dialog, on_create_share_grant }
@@ -237,12 +235,7 @@ fn AlbumInfoSection(
     let import_progress = *state.import_progress().read();
     let import_error = state.import_error().read().clone();
     let selected_release_id = state.selected_release_id().read().clone();
-    let is_on_cloud = state
-        .storage_profile()
-        .read()
-        .as_ref()
-        .map(|p| p.location == crate::components::settings::StorageLocation::Cloud)
-        .unwrap_or(false);
+    let is_on_cloud = *state.managed_in_cloud().read();
 
     // Use derived fields - these don't change during import progress updates
     let track_count = *state.track_count().read();
@@ -305,12 +298,7 @@ fn ReleaseTabsSectionWrapper(
     // Use lenses
     let releases = state.releases().read().clone();
     let selected_release_id = state.selected_release_id().read().clone();
-    let is_on_cloud = state
-        .storage_profile()
-        .read()
-        .as_ref()
-        .map(|p| p.location == crate::components::settings::StorageLocation::Cloud)
-        .unwrap_or(false);
+    let is_on_cloud = *state.managed_in_cloud().read();
 
     if releases.len() <= 1 {
         return rsx! {};
@@ -563,6 +551,9 @@ fn ReleaseInfoModalWrapper(
             barcode: None,
             discogs_release_id: None,
             musicbrainz_release_id: None,
+            managed_locally: false,
+            managed_in_cloud: false,
+            unmanaged_path: None,
         });
 
     let track_count = *state.track_count().read();
@@ -595,15 +586,16 @@ fn ReleaseInfoModalWrapper(
 fn StorageModalWrapper(
     state: ReadStore<AlbumDetailState>,
     show: Signal<Option<String>>,
-    on_transfer_to_profile: EventHandler<(String, String)>,
+    on_transfer_to_managed: EventHandler<String>,
     on_eject: EventHandler<String>,
-    available_profiles: Vec<crate::components::settings::StorageProfile>,
 ) -> Element {
     let is_open_memo = use_memo(move || show().is_some());
     let is_open: ReadSignal<bool> = is_open_memo.into();
 
     let files = state.files().read().clone();
-    let storage_profile = state.storage_profile().read().clone();
+    let managed_locally = *state.managed_locally().read();
+    let managed_in_cloud = *state.managed_in_cloud().read();
+    let is_unmanaged = *state.is_unmanaged().read();
     let transfer_progress = state.transfer_progress().read().clone();
     let transfer_error = state.transfer_error().read().clone();
 
@@ -615,12 +607,13 @@ fn StorageModalWrapper(
             is_open,
             on_close: move |_| show.set(None),
             files,
-            storage_profile,
+            managed_locally,
+            managed_in_cloud,
+            is_unmanaged,
             transfer_progress,
             transfer_error,
-            available_profiles,
-            on_transfer_to_profile: move |profile_id: String| {
-                on_transfer_to_profile.call((release_id_for_transfer.clone(), profile_id));
+            on_transfer_to_managed: move |_| {
+                on_transfer_to_managed.call(release_id_for_transfer.clone());
             },
             on_eject: move |_| {
                 on_eject.call(release_id_for_eject.clone());
@@ -640,12 +633,7 @@ fn ShareGrantDialogWrapper(
 
     let grant_json = state.share_grant_json().read().clone();
     let grant_error = state.share_error().read().clone();
-    let has_cloud_profile = state
-        .storage_profile()
-        .read()
-        .as_ref()
-        .map(|p| p.location == crate::components::settings::StorageLocation::Cloud)
-        .unwrap_or(false);
+    let has_cloud_profile = *state.managed_in_cloud().read();
 
     let release_id = show().unwrap_or_default();
 

@@ -75,6 +75,9 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
             barcode: Some("123456789012".to_string()),
             discogs_release_id: Some("12345678".to_string()),
             musicbrainz_release_id: Some("abc-123".to_string()),
+            managed_locally: true,
+            managed_in_cloud: false,
+            unmanaged_path: None,
         },
         Release {
             id: "release-2".to_string(),
@@ -88,6 +91,9 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
             barcode: None,
             discogs_release_id: None,
             musicbrainz_release_id: Some("def-456".to_string()),
+            managed_locally: true,
+            managed_in_cloud: false,
+            unmanaged_path: None,
         },
     ];
 
@@ -145,7 +151,9 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
         error: None,
         import_progress: None,
         import_error: None,
-        storage_profile: None,
+        managed_locally: false,
+        managed_in_cloud: false,
+        is_unmanaged: false,
         transfer_progress: None,
         transfer_error: None,
         remote_covers: vec![],
@@ -200,12 +208,11 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
                 on_artist_click: |_| {},
                 on_play_album: |_| {},
                 on_add_album_to_queue: |_| {},
-                on_transfer_to_profile: |_| {},
+                on_transfer_to_managed: |_| {},
                 on_eject: |_| {},
                 on_fetch_remote_covers: |_| {},
                 on_select_cover: |_| {},
                 on_create_share_grant: |_| {},
-                available_profiles: vec![],
             }
         }
     }

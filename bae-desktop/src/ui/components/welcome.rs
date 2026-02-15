@@ -336,27 +336,12 @@ async fn do_restore(
     let images_dir = library_dir.images_dir();
     download_images_encrypted(&storage, &encryption_service, &bucket, &images_dir).await?;
 
-    // Generate a new home profile UUID
-    let home_profile_id = uuid::Uuid::new_v4().to_string();
-
-    // Open the restored DB to insert the home profile
-    let database = bae_core::db::Database::new(db_path.to_str().unwrap()).await?;
-    let home_profile =
-        bae_core::db::DbStorageProfile::new_local("Local", &library_dir.to_string_lossy(), false)
-            .with_home(true);
-    // Override the auto-generated ID
-    let home_profile = bae_core::db::DbStorageProfile {
-        id: home_profile_id.clone(),
-        ..home_profile
-    };
-    database.insert_storage_profile(&home_profile).await?;
-
-    // Write local manifest.json for the new home
+    // Write local manifest.json
     let home_manifest = bae_core::library_dir::Manifest {
         library_id: library_id.clone(),
         library_name: manifest.library_name.clone(),
         encryption_key_fingerprint: Some(fingerprint.clone()),
-        profile_id: home_profile_id,
+        profile_id: String::new(),
         profile_name: "Local".to_string(),
     };
     let manifest_json = serde_json::to_string_pretty(&home_manifest)?;
@@ -408,20 +393,12 @@ async fn do_restore(
     // Write secrets to keyring
     key_service.set_encryption_key(&encryption_key_hex)?;
 
-    // Save S3 credentials for the cloud profile that matches the bucket we restored from.
-    // Without this, auto-sync would fail because the credentials only live in the keyring.
-    let all_profiles = database.get_all_storage_profiles().await?;
-    if let Some(cloud_profile) = all_profiles
-        .iter()
-        .find(|p| p.cloud_bucket.as_deref() == Some(&bucket))
+    // Save cloud home S3 credentials
     {
-        key_service.set_profile_access_key(&cloud_profile.id, &access_key)?;
-        key_service.set_profile_secret_key(&cloud_profile.id, &secret_key)?;
+        key_service.set_cloud_home_access_key(&access_key)?;
+        key_service.set_cloud_home_secret_key(&secret_key)?;
 
-        info!(
-            "Saved S3 credentials for cloud profile '{}'",
-            cloud_profile.name
-        );
+        info!("Saved cloud home S3 credentials");
     }
 
     // Write pointer file last (makes this idempotent on failure)

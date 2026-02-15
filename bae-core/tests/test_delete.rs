@@ -3,20 +3,22 @@ mod support;
 use crate::support::{test_encryption_service, tracing_init};
 use bae_core::db::{Database, DbAlbum, DbRelease, DbTrack, ImportStatus};
 use bae_core::library::{LibraryManager, SharedLibraryManager};
+use bae_core::library_dir::LibraryDir;
 use chrono::Utc;
 use tempfile::TempDir;
 use uuid::Uuid;
 
-async fn setup_test_environment() -> (SharedLibraryManager, Database, TempDir) {
+async fn setup_test_environment() -> (SharedLibraryManager, Database, TempDir, LibraryDir) {
     tracing_init();
     let temp_dir = TempDir::new().unwrap();
     let db_path = temp_dir.path().join("test.db");
+    let library_dir = LibraryDir::new(temp_dir.path().to_path_buf());
     let database = Database::new(db_path.to_str().unwrap())
         .await
         .expect("Failed to create database");
     let library_manager = LibraryManager::new(database.clone(), test_encryption_service());
     let shared_library_manager = SharedLibraryManager::new(library_manager);
-    (shared_library_manager, database, temp_dir)
+    (shared_library_manager, database, temp_dir, library_dir)
 }
 
 fn create_test_album() -> DbAlbum {
@@ -48,6 +50,9 @@ fn create_test_release(album_id: &str) -> DbRelease {
         country: None,
         barcode: None,
         import_status: ImportStatus::Complete,
+        managed_locally: false,
+        managed_in_cloud: false,
+        unmanaged_path: None,
         private: false,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -72,7 +77,7 @@ fn create_test_track(release_id: &str, track_number: i32) -> DbTrack {
 
 #[tokio::test]
 async fn test_delete_album_integration() {
-    let (library_manager, database, _temp_dir) = setup_test_environment().await;
+    let (library_manager, database, _temp_dir, library_dir) = setup_test_environment().await;
     let album = create_test_album();
     let release = create_test_release(&album.id);
     let track1 = create_test_track(&release.id, 1);
@@ -85,7 +90,7 @@ async fn test_delete_album_integration() {
 
     library_manager
         .get()
-        .delete_album(&album.id, _temp_dir.path())
+        .delete_album(&album.id, &library_dir)
         .await
         .unwrap();
 
@@ -109,7 +114,7 @@ async fn test_delete_album_integration() {
 
 #[tokio::test]
 async fn test_delete_release_integration() {
-    let (library_manager, database, _temp_dir) = setup_test_environment().await;
+    let (library_manager, database, _temp_dir, library_dir) = setup_test_environment().await;
     let album = create_test_album();
     let release1 = create_test_release(&album.id);
     let release2 = create_test_release(&album.id);
@@ -124,7 +129,7 @@ async fn test_delete_release_integration() {
 
     library_manager
         .get()
-        .delete_release(&release1.id, _temp_dir.path())
+        .delete_release(&release1.id, &library_dir)
         .await
         .unwrap();
 
@@ -160,7 +165,7 @@ async fn test_delete_release_integration() {
 
 #[tokio::test]
 async fn test_delete_last_release_deletes_album() {
-    let (library_manager, database, _temp_dir) = setup_test_environment().await;
+    let (library_manager, database, _temp_dir, library_dir) = setup_test_environment().await;
     let album = create_test_album();
     let release = create_test_release(&album.id);
 
@@ -169,7 +174,7 @@ async fn test_delete_last_release_deletes_album() {
 
     library_manager
         .get()
-        .delete_release(&release.id, _temp_dir.path())
+        .delete_release(&release.id, &library_dir)
         .await
         .unwrap();
 

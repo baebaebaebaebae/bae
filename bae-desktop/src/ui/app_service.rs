@@ -16,7 +16,7 @@ use crate::ui::display_types::{
 use crate::ui::import_helpers::consume_scan_events;
 use bae_core::cache;
 use bae_core::config;
-use bae_core::db::{DbStorageProfile, ImportStatus, StorageLocation};
+use bae_core::db::ImportStatus;
 use bae_core::image_server::ImageServerHandle;
 use bae_core::import::{self, ImportProgress};
 use bae_core::keys::{KeyService, UserKeypair};
@@ -29,9 +29,8 @@ use bae_ui::stores::{
     ActiveImport, ActiveImportsUiStateStoreExt, AlbumDetailStateStoreExt, AppState,
     AppStateStoreExt, ArtistDetailStateStoreExt, ConfigStateStoreExt, DeviceActivityInfo,
     ImportOperationStatus, LibraryStateStoreExt, Member, MemberRole, PlaybackStatus,
-    PlaybackUiStateStoreExt, PrepareStep, StorageProfilesStateStoreExt, SyncStateStoreExt,
+    PlaybackUiStateStoreExt, PrepareStep, SyncStateStoreExt,
 };
-use bae_ui::StorageProfile;
 use dioxus::prelude::*;
 use std::collections::HashMap;
 
@@ -444,7 +443,6 @@ impl AppService {
         let library_manager = self.library_manager.clone();
         let imgs = self.image_server.clone();
         let library_dir = self.config.library_dir.clone();
-        let key_service = self.key_service.clone();
 
         // Spawn a debounced AlbumsChanged forwarder that sends on the trigger channel.
         let mut library_events_rx = library_manager.get().subscribe_events();
@@ -480,7 +478,6 @@ impl AppService {
                 &library_manager,
                 &imgs,
                 &library_dir,
-                &key_service,
                 &mut trigger_rx,
             )
             .await;
@@ -493,22 +490,14 @@ impl AppService {
         self.load_config();
         self.load_active_imports();
         self.load_library();
-        self.load_storage_profiles();
     }
 
     /// Process any pending file deletions from previous transfers
     fn process_pending_deletions(&self) {
         let library_dir = self.config.library_dir.clone();
-        let library_manager = self.library_manager.clone();
-        let key_service = self.key_service.clone();
 
         spawn(async move {
-            bae_core::storage::cleanup::process_pending_deletions(
-                &library_dir,
-                library_manager,
-                &key_service,
-            )
-            .await;
+            bae_core::storage::cleanup::process_pending_deletions(&library_dir).await;
         });
     }
 
@@ -801,7 +790,6 @@ impl AppService {
                 let album_id = album_id.to_string();
                 let release_id = release_id.map(|s| s.to_string());
                 let imgs = self.image_server.clone();
-                let key_service = self.key_service.clone();
 
                 spawn(async move {
                     load_album_detail(
@@ -810,7 +798,6 @@ impl AppService {
                         &album_id,
                         release_id.as_deref(),
                         &imgs,
-                        &key_service,
                     )
                     .await;
                 });
@@ -862,7 +849,6 @@ impl AppService {
         let album_id = album_id.to_string();
         let release_id = release_id.to_string();
         let imgs = self.image_server.clone();
-        let key_service = self.key_service.clone();
 
         spawn(async move {
             let result = change_cover_async(
@@ -886,7 +872,6 @@ impl AppService {
                 &album_id,
                 Some(&release_id),
                 &imgs,
-                &key_service,
             )
             .await;
 
@@ -904,41 +889,15 @@ impl AppService {
         });
     }
 
-    /// Transfer a release to a different storage profile
-    pub fn transfer_release_storage(&self, release_id: &str, target_profile_id: &str) {
+    /// Transfer a release to managed local storage
+    pub fn transfer_release_to_managed(&self, release_id: &str) {
         let state = self.state;
         let library_manager = self.library_manager.clone();
         let config = self.config.clone();
         let release_id = release_id.to_string();
-        let target_profile_id = target_profile_id.to_string();
         let imgs = self.image_server.clone();
-        let key_service = self.key_service.clone();
 
         spawn(async move {
-            // Look up the target profile
-            let target_profile = match library_manager
-                .get()
-                .database()
-                .get_storage_profile(&target_profile_id)
-                .await
-            {
-                Ok(Some(p)) => p,
-                Ok(None) => {
-                    state
-                        .album_detail()
-                        .transfer_error()
-                        .set(Some("Target storage profile not found".into()));
-                    return;
-                }
-                Err(e) => {
-                    state
-                        .album_detail()
-                        .transfer_error()
-                        .set(Some(format!("Failed to load target profile: {}", e)));
-                    return;
-                }
-            };
-
             let encryption_service = library_manager.get().encryption_service().cloned();
             let library_dir = config.library_dir.clone();
 
@@ -946,12 +905,11 @@ impl AppService {
                 library_manager.clone(),
                 encryption_service,
                 library_dir.clone(),
-                key_service.clone(),
             );
 
             let mut rx = transfer_service.transfer(
                 release_id.clone(),
-                bae_core::storage::transfer::TransferTarget::Profile(target_profile),
+                bae_core::storage::transfer::TransferTarget::ManagedLocal,
             );
 
             while let Some(progress) = rx.recv().await {
@@ -1000,17 +958,12 @@ impl AppService {
                                 &album_id,
                                 Some(&release_id),
                                 &imgs,
-                                &key_service,
                             )
                             .await;
                         }
 
                         // Schedule deferred cleanup of old files
-                        bae_core::storage::cleanup::schedule_cleanup(
-                            &library_dir,
-                            library_manager.clone(),
-                            key_service.clone(),
-                        );
+                        bae_core::storage::cleanup::schedule_cleanup(&library_dir);
                     }
                     bae_core::storage::transfer::TransferProgress::Failed { error, .. } => {
                         state.album_detail().transfer_progress().set(None);
@@ -1028,7 +981,6 @@ impl AppService {
         let config = self.config.clone();
         let release_id = release_id.to_string();
         let imgs = self.image_server.clone();
-        let key_service = self.key_service.clone();
 
         spawn(async move {
             // Show folder picker
@@ -1049,7 +1001,6 @@ impl AppService {
                 library_manager.clone(),
                 encryption_service,
                 library_dir.clone(),
-                key_service.clone(),
             );
 
             let mut rx = transfer_service.transfer(
@@ -1103,17 +1054,12 @@ impl AppService {
                                 &album_id,
                                 Some(&release_id),
                                 &imgs,
-                                &key_service,
                             )
                             .await;
                         }
 
                         // Schedule deferred cleanup of old files
-                        bae_core::storage::cleanup::schedule_cleanup(
-                            &library_dir,
-                            library_manager.clone(),
-                            key_service.clone(),
-                        );
+                        bae_core::storage::cleanup::schedule_cleanup(&library_dir);
                     }
                     bae_core::storage::transfer::TransferProgress::Failed { error, .. } => {
                         state.album_detail().transfer_progress().set(None);
@@ -2004,270 +1950,11 @@ impl AppService {
             }
         });
     }
-
-    // =========================================================================
-    // Storage Profile Methods
-    // =========================================================================
-
-    /// Load storage profiles from database into Store
-    pub fn load_storage_profiles(&self) {
-        let state = self.state;
-        let library_manager = self.library_manager.clone();
-        let key_service = self.key_service.clone();
-
-        spawn(async move {
-            state.storage_profiles().loading().set(true);
-            state.storage_profiles().error().set(None);
-
-            match library_manager.get_all_storage_profiles().await {
-                Ok(db_profiles) => {
-                    let profiles = db_profiles
-                        .iter()
-                        .map(|p| storage_profile_from_db(p, &key_service))
-                        .collect();
-                    state.storage_profiles().profiles().set(profiles);
-                }
-                Err(e) => {
-                    state
-                        .storage_profiles()
-                        .error()
-                        .set(Some(format!("Failed to load storage profiles: {}", e)));
-                }
-            }
-
-            state.storage_profiles().loading().set(false);
-        });
-    }
-
-    /// Save (create or update) a storage profile
-    pub fn save_storage_profile(&self, profile: StorageProfile) {
-        let state = self.state;
-        let library_manager = self.library_manager.clone();
-        let key_service = self.key_service.clone();
-        let is_new = profile.id.is_empty();
-
-        spawn(async move {
-            let result = if is_new {
-                let location = storage_location_from_display(profile.location);
-                // Cloud profiles must always be encrypted; local profiles are never encrypted
-                let encrypted = location == StorageLocation::Cloud;
-                let db_profile = if location == StorageLocation::Local {
-                    DbStorageProfile::new_local(&profile.name, &profile.location_path, encrypted)
-                } else {
-                    DbStorageProfile::new_cloud(
-                        &profile.name,
-                        profile.cloud_bucket.as_deref().unwrap_or(""),
-                        profile.cloud_region.as_deref().unwrap_or(""),
-                        profile.cloud_endpoint.as_deref(),
-                        encrypted,
-                    )
-                }
-                .with_default(profile.is_default);
-
-                // Save S3 credentials to keyring before DB insert
-                if location == StorageLocation::Cloud {
-                    if let Some(ref ak) = profile.cloud_access_key {
-                        if let Err(e) = key_service.set_profile_access_key(&db_profile.id, ak) {
-                            tracing::error!("Failed to save S3 access key: {}", e);
-                        }
-                    }
-                    if let Some(ref sk) = profile.cloud_secret_key {
-                        if let Err(e) = key_service.set_profile_secret_key(&db_profile.id, sk) {
-                            tracing::error!("Failed to save S3 secret key: {}", e);
-                        }
-                    }
-                }
-
-                library_manager.insert_storage_profile(&db_profile).await
-            } else {
-                let location = storage_location_from_display(profile.location);
-                // Cloud profiles must always be encrypted; local profiles are never encrypted
-                let encrypted = location == StorageLocation::Cloud;
-                let mut db_profile = DbStorageProfile {
-                    id: profile.id.clone(),
-                    name: profile.name.clone(),
-                    location,
-                    location_path: profile.location_path.clone(),
-                    encrypted,
-                    is_default: profile.is_default,
-                    is_home: false,
-                    cloud_bucket: profile.cloud_bucket.clone(),
-                    cloud_region: profile.cloud_region.clone(),
-                    cloud_endpoint: profile.cloud_endpoint.clone(),
-                    created_at: chrono::Utc::now(),
-                    updated_at: chrono::Utc::now(),
-                };
-
-                if db_profile.location == StorageLocation::Local {
-                    db_profile.cloud_bucket = None;
-                    db_profile.cloud_region = None;
-                    db_profile.cloud_endpoint = None;
-
-                    // Clean up any stale keyring entries when switching to local
-                    let _ = key_service.delete_profile_credentials(&db_profile.id);
-                } else {
-                    // Update S3 credentials in keyring
-                    if let Some(ref ak) = profile.cloud_access_key {
-                        if let Err(e) = key_service.set_profile_access_key(&db_profile.id, ak) {
-                            tracing::error!("Failed to save S3 access key: {}", e);
-                        }
-                    }
-                    if let Some(ref sk) = profile.cloud_secret_key {
-                        if let Err(e) = key_service.set_profile_secret_key(&db_profile.id, sk) {
-                            tracing::error!("Failed to save S3 secret key: {}", e);
-                        }
-                    }
-                }
-
-                library_manager.update_storage_profile(&db_profile).await
-            };
-
-            match result {
-                Ok(()) => {
-                    tracing::info!("Saved storage profile: {}", profile.name);
-                    // Reload profiles
-                    if let Ok(db_profiles) = library_manager.get_all_storage_profiles().await {
-                        let profiles = db_profiles
-                            .iter()
-                            .map(|p| storage_profile_from_db(p, &key_service))
-                            .collect();
-                        state.storage_profiles().profiles().set(profiles);
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("Failed to save storage profile: {}", e);
-                    state
-                        .storage_profiles()
-                        .error()
-                        .set(Some(format!("Failed to save: {}", e)));
-                }
-            }
-        });
-    }
-
-    /// Delete a storage profile
-    pub fn delete_storage_profile(&self, profile_id: &str) {
-        let state = self.state;
-        let library_manager = self.library_manager.clone();
-        let key_service = self.key_service.clone();
-        let profile_id = profile_id.to_string();
-
-        spawn(async move {
-            state.storage_profiles().error().set(None);
-
-            match library_manager.delete_storage_profile(&profile_id).await {
-                Ok(()) => {
-                    // Clean up S3 credentials from keyring
-                    if let Err(e) = key_service.delete_profile_credentials(&profile_id) {
-                        tracing::warn!(
-                            "Failed to delete keyring credentials for profile {}: {}",
-                            profile_id,
-                            e
-                        );
-                    }
-
-                    tracing::info!("Deleted storage profile: {}", profile_id);
-                    // Reload profiles
-                    if let Ok(db_profiles) = library_manager.get_all_storage_profiles().await {
-                        let profiles = db_profiles
-                            .iter()
-                            .map(|p| storage_profile_from_db(p, &key_service))
-                            .collect();
-                        state.storage_profiles().profiles().set(profiles);
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("Failed to delete storage profile: {}", e);
-
-                    // Extract a clean user-facing message. The inner sqlx::Error::Protocol
-                    // wrapping adds confusing "server backend" framing, so we pull out
-                    // our business-logic message when present.
-                    let full = e.to_string();
-                    let user_msg = if let Some(pos) = full.find("Cannot delete") {
-                        full[pos..].to_string()
-                    } else {
-                        format!("Failed to delete storage profile: {}", e)
-                    };
-                    state.storage_profiles().error().set(Some(user_msg));
-                }
-            }
-        });
-    }
-
-    /// Set a storage profile as default
-    pub fn set_default_storage_profile(&self, profile_id: &str) {
-        let state = self.state;
-        let library_manager = self.library_manager.clone();
-        let key_service = self.key_service.clone();
-        let profile_id = profile_id.to_string();
-
-        spawn(async move {
-            match library_manager
-                .set_default_storage_profile(&profile_id)
-                .await
-            {
-                Ok(()) => {
-                    tracing::info!("Set default storage profile: {}", profile_id);
-                    // Reload profiles
-                    if let Ok(db_profiles) = library_manager.get_all_storage_profiles().await {
-                        let profiles = db_profiles
-                            .iter()
-                            .map(|p| storage_profile_from_db(p, &key_service))
-                            .collect();
-                        state.storage_profiles().profiles().set(profiles);
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("Failed to set default storage profile: {}", e);
-                    state
-                        .storage_profiles()
-                        .error()
-                        .set(Some(format!("Failed to set default: {}", e)));
-                }
-            }
-        });
-    }
 }
 
 // =============================================================================
 // Helper Functions
 // =============================================================================
-
-/// Convert DbStorageProfile to display StorageProfile, reading credentials from keyring
-fn storage_profile_from_db(
-    p: &DbStorageProfile,
-    key_service: &bae_core::keys::KeyService,
-) -> StorageProfile {
-    StorageProfile {
-        id: p.id.clone(),
-        name: p.name.clone(),
-        location: storage_location_to_display(p.location),
-        location_path: p.location_path.clone(),
-        encrypted: p.encrypted,
-        is_default: p.is_default,
-        cloud_bucket: p.cloud_bucket.clone(),
-        cloud_region: p.cloud_region.clone(),
-        cloud_endpoint: p.cloud_endpoint.clone(),
-        cloud_access_key: key_service.get_profile_access_key(&p.id),
-        cloud_secret_key: key_service.get_profile_secret_key(&p.id),
-    }
-}
-
-/// Convert StorageLocation to display type
-fn storage_location_to_display(loc: StorageLocation) -> bae_ui::StorageLocation {
-    match loc {
-        StorageLocation::Local => bae_ui::StorageLocation::Local,
-        StorageLocation::Cloud => bae_ui::StorageLocation::Cloud,
-    }
-}
-
-/// Convert display StorageLocation to DB type
-fn storage_location_from_display(loc: bae_ui::StorageLocation) -> StorageLocation {
-    match loc {
-        bae_ui::StorageLocation::Local => StorageLocation::Local,
-        bae_ui::StorageLocation::Cloud => StorageLocation::Cloud,
-    }
-}
 
 /// Load library albums and artists into the Store
 async fn load_library(
@@ -2452,7 +2139,9 @@ async fn load_followed_album_detail(
             state.album_detail().files().set(vec![]);
             state.album_detail().images().set(vec![]);
             state.album_detail().selected_release_id().set(None);
-            state.album_detail().storage_profile().set(None);
+            state.album_detail().managed_locally().set(false);
+            state.album_detail().managed_in_cloud().set(false);
+            state.album_detail().is_unmanaged().set(false);
         }
         Err(e) => {
             state
@@ -2472,7 +2161,6 @@ async fn load_album_detail(
     album_id: &str,
     release_id_param: Option<&str>,
     imgs: &ImageServerHandle,
-    key_service: &bae_core::keys::KeyService,
 ) {
     state.album_detail().loading().set(true);
     state.album_detail().error().set(None);
@@ -2539,6 +2227,20 @@ async fn load_album_detail(
         // Progress will be updated by import subscription
         state.album_detail().import_progress().set(Some(0));
     }
+
+    // Set storage flags from selected release
+    state
+        .album_detail()
+        .managed_locally()
+        .set(selected_release.managed_locally);
+    state
+        .album_detail()
+        .managed_in_cloud()
+        .set(selected_release.managed_in_cloud);
+    state
+        .album_detail()
+        .is_unmanaged()
+        .set(selected_release.unmanaged_path.is_some());
 
     let display_releases = releases.iter().map(release_from_db_ref).collect();
     state.album_detail().releases().set(display_releases);
@@ -2612,15 +2314,6 @@ async fn load_album_detail(
         state.album_detail().images().set(images);
     }
 
-    // Load storage profile for selected release
-    let storage_profile = library_manager
-        .get()
-        .get_storage_profile_for_release(&selected_release_id)
-        .await
-        .ok()
-        .flatten()
-        .map(|p| storage_profile_from_db(&p, key_service));
-    state.album_detail().storage_profile().set(storage_profile);
     state.album_detail().transfer_progress().set(None);
     state.album_detail().transfer_error().set(None);
     state.album_detail().remote_covers().set(vec![]);
@@ -2709,13 +2402,24 @@ async fn change_cover_async(
                 .map_err(|e| format!("Failed to get file: {}", e))?
                 .ok_or_else(|| "File not found".to_string())?;
 
-            // Read the file bytes from source_path
-            let source_path = file
-                .source_path
-                .as_ref()
-                .ok_or_else(|| "File has no source_path".to_string())?;
+            // Derive file path from the release's storage flags
+            let release = library_manager
+                .get()
+                .database()
+                .get_release_by_id(&file.release_id)
+                .await
+                .map_err(|e| format!("Failed to get release: {}", e))?
+                .ok_or_else(|| "Release not found".to_string())?;
+
+            let source_path = if release.managed_locally {
+                file.local_storage_path(library_dir)
+            } else if let Some(ref unmanaged) = release.unmanaged_path {
+                std::path::PathBuf::from(unmanaged).join(&file.original_filename)
+            } else {
+                return Err("Release has no local file storage".to_string());
+            };
             let bytes =
-                std::fs::read(source_path).map_err(|e| format!("Failed to read file: {}", e))?;
+                std::fs::read(&source_path).map_err(|e| format!("Failed to read file: {}", e))?;
 
             let content_type = file.content_type.clone();
 
@@ -3302,7 +3006,6 @@ async fn run_sync_loop(
     library_manager: &SharedLibraryManager,
     imgs: &ImageServerHandle,
     library_dir: &LibraryDir,
-    key_service: &KeyService,
     trigger_rx: &mut tokio::sync::mpsc::Receiver<()>,
 ) {
     let db = library_manager.get().database();
@@ -3416,7 +3119,6 @@ async fn run_sync_loop(
                             &aid,
                             release_id.as_deref(),
                             imgs,
-                            key_service,
                         )
                         .await;
                     }
@@ -3779,33 +3481,33 @@ async fn create_share_grant_async(
         .cloned()
         .ok_or("Encryption is not configured.")?;
 
-    // Look up the release's storage profile.
-    let profile = library_manager
+    // Verify the release is managed in the cloud.
+    let release = library_manager
         .get()
         .database()
-        .get_storage_profile_for_release(release_id)
+        .get_release_by_id(release_id)
         .await
-        .map_err(|e| format!("Failed to look up storage profile: {e}"))?
-        .ok_or("Release is not on a managed storage profile.")?;
+        .map_err(|e| format!("Failed to look up release: {e}"))?
+        .ok_or("Release not found.")?;
 
-    // Must be cloud.
-    if profile.location != StorageLocation::Cloud {
-        return Err("Release must be on a cloud storage profile to share.".to_string());
+    if !release.managed_in_cloud {
+        return Err("Release must be managed in the cloud to share.".to_string());
     }
 
-    let bucket = profile
-        .cloud_bucket
+    // Use cloud home config for bucket/region/endpoint.
+    let bucket = config
+        .cloud_home_s3_bucket
         .as_deref()
-        .ok_or("Storage profile has no bucket configured.")?;
-    let region = profile
-        .cloud_region
+        .ok_or("Cloud home S3 bucket not configured.")?;
+    let region = config
+        .cloud_home_s3_region
         .as_deref()
-        .ok_or("Storage profile has no region configured.")?;
-    let endpoint = profile.cloud_endpoint.as_deref();
+        .ok_or("Cloud home S3 region not configured.")?;
+    let endpoint = config.cloud_home_s3_endpoint.as_deref();
 
     // Read S3 credentials from keyring.
-    let access_key = key_service.get_profile_access_key(&profile.id);
-    let secret_key = key_service.get_profile_secret_key(&profile.id);
+    let access_key = key_service.get_cloud_home_access_key();
+    let secret_key = key_service.get_cloud_home_secret_key();
 
     let grant = bae_core::sync::share_grant::create_share_grant(
         keypair,

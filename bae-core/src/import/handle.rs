@@ -129,7 +129,7 @@ impl ImportServiceHandle {
                 mb_release,
                 folder,
                 master_year,
-                storage_profile_id,
+                managed,
                 selected_cover,
             } => {
                 self.send_folder_request(
@@ -138,7 +138,7 @@ impl ImportServiceHandle {
                     mb_release,
                     folder,
                     master_year,
-                    storage_profile_id,
+                    managed,
                     selected_cover,
                 )
                 .await
@@ -151,7 +151,7 @@ impl ImportServiceHandle {
                 master_year,
                 seed_after_download,
                 torrent_metadata,
-                storage_profile_id,
+                managed,
                 selected_cover,
             } => {
                 self.send_torrent_request(
@@ -161,7 +161,7 @@ impl ImportServiceHandle {
                     master_year,
                     seed_after_download,
                     torrent_metadata,
-                    storage_profile_id,
+                    managed,
                     selected_cover,
                 )
                 .await
@@ -172,7 +172,7 @@ impl ImportServiceHandle {
                 mb_release,
                 drive_path,
                 master_year,
-                storage_profile_id,
+                managed,
                 selected_cover,
             } => {
                 self.send_cd_request(
@@ -180,7 +180,7 @@ impl ImportServiceHandle {
                     mb_release,
                     drive_path,
                     master_year,
-                    storage_profile_id,
+                    managed,
                     selected_cover,
                 )
                 .await
@@ -194,7 +194,7 @@ impl ImportServiceHandle {
         mb_release: Option<MbRelease>,
         folder: std::path::PathBuf,
         master_year: u32,
-        storage_profile_id: Option<String>,
+        managed: bool,
         selected_cover: Option<CoverSelection>,
     ) -> Result<(String, String), String> {
         if discogs_release.is_none() && mb_release.is_none() {
@@ -364,7 +364,7 @@ impl ImportServiceHandle {
                 tracks_to_files,
                 discovered_files,
                 cue_flac_metadata,
-                storage_profile_id,
+                managed,
                 cover_image_path,
                 remote_cover_set,
                 import_id,
@@ -381,7 +381,7 @@ impl ImportServiceHandle {
         master_year: u32,
         seed_after_download: bool,
         torrent_metadata: TorrentImportMetadata,
-        storage_profile_id: Option<String>,
+        managed: bool,
         selected_cover: Option<CoverSelection>,
     ) -> Result<(String, String), String> {
         if discogs_release.is_none() && mb_release.is_none() {
@@ -460,7 +460,7 @@ impl ImportServiceHandle {
                 torrent_source: torrent_source_for_request,
                 torrent_metadata,
                 seed_after_download,
-                storage_profile_id,
+                managed,
                 selected_cover,
             })
             .map_err(|_| "Failed to queue validated torrent for import".to_string())?;
@@ -473,7 +473,7 @@ impl ImportServiceHandle {
         mb_release: Option<MbRelease>,
         drive_path: std::path::PathBuf,
         master_year: u32,
-        storage_profile_id: Option<String>,
+        managed: bool,
         selected_cover: Option<CoverSelection>,
     ) -> Result<(String, String), String> {
         if discogs_release.is_none() && mb_release.is_none() {
@@ -524,7 +524,7 @@ impl ImportServiceHandle {
                 db_tracks,
                 drive_path: drive.device_path,
                 toc,
-                storage_profile_id,
+                managed,
                 cover_image_path,
             })
             .map_err(|_| "Failed to queue validated CD import".to_string())?;

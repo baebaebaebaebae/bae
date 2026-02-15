@@ -1,13 +1,10 @@
-//! Deferred file cleanup after storage transfers
+//! Deferred file cleanup after storage operations
 //!
-//! After a transfer swaps DB records, old file locations are queued for
+//! After a transfer or delete, old file locations are queued for
 //! deletion via a manifest file. Cleanup runs on app startup and after
-//! a delay post-transfer, giving in-flight playback seeks and Subsonic
+//! a delay post-operation, giving in-flight playback seeks and Subsonic
 //! streams time to complete.
 
-use crate::db::DbStorageProfile;
-use crate::keys::KeyService;
-use crate::storage::create_storage_reader;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tokio::time::{sleep, Duration};
@@ -25,8 +22,6 @@ const MANIFEST_FILENAME: &str = "pending_deletions.json";
 pub enum PendingDeletion {
     #[serde(rename = "local")]
     Local { path: String },
-    #[serde(rename = "cloud")]
-    Cloud { profile_id: String, key: String },
 }
 
 /// Append pending deletions to the manifest file
@@ -54,11 +49,7 @@ pub async fn append_pending_deletions(
 /// Process all pending deletions from the manifest.
 ///
 /// Called on app startup and after a delay post-transfer.
-pub async fn process_pending_deletions(
-    library_path: &Path,
-    get_profile: impl AsyncProfileLookup,
-    key_service: &KeyService,
-) {
+pub async fn process_pending_deletions(library_path: &Path) {
     let manifest_path = library_path.join(MANIFEST_FILENAME);
     let pending = read_manifest(&manifest_path).await;
 
@@ -84,34 +75,6 @@ pub async fn process_pending_deletions(
                     }
                 }
             }
-            PendingDeletion::Cloud { profile_id, key } => {
-                match get_profile.get_profile(profile_id).await {
-                    Some(profile) => match create_storage_reader(&profile, key_service).await {
-                        Ok(reader) => {
-                            if let Err(e) = reader.delete(key).await {
-                                warn!("Failed to delete cloud file {}: {}, will retry", key, e);
-                                remaining.push(deletion);
-                            } else {
-                                info!("Deleted cloud file: {}", key);
-                            }
-                        }
-                        Err(e) => {
-                            warn!(
-                                "Failed to create storage reader for profile {}: {}, will retry",
-                                profile_id, e
-                            );
-                            remaining.push(deletion);
-                        }
-                    },
-                    None => {
-                        warn!(
-                            "Storage profile {} not found, dropping deletion for {}",
-                            profile_id, key
-                        );
-                        // Profile was deleted, can't clean up — drop it
-                    }
-                }
-            }
         }
     }
 
@@ -124,15 +87,11 @@ pub async fn process_pending_deletions(
 }
 
 /// Schedule deferred cleanup after a transfer completes
-pub fn schedule_cleanup(
-    library_path: &Path,
-    get_profile: impl AsyncProfileLookup + 'static,
-    key_service: KeyService,
-) {
+pub fn schedule_cleanup(library_path: &Path) {
     let library_path = library_path.to_path_buf();
     tokio::spawn(async move {
         sleep(CLEANUP_DELAY).await;
-        process_pending_deletions(&library_path, get_profile, &key_service).await;
+        process_pending_deletions(&library_path).await;
     });
 }
 
@@ -143,58 +102,19 @@ async fn read_manifest(manifest_path: &Path) -> Vec<PendingDeletion> {
     }
 }
 
-/// Trait for looking up storage profiles (allows mocking in tests)
-#[async_trait::async_trait]
-pub trait AsyncProfileLookup: Send + Sync {
-    async fn get_profile(&self, profile_id: &str) -> Option<DbStorageProfile>;
-}
-
-/// Implementation that uses LibraryManager
-#[async_trait::async_trait]
-impl AsyncProfileLookup for crate::library::SharedLibraryManager {
-    async fn get_profile(&self, profile_id: &str) -> Option<DbStorageProfile> {
-        self.get()
-            .database()
-            .get_storage_profile(profile_id)
-            .await
-            .ok()
-            .flatten()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
-
-    fn test_key_service() -> KeyService {
-        KeyService::new(true, "test".to_string())
-    }
-
-    /// A no-op profile lookup that always returns None
-    struct NoOpProfileLookup;
-
-    #[async_trait::async_trait]
-    impl AsyncProfileLookup for NoOpProfileLookup {
-        async fn get_profile(&self, _profile_id: &str) -> Option<DbStorageProfile> {
-            None
-        }
-    }
 
     #[tokio::test]
     async fn test_append_creates_manifest() {
         let temp = TempDir::new().unwrap();
         let library_path = temp.path();
 
-        let deletions = vec![
-            PendingDeletion::Local {
-                path: "/old/file1.flac".to_string(),
-            },
-            PendingDeletion::Cloud {
-                profile_id: "prof-1".to_string(),
-                key: "release-1/file2.flac".to_string(),
-            },
-        ];
+        let deletions = vec![PendingDeletion::Local {
+            path: "/old/file1.flac".to_string(),
+        }];
 
         append_pending_deletions(library_path, &deletions)
             .await
@@ -205,7 +125,7 @@ mod tests {
 
         let contents = tokio::fs::read_to_string(&manifest_path).await.unwrap();
         let parsed: Vec<PendingDeletion> = serde_json::from_str(&contents).unwrap();
-        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed.len(), 1);
     }
 
     #[tokio::test]
@@ -262,7 +182,7 @@ mod tests {
         .await
         .unwrap();
 
-        process_pending_deletions(library_path, NoOpProfileLookup, &test_key_service()).await;
+        process_pending_deletions(library_path).await;
 
         assert!(!file1.exists());
         assert!(!file2.exists());
@@ -285,67 +205,31 @@ mod tests {
         .await
         .unwrap();
 
-        process_pending_deletions(library_path, NoOpProfileLookup, &test_key_service()).await;
+        process_pending_deletions(library_path).await;
 
         // Manifest should be cleaned up (not-found is not a retry)
         assert!(!library_path.join(MANIFEST_FILENAME).exists());
     }
 
     #[tokio::test]
-    async fn test_process_cloud_with_missing_profile_drops_entry() {
-        let temp = TempDir::new().unwrap();
-        let library_path = temp.path();
-
-        append_pending_deletions(
-            library_path,
-            &[PendingDeletion::Cloud {
-                profile_id: "deleted-profile".to_string(),
-                key: "release-1/file.flac".to_string(),
-            }],
-        )
-        .await
-        .unwrap();
-
-        // NoOpProfileLookup returns None for all profiles
-        process_pending_deletions(library_path, NoOpProfileLookup, &test_key_service()).await;
-
-        // Entry should be dropped (not retried), manifest cleaned up
-        assert!(!library_path.join(MANIFEST_FILENAME).exists());
-    }
-
-    #[tokio::test]
     async fn test_process_with_no_manifest_is_noop() {
         let temp = TempDir::new().unwrap();
-        // No manifest file exists — should not panic
-        process_pending_deletions(temp.path(), NoOpProfileLookup, &test_key_service()).await;
+        // No manifest file exists -- should not panic
+        process_pending_deletions(temp.path()).await;
     }
 
     #[tokio::test]
     async fn test_serde_roundtrip() {
-        let deletions = vec![
-            PendingDeletion::Local {
-                path: "/some/path.flac".to_string(),
-            },
-            PendingDeletion::Cloud {
-                profile_id: "prof-1".to_string(),
-                key: "key/path.flac".to_string(),
-            },
-        ];
+        let deletions = vec![PendingDeletion::Local {
+            path: "/some/path.flac".to_string(),
+        }];
 
         let json = serde_json::to_string_pretty(&deletions).unwrap();
         let parsed: Vec<PendingDeletion> = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed.len(), 1);
         match &parsed[0] {
             PendingDeletion::Local { path } => assert_eq!(path, "/some/path.flac"),
-            _ => panic!("Expected Local variant"),
-        }
-        match &parsed[1] {
-            PendingDeletion::Cloud { profile_id, key } => {
-                assert_eq!(profile_id, "prof-1");
-                assert_eq!(key, "key/path.flac");
-            }
-            _ => panic!("Expected Cloud variant"),
         }
     }
 }

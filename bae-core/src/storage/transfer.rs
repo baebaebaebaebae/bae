@@ -1,18 +1,14 @@
-//! Transfer service — moves releases between storage profiles
+//! Transfer service — moves releases between storage modes
 //!
 //! Orchestrates reading files from the source location, writing them to the
-//! destination, updating DB records atomically, and queuing old files for
-//! deferred cleanup.
+//! destination, updating DB records, and queuing old files for deferred cleanup.
 
-use crate::cloud_storage::CloudStorage;
-use crate::db::{DbFile, DbReleaseStorage, DbStorageProfile, EncryptionScheme, StorageLocation};
+use crate::db::DbFile;
 use crate::encryption::EncryptionService;
-use crate::keys::KeyService;
 use crate::library::SharedLibraryManager;
 use crate::library_dir::LibraryDir;
-use crate::storage::{create_storage_reader, ReleaseStorageImpl};
+use crate::storage::ReleaseStorageImpl;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
@@ -42,22 +38,17 @@ pub enum TransferProgress {
 
 /// Where to transfer a release
 pub enum TransferTarget {
-    /// Move to a managed storage profile
-    Profile(DbStorageProfile),
+    /// Move files into managed local storage
+    ManagedLocal,
     /// Eject to a user-chosen local folder (removes from managed storage)
     Eject(PathBuf),
 }
 
-/// Transfer service that moves releases between storage profiles
+/// Transfer service that moves releases between storage modes
 pub struct TransferService {
     library_manager: SharedLibraryManager,
     encryption_service: Option<EncryptionService>,
     library_dir: LibraryDir,
-    key_service: KeyService,
-    #[cfg(feature = "test-utils")]
-    injected_source_cloud: Option<Arc<dyn CloudStorage>>,
-    #[cfg(feature = "test-utils")]
-    injected_dest_cloud: Option<Arc<dyn CloudStorage>>,
 }
 
 impl TransferService {
@@ -65,29 +56,12 @@ impl TransferService {
         library_manager: SharedLibraryManager,
         encryption_service: Option<EncryptionService>,
         library_dir: LibraryDir,
-        key_service: KeyService,
     ) -> Self {
         Self {
             library_manager,
             encryption_service,
             library_dir,
-            key_service,
-            #[cfg(feature = "test-utils")]
-            injected_source_cloud: None,
-            #[cfg(feature = "test-utils")]
-            injected_dest_cloud: None,
         }
-    }
-
-    #[cfg(feature = "test-utils")]
-    pub fn with_injected_clouds(
-        mut self,
-        source: Option<Arc<dyn CloudStorage>>,
-        dest: Option<Arc<dyn CloudStorage>>,
-    ) -> Self {
-        self.injected_source_cloud = source;
-        self.injected_dest_cloud = dest;
-        self
     }
 
     /// Transfer a release to a new storage target.
@@ -102,12 +76,6 @@ impl TransferService {
         let library_manager = self.library_manager.clone();
         let encryption_service = self.encryption_service.clone();
         let library_dir = self.library_dir.clone();
-        let key_service = self.key_service.clone();
-
-        #[cfg(feature = "test-utils")]
-        let injected_source = self.injected_source_cloud.clone();
-        #[cfg(feature = "test-utils")]
-        let injected_dest = self.injected_dest_cloud.clone();
 
         tokio::spawn(async move {
             let result = do_transfer(
@@ -116,12 +84,7 @@ impl TransferService {
                 &library_manager,
                 encryption_service.as_ref(),
                 &library_dir,
-                &key_service,
                 &tx,
-                #[cfg(feature = "test-utils")]
-                injected_source,
-                #[cfg(feature = "test-utils")]
-                injected_dest,
             )
             .await;
 
@@ -143,17 +106,18 @@ async fn do_transfer(
     target: TransferTarget,
     library_manager: &SharedLibraryManager,
     encryption_service: Option<&EncryptionService>,
-    library_path: &Path,
-    key_service: &KeyService,
+    library_dir: &LibraryDir,
     tx: &mpsc::UnboundedSender<TransferProgress>,
-    #[cfg(feature = "test-utils")] injected_source: Option<Arc<dyn CloudStorage>>,
-    #[cfg(feature = "test-utils")] injected_dest: Option<Arc<dyn CloudStorage>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mgr = library_manager.get();
 
-    // 1. Get current files and source profile
+    let release = mgr
+        .database()
+        .get_release_by_id(release_id)
+        .await?
+        .ok_or("Release not found")?;
+
     let old_files = mgr.get_files_for_release(release_id).await?;
-    let source_profile = mgr.get_storage_profile_for_release(release_id).await?;
 
     if old_files.is_empty() {
         return Err("Release has no files".into());
@@ -170,26 +134,9 @@ async fn do_transfer(
         old_files.len()
     );
 
-    // 2. Read all files from source, decrypting if needed
-    let source_reader: Option<Arc<dyn CloudStorage>> = if let Some(ref profile) = source_profile {
-        #[cfg(feature = "test-utils")]
-        if let Some(ref cloud) = injected_source {
-            Some(cloud.clone())
-        } else {
-            Some(create_storage_reader(profile, key_service).await?)
-        }
-        #[cfg(not(feature = "test-utils"))]
-        Some(create_storage_reader(profile, key_service).await?)
-    } else {
-        None
-    };
+    // Read all files from source, decrypting if needed
+    let source_encrypted = release.managed_locally && encryption_service.is_some();
 
-    let source_encrypted = source_profile
-        .as_ref()
-        .map(|p| p.encrypted)
-        .unwrap_or(false);
-
-    // Read source files into memory with decryption
     let mut file_data: Vec<(String, Vec<u8>)> = Vec::with_capacity(old_files.len());
     for (i, file) in old_files.iter().enumerate() {
         let _ = tx.send(TransferProgress::FileProgress {
@@ -200,7 +147,7 @@ async fn do_transfer(
             percent: 0,
         });
 
-        let raw_data = read_file_data(file, source_reader.as_ref()).await?;
+        let raw_data = read_file_data(file, &release, library_dir).await?;
 
         let data = if source_encrypted {
             let enc =
@@ -221,41 +168,33 @@ async fn do_transfer(
         });
     }
 
-    // 3. Write files to destination, updating existing records in place
+    // Queue old managed-local files for deferred deletion
+    if release.managed_locally {
+        let pending: Vec<PendingDeletion> = old_files
+            .iter()
+            .map(|f| PendingDeletion::Local {
+                path: f.local_storage_path(library_dir).display().to_string(),
+            })
+            .collect();
+
+        if !pending.is_empty() {
+            if let Err(e) =
+                super::cleanup::append_pending_deletions(library_dir.as_ref(), &pending).await
+            {
+                warn!("Failed to queue deferred deletions: {}", e);
+            }
+        }
+    }
+
+    // Write files to destination
     match &target {
-        TransferTarget::Profile(dest_profile) => {
-            let database = Arc::new(mgr.database().clone());
-
-            #[cfg(feature = "test-utils")]
-            let storage = if let Some(ref cloud) = injected_dest {
-                ReleaseStorageImpl::with_cloud(
-                    dest_profile.clone(),
-                    encryption_service.cloned(),
-                    cloud.clone(),
-                    database,
-                )
-            } else {
-                ReleaseStorageImpl::from_profile(
-                    dest_profile.clone(),
-                    encryption_service.cloned(),
-                    database,
-                    key_service,
-                )
-                .await?
-            };
-
-            #[cfg(not(feature = "test-utils"))]
-            let storage = ReleaseStorageImpl::from_profile(
-                dest_profile.clone(),
+        TransferTarget::ManagedLocal => {
+            let database = std::sync::Arc::new(mgr.database().clone());
+            let storage = ReleaseStorageImpl::new_local(
+                library_dir.clone(),
                 encryption_service.cloned(),
                 database,
-                key_service,
-            )
-            .await?;
-
-            // Write all bytes to storage first, collecting new paths
-            let mut file_updates: Vec<(String, Option<Vec<u8>>)> =
-                Vec::with_capacity(old_files.len());
+            );
 
             for (i, file) in old_files.iter().enumerate() {
                 let data = &file_data[i].1;
@@ -264,7 +203,7 @@ async fn do_transfer(
                 let rid = release_id.to_string();
                 let fname = file.original_filename.clone();
 
-                let (new_source_path, nonce) = storage
+                let nonce = storage
                     .store_bytes(
                         &file.id,
                         data,
@@ -285,38 +224,28 @@ async fn do_transfer(
                     )
                     .await?;
 
-                file_updates.push((new_source_path, nonce));
+                // Update encryption nonce if newly encrypted
+                if let Some(nonce) = nonce {
+                    mgr.database()
+                        .update_file_encryption_nonce(&file.id, &nonce)
+                        .await?;
+                }
             }
 
-            // Batch-update all file records + release storage link atomically
-            let updates: Vec<(&str, &str, Option<&[u8]>, &str)> = old_files
-                .iter()
-                .zip(file_updates.iter())
-                .map(|(file, (path, nonce))| {
-                    (
-                        file.id.as_str(),
-                        path.as_str(),
-                        nonce.as_deref(),
-                        file.encryption_scheme.as_str(),
-                    )
-                })
-                .collect();
-            mgr.batch_update_file_source_paths(&updates).await?;
+            mgr.database()
+                .set_release_managed_locally(release_id, true)
+                .await?;
 
-            let release_storage = DbReleaseStorage::new(release_id, &dest_profile.id);
-            mgr.set_release_storage(&release_storage).await?;
+            // Clear unmanaged_path since files are now managed
+            // (set_release_managed_locally already handles this via SQL)
         }
         TransferTarget::Eject(target_dir) => {
             tokio::fs::create_dir_all(target_dir).await?;
-
-            // Write all files to target directory first
-            let mut dest_paths: Vec<String> = Vec::with_capacity(old_files.len());
 
             for (i, file) in old_files.iter().enumerate() {
                 let data = &file_data[i].1;
                 let dest_path = target_dir.join(&file.original_filename);
                 tokio::fs::write(&dest_path, data).await?;
-                dest_paths.push(dest_path.display().to_string());
 
                 let _ = tx.send(TransferProgress::FileProgress {
                     release_id: release_id.to_string(),
@@ -327,45 +256,15 @@ async fn do_transfer(
                 });
             }
 
-            // Batch-update all file records atomically
-            let scheme = EncryptionScheme::Master.as_str();
-            let updates: Vec<(&str, &str, Option<&[u8]>, &str)> = old_files
-                .iter()
-                .zip(dest_paths.iter())
-                .map(|(file, path)| (file.id.as_str(), path.as_str(), None, scheme))
-                .collect();
-            mgr.batch_update_file_source_paths(&updates).await?;
-
-            mgr.delete_release_storage(release_id).await?;
-        }
-    }
-
-    // 4. Queue old files for deferred deletion
-    let pending: Vec<PendingDeletion> = old_files
-        .iter()
-        .filter_map(|f| {
-            let source_path = f.source_path.as_ref()?;
-            if let Some(ref profile) = source_profile {
-                if profile.location == StorageLocation::Cloud {
-                    Some(PendingDeletion::Cloud {
-                        profile_id: profile.id.clone(),
-                        key: source_path.clone(),
-                    })
-                } else {
-                    Some(PendingDeletion::Local {
-                        path: source_path.clone(),
-                    })
-                }
-            } else {
-                // Self-managed files: don't delete originals
-                None
-            }
-        })
-        .collect();
-
-    if !pending.is_empty() {
-        if let Err(e) = super::cleanup::append_pending_deletions(library_path, &pending).await {
-            warn!("Failed to queue deferred deletions: {}", e);
+            let unmanaged_path = target_dir
+                .to_str()
+                .ok_or("Cannot convert target dir to string")?;
+            mgr.database()
+                .set_release_unmanaged(release_id, unmanaged_path)
+                .await?;
+            mgr.database()
+                .set_release_managed_locally(release_id, false)
+                .await?;
         }
     }
 
@@ -378,20 +277,21 @@ async fn do_transfer(
     Ok(())
 }
 
-/// Read file data from its source location
+/// Read file data from its source location based on release storage flags
 async fn read_file_data(
     file: &DbFile,
-    source_reader: Option<&Arc<dyn CloudStorage>>,
+    release: &crate::db::DbRelease,
+    library_dir: &LibraryDir,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-    let source_path = file
-        .source_path
-        .as_ref()
-        .ok_or_else(|| format!("File {} has no source_path", file.id))?;
-
-    if let Some(reader) = source_reader {
-        Ok(reader.download(source_path).await?)
+    if release.managed_locally {
+        // Read from managed local storage path
+        let path = file.local_storage_path(library_dir);
+        Ok(tokio::fs::read(&path).await?)
+    } else if let Some(ref unmanaged_path) = release.unmanaged_path {
+        // Read from unmanaged location
+        let path = Path::new(unmanaged_path).join(&file.original_filename);
+        Ok(tokio::fs::read(&path).await?)
     } else {
-        // Self-managed: read from disk directly
-        Ok(tokio::fs::read(source_path).await?)
+        Err(format!("File {} has no readable location", file.id).into())
     }
 }
