@@ -8,7 +8,7 @@ One symmetric encryption key per library, shared by all members. Everything that
 
 **Key fingerprint:** SHA-256 of the key, truncated. Stored in `config.yaml`. Lets us detect the wrong key immediately instead of silently producing garbage.
 
-Encryption is automatic when cloud is configured -- there's no separate setup step.
+When cloud is configured, bae generates an encryption key and stores it in the OS keyring. On macOS, this prompts for keychain access -- the user should understand bae is storing the encryption key in the system's secure store, not asking for a bae password.
 
 ## The CloudHome Trait
 
@@ -25,7 +25,7 @@ The `CloudHome` trait is the core abstraction that makes bae backend-agnostic. E
 ### What varies (below the trait)
 
 - **Storage API**: how files are actually read/written (S3 API vs Google Drive API vs Dropbox API)
-- **Access management**: how a joiner gets storage access (folder sharing vs credential minting vs manual)
+- **Access management**: how a joiner gets storage access (folder sharing vs credential minting)
 - **Authentication**: how the joiner authenticates (their own cloud account vs embedded credentials)
 - **Change notifications**: consumer clouds have push notifications, S3 requires polling
 
@@ -68,16 +68,16 @@ Cloud home paths like `changes/{device_id}/{seq}.enc` map to flat object keys on
 
 How `grant_access` and `revoke_access` work depends on the backend:
 
-| | Consumer cloud | S3 with minting | S3 without minting |
-|---|---|---|---|
-| **Grant access** | Share folder via provider API (Google Drive `permissions.create`, Dropbox `sharing/add_folder_member`, etc.) | Mint scoped IAM credentials via provider API | Owner creates credentials manually in provider console |
-| **Revoke access** | Unshare folder via provider API | Delete minted credentials | Rotate shared credentials (all-or-nothing) |
-| **Joiner authenticates with** | Their own cloud account (OAuth) | Credentials embedded in invite code | Credentials embedded in invite code |
-| **Per-user scoping** | Yes (provider-native) | Yes (per-user IAM) | No (shared credentials) |
+| | Consumer cloud | S3 |
+|---|---|---|
+| **Grant access** | Share folder via provider API (Google Drive `permissions.create`, Dropbox `sharing/add_folder_member`, etc.) | Mint scoped IAM credentials (automated via provider API, or manually in the provider console) |
+| **Revoke access** | Unshare folder via provider API | Delete minted credentials |
+| **Joiner authenticates with** | Their own cloud account (OAuth) | Credentials embedded in invite code |
+| **Per-user scoping** | Yes (provider-native) | Yes (per-user IAM) |
 
 `JoinInfo` is what the joiner needs beyond the encryption key (which is always wrapped to their pubkey via the membership chain):
 - **Consumer cloud**: provider type + folder ID. The joiner signs into their own account; the shared folder is already accessible.
-- **S3**: bucket + region + endpoint + credentials.
+- **S3**: bucket + region + endpoint + minted credentials.
 
 ### Change notifications
 
@@ -85,7 +85,7 @@ Consumer clouds support push-based change notifications (Google Drive `changes.w
 
 ## Changeset sync
 
-Use the SQLite session extension to capture exactly what changed, push the binary changeset to the cloud home, pull and apply on other devices with a conflict handler. No coordination server. The cloud home is a library-level concept -- one bucket/folder per library, configured in `config.yaml`. The cloud home can be an S3 bucket or a folder on a consumer cloud (Google Drive, Dropbox, etc.).
+Use the SQLite session extension to capture exactly what changed, push the changeset to the cloud home, pull and apply on other devices with a conflict handler. No coordination server. The cloud home is a library-level concept -- one bucket/folder per library, configured in `config.yaml`. The cloud home can be an S3 bucket or a folder on a consumer cloud (Google Drive, Dropbox, etc.).
 
 Each device writes to its own keyspace on the shared bucket. No write contention by construction:
 
@@ -113,13 +113,13 @@ We considered and rejected several alternatives:
 - **CRDTs (Automerge/Loro)** -- hold full state in memory, don't scale to arbitrary entity counts
 - **cr-sqlite** -- stalled project, too risky as a dependency
 
-The session extension is built into SQLite. It tracks all changes (INSERT/UPDATE/DELETE) automatically at the C level. No triggers, no method wrapping, no column enumeration. The app writes normally. SQLite records what changed. We grab the binary changeset and push it.
+The session extension is built into SQLite. It tracks all changes (INSERT/UPDATE/DELETE) automatically at the C level. No triggers, no method wrapping, no column enumeration. The app writes normally. SQLite records what changed. We grab the changeset and push it.
 
 ### Changesets, not operations
 
-The session extension produces a compact binary changeset that represents the diff between the database before and after. A changeset contains only the rows and columns that actually changed.
+The session extension produces a compact changeset that represents the diff between the database before and after. A changeset contains only the rows and columns that actually changed.
 
-For an import that creates an album + release + 12 tracks + 12 files, a JSON op log approach would generate ~50 operations. The session extension produces a single binary changeset blob. Smaller, faster, and no custom serialization.
+For an import that creates an album + release + 12 tracks + 12 files, a JSON op log approach would generate ~50 operations. The session extension produces a single changeset blob. Smaller, faster, and no custom serialization.
 
 ### Conflict resolution: row-level LWW
 
@@ -376,7 +376,7 @@ Each capability is independent. Solo users only need changeset sync.
 
 ### Access control varies by backend
 
-See the CloudHome trait's access management table above. The three tiers (consumer cloud, S3 with minting, S3 without minting) have different capabilities for per-user scoping and revocation, but the join flow and membership chain work the same across all of them.
+See the CloudHome trait's access management table above. Consumer clouds and S3 have different mechanisms for access management, but the join flow and membership chain work the same across all of them. S3 always uses per-user credential minting — the difference is whether minting is automated (provider API) or manual (owner creates credentials in the provider console).
 
 **Bandwidth/request limits are the provider's problem.** bae can't enforce quotas regardless of backend.
 
