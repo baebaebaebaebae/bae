@@ -62,12 +62,18 @@ fn session_does_not_capture_non_synced_tables() {
         let db = open_memory_db();
         create_synced_schema(db);
 
+        // Create a non-synced table for the test
+        exec(
+            db,
+            "CREATE TABLE imports (id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'preparing', album_title TEXT NOT NULL, artist_name TEXT NOT NULL, folder_path TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
+        );
+
         let session = SyncSession::start(db).expect("start session");
 
         // Write to a non-synced table
         exec(
             db,
-            "INSERT INTO storage_profiles (id, name, location, location_path, created_at, updated_at) VALUES ('sp1', 'test', 'local', '/tmp', '2026-01-01', '2026-01-01')",
+            "INSERT INTO imports (id, status, album_title, artist_name, folder_path, created_at, updated_at) VALUES ('imp1', 'preparing', 'Test', 'Artist', '/tmp', 0, 0)",
         );
 
         let cs = session.changeset().expect("changeset");
@@ -456,7 +462,7 @@ fn changeset_from_bytes_roundtrip() {
 // ---- release_files DATA conflict preserves device-specific columns ----
 
 #[test]
-fn release_files_data_conflict_preserves_source_path_and_nonce() {
+fn release_files_data_conflict_preserves_encryption_nonce() {
     unsafe {
         let db1 = open_memory_db();
         create_synced_schema(db1);
@@ -472,7 +478,7 @@ fn release_files_data_conflict_preserves_source_path_and_nonce() {
         );
         exec(
             db1,
-            "INSERT INTO release_files (id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, _updated_at, created_at) VALUES ('f1', 'r1', 'track01.flac', 50000, 'audio/flac', '/dev1/music/track01.flac', X'AABBCCDD', '0000000001000-0000-dev1', '2026-01-01')",
+            "INSERT INTO release_files (id, release_id, original_filename, file_size, content_type, encryption_nonce, _updated_at, created_at) VALUES ('f1', 'r1', 'track01.flac', 50000, 'audio/flac', X'AABBCCDD', '0000000001000-0000-dev1', '2026-01-01')",
         );
 
         // Dev1 updates the file metadata with a NEWER timestamp
@@ -480,12 +486,12 @@ fn release_files_data_conflict_preserves_source_path_and_nonce() {
         session.attach(Some("release_files")).expect("attach");
         exec(
             db1,
-            "UPDATE release_files SET original_filename = 'track01_renamed.flac', source_path = '/dev1/music/track01_renamed.flac', encryption_nonce = X'11223344', _updated_at = '0000000003000-0000-dev1' WHERE id = 'f1'",
+            "UPDATE release_files SET original_filename = 'track01_renamed.flac', encryption_nonce = X'11223344', _updated_at = '0000000003000-0000-dev1' WHERE id = 'f1'",
         );
         let cs = session.changeset().expect("changeset");
         drop(session);
 
-        // Dev2 has the same row with an OLDER timestamp but its own device-specific paths
+        // Dev2 has the same row with an OLDER timestamp but its own device-specific nonce
         let db2 = open_memory_db();
         create_synced_schema(db2);
         exec(
@@ -498,7 +504,7 @@ fn release_files_data_conflict_preserves_source_path_and_nonce() {
         );
         exec(
             db2,
-            "INSERT INTO release_files (id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, _updated_at, created_at) VALUES ('f1', 'r1', 'track01.flac', 50000, 'audio/flac', '/dev2/library/track01.flac', X'DEADBEEF', '0000000002000-0000-dev2', '2026-01-01')",
+            "INSERT INTO release_files (id, release_id, original_filename, file_size, content_type, encryption_nonce, _updated_at, created_at) VALUES ('f1', 'r1', 'track01.flac', 50000, 'audio/flac', X'DEADBEEF', '0000000002000-0000-dev2', '2026-01-01')",
         );
 
         apply_changeset_lww(db2, &cs).expect("apply");
@@ -513,13 +519,7 @@ fn release_files_data_conflict_preserves_source_path_and_nonce() {
             "incoming shared metadata should win"
         );
 
-        // Device-specific columns should be preserved from local (dev2)
-        let source_path = query_text(db2, "SELECT source_path FROM release_files WHERE id = 'f1'");
-        assert_eq!(
-            source_path, "/dev2/library/track01.flac",
-            "local source_path must be preserved"
-        );
-
+        // Device-specific encryption_nonce should be preserved from local (dev2)
         let nonce = query_text(
             db2,
             "SELECT hex(encryption_nonce) FROM release_files WHERE id = 'f1'",
@@ -550,7 +550,7 @@ fn release_files_data_conflict_local_wins_no_restore_needed() {
         );
         exec(
             db1,
-            "INSERT INTO release_files (id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, _updated_at, created_at) VALUES ('f1', 'r1', 'track01.flac', 50000, 'audio/flac', '/dev1/path', X'AABB', '0000000001000-0000-dev1', '2026-01-01')",
+            "INSERT INTO release_files (id, release_id, original_filename, file_size, content_type, encryption_nonce, _updated_at, created_at) VALUES ('f1', 'r1', 'track01.flac', 50000, 'audio/flac', X'AABB', '0000000001000-0000-dev1', '2026-01-01')",
         );
 
         // Dev1 updates with an OLDER timestamp
@@ -558,7 +558,7 @@ fn release_files_data_conflict_local_wins_no_restore_needed() {
         session.attach(Some("release_files")).expect("attach");
         exec(
             db1,
-            "UPDATE release_files SET original_filename = 'old_name.flac', source_path = '/dev1/old', _updated_at = '0000000002000-0000-dev1' WHERE id = 'f1'",
+            "UPDATE release_files SET original_filename = 'old_name.flac', _updated_at = '0000000002000-0000-dev1' WHERE id = 'f1'",
         );
         let cs = session.changeset().expect("changeset");
         drop(session);
@@ -576,7 +576,7 @@ fn release_files_data_conflict_local_wins_no_restore_needed() {
         );
         exec(
             db2,
-            "INSERT INTO release_files (id, release_id, original_filename, file_size, content_type, source_path, encryption_nonce, _updated_at, created_at) VALUES ('f1', 'r1', 'track01.flac', 50000, 'audio/flac', '/dev2/path', X'CCDD', '0000000005000-0000-dev2', '2026-01-01')",
+            "INSERT INTO release_files (id, release_id, original_filename, file_size, content_type, encryption_nonce, _updated_at, created_at) VALUES ('f1', 'r1', 'track01.flac', 50000, 'audio/flac', X'CCDD', '0000000005000-0000-dev2', '2026-01-01')",
         );
 
         apply_changeset_lww(db2, &cs).expect("apply");
@@ -588,8 +588,11 @@ fn release_files_data_conflict_local_wins_no_restore_needed() {
         );
         assert_eq!(filename, "track01.flac", "local should win");
 
-        let source_path = query_text(db2, "SELECT source_path FROM release_files WHERE id = 'f1'");
-        assert_eq!(source_path, "/dev2/path", "local source_path preserved");
+        let nonce = query_text(
+            db2,
+            "SELECT hex(encryption_nonce) FROM release_files WHERE id = 'f1'",
+        );
+        assert_eq!(nonce, "CCDD", "local encryption_nonce preserved");
 
         ffi::sqlite3_close(db1);
         ffi::sqlite3_close(db2);
@@ -614,8 +617,6 @@ fn synced_tables_constant_has_correct_count() {
     assert!(SYNCED_TABLES.contains(&"library_images"));
 
     // Non-synced tables must NOT be included
-    assert!(!SYNCED_TABLES.contains(&"storage_profiles"));
-    assert!(!SYNCED_TABLES.contains(&"release_storage"));
     assert!(!SYNCED_TABLES.contains(&"torrents"));
     assert!(!SYNCED_TABLES.contains(&"torrent_piece_mappings"));
     assert!(!SYNCED_TABLES.contains(&"imports"));

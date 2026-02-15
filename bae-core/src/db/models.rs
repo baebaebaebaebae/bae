@@ -314,7 +314,6 @@ pub struct DbAudioFormat {
     /// Seektable byte offsets are relative to this position.
     pub audio_data_start: i64,
     /// FK to DbFile containing this track's audio data.
-    /// Links to files.id to get the actual source_path.
     pub file_id: Option<String>,
     pub updated_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,

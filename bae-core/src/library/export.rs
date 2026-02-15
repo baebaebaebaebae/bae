@@ -117,13 +117,20 @@ impl ExportService {
         library_manager: &LibraryManager,
         cache: &CacheManager,
         encryption_service: Option<&EncryptionService>,
+        library_dir: &LibraryDir,
     ) -> Result<(), String> {
         info!("Exporting track {} to {}", track_id, output_path.display());
 
-        let pcm_source =
-            load_track_audio(track_id, library_manager, None, cache, encryption_service)
-                .await
-                .map_err(|e| e.to_string())?;
+        let pcm_source = load_track_audio(
+            track_id,
+            library_manager,
+            library_dir,
+            None,
+            cache,
+            encryption_service,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
 
         let flac_data = crate::audio_codec::encode_to_flac(
             pcm_source.raw_samples(),

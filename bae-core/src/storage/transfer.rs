@@ -235,9 +235,6 @@ async fn do_transfer(
             mgr.database()
                 .set_release_managed_locally(release_id, true)
                 .await?;
-
-            // Clear unmanaged_path since files are now managed
-            // (set_release_managed_locally already handles this via SQL)
         }
         TransferTarget::Eject(target_dir) => {
             tokio::fs::create_dir_all(target_dir).await?;
@@ -261,9 +258,6 @@ async fn do_transfer(
                 .ok_or("Cannot convert target dir to string")?;
             mgr.database()
                 .set_release_unmanaged(release_id, unmanaged_path)
-                .await?;
-            mgr.database()
-                .set_release_managed_locally(release_id, false)
                 .await?;
         }
     }

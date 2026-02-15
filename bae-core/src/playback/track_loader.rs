@@ -53,12 +53,14 @@ pub async fn create_shared_release_storage(
 
 /// Read a track's audio file and decode to PCM for playback.
 ///
-/// For tracks with source_path set, reads from local file.
+/// For managed-locally tracks, reads from the library directory.
+/// For unmanaged tracks, reads from the unmanaged_path.
 /// For cloud storage, downloads and decrypts the file.
 /// Returns decoded PCM audio ready for cpal output.
 pub async fn load_track_audio(
     track_id: &str,
     library_manager: &LibraryManager,
+    library_dir: &crate::library_dir::LibraryDir,
     storage: Option<Arc<dyn CloudStorage>>,
     cache: &CacheManager,
     encryption_service: Option<&EncryptionService>,
@@ -190,9 +192,7 @@ pub async fn load_track_audio(
         } else {
             // Local file - derive path from release storage flags
             let source_path = if release.managed_locally {
-                audio_file.local_storage_path(&crate::library_dir::LibraryDir::new(
-                    std::path::PathBuf::from("."),
-                ))
+                audio_file.local_storage_path(library_dir)
             } else if let Some(ref unmanaged_path) = release.unmanaged_path {
                 std::path::Path::new(unmanaged_path).join(&audio_file.original_filename)
             } else {

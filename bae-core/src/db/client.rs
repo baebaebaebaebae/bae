@@ -1791,19 +1791,30 @@ impl Database {
         Ok(row.as_ref().map(Self::row_to_release))
     }
 
-    /// Set managed_locally flag on a release
+    /// Set managed_locally flag on a release.
+    /// When setting managed = true, also clears unmanaged_path since the
+    /// release is now managed (the two are mutually exclusive).
     pub async fn set_release_managed_locally(
         &self,
         release_id: &str,
         managed: bool,
     ) -> Result<(), sqlx::Error> {
         let mut conn = self.writer()?.lock().await;
-        sqlx::query("UPDATE releases SET managed_locally = ?, _updated_at = ? WHERE id = ?")
-            .bind(managed)
+        if managed {
+            sqlx::query("UPDATE releases SET managed_locally = TRUE, unmanaged_path = NULL, _updated_at = ? WHERE id = ?")
+                .bind(Utc::now().to_rfc3339())
+                .bind(release_id)
+                .execute(&mut *conn)
+                .await?;
+        } else {
+            sqlx::query(
+                "UPDATE releases SET managed_locally = FALSE, _updated_at = ? WHERE id = ?",
+            )
             .bind(Utc::now().to_rfc3339())
             .bind(release_id)
             .execute(&mut *conn)
             .await?;
+        }
         Ok(())
     }
 

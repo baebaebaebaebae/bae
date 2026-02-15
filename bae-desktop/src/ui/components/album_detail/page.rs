@@ -103,9 +103,11 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
     let on_track_export = EventHandler::new({
         let library_manager = library_manager.clone();
         let cache = cache.clone();
+        let library_dir = app.config.library_dir.clone();
         move |track_id: String| {
             let library_manager = library_manager.clone();
             let cache = cache.clone();
+            let library_dir = library_dir.clone();
             spawn(async move {
                 if let Some(file_handle) = AsyncFileDialog::new()
                     .set_title("Export Track")
@@ -117,7 +119,7 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
                     let output_path = file_handle.path().to_path_buf();
                     if let Err(e) = library_manager
                         .get()
-                        .export_track(&track_id, &output_path, &cache)
+                        .export_track(&track_id, &output_path, &cache, &library_dir)
                         .await
                     {
                         error!("Failed to export track: {}", e);

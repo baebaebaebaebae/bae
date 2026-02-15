@@ -255,7 +255,8 @@ async fn prepare_track(
             .display()
             .to_string()
     } else {
-        // Fall back: could be a shared release or missing data
+        // No local path — will be resolved as a shared release below,
+        // or an error will be returned.
         String::new()
     };
 
@@ -344,13 +345,10 @@ async fn prepare_track(
                     Some(srs.encryption),
                 )
             } else {
-                (
-                    Box::new(LocalFileReader::new(read_config)),
-                    true,
-                    None,
-                    false,
-                    None,
-                )
+                return Err(PlaybackError::not_found(
+                    "playable file location",
+                    track_id,
+                ));
             }
         } else {
             // Local file (managed or unmanaged) — read from disk

@@ -540,6 +540,7 @@ impl LibraryManager {
         track_id: &str,
         output_path: &Path,
         cache: &CacheManager,
+        library_dir: &LibraryDir,
     ) -> Result<(), LibraryError> {
         ExportService::export_track(
             track_id,
@@ -547,6 +548,7 @@ impl LibraryManager {
             self,
             cache,
             self.encryption_service.as_ref(),
+            library_dir,
         )
         .await
         .map_err(LibraryError::Import)
