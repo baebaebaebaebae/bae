@@ -16,10 +16,12 @@ use tracing::{info, warn};
 
 use super::apply::apply_changeset_lww;
 use super::bucket::{DeviceHead, SyncBucketClient};
+use super::changeset_scanner;
 use super::envelope::{self, verify_changeset_signature};
 use super::membership::MembershipChain;
 use super::push::SCHEMA_VERSION;
 use super::session_ext::Changeset;
+use crate::library_dir::LibraryDir;
 
 /// Summary of a pull operation.
 #[derive(Debug)]
@@ -60,6 +62,7 @@ pub async unsafe fn pull_changes(
     our_device_id: &str,
     cursors: &HashMap<String, u64>,
     membership_chain: Option<&MembershipChain>,
+    library_dir: &LibraryDir,
 ) -> Result<(HashMap<String, u64>, PullResult), PullError> {
     // Check min_schema_version before processing any changesets.
     // If the bucket has a minimum that's higher than ours, refuse to sync.
@@ -205,8 +208,8 @@ pub async unsafe fn pull_changes(
             let cs = Changeset::from_bytes(&changeset_bytes);
             let apply_result = apply_changeset_lww(db, &cs).map_err(PullError::Apply)?;
 
-            // TODO: Image sync is deferred -- downloaded images will be fetched
-            // here in a follow-up.
+            // Download any images referenced by this changeset.
+            download_changeset_images(&changeset_bytes, bucket, library_dir).await;
 
             if apply_result.had_fk_violations {
                 deferred.push(DeferredChangeset {
@@ -248,6 +251,51 @@ pub async unsafe fn pull_changes(
     }
 
     Ok((updated_cursors, result))
+}
+
+/// Download images referenced by a changeset's library_images operations.
+///
+/// Scans the changeset for upserted image IDs and downloads any that don't
+/// already exist locally. Failures are logged but do not fail the pull --
+/// the image might not be in the bucket yet if push was partial, and the
+/// next sync cycle will retry.
+async fn download_changeset_images(
+    changeset_bytes: &[u8],
+    bucket: &dyn SyncBucketClient,
+    library_dir: &LibraryDir,
+) {
+    let scan = match changeset_scanner::scan_changeset_for_images(changeset_bytes) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("Failed to scan changeset for images: {e}");
+            return;
+        }
+    };
+
+    for image_id in &scan.upserted_image_ids {
+        let image_path = library_dir.image_path(image_id);
+        if image_path.exists() {
+            continue;
+        }
+
+        match bucket.download_image(image_id).await {
+            Ok(bytes) => {
+                if let Some(parent) = image_path.parent() {
+                    if let Err(e) = std::fs::create_dir_all(parent) {
+                        warn!(image_id, error = %e, "failed to create image directory");
+                        continue;
+                    }
+                }
+
+                if let Err(e) = std::fs::write(&image_path, bytes) {
+                    warn!(image_id, error = %e, "failed to write image");
+                }
+            }
+            Err(e) => {
+                warn!(image_id, error = %e, "failed to download image");
+            }
+        }
+    }
 }
 
 #[derive(Debug)]

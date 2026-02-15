@@ -3597,6 +3597,7 @@ async fn run_sync_cycle(
                 "background sync",
                 user_keypair,
                 None, // membership_chain: solo/legacy library for now
+                library_dir,
             )
             .await
     };
