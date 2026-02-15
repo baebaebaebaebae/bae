@@ -106,6 +106,70 @@ import { Image } from 'astro:assets';
 			</div>
 		</section>
 
+		<section class="features">
+			<h2>Features</h2>
+			<div class="features-grid">
+				<div class="feature">
+					<h3>Playback</h3>
+					<ul>
+						<li>CUE/FLAC albums play as individual tracks without splitting the file</li>
+						<li>Pregap-accurate playback</li>
+						<li>Gapless playback</li>
+					</ul>
+				</div>
+				<div class="feature">
+					<h3>Storage</h3>
+					<ul>
+						<li>Managed or unmanaged — bae copies files or indexes in place</li>
+						<li>Google Drive, Dropbox, OneDrive, pCloud, iCloud Drive, S3-compatible</li>
+						<li>End-to-end encrypted (XChaCha20-Poly1305)</li>
+						<li>Per-release derived keys for sharing without exposing the library key</li>
+					</ul>
+				</div>
+				<div class="feature">
+					<h3>Sync</h3>
+					<ul>
+						<li>Incremental changeset sync via SQLite session extension</li>
+						<li>Automatic conflict resolution (last-writer-wins per column)</li>
+						<li>Works offline — syncs when connected</li>
+					</ul>
+				</div>
+				<div class="feature">
+					<h3>Import</h3>
+					<ul>
+						<li>MusicBrainz and Discogs metadata lookup</li>
+						<li>Cover art from Cover Art Archive and Discogs</li>
+						<li>Disc ID matching for CUE sheets</li>
+					</ul>
+				</div>
+				<div class="feature">
+					<h3>Sharing</h3>
+					<ul>
+						<li>Share links — browser playback, no app needed</li>
+						<li>Follow codes — read-only remote library access</li>
+						<li>Shared libraries — multiple contributors, signed changesets</li>
+						<li>Share grants — share individual releases across libraries</li>
+					</ul>
+				</div>
+				<div class="feature">
+					<h3>Server</h3>
+					<ul>
+						<li>Subsonic-compatible API — use any Subsonic client</li>
+						<li>bae-server — headless, pulls from cloud home, streams on the fly</li>
+						<li>bae-web — browser frontend for share links</li>
+					</ul>
+				</div>
+				<div class="feature">
+					<h3>Identity</h3>
+					<ul>
+						<li>Decentralized — Ed25519 keypairs, no central server</li>
+						<li>Membership chain with signed entries</li>
+						<li>Cryptographic attribution on every changeset</li>
+					</ul>
+				</div>
+			</div>
+		</section>
+
 		<section class="mission">
 			<p>Music ownership shouldn't be complicated. bae exists to make owning, organizing, and playing your own music as straightforward as streaming.</p>
 		</section>
@@ -451,6 +515,47 @@ import { Image } from 'astro:assets';
 		text-decoration: underline;
 	}
 
+	/* Features */
+
+	.features {
+		padding: 4rem 0;
+		border-top: 1px solid var(--border);
+	}
+
+	.features > h2 {
+		font-family: 'DM Serif Display', serif;
+		font-size: 2rem;
+		font-weight: 400;
+		text-align: center;
+		margin-bottom: 3rem;
+	}
+
+	.features-grid {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 2rem;
+		max-width: 1000px;
+		margin: 0 auto;
+	}
+
+	.feature h3 {
+		font-size: 1rem;
+		font-weight: 600;
+		margin-bottom: 0.75rem;
+	}
+
+	.feature ul {
+		list-style: none;
+		padding: 0;
+	}
+
+	.feature li {
+		color: var(--text-muted);
+		font-size: 0.9rem;
+		line-height: 1.5;
+		padding: 0.25rem 0;
+	}
+
 	/* Download CTA */
 
 	.download-cta {
@@ -530,6 +635,12 @@ import { Image } from 'astro:assets';
 		}
 	}
 
+	@media (max-width: 768px) {
+		.features-grid {
+			grid-template-columns: repeat(2, 1fr);
+		}
+	}
+
 	@media (max-width: 640px) {
 		nav, main, footer {
 			padding-left: 1.5rem;
@@ -546,6 +657,10 @@ import { Image } from 'astro:assets';
 
 		.concept {
 			padding: 2rem 0;
+		}
+
+		.features-grid {
+			grid-template-columns: 1fr;
 		}
 	}
 </style>
