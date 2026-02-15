@@ -11,6 +11,10 @@ fn stream_url(track_id: &str, token: &str) -> String {
     format!("/rest/stream?id={track_id}&shareToken={token}")
 }
 
+fn download_url(track_id: &str, token: &str) -> String {
+    format!("/rest/stream?id={track_id}&shareToken={token}&download=true")
+}
+
 fn format_duration(secs: i64) -> String {
     let mins = secs / 60;
     let remaining = secs % 60;
@@ -43,6 +47,7 @@ pub fn ShareView(token: String) -> Element {
         Ok(ShareInfo::Track(track)) => {
             let cover_url = cover_art_url(&track.cover_art_id, &token);
             let audio_src = stream_url(&track.id, &token);
+            let dl_url = download_url(&track.id, &token);
 
             rsx! {
                 SharePageShell {
@@ -52,6 +57,15 @@ pub fn ShareView(token: String) -> Element {
                         secondary_line: track.artist.clone(),
                         tertiary_line: if track.album.is_empty() { None } else { Some(track.album.clone()) },
                         audio { class: "w-full mt-4", controls: true, src: audio_src }
+                        div { class: "flex justify-center mt-3",
+                            a {
+                                class: "inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-surface-input)] text-gray-300 hover:text-white hover:bg-[var(--color-hover)] transition-colors text-sm",
+                                href: dl_url,
+                                download: true,
+                                DownloadIcon {}
+                                "Download"
+                            }
+                        }
                     }
                 }
             }
@@ -154,6 +168,7 @@ fn AlbumShareCard(album: SharedAlbum, token: String) -> Element {
             div { class: "mt-4 border-t border-[var(--color-border-subtle)]",
                 for song in &album.songs {
                     TrackRow {
+                        download_href: download_url(&song.id, &token),
                         song: song.clone(),
                         is_playing: current_track_id().as_deref() == Some(&song.id),
                         on_click: move |id: String| {
@@ -192,7 +207,12 @@ fn AlbumShareCard(album: SharedAlbum, token: String) -> Element {
 
 /// A single row in the album track list.
 #[component]
-fn TrackRow(song: SharedAlbumSong, is_playing: bool, on_click: EventHandler<String>) -> Element {
+fn TrackRow(
+    song: SharedAlbumSong,
+    is_playing: bool,
+    on_click: EventHandler<String>,
+    download_href: String,
+) -> Element {
     let id = song.id.clone();
     let highlight = if is_playing {
         "text-[var(--color-accent)]"
@@ -201,24 +221,49 @@ fn TrackRow(song: SharedAlbumSong, is_playing: bool, on_click: EventHandler<Stri
     };
 
     rsx! {
-        button {
-            class: "w-full flex items-center gap-3 px-2 py-2.5 text-left transition-colors cursor-pointer {highlight} hover:bg-[var(--color-hover)] rounded",
-            onclick: move |_| on_click.call(id.clone()),
-
-            // Track number
-            span { class: "w-6 text-right text-xs text-gray-500 shrink-0",
-                if let Some(n) = song.track_number {
-                    "{n}"
+        div { class: "flex items-center gap-1 hover:bg-[var(--color-hover)] rounded",
+            button {
+                class: "flex-1 flex items-center gap-3 px-2 py-2.5 text-left transition-colors cursor-pointer {highlight} rounded min-w-0",
+                onclick: move |_| on_click.call(id.clone()),
+                // Track number
+                span { class: "w-6 text-right text-xs text-gray-500 shrink-0",
+                    if let Some(n) = song.track_number {
+                        "{n}"
+                    }
+                }
+                // Title
+                span { class: "flex-1 text-sm truncate", "{song.title}" }
+                // Duration
+                if let Some(secs) = song.duration_secs {
+                    span { class: "text-xs text-gray-500 shrink-0", "{format_duration(secs)}" }
                 }
             }
-
-            // Title
-            span { class: "flex-1 text-sm truncate", "{song.title}" }
-
-            // Duration
-            if let Some(secs) = song.duration_secs {
-                span { class: "text-xs text-gray-500 shrink-0", "{format_duration(secs)}" }
+            a {
+                class: "p-2 text-gray-500 hover:text-white transition-colors shrink-0",
+                href: download_href,
+                download: true,
+                title: "Download",
+                onclick: move |e: Event<MouseData>| e.stop_propagation(),
+                DownloadIcon {}
             }
+        }
+    }
+}
+
+#[component]
+fn DownloadIcon() -> Element {
+    rsx! {
+        svg {
+            class: "w-4 h-4",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            view_box: "0 0 24 24",
+            path { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }
+            polyline { points: "7 10 12 15 17 10" }
+            line { x1: "12", y1: "15", x2: "12", y2: "3" }
         }
     }
 }
