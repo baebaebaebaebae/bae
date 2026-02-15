@@ -636,6 +636,24 @@ impl AppService {
             .cloud_home_configured()
             .set(config.sync_enabled(&self.key_service));
 
+        // iCloud Drive availability (macOS only)
+        #[cfg(target_os = "macos")]
+        self.state
+            .sync()
+            .icloud_available()
+            .set(detect_icloud_container().is_some());
+
+        // Set iCloud account display if already configured
+        if matches!(
+            config.cloud_provider,
+            Some(bae_core::config::CloudProvider::ICloud)
+        ) {
+            self.state
+                .config()
+                .cloud_account_display()
+                .set(Some("iCloud Drive".to_string()));
+        }
+
         // Followed libraries
         let followed: Vec<bae_ui::stores::config::FollowedLibraryInfo> = config
             .followed_libraries
@@ -1830,6 +1848,58 @@ impl AppService {
         });
     }
 
+    /// Detect and configure iCloud Drive as the cloud home.
+    ///
+    /// Calls `NSFileManager.URLForUbiquityContainerIdentifier` to find the
+    /// ubiquity container, appends a library-specific subdirectory, saves the
+    /// path to config, and updates the store.
+    #[cfg(target_os = "macos")]
+    pub fn use_icloud(&self) {
+        let state = self.state;
+        let mut config = self.config.clone();
+        let key_service = self.key_service.clone();
+
+        match detect_icloud_container() {
+            None => {
+                state.sync().sign_in_error().set(Some(
+                    "iCloud Drive is not available. Sign in to iCloud in System Settings."
+                        .to_string(),
+                ));
+            }
+            Some(container) => {
+                // Use a library-specific subdirectory inside the container
+                let cloud_home_path = container.join(&config.library_id);
+
+                config.cloud_provider = Some(config::CloudProvider::ICloud);
+                config.cloud_home_icloud_container_path =
+                    Some(cloud_home_path.to_string_lossy().to_string());
+
+                if let Err(e) = config.save() {
+                    tracing::error!("Failed to save iCloud config: {e}");
+                    state
+                        .sync()
+                        .sign_in_error()
+                        .set(Some(format!("Failed to save config: {e}")));
+                    return;
+                }
+
+                state
+                    .config()
+                    .cloud_provider()
+                    .set(Some(bae_ui::stores::config::CloudProvider::ICloud));
+                state
+                    .config()
+                    .cloud_account_display()
+                    .set(Some("iCloud Drive".to_string()));
+                state
+                    .sync()
+                    .cloud_home_configured()
+                    .set(config.sync_enabled(&key_service));
+                state.sync().sign_in_error().set(None);
+            }
+        }
+    }
+
     /// Disconnect the current cloud provider. Clears tokens and config.
     pub fn disconnect_cloud_provider(&self) {
         let state = self.state;
@@ -1847,6 +1917,7 @@ impl AppService {
         new_config.cloud_home_onedrive_folder_id = None;
         new_config.cloud_home_pcloud_folder_id = None;
         new_config.cloud_home_pcloud_api_host = None;
+        new_config.cloud_home_icloud_container_path = None;
 
         if let Err(e) = new_config.save() {
             tracing::error!("Failed to save config after disconnect: {e}");
@@ -3751,4 +3822,55 @@ async fn create_share_grant_async(
     .map_err(|e| format!("{e}"))?;
 
     serde_json::to_string_pretty(&grant).map_err(|e| format!("Failed to serialize grant: {e}"))
+}
+
+/// Detect the iCloud Drive ubiquity container for the app.
+///
+/// Calls `NSFileManager.URLForUbiquityContainerIdentifier` with the app's
+/// container identifier. Returns `Some(path)` to the container's `Documents/`
+/// subdirectory if iCloud Drive is available, `None` otherwise.
+#[cfg(target_os = "macos")]
+fn detect_icloud_container() -> Option<std::path::PathBuf> {
+    use objc::runtime::{Class, Object};
+    use objc::{msg_send, sel, sel_impl};
+    use std::ffi::CStr;
+
+    unsafe {
+        let nsfilemanager_class = Class::get("NSFileManager")?;
+        let file_manager: *mut Object = msg_send![nsfilemanager_class, defaultManager];
+        if file_manager.is_null() {
+            return None;
+        }
+
+        // Create NSString for the container identifier (needs null-terminated C string)
+        let nsstring_class = Class::get("NSString")?;
+        let container_cstr = std::ffi::CString::new("iCloud.fm.bae").ok()?;
+        let container_nsstring: *mut Object = msg_send![
+            nsstring_class,
+            stringWithUTF8String: container_cstr.as_ptr()
+        ];
+
+        let url: *mut Object =
+            msg_send![file_manager, URLForUbiquityContainerIdentifier: container_nsstring];
+        if url.is_null() {
+            tracing::info!("iCloud Drive ubiquity container not available");
+            return None;
+        }
+
+        // Get the path from the NSURL
+        let path_nsstring: *mut Object = msg_send![url, path];
+        if path_nsstring.is_null() {
+            return None;
+        }
+        let path_cstr: *const std::ffi::c_char = msg_send![path_nsstring, UTF8String];
+        if path_cstr.is_null() {
+            return None;
+        }
+        let path_str = CStr::from_ptr(path_cstr).to_string_lossy().to_string();
+
+        tracing::info!("iCloud Drive container detected at: {}", path_str);
+
+        // Use Documents/ subdirectory (standard for user-visible data in ubiquity containers)
+        Some(std::path::PathBuf::from(path_str).join("Documents"))
+    }
 }

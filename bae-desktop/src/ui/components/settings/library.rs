@@ -666,6 +666,7 @@ async fn bootstrap_library(
         cloud_home_onedrive_folder_id: None,
         cloud_home_pcloud_folder_id: None,
         cloud_home_pcloud_api_host: None,
+        cloud_home_icloud_container_path: None,
         share_base_url: None,
         share_default_expiry_days: None,
         share_signing_key_version: 1,
