@@ -533,15 +533,25 @@ import { Image } from 'astro:assets';
 	.features-grid {
 		display: grid;
 		grid-template-columns: repeat(3, 1fr);
-		gap: 2rem;
+		gap: 1.5rem;
 		max-width: 1000px;
 		margin: 0 auto;
 	}
 
+	.feature {
+		background: var(--bg-subtle);
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		padding: 1.5rem;
+	}
+
 	.feature h3 {
-		font-size: 1rem;
-		font-weight: 600;
-		margin-bottom: 0.75rem;
+		font-size: 0.85rem;
+		font-weight: 500;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--accent);
+		margin-bottom: 1rem;
 	}
 
 	.feature ul {
@@ -553,7 +563,13 @@ import { Image } from 'astro:assets';
 		color: var(--text-muted);
 		font-size: 0.9rem;
 		line-height: 1.5;
-		padding: 0.25rem 0;
+		padding: 0.35rem 0;
+		border-top: 1px solid var(--border);
+	}
+
+	.feature li:first-child {
+		border-top: none;
+		padding-top: 0;
 	}
 
 	/* Download CTA */
