@@ -420,8 +420,14 @@ async fn create_sync_handle(
     let bucket = config.cloud_home_s3_bucket.as_ref()?;
     let region = config.cloud_home_s3_region.as_ref()?;
     let endpoint = config.cloud_home_s3_endpoint.clone();
-    let access_key = key_service.get_cloud_home_access_key()?;
-    let secret_key = key_service.get_cloud_home_secret_key()?;
+
+    let (access_key, secret_key) = match key_service.get_cloud_home_credentials() {
+        Some(bae_core::keys::CloudHomeCredentials::S3 {
+            access_key,
+            secret_key,
+        }) => (access_key, secret_key),
+        _ => return None,
+    };
 
     let cloud_home = match S3CloudHome::new(
         bucket.clone(),

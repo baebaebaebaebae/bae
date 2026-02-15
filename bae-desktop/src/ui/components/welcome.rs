@@ -395,8 +395,11 @@ async fn do_restore(
 
     // Save cloud home S3 credentials
     {
-        key_service.set_cloud_home_access_key(&access_key)?;
-        key_service.set_cloud_home_secret_key(&secret_key)?;
+        let creds = bae_core::keys::CloudHomeCredentials::S3 {
+            access_key: access_key.clone(),
+            secret_key: secret_key.clone(),
+        };
+        key_service.set_cloud_home_credentials(&creds)?;
 
         info!("Saved cloud home S3 credentials");
     }

@@ -622,12 +622,11 @@ async fn bootstrap_library(
 
     // Save sync bucket credentials to keyring.
     new_key_service
-        .set_cloud_home_access_key(access_key)
-        .map_err(|e| format!("Failed to save sync access key: {e}"))?;
-
-    new_key_service
-        .set_cloud_home_secret_key(secret_key)
-        .map_err(|e| format!("Failed to save sync secret key: {e}"))?;
+        .set_cloud_home_credentials(&bae_core::keys::CloudHomeCredentials::S3 {
+            access_key: access_key.to_string(),
+            secret_key: secret_key.to_string(),
+        })
+        .map_err(|e| format!("Failed to save sync credentials: {e}"))?;
 
     let config = Config {
         library_id: library_id.to_string(),
