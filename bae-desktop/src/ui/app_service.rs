@@ -769,21 +769,24 @@ impl AppService {
     // Album Detail Methods
     // =========================================================================
 
-    /// Load album detail data into Store (called when navigating to album page)
-    pub fn load_album_detail(&self, album_id: &str, release_id: Option<&str>) {
+    /// Load album detail data into Store. Takes pre-read active_source and
+    /// followed_libs to avoid calling state.read() (which would subscribe a
+    /// use_effect's ReactiveContext to the store and cause infinite re-fires).
+    pub fn load_album_detail(
+        &self,
+        album_id: &str,
+        release_id: Option<&str>,
+        active_source: &bae_ui::stores::config::LibrarySource,
+        followed_libs: &[bae_ui::stores::config::FollowedLibraryInfo],
+    ) {
         let state = self.state;
-        let active_source = state.read().library.active_source.clone();
 
         match active_source {
             bae_ui::stores::config::LibrarySource::Followed(ref followed_id) => {
                 let key_service = self.key_service.clone();
                 let album_id = album_id.to_string();
 
-                // Read connection details from the Store
-                let followed = {
-                    let followed_libs = state.read().config.followed_libraries.clone();
-                    followed_libs.into_iter().find(|f| f.id == *followed_id)
-                };
+                let followed = followed_libs.iter().find(|f| f.id == *followed_id).cloned();
 
                 let Some(followed) = followed else {
                     state
