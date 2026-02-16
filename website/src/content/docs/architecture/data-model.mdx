@@ -1,0 +1,168 @@
+---
+title: Data Model
+description: How bae organizes libraries, files, images, and metadata
+---
+
+## Libraries and storage locations
+
+A **library** is the top-level entity -- a music collection with its own identity (`library_id`), name, and encryption key. It lives at a **library home** on disk (`~/.bae/libraries/{uuid}/`), where the desktop app writes the authoritative database.
+
+A library can optionally have a **cloud home** -- a single cloud location (Google Drive folder, S3 bucket, etc.) that acts as the collaborative hub for multi-device sync and multi-user access. One cloud home per library, configured in `config.yaml`.
+
+Release files can live in one or more of these locations:
+
+- **Library home** (`~/.bae/libraries/{uuid}/storage/`) -- local copy, available offline
+- **Cloud home** (`cloud-home/storage/`) -- encrypted copy, available for sync
+- **Unmanaged** -- files stay wherever they are on disk, bae just indexes them
+
+A release can be local only, cloud only, or both. Cloud-only files are not available for offline playback.
+
+## Directory layout
+
+### bae directory (`~/.bae/`)
+
+This is what the desktop app opens on launch. Contains all local libraries. `active-library` is the UUID of the currently active library.
+
+```
+~/.bae/
+  active-library               # UUID of the active library
+  libraries/
+    {uuid}/                    # one directory per library
+```
+
+bae-server does not use `~/.bae/` -- it syncs from the cloud home directly.
+
+### Library home
+
+Where the desktop app runs. Holds the authoritative database, device-specific config, and local release files.
+
+```
+~/.bae/libraries/{uuid}/
+  config.yaml                  # device-specific settings (not synced)
+  library.db                   # SQLite -- all metadata
+  images/ab/cd/{id}            # library images (covers, artist photos)
+  storage/ab/cd/{file_id}      # release files
+  manifest.json                # library identity (library_id, name, encryption fingerprint)
+  pending_deletions.json       # deferred file deletion manifest
+```
+
+`config.yaml` holds device-specific settings. It is not synced. Credentials go in the OS keyring, not here.
+
+Files under `images/` and `storage/` have no file extension on disk -- content types are stored in the database.
+
+### Keyring entries
+
+Managed by `KeyService`, using the OS keyring (on macOS, the protected data store with iCloud Keychain sync). All entries are namespaced by `library_id` unless noted otherwise.
+
+| Entry | Scope | Purpose |
+|---|---|---|
+| `encryption_master_key` | per-library | File and metadata encryption |
+| `cloud_home_credentials` | per-library | Serialized enum: S3 access+secret, OAuth token, or none (iCloud) |
+| `discogs_api_key` | per-library | Discogs API access |
+| `server_password` | per-library | bae-server authentication |
+| `followed_password:{id}` | per-library | Per-followed-library password |
+| `bae_user_signing_key` | global | Ed25519 signing key |
+| `bae_user_public_key` | global | Ed25519 public key |
+
+### Cloud home layout
+
+The cloud home mirrors the library's data and adds sync and access control machinery. Same logical structure regardless of whether the backend is S3, Google Drive, or something else.
+
+| Library home | Cloud home | Purpose |
+|---|---|---|
+| `library.db` | `snapshot.db.enc` | Full database (bootstrap for new devices) |
+| -- | `changes/{device_id}/{seq}.enc` | Incremental sync changesets |
+| -- | `heads/{device_id}.json.enc` | Per-device sequence numbers |
+| `images/` | `images/ab/cd/{id}` | Library images (encrypted in cloud) |
+| `storage/` | `storage/ab/cd/{file_id}` | Release files (encrypted in cloud) |
+| -- | `membership/{pubkey}/{seq}.enc` | Multi-contributor access control |
+| -- | `keys/{user_pubkey}.enc` | Per-user wrapped encryption keys |
+| `config.yaml` | -- | Device-specific, not synced |
+| `pending_deletions.json` | -- | Device-specific, not synced |
+
+## Two classes of files
+
+bae manages two fundamentally different kinds of files.
+
+### Release files
+
+Whatever files came with a release: audio, images, CUE sheets, logs, etc. These are the user's data. bae stores them exactly as imported so they can be ejected intact or seeded as torrents.
+
+Storage location is tracked on the `releases` table: `managed_locally` and `managed_in_cloud` booleans, plus `unmanaged_path` for unmanaged releases. Managed file paths are derived from the file ID -- no configuration needed.
+
+### Metadata images
+
+Images that bae creates and manages, separate from release files. Two kinds:
+
+- **Release covers** -- display art for album grids, detail views, playback. One per release. May originate from a file in the release, or fetched from MusicBrainz or Discogs. bae makes its own copy.
+- **Artist images** -- fetched from external sources.
+
+All metadata images are stored under `images/` using the same hash-based layout as release files.
+
+## Release file storage
+
+Both `storage/` and `images/` use an opaque hash-based directory layout:
+
+```
+storage/{prefix}/{subprefix}/{file_id}
+images/{prefix}/{subprefix}/{id}
+```
+
+`prefix` is the first 2 characters of the ID, `subprefix` is the next 2. No filenames, no extensions on disk -- original filenames and content types live in the database. The path is deterministic from the ID alone. Same layout in both the library home and cloud home.
+
+## Image server
+
+Images and release files are served over HTTP using axum, on an OS-assigned port, with HMAC-signed URLs. Two endpoints:
+
+- `/image/{id}` -- serves library images. Looks up `library_images WHERE id = ?`, reads from `images/.../{id}`, serves with the correct Content-Type.
+- `/file/{file_id}` -- serves release files. Looks up `release_files WHERE id = ?`, reads from the file's storage location, decrypts if needed, serves with the correct Content-Type.
+
+URL signing prevents unauthorized access -- the token is an HMAC over the resource ID, so URLs cannot be guessed or forged.
+
+## Cover lifecycle
+
+**Import with local cover**: the user selects a cover from among the release's image files. bae copies the bytes to `images/.../{release_id}`, inserts a `library_images` row with `source = "local"`. The original image stays untouched in the release files. The cover is a copy -- bae can crop, resize, or optimize it without affecting the original.
+
+**Import with remote cover**: the user selects a cover from MusicBrainz or Discogs. bae downloads it, writes to `images/.../{release_id}`, and inserts a `library_images` row with the source URL pointing back to the external service.
+
+**Cover picker (change to release image)**: the user picks a different image from the release's files. bae reads from the release file, writes to `images/.../{release_id}`, and upserts the `library_images` row.
+
+**Cover picker (download new cover)**: the user picks from MusicBrainz or Discogs. bae downloads, writes to `images/.../{release_id}`, and upserts the `library_images` row.
+
+**Artist image fetch**: during import, bae fetches an artist photo from Discogs and writes it to `images/.../{artist_id}` with `type = "artist"`.
+
+## First-run flows
+
+### New library
+
+On first run (no `~/.bae/active-library`), the desktop app shows a welcome screen. The user picks "Create new library":
+
+1. Generate a library UUID
+2. Create `~/.bae/libraries/{uuid}/`
+3. Create an empty `library.db`
+4. Write `config.yaml` and set `~/.bae/active-library` to the new UUID
+5. Re-exec the binary -- the app launches normally
+
+The `storage/` directory starts empty. The user imports their first album and files go into `storage/ab/cd/{file_id}`.
+
+### Restore from cloud home
+
+The user picks "Restore from cloud home" and provides cloud home credentials plus the encryption key:
+
+1. Download and decrypt `snapshot.db.enc` (validates the key -- if decryption fails, wrong key)
+2. Create `~/.bae/libraries/{library_id}/`
+3. Write `config.yaml` (with cloud home config), keyring entries, and `active-library`
+4. Download images from the cloud home
+5. Pull and apply any changesets newer than the snapshot
+6. Re-exec the binary
+
+Local `storage/` is empty after restore -- release files stream from the cloud home. The user can optionally download files locally for offline playback.
+
+### Going from local to cloud
+
+1. The user signs in with a cloud provider (OAuth) or enters S3 credentials
+2. bae creates the cloud home folder/bucket (or uses an existing one)
+3. bae generates an encryption key if one does not exist, stores it in the keyring
+4. bae pushes a full snapshot, all images, and release files to the cloud home
+5. Subsequent mutations push incremental changesets
+6. Another device can now restore from the cloud home
