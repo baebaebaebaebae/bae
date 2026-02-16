@@ -24,7 +24,7 @@ use bae_core::library::{LibraryEvent, SharedLibraryManager};
 use bae_core::playback::{self, PlaybackProgress};
 #[cfg(feature = "torrent")]
 use bae_core::torrent;
-use bae_ui::display_types::{QueueItem, TrackImportState};
+use bae_ui::display_types::{Album, Artist, File, QueueItem, Release, Track, TrackImportState};
 use bae_ui::stores::{
     ActiveImport, ActiveImportsUiStateStoreExt, AlbumDetailStateStoreExt, AppState,
     AppStateStoreExt, ArtistDetailStateStoreExt, ConfigStateStoreExt, DeviceActivityInfo,
@@ -189,15 +189,16 @@ impl AppService {
                             ),
                         };
 
-                        state.playback().status().set(status);
-                        state
-                            .playback()
-                            .current_track_id()
-                            .set(current_track_id.clone());
-                        state.playback().current_release_id().set(release_id);
-                        state.playback().position_ms().set(position_ms);
-                        state.playback().duration_ms().set(duration_ms);
-                        state.playback().pregap_ms().set(pregap_ms);
+                        {
+                            let mut pb_lens = state.playback();
+                            let mut pb = pb_lens.write();
+                            pb.status = status;
+                            pb.current_track_id = current_track_id.clone();
+                            pb.current_release_id = release_id;
+                            pb.position_ms = position_ms;
+                            pb.duration_ms = duration_ms;
+                            pb.pregap_ms = pregap_ms;
+                        }
 
                         // Load album and artist info for current track
                         let (current_track, artist_name, artist_id, cover_url) =
@@ -261,10 +262,14 @@ impl AppService {
                                 (None, String::new(), None, None)
                             };
 
-                        state.playback().current_track().set(current_track);
-                        state.playback().artist_name().set(artist_name);
-                        state.playback().artist_id().set(artist_id);
-                        state.playback().cover_url().set(cover_url);
+                        {
+                            let mut pb_lens = state.playback();
+                            let mut pb = pb_lens.write();
+                            pb.current_track = current_track;
+                            pb.artist_name = artist_name;
+                            pb.artist_id = artist_id;
+                            pb.cover_url = cover_url;
+                        }
                     }
                     PlaybackProgress::PositionUpdate { position, .. } => {
                         state
@@ -298,9 +303,7 @@ impl AppService {
                         });
                     }
                     PlaybackProgress::QueueUpdated { tracks } => {
-                        state.playback().queue().set(tracks.clone());
-
-                        // Load track/album details for queue items
+                        // Load track/album details for queue items before writing store
                         let mut queue_items = Vec::new();
                         for track_id in &tracks {
                             if let Ok(Some(track)) = library_manager.get().get_track(track_id).await
@@ -330,7 +333,13 @@ impl AppService {
                                 });
                             }
                         }
-                        state.playback().queue_items().set(queue_items);
+
+                        {
+                            let mut pb_lens = state.playback();
+                            let mut pb = pb_lens.write();
+                            pb.queue = tracks;
+                            pb.queue_items = queue_items;
+                        }
                     }
                     PlaybackProgress::VolumeChanged { volume } => {
                         state.playback().volume().set(volume);
@@ -520,82 +529,36 @@ impl AppService {
             .map(|kp| hex::encode(kp.public_key));
         self.state.sync().user_pubkey().set(user_pubkey);
 
-        let config = &self.config;
-        self.state
-            .config()
-            .discogs_key_stored()
-            .set(config.discogs_key_stored);
-        self.state
-            .config()
-            .encryption_key_stored()
-            .set(config.encryption_key_stored);
-        self.state
-            .config()
-            .encryption_key_fingerprint()
-            .set(config.encryption_key_fingerprint.clone());
-        self.state
-            .config()
-            .server_enabled()
-            .set(config.server_enabled);
-        self.state.config().server_port().set(config.server_port);
-        self.state
-            .config()
-            .server_bind_address()
-            .set(config.server_bind_address.clone());
-        self.state
-            .config()
-            .server_auth_enabled()
-            .set(config.server_auth_enabled);
-        self.state
-            .config()
-            .server_username()
-            .set(config.server_username.clone());
-        self.state
-            .config()
-            .torrent_bind_interface()
-            .set(config.torrent_bind_interface.clone());
-        self.state
-            .config()
-            .torrent_listen_port()
-            .set(config.torrent_listen_port);
-        self.state
-            .config()
-            .torrent_enable_upnp()
-            .set(config.torrent_enable_upnp);
-        self.state
-            .config()
-            .torrent_max_connections()
-            .set(config.torrent_max_connections);
-        self.state
-            .config()
-            .torrent_max_connections_per_torrent()
-            .set(config.torrent_max_connections_per_torrent);
-        self.state
-            .config()
-            .torrent_max_uploads()
-            .set(config.torrent_max_uploads);
-        self.state
-            .config()
-            .torrent_max_uploads_per_torrent()
-            .set(config.torrent_max_uploads_per_torrent);
-        self.state
-            .config()
-            .share_base_url()
-            .set(config.share_base_url.clone());
-        self.state
-            .config()
-            .share_default_expiry_days()
-            .set(config.share_default_expiry_days);
-        self.state
-            .config()
-            .share_signing_key_version()
-            .set(config.share_signing_key_version);
+        self.sync_config_to_store(&self.config);
+    }
 
-        // Cloud provider
-        self.state
-            .config()
-            .cloud_provider()
-            .set(config.cloud_provider.as_ref().map(|p| match p {
+    /// Sync a Config to the Store (config + sync sub-stores).
+    ///
+    /// Used by both `load_config()` (initial load) and `save_config()` (after
+    /// writing to disk) to avoid duplicating the field mapping.
+    fn sync_config_to_store(&self, config: &config::Config) {
+        {
+            let mut config_lens = self.state.config();
+            let mut cs = config_lens.write();
+            cs.discogs_key_stored = config.discogs_key_stored;
+            cs.encryption_key_stored = config.encryption_key_stored;
+            cs.encryption_key_fingerprint = config.encryption_key_fingerprint.clone();
+            cs.server_enabled = config.server_enabled;
+            cs.server_port = config.server_port;
+            cs.server_bind_address = config.server_bind_address.clone();
+            cs.server_auth_enabled = config.server_auth_enabled;
+            cs.server_username = config.server_username.clone();
+            cs.torrent_bind_interface = config.torrent_bind_interface.clone();
+            cs.torrent_listen_port = config.torrent_listen_port;
+            cs.torrent_enable_upnp = config.torrent_enable_upnp;
+            cs.torrent_max_connections = config.torrent_max_connections;
+            cs.torrent_max_connections_per_torrent = config.torrent_max_connections_per_torrent;
+            cs.torrent_max_uploads = config.torrent_max_uploads;
+            cs.torrent_max_uploads_per_torrent = config.torrent_max_uploads_per_torrent;
+            cs.share_base_url = config.share_base_url.clone();
+            cs.share_default_expiry_days = config.share_default_expiry_days;
+            cs.share_signing_key_version = config.share_signing_key_version;
+            cs.cloud_provider = config.cloud_provider.as_ref().map(|p| match p {
                 bae_core::config::CloudProvider::S3 => bae_ui::stores::config::CloudProvider::S3,
                 bae_core::config::CloudProvider::ICloud => {
                     bae_ui::stores::config::CloudProvider::ICloud
@@ -612,56 +575,40 @@ impl AppService {
                 bae_core::config::CloudProvider::PCloud => {
                     bae_ui::stores::config::CloudProvider::PCloud
                 }
-            }));
-
-        // Sync config
-        self.state
-            .sync()
-            .cloud_home_bucket()
-            .set(config.cloud_home_s3_bucket.clone());
-        self.state
-            .sync()
-            .cloud_home_region()
-            .set(config.cloud_home_s3_region.clone());
-        self.state
-            .sync()
-            .cloud_home_endpoint()
-            .set(config.cloud_home_s3_endpoint.clone());
-        self.state
-            .sync()
-            .cloud_home_configured()
-            .set(config.sync_enabled(&self.key_service));
-
-        // iCloud Drive availability (macOS only)
-        #[cfg(target_os = "macos")]
-        self.state
-            .sync()
-            .icloud_available()
-            .set(detect_icloud_container().is_some());
-
-        // Set iCloud account display if already configured
-        if matches!(
-            config.cloud_provider,
-            Some(bae_core::config::CloudProvider::ICloud)
-        ) {
-            self.state
-                .config()
-                .cloud_account_display()
-                .set(Some("iCloud Drive".to_string()));
+            });
+            cs.cloud_account_display = if matches!(
+                config.cloud_provider,
+                Some(bae_core::config::CloudProvider::ICloud)
+            ) {
+                Some("iCloud Drive".to_string())
+            } else {
+                cs.cloud_account_display.clone()
+            };
+            cs.followed_libraries = config
+                .followed_libraries
+                .iter()
+                .map(|fl| bae_ui::stores::config::FollowedLibraryInfo {
+                    id: fl.id.clone(),
+                    name: fl.name.clone(),
+                    server_url: fl.server_url.clone(),
+                    username: fl.username.clone(),
+                })
+                .collect();
         }
 
-        // Followed libraries
-        let followed: Vec<bae_ui::stores::config::FollowedLibraryInfo> = config
-            .followed_libraries
-            .iter()
-            .map(|fl| bae_ui::stores::config::FollowedLibraryInfo {
-                id: fl.id.clone(),
-                name: fl.name.clone(),
-                server_url: fl.server_url.clone(),
-                username: fl.username.clone(),
-            })
-            .collect();
-        self.state.config().followed_libraries().set(followed);
+        {
+            let mut sync_lens = self.state.sync();
+            let mut ss = sync_lens.write();
+            ss.cloud_home_bucket = config.cloud_home_s3_bucket.clone();
+            ss.cloud_home_region = config.cloud_home_s3_region.clone();
+            ss.cloud_home_endpoint = config.cloud_home_s3_endpoint.clone();
+            ss.cloud_home_configured = config.sync_enabled(&self.key_service);
+
+            #[cfg(target_os = "macos")]
+            {
+                ss.icloud_available = detect_icloud_container().is_some();
+            }
+        }
     }
 
     /// Load active imports from database
@@ -1174,97 +1121,7 @@ impl AppService {
             return;
         }
 
-        // Update Store
-        self.state
-            .config()
-            .discogs_key_stored()
-            .set(new_config.discogs_key_stored);
-        self.state
-            .config()
-            .encryption_key_stored()
-            .set(new_config.encryption_key_stored);
-        self.state
-            .config()
-            .encryption_key_fingerprint()
-            .set(new_config.encryption_key_fingerprint.clone());
-        self.state
-            .config()
-            .server_enabled()
-            .set(new_config.server_enabled);
-        self.state
-            .config()
-            .server_port()
-            .set(new_config.server_port);
-        self.state
-            .config()
-            .server_bind_address()
-            .set(new_config.server_bind_address.clone());
-        self.state
-            .config()
-            .server_auth_enabled()
-            .set(new_config.server_auth_enabled);
-        self.state
-            .config()
-            .server_username()
-            .set(new_config.server_username.clone());
-        self.state
-            .config()
-            .torrent_bind_interface()
-            .set(new_config.torrent_bind_interface.clone());
-        self.state
-            .config()
-            .torrent_listen_port()
-            .set(new_config.torrent_listen_port);
-        self.state
-            .config()
-            .torrent_enable_upnp()
-            .set(new_config.torrent_enable_upnp);
-        self.state
-            .config()
-            .torrent_max_connections()
-            .set(new_config.torrent_max_connections);
-        self.state
-            .config()
-            .torrent_max_connections_per_torrent()
-            .set(new_config.torrent_max_connections_per_torrent);
-        self.state
-            .config()
-            .torrent_max_uploads()
-            .set(new_config.torrent_max_uploads);
-        self.state
-            .config()
-            .torrent_max_uploads_per_torrent()
-            .set(new_config.torrent_max_uploads_per_torrent);
-        self.state
-            .config()
-            .share_base_url()
-            .set(new_config.share_base_url.clone());
-        self.state
-            .config()
-            .share_default_expiry_days()
-            .set(new_config.share_default_expiry_days);
-        self.state
-            .config()
-            .share_signing_key_version()
-            .set(new_config.share_signing_key_version);
-
-        // Sync config might have changed via save_config too
-        self.state
-            .sync()
-            .cloud_home_bucket()
-            .set(new_config.cloud_home_s3_bucket.clone());
-        self.state
-            .sync()
-            .cloud_home_region()
-            .set(new_config.cloud_home_s3_region.clone());
-        self.state
-            .sync()
-            .cloud_home_endpoint()
-            .set(new_config.cloud_home_s3_endpoint.clone());
-        self.state
-            .sync()
-            .cloud_home_configured()
-            .set(new_config.sync_enabled(&self.key_service));
+        self.sync_config_to_store(&new_config);
     }
 
     // =========================================================================
@@ -1467,11 +1324,6 @@ impl AppService {
 
             match result {
                 Ok(join_info) => {
-                    state
-                        .sync()
-                        .invite_status()
-                        .set(Some(bae_ui::stores::InviteStatus::Success));
-
                     // Encode invite code for the UI.
                     let invite_code = bae_core::join_code::InviteCode {
                         library_id: config.library_id.clone(),
@@ -1491,15 +1343,17 @@ impl AppService {
                         invitee_pubkey_hex.clone()
                     };
 
-                    state
-                        .sync()
-                        .share_info()
-                        .set(Some(bae_ui::stores::ShareInfo {
+                    {
+                        let mut sync_lens = state.sync();
+                        let mut ss = sync_lens.write();
+                        ss.invite_status = Some(bae_ui::stores::InviteStatus::Success);
+                        ss.share_info = Some(bae_ui::stores::ShareInfo {
                             invite_code: code_string,
                             invitee_display,
-                        }));
+                        });
+                    }
 
-                    // Reload the member list.
+                    // Reload the member list (after await, separate write).
                     match load_membership_from_bucket(bucket, Some(&user_pubkey_hex)).await {
                         Ok(members) => state.sync().members().set(members),
                         Err(e) => tracing::warn!("Failed to reload membership after invite: {e}"),
@@ -1681,22 +1535,14 @@ impl AppService {
             .config()
             .cloud_provider()
             .set(Some(bae_ui::stores::config::CloudProvider::S3));
-        state
-            .sync()
-            .cloud_home_bucket()
-            .set(new_config.cloud_home_s3_bucket.clone());
-        state
-            .sync()
-            .cloud_home_region()
-            .set(new_config.cloud_home_s3_region.clone());
-        state
-            .sync()
-            .cloud_home_endpoint()
-            .set(new_config.cloud_home_s3_endpoint.clone());
-        state
-            .sync()
-            .cloud_home_configured()
-            .set(new_config.sync_enabled(&key_service));
+        {
+            let mut sync_lens = state.sync();
+            let mut ss = sync_lens.write();
+            ss.cloud_home_bucket = new_config.cloud_home_s3_bucket.clone();
+            ss.cloud_home_region = new_config.cloud_home_s3_region.clone();
+            ss.cloud_home_endpoint = new_config.cloud_home_s3_endpoint.clone();
+            ss.cloud_home_configured = new_config.sync_enabled(&key_service);
+        }
 
         Ok(())
     }
@@ -1825,11 +1671,13 @@ impl AppService {
                             .map_err(|e| format!("Failed to save config: {e}"))?;
 
                         // Update store
-                        state
-                            .config()
-                            .cloud_provider()
-                            .set(Some(bae_ui::stores::config::CloudProvider::GoogleDrive));
-                        state.config().cloud_account_display().set(account_display);
+                        {
+                            let mut config_lens = state.config();
+                            let mut cs = config_lens.write();
+                            cs.cloud_provider =
+                                Some(bae_ui::stores::config::CloudProvider::GoogleDrive);
+                            cs.cloud_account_display = account_display;
+                        }
                         state
                             .sync()
                             .cloud_home_configured()
@@ -1918,11 +1766,13 @@ impl AppService {
                             .map_err(|e| format!("Failed to save config: {e}"))?;
 
                         // Update store
-                        state
-                            .config()
-                            .cloud_provider()
-                            .set(Some(bae_ui::stores::config::CloudProvider::Dropbox));
-                        state.config().cloud_account_display().set(account_display);
+                        {
+                            let mut config_lens = state.config();
+                            let mut cs = config_lens.write();
+                            cs.cloud_provider =
+                                Some(bae_ui::stores::config::CloudProvider::Dropbox);
+                            cs.cloud_account_display = account_display;
+                        }
                         state
                             .sync()
                             .cloud_home_configured()
@@ -1983,19 +1833,18 @@ impl AppService {
                     return;
                 }
 
-                state
-                    .config()
-                    .cloud_provider()
-                    .set(Some(bae_ui::stores::config::CloudProvider::ICloud));
-                state
-                    .config()
-                    .cloud_account_display()
-                    .set(Some("iCloud Drive".to_string()));
-                state
-                    .sync()
-                    .cloud_home_configured()
-                    .set(config.sync_enabled(&key_service));
-                state.sync().sign_in_error().set(None);
+                {
+                    let mut config_lens = state.config();
+                    let mut cs = config_lens.write();
+                    cs.cloud_provider = Some(bae_ui::stores::config::CloudProvider::ICloud);
+                    cs.cloud_account_display = Some("iCloud Drive".to_string());
+                }
+                {
+                    let mut sync_lens = state.sync();
+                    let mut ss = sync_lens.write();
+                    ss.cloud_home_configured = config.sync_enabled(&key_service);
+                    ss.sign_in_error = None;
+                }
             }
         }
     }
@@ -2032,11 +1881,15 @@ impl AppService {
         // Update store
         state.config().cloud_provider().set(None);
         state.config().cloud_account_display().set(None);
-        state.sync().cloud_home_bucket().set(None);
-        state.sync().cloud_home_region().set(None);
-        state.sync().cloud_home_endpoint().set(None);
-        state.sync().cloud_home_configured().set(false);
-        state.sync().sign_in_error().set(None);
+        {
+            let mut sync_lens = state.sync();
+            let mut ss = sync_lens.write();
+            ss.cloud_home_bucket = None;
+            ss.cloud_home_region = None;
+            ss.cloud_home_endpoint = None;
+            ss.cloud_home_configured = false;
+            ss.sign_in_error = None;
+        }
     }
 
     // =========================================================================
@@ -2134,18 +1987,20 @@ async fn load_library(
                 .map(|a| album_from_db_ref(a, imgs))
                 .collect();
 
-            state.library().albums().set(display_albums);
-            state.library().artists_by_album().set(artists_map);
+            let mut lib_lens = state.library();
+            let mut lib = lib_lens.write();
+            lib.albums = display_albums;
+            lib.artists_by_album = artists_map;
+            lib.loading = false;
+            lib.error = None;
         }
         Err(e) => {
-            state
-                .library()
-                .error()
-                .set(Some(format!("Failed to load library: {}", e)));
+            let mut lib_lens = state.library();
+            let mut lib = lib_lens.write();
+            lib.error = Some(format!("Failed to load library: {}", e));
+            lib.loading = false;
         }
     }
-
-    state.library().loading().set(false);
 }
 
 /// Load albums from a followed Subsonic server into the Store.
@@ -2181,7 +2036,6 @@ async fn load_followed_library(
                 })
                 .collect();
 
-            // Build artists_by_album from the album artist field
             let mut artists_map: HashMap<String, Vec<bae_ui::Artist>> = HashMap::new();
             for a in &albums {
                 if let Some(ref artist_name) = a.artist {
@@ -2196,18 +2050,20 @@ async fn load_followed_library(
                 }
             }
 
-            state.library().albums().set(display_albums);
-            state.library().artists_by_album().set(artists_map);
+            let mut lib_lens = state.library();
+            let mut lib = lib_lens.write();
+            lib.albums = display_albums;
+            lib.artists_by_album = artists_map;
+            lib.loading = false;
+            lib.error = None;
         }
         Err(e) => {
-            state
-                .library()
-                .error()
-                .set(Some(format!("Failed to load followed library: {}", e)));
+            let mut lib_lens = state.library();
+            let mut lib = lib_lens.write();
+            lib.error = Some(format!("Failed to load followed library: {}", e));
+            lib.loading = false;
         }
     }
-
-    state.library().loading().set(false);
 }
 
 /// Load album detail from a followed Subsonic server into the Store.
@@ -2234,17 +2090,15 @@ async fn load_followed_album_detail(
                 .as_ref()
                 .map(|id| client.get_cover_art_url(id, Some(600)));
 
-            // Set album
-            state.album_detail().album().set(Some(bae_ui::Album {
+            let display_album = bae_ui::Album {
                 id: album.id.clone(),
                 title: album.name.clone(),
                 year: album.year,
                 cover_url,
                 is_compilation: false,
                 date_added: chrono::Utc::now(),
-            }));
+            };
 
-            // Artists
             let artists = if let Some(ref artist_name) = album.artist {
                 vec![bae_ui::Artist {
                     id: album.artist_id.clone().unwrap_or_default(),
@@ -2254,9 +2108,7 @@ async fn load_followed_album_detail(
             } else {
                 vec![]
             };
-            state.album_detail().artists().set(artists);
 
-            // Convert songs to tracks
             let tracks: Vec<bae_ui::Track> = album
                 .song
                 .as_deref()
@@ -2280,29 +2132,157 @@ async fn load_followed_album_detail(
                 .map(|t| (t.disc_number, t.id.clone()))
                 .collect();
 
-            state.album_detail().tracks().set(tracks);
-            state.album_detail().track_count().set(track_count);
-            state.album_detail().track_ids().set(track_ids);
-            state.album_detail().track_disc_info().set(track_disc_info);
-
-            // Clear local-only fields
-            state.album_detail().releases().set(vec![]);
-            state.album_detail().files().set(vec![]);
-            state.album_detail().images().set(vec![]);
-            state.album_detail().selected_release_id().set(None);
-            state.album_detail().managed_locally().set(false);
-            state.album_detail().managed_in_cloud().set(false);
-            state.album_detail().is_unmanaged().set(false);
+            let mut detail_lens = state.album_detail();
+            let mut detail = detail_lens.write();
+            detail.album = Some(display_album);
+            detail.artists = artists;
+            detail.tracks = tracks;
+            detail.track_count = track_count;
+            detail.track_ids = track_ids;
+            detail.track_disc_info = track_disc_info;
+            detail.releases = vec![];
+            detail.files = vec![];
+            detail.images = vec![];
+            detail.selected_release_id = None;
+            detail.managed_locally = false;
+            detail.managed_in_cloud = false;
+            detail.is_unmanaged = false;
+            detail.loading = false;
         }
         Err(e) => {
             state
                 .album_detail()
                 .error()
                 .set(Some(format!("Failed to load album: {}", e)));
+            state.album_detail().loading().set(false);
         }
     }
+}
 
-    state.album_detail().loading().set(false);
+/// All data needed for the album detail view, loaded before touching the store.
+struct AlbumDetailData {
+    album: Option<Album>,
+    artists: Vec<Artist>,
+    releases: Vec<Release>,
+    selected_release_id: String,
+    managed_locally: bool,
+    managed_in_cloud: bool,
+    is_unmanaged: bool,
+    import_progress: Option<u8>,
+    tracks: Vec<Track>,
+    track_count: usize,
+    track_ids: Vec<String>,
+    track_disc_info: Vec<(Option<i32>, String)>,
+    files: Vec<File>,
+    images: Vec<bae_ui::Image>,
+}
+
+/// Fetch all album detail data from the database without touching the store.
+async fn fetch_album_detail(
+    library_manager: &SharedLibraryManager,
+    album_id: &str,
+    release_id_param: Option<&str>,
+    imgs: &ImageServerHandle,
+) -> Result<AlbumDetailData, String> {
+    let album = library_manager
+        .get()
+        .get_album_by_id(album_id)
+        .await
+        .map_err(|e| format!("Failed to load album: {e}"))?
+        .map(|ref db_album| album_from_db_ref(db_album, imgs))
+        .ok_or_else(|| "Album not found".to_string())?;
+
+    let db_releases = library_manager
+        .get()
+        .get_releases_for_album(album_id)
+        .await
+        .map_err(|e| format!("Failed to load releases: {e}"))?;
+
+    if db_releases.is_empty() {
+        return Err("Album has no releases".to_string());
+    }
+
+    let selected = if let Some(rid) = release_id_param {
+        db_releases
+            .iter()
+            .find(|r| r.id == rid)
+            .unwrap_or(&db_releases[0])
+    } else {
+        &db_releases[0]
+    };
+    let selected_release_id = selected.id.clone();
+    let managed_locally = selected.managed_locally;
+    let managed_in_cloud = selected.managed_in_cloud;
+    let is_unmanaged = selected.unmanaged_path.is_some();
+    let import_progress = if selected.import_status == ImportStatus::Importing
+        || selected.import_status == ImportStatus::Queued
+    {
+        Some(0)
+    } else {
+        None
+    };
+
+    let releases = db_releases.iter().map(release_from_db_ref).collect();
+
+    let artists = library_manager
+        .get()
+        .get_artists_for_album(album_id)
+        .await
+        .unwrap_or_default()
+        .iter()
+        .map(|a| artist_from_db_ref(a, imgs))
+        .collect();
+
+    let mut tracks: Vec<Track> = library_manager
+        .get()
+        .get_tracks(&selected_release_id)
+        .await
+        .map_err(|e| format!("Failed to load tracks: {e}"))?
+        .iter()
+        .map(track_from_db_ref)
+        .collect();
+    tracks.sort_by(|a, b| (a.disc_number, a.track_number).cmp(&(b.disc_number, b.track_number)));
+
+    let track_count = tracks.len();
+    let track_ids = tracks.iter().map(|t| t.id.clone()).collect();
+    let track_disc_info = tracks
+        .iter()
+        .map(|t| (t.disc_number, t.id.clone()))
+        .collect();
+
+    let db_files = library_manager
+        .get()
+        .get_files_for_release(&selected_release_id)
+        .await
+        .unwrap_or_default();
+
+    let files = db_files.iter().map(file_from_db_ref).collect();
+    let images = db_files
+        .iter()
+        .filter(|f| f.content_type.is_image())
+        .map(|f| bae_ui::Image {
+            id: f.id.clone(),
+            filename: f.original_filename.clone(),
+            url: imgs.file_url(&f.id),
+        })
+        .collect();
+
+    Ok(AlbumDetailData {
+        album: Some(album),
+        artists,
+        releases,
+        selected_release_id,
+        managed_locally,
+        managed_in_cloud,
+        is_unmanaged,
+        import_progress,
+        tracks,
+        track_count,
+        track_ids,
+        track_disc_info,
+        files,
+        images,
+    })
 }
 
 /// Load album detail data into the Store
@@ -2316,163 +2296,37 @@ async fn load_album_detail(
     state.album_detail().loading().set(true);
     state.album_detail().error().set(None);
 
-    // Load album
-    let album = match library_manager.get().get_album_by_id(album_id).await {
-        Ok(Some(db_album)) => Some(album_from_db_ref(&db_album, imgs)),
-        Ok(None) => {
-            state
-                .album_detail()
-                .error()
-                .set(Some("Album not found".to_string()));
+    match fetch_album_detail(library_manager, album_id, release_id_param, imgs).await {
+        Ok(data) => {
+            let mut detail_lens = state.album_detail();
+            let mut detail = detail_lens.write();
+            detail.album = data.album;
+            detail.artists = data.artists;
+            detail.releases = data.releases;
+            detail.selected_release_id = Some(data.selected_release_id);
+            detail.managed_locally = data.managed_locally;
+            detail.managed_in_cloud = data.managed_in_cloud;
+            detail.is_unmanaged = data.is_unmanaged;
+            detail.import_progress = data.import_progress;
+            detail.tracks = data.tracks;
+            detail.track_count = data.track_count;
+            detail.track_ids = data.track_ids;
+            detail.track_disc_info = data.track_disc_info;
+            detail.files = data.files;
+            detail.images = data.images;
+            detail.transfer_progress = None;
+            detail.transfer_error = None;
+            detail.remote_covers = vec![];
+            detail.loading_remote_covers = false;
+            detail.share_grant_json = None;
+            detail.share_error = None;
+            detail.loading = false;
+        }
+        Err(msg) => {
+            state.album_detail().error().set(Some(msg));
             state.album_detail().loading().set(false);
-            return;
-        }
-        Err(e) => {
-            state
-                .album_detail()
-                .error()
-                .set(Some(format!("Failed to load album: {}", e)));
-            state.album_detail().loading().set(false);
-            return;
-        }
-    };
-    state.album_detail().album().set(album);
-
-    // Load releases
-    let releases = match library_manager.get().get_releases_for_album(album_id).await {
-        Ok(db_releases) => db_releases,
-        Err(e) => {
-            state
-                .album_detail()
-                .error()
-                .set(Some(format!("Failed to load releases: {}", e)));
-            state.album_detail().loading().set(false);
-            return;
-        }
-    };
-
-    if releases.is_empty() {
-        state
-            .album_detail()
-            .error()
-            .set(Some("Album has no releases".to_string()));
-        state.album_detail().loading().set(false);
-        return;
-    }
-
-    // Determine selected release
-    let selected_release = if let Some(rid) = release_id_param {
-        releases
-            .iter()
-            .find(|r| r.id == rid)
-            .unwrap_or(&releases[0])
-    } else {
-        &releases[0]
-    };
-    let selected_release_id = selected_release.id.clone();
-
-    // Check if release is importing
-    let is_importing = selected_release.import_status == ImportStatus::Importing
-        || selected_release.import_status == ImportStatus::Queued;
-    if is_importing {
-        // Progress will be updated by import subscription
-        state.album_detail().import_progress().set(Some(0));
-    }
-
-    // Set storage flags from selected release
-    state
-        .album_detail()
-        .managed_locally()
-        .set(selected_release.managed_locally);
-    state
-        .album_detail()
-        .managed_in_cloud()
-        .set(selected_release.managed_in_cloud);
-    state
-        .album_detail()
-        .is_unmanaged()
-        .set(selected_release.unmanaged_path.is_some());
-
-    let display_releases = releases.iter().map(release_from_db_ref).collect();
-    state.album_detail().releases().set(display_releases);
-    state
-        .album_detail()
-        .selected_release_id()
-        .set(Some(selected_release_id.clone()));
-
-    // Load artists
-    if let Ok(db_artists) = library_manager.get().get_artists_for_album(album_id).await {
-        let artists = db_artists
-            .iter()
-            .map(|a| artist_from_db_ref(a, imgs))
-            .collect();
-        state.album_detail().artists().set(artists);
-    }
-
-    // Load tracks for selected release (sorted by disc/track number)
-    match library_manager.get().get_tracks(&selected_release_id).await {
-        Ok(db_tracks) => {
-            let mut tracks: Vec<_> = db_tracks.iter().map(track_from_db_ref).collect();
-            tracks.sort_by(|a, b| {
-                (a.disc_number, a.track_number).cmp(&(b.disc_number, b.track_number))
-            });
-
-            // Set derived fields first to avoid subscribing to tracks for count/ids/disc info
-            let track_count = tracks.len();
-            let track_ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
-            let track_disc_info: Vec<(Option<i32>, String)> = tracks
-                .iter()
-                .map(|t| (t.disc_number, t.id.clone()))
-                .collect();
-            state.album_detail().track_count().set(track_count);
-            state.album_detail().track_ids().set(track_ids);
-            state.album_detail().track_disc_info().set(track_disc_info);
-            state.album_detail().tracks().set(tracks);
-        }
-        Err(e) => {
-            state
-                .album_detail()
-                .error()
-                .set(Some(format!("Failed to load tracks: {}", e)));
         }
     }
-
-    // Load files for selected release
-    if let Ok(db_files) = library_manager
-        .get()
-        .get_files_for_release(&selected_release_id)
-        .await
-    {
-        let files = db_files.iter().map(file_from_db_ref).collect();
-        state.album_detail().files().set(files);
-    }
-
-    // Load gallery images from release files (images are just files with image content types)
-    if let Ok(db_files) = library_manager
-        .get()
-        .get_files_for_release(&selected_release_id)
-        .await
-    {
-        let images = db_files
-            .iter()
-            .filter(|f| f.content_type.is_image())
-            .map(|f| bae_ui::Image {
-                id: f.id.clone(),
-                filename: f.original_filename.clone(),
-                url: imgs.file_url(&f.id),
-            })
-            .collect();
-        state.album_detail().images().set(images);
-    }
-
-    state.album_detail().transfer_progress().set(None);
-    state.album_detail().transfer_error().set(None);
-    state.album_detail().remote_covers().set(vec![]);
-    state.album_detail().loading_remote_covers().set(false);
-    state.album_detail().share_grant_json().set(None);
-    state.album_detail().share_error().set(None);
-
-    state.album_detail().loading().set(false);
 }
 
 /// Fetch remote cover options from MusicBrainz Cover Art Archive and Discogs
@@ -2657,6 +2511,56 @@ async fn change_cover_async(
     Ok(())
 }
 
+/// All data needed for the artist detail view, loaded before touching the store.
+struct ArtistDetailData {
+    artist: Artist,
+    albums: Vec<Album>,
+    artists_by_album: HashMap<String, Vec<Artist>>,
+}
+
+/// Fetch all artist detail data from the database without touching the store.
+async fn fetch_artist_detail(
+    library_manager: &SharedLibraryManager,
+    artist_id: &str,
+    imgs: &ImageServerHandle,
+) -> Result<ArtistDetailData, String> {
+    let artist = library_manager
+        .get()
+        .get_artist_by_id(artist_id)
+        .await
+        .map_err(|e| format!("Failed to load artist: {e}"))?
+        .map(|ref db_artist| artist_from_db_ref(db_artist, imgs))
+        .ok_or_else(|| "Artist not found".to_string())?;
+
+    let db_albums = library_manager
+        .get()
+        .get_albums_for_artist(artist_id)
+        .await
+        .map_err(|e| format!("Failed to load albums: {e}"))?;
+
+    let mut artists_by_album = HashMap::new();
+    for album in &db_albums {
+        if let Ok(db_artists) = library_manager.get().get_artists_for_album(&album.id).await {
+            let artists = db_artists
+                .iter()
+                .map(|a| artist_from_db_ref(a, imgs))
+                .collect();
+            artists_by_album.insert(album.id.clone(), artists);
+        }
+    }
+
+    let albums = db_albums
+        .iter()
+        .map(|a| album_from_db_ref(a, imgs))
+        .collect();
+
+    Ok(ArtistDetailData {
+        artist,
+        albums,
+        artists_by_album,
+    })
+}
+
 /// Load artist detail data into the Store
 async fn load_artist_detail(
     state: &Store<AppState>,
@@ -2667,63 +2571,23 @@ async fn load_artist_detail(
     state.artist_detail().loading().set(true);
     state.artist_detail().error().set(None);
 
-    // Load artist
-    match library_manager.get().get_artist_by_id(artist_id).await {
-        Ok(Some(db_artist)) => {
-            state
-                .artist_detail()
-                .artist()
-                .set(Some(artist_from_db_ref(&db_artist, imgs)));
+    match fetch_artist_detail(library_manager, artist_id, imgs).await {
+        Ok(data) => {
+            let mut detail_lens = state.artist_detail();
+            let mut detail = detail_lens.write();
+            detail.artist = Some(data.artist);
+            detail.albums = data.albums;
+            detail.artists_by_album = data.artists_by_album;
+            detail.loading = false;
+            detail.error = None;
         }
-        Ok(None) => {
-            state
-                .artist_detail()
-                .error()
-                .set(Some("Artist not found".to_string()));
-            state.artist_detail().loading().set(false);
-            return;
-        }
-        Err(e) => {
-            state
-                .artist_detail()
-                .error()
-                .set(Some(format!("Failed to load artist: {}", e)));
-            state.artist_detail().loading().set(false);
-            return;
-        }
-    };
-
-    // Load albums for this artist
-    match library_manager.get().get_albums_for_artist(artist_id).await {
-        Ok(db_albums) => {
-            let mut artists_map = HashMap::new();
-            for album in &db_albums {
-                if let Ok(db_artists) = library_manager.get().get_artists_for_album(&album.id).await
-                {
-                    let artists = db_artists
-                        .iter()
-                        .map(|a| artist_from_db_ref(a, imgs))
-                        .collect();
-                    artists_map.insert(album.id.clone(), artists);
-                }
-            }
-            let display_albums = db_albums
-                .iter()
-                .map(|a| album_from_db_ref(a, imgs))
-                .collect();
-
-            state.artist_detail().albums().set(display_albums);
-            state.artist_detail().artists_by_album().set(artists_map);
-        }
-        Err(e) => {
-            state
-                .artist_detail()
-                .error()
-                .set(Some(format!("Failed to load albums: {}", e)));
+        Err(msg) => {
+            let mut detail_lens = state.artist_detail();
+            let mut detail = detail_lens.write();
+            detail.error = Some(msg);
+            detail.loading = false;
         }
     }
-
-    state.artist_detail().loading().set(false);
 }
 
 /// Convert bae_core ImportOperationStatus to bae_ui ImportOperationStatus
@@ -3256,10 +3120,14 @@ async fn run_sync_loop(
                     })
                     .collect();
 
-                state.sync().last_sync_time().set(Some(now.clone()));
-                state.sync().other_devices().set(other_devices);
-                state.sync().syncing().set(false);
-                state.sync().error().set(None);
+                {
+                    let mut sync_lens = state.sync();
+                    let mut ss = sync_lens.write();
+                    ss.last_sync_time = Some(now.clone());
+                    ss.other_devices = other_devices;
+                    ss.syncing = false;
+                    ss.error = None;
+                }
 
                 // Refresh membership list from bucket
                 let user_pubkey_hex = hex::encode(user_keypair.public_key);
