@@ -118,6 +118,13 @@ jobs:
       working-directory: ./bae-desktop
       run: ./scripts/bundle_dylibs.sh ../target/dx/bae/bundle/macos/bundle/macos/bae.app
 
+    - name: Embed provisioning profile
+      env:
+        PROVISIONING_PROFILE: ${{ secrets.PROVISIONING_PROFILE }}
+      run: |
+        APP_PATH="target/dx/bae/bundle/macos/bundle/macos/bae.app"
+        echo "$PROVISIONING_PROFILE" | base64 --decode > "$APP_PATH/Contents/embedded.provisionprofile"
+
     - name: Import Apple certificate
       env:
         APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}

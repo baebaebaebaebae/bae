@@ -2,7 +2,7 @@
 name = "bae"
 
 [bundle]
-identifier = "com.bae.app"
+identifier = "fm.bae"
 publisher = "bae"
 
 # Generated from /icon-source.png via:
