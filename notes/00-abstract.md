@@ -1,6 +1,6 @@
 # Abstract
 
-Owning and managing a digital music collection is difficult. bae is a music library manager that uses decentralized identity and zero-knowledge encryption over pluggable storage to enable multi-device sync, collaborative curation, and discovery.
+Owning and managing a digital music collection is difficult. bae is a music library manager that uses decentralized identity and end-to-end encryption over pluggable storage to enable multi-device sync, collaborative curation, and discovery.
 
 - **Identity**: each user has a locally generated keypair (Ed25519/X25519). Public keys are identities. There is no central identity server.
 - **Encryption**: one symmetric key per library, shared by all members. Everything in the cloud home is encrypted. The storage provider sees opaque blobs.

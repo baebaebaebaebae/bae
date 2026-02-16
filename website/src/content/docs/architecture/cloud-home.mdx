@@ -3,7 +3,7 @@ title: Cloud Home
 description: The CloudHome trait and backend-agnostic cloud storage
 ---
 
-A cloud home is a single remote storage location for a library -- one Google Drive folder, one S3 bucket, one Dropbox folder. It holds encrypted release files, metadata changesets, artwork, snapshots, and the membership chain. All trust lives in cryptography, not the storage backend. The cloud provider stores opaque blobs.
+The cloud home is a single remote storage location for a library -- one Google Drive folder, one S3 bucket, one Dropbox folder. It holds encrypted release files, metadata changesets, artwork, snapshots, and the membership chain. All trust lives in cryptography, not the storage backend. The cloud provider stores opaque blobs.
 
 ## The CloudHome trait
 
@@ -15,13 +15,12 @@ The `CloudHome` trait is the abstraction that makes bae backend-agnostic. Everyt
 - **Encryption** -- one symmetric key per library. Everything is encrypted before it leaves the device.
 - **Sync protocol** -- changesets, snapshots, conflict resolution via last-writer-wins. Same algorithm everywhere.
 - **Membership chain** -- append-only log with Ed25519 signatures, encryption key wrapped to each member's public key.
-- **Join flow** -- two-step code exchange (public key then invite code). Same ceremony regardless of backend.
 
 ### What varies (below the trait)
 
-- **Storage API** -- how files are actually read and written (S3 API vs Google Drive API vs Dropbox API vs local filesystem).
+- **Storage API** -- how files are actually read and written (S3 API vs Google Drive API vs local filesystem, etc.).
 - **Access management** -- how a new member gets storage access (folder sharing vs credential minting).
-- **Authentication** -- how the new member authenticates (their own cloud account vs embedded credentials).
+- **Authentication** -- how a new member authenticates (their own cloud account vs embedded credentials).
 - **Change notifications** -- consumer clouds support push notifications; S3 requires polling.
 
 ### The trait interface
@@ -40,50 +39,15 @@ trait CloudHome {
     fn grant_access(member_email_or_id) -> Result<JoinInfo>;
     fn revoke_access(member_email_or_id) -> Result;
 }
-```
 
 Callers (sync engine, image uploader, file storage) use this interface directly. They do not know or care which backend they are talking to.
-
-## Storage operations
-
-Every cloud storage service supports basic file operations. The trait normalizes them into one interface:
-
-| Operation | S3 | Google Drive | Dropbox |
-|---|---|---|---|
-| Write | `PutObject` | `files.create` | `files/upload` |
-| Read | `GetObject` | `files.get` (media) | `files/download` |
-| Read byte range | `Range` header | `Range` header | `Range` header |
-| List by prefix | `ListObjectsV2(prefix=)` | `files.list(q=)` on folder | `files/list_folder` |
-| Delete | `DeleteObject` | `files.delete` | `files/delete` |
-| Exists | `HeadObject` | `files.get(fields=id)` | `files/get_metadata` |
-
-Cloud home paths like `changes/{device_id}/{seq}.enc` map to flat object keys on S3 and folder hierarchy on consumer clouds. Same logical paths, different native representations.
+```
 
 ## Access management
 
-How `grant_access` and `revoke_access` work depends on the backend:
+How `grant_access` and `revoke_access` work depends on the backend. Consumer clouds (Google Drive, Dropbox, OneDrive, pCloud) share the folder via the provider's API -- the joiner signs into their own account and the shared folder is already accessible. S3-compatible backends mint scoped IAM credentials for each member, embedded in the invite code.
 
-| | Consumer cloud | S3 |
-|---|---|---|
-| **Grant access** | Share folder via provider API (Google Drive `permissions.create`, Dropbox `sharing/add_folder_member`, etc.) | Mint scoped IAM credentials |
-| **Revoke access** | Unshare folder via provider API | Delete minted credentials |
-| **Joiner authenticates with** | Their own cloud account (OAuth) | Credentials embedded in invite code |
-| **Per-user scoping** | Yes (provider-native) | Yes (per-user IAM) |
-
-`JoinInfo` is what the joiner needs beyond the encryption key (which is always wrapped to their public key via the membership chain):
-
-- **Consumer cloud**: provider type + folder ID. The joiner signs into their own account and the shared folder is already accessible.
-- **S3**: bucket + region + endpoint + minted credentials.
-
-## Change notifications
-
-Consumer clouds support push-based change notifications:
-
-- Google Drive: `changes.watch`
-- Dropbox: longpoll
-- OneDrive: delta API
-
-These enable faster sync than S3's polling model. The `CloudHome` trait can optionally support a `watch` method for backends that have it. For S3, bae falls back to periodic polling (listing `heads/` to check for new sequence numbers).
+In both cases, the encryption key is delivered separately via the membership chain, wrapped to the joiner's public key.
 
 ## Implementations
 

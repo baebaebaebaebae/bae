@@ -22,20 +22,11 @@ export default defineConfig({
 					],
 				},
 				{
-					label: 'Importing Music',
-					items: [
-						{ label: 'Local Files', slug: 'importing/local-files' },
-						{ label: 'Data Sources', slug: 'importing/data-sources' },
-					],
-				},
-				{
 					label: 'Library',
 					items: [
-						{ label: 'Browsing', slug: 'library/browsing' },
+						{ label: 'Importing', slug: 'importing/local-files' },
 						{ label: 'Metadata', slug: 'library/metadata' },
-						{ label: 'Share Links', slug: 'library/share-links' },
-						{ label: 'Sharing a Library', slug: 'library/sharing' },
-						{ label: 'Share Grants', slug: 'library/share-grants' },
+						{ label: 'Browsing', slug: 'library/browsing' },
 					],
 				},
 				{
@@ -47,8 +38,17 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Sharing',
+					items: [
+						{ label: 'Sharing a Library', slug: 'library/sharing' },
+						{ label: 'Share Links', slug: 'library/share-links' },
+						{ label: 'Share Grants', slug: 'library/share-grants' },
+					],
+				},
+				{
 					label: 'Architecture',
 					items: [
+						{ label: 'Overview', slug: 'architecture/overview' },
 						{ label: 'Data Model', slug: 'architecture/data-model' },
 						{ label: 'Cloud Home', slug: 'architecture/cloud-home' },
 						{ label: 'bae-server', slug: 'architecture/server' },
