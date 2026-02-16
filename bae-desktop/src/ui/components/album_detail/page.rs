@@ -23,13 +23,23 @@ use tracing::{error, warn};
 pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>) -> Element {
     let app = use_app();
 
+    // Read store values here (in component body) so the effect closure doesn't
+    // call state.read() and subscribe its ReactiveContext to the whole store.
+    let active_source = app.state.library().active_source().read().clone();
+    let followed_libs = app.state.config().followed_libraries().read().clone();
+
     // Load album detail data into Store on mount/param change
     use_effect({
         let app = app.clone();
         move || {
             let album_id = album_id();
             let release_id = maybe_not_empty(release_id());
-            app.load_album_detail(&album_id, release_id.as_deref());
+            app.load_album_detail(
+                &album_id,
+                release_id.as_deref(),
+                &active_source,
+                &followed_libs,
+            );
         }
     });
 
