@@ -162,8 +162,14 @@ jobs:
         find "$APP_PATH/Contents/Frameworks" -name "*.dylib" -exec \
           codesign --force --sign "$IDENTITY" --options runtime {} \;
         
+        # Expand $(AppIdentifierPrefix) in entitlements — codesign doesn't expand
+        # Xcode build variables, so the literal string ends up in the binary and
+        # AMFI rejects the launch via launchd.
+        ENTITLEMENTS=$(mktemp)
+        sed "s/\$(AppIdentifierPrefix)/${APPLE_TEAM_ID}./" bae-desktop/bae.entitlements > "$ENTITLEMENTS"
+
         # Finally sign the main app (with entitlements for protected keychain / iCloud sync)
-        codesign --force --sign "$IDENTITY" --options runtime --entitlements bae-desktop/bae.entitlements "$APP_PATH"
+        codesign --force --sign "$IDENTITY" --options runtime --entitlements "$ENTITLEMENTS" "$APP_PATH"
         
         codesign --verify --verbose "$APP_PATH"
 
