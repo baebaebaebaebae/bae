@@ -74,23 +74,23 @@ import { Image } from 'astro:assets';
 		<section class="concepts">
 			<div class="concept">
 				<h2>Import & play</h2>
-				<p>bae understands <em>releases</em>, not just files. Point it at a folder, search MusicBrainz or Discogs, and bae pulls in cover art, track listings, and release details.</p>
+				<p>bae understands releases, not just files. Point it at a folder, search MusicBrainz or Discogs, and bae pulls in cover art, track listings, and release details.</p>
 			</div>
 			<div class="concept">
 				<h2>Sync across devices</h2>
-				<p>Connect a cloud provider or an S3-compatible bucket. bae creates an encrypted cloud home that holds your files, metadata, and artwork. Changes sync incrementally across devices. Keep everyday listening on fast local storage and put the rest in the cloud.</p>
+				<p>Connect a cloud provider. bae creates an encrypted cloud home that holds your files, metadata, and artwork. Changes sync automatically.</p>
 			</div>
 			<div class="concept">
 				<h2>Share tracks</h2>
-				<p>Select a track, copy a link, send it to anyone. They click and listen in their browser — no app, no account. Leave bae-desktop running locally or run bae-server headless on a VPS to keep links alive.</p>
+				<p>Select a track, copy a link, send it to anyone. They click and listen in their browser — no app, no account.</p>
 			</div>
 			<div class="concept">
 				<h2>Follow libraries</h2>
-				<p>Let others browse your full catalog, not just one-off links. Generate a follow code, send it to a friend, and your library appears in their bae — read-only, streaming through your server. They never touch your cloud home.</p>
+				<p>Let others browse your full catalog. Generate a follow code, send it to a friend, and your library appears in their bae — read-only, streaming through your server.</p>
 			</div>
 			<div class="concept">
 				<h2>Curate together</h2>
-				<p>Invite someone to contribute to the same library. Both of you import music, edit metadata, and curate together. bae handles access control, key distribution, and signed changesets.</p>
+				<p>Invite someone to contribute to the same library. Both of you import music, edit metadata, and curate together. bae handles the rest.</p>
 			</div>
 			<div class="concept">
 				<h2>Open source</h2>
@@ -120,8 +120,8 @@ import { Image } from 'astro:assets';
 				<div class="feature">
 					<h3>Storage</h3>
 					<ul>
+						<li>Many cloud providers / S3</li>
 						<li>End-to-end encryption</li>
-						<li>Many cloud providers</li>
 						<li>Choose where albums live</li>
 					</ul>
 				</div>
@@ -136,17 +136,17 @@ import { Image } from 'astro:assets';
 				<div class="feature">
 					<h3>Sharing</h3>
 					<ul>
+						<li>Easy share links</li>
+						<li>Follow friends</li>
 						<li>Multi-contributor libraries</li>
-						<li>Share and follow libraries</li>
-						<li>One-click listening via share links</li>
 					</ul>
 				</div>
 				<div class="feature">
 					<h3>Server</h3>
 					<ul>
-						<li>Headless, streams from cloud</li>
+						<li>Streams from cloud</li>
+						<li>Web player</li>
 						<li>Subsonic-compatible</li>
-						<li>Browser frontend for share links</li>
 					</ul>
 				</div>
 			</div>
