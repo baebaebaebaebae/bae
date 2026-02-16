@@ -8,5 +8,13 @@
     <array>
         <string>$(AppIdentifierPrefix)com.fm.bae</string>
     </array>
+    <key>com.apple.developer.icloud-container-identifiers</key>
+    <array>
+        <string>iCloud.com.fm.bae</string>
+    </array>
+    <key>com.apple.developer.ubiquity-container-identifiers</key>
+    <array>
+        <string>iCloud.com.fm.bae</string>
+    </array>
 </dict>
 </plist>
