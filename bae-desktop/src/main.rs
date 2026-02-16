@@ -65,7 +65,7 @@ fn configure_logging() {
     // Always log to console. In release mode on macOS, also log to Console.app.
     #[cfg(target_os = "macos")]
     if !config::Config::is_dev_mode() {
-        let oslog_layer = tracing_oslog::OsLogger::new("fm.bae", "default");
+        let oslog_layer = tracing_oslog::OsLogger::new("fm.bae.desktop", "default");
 
         tracing_subscriber::registry()
             .with(env_filter)

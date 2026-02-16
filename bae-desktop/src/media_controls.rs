@@ -23,7 +23,7 @@ pub fn setup_media_controls(
     let current_state_for_controls = current_state.clone();
     let current_state_for_progress = current_state.clone();
     let config = PlatformConfig {
-        dbus_name: "fm.bae",
+        dbus_name: "fm.bae.desktop",
         display_name: "bae",
         hwnd: None,
     };
