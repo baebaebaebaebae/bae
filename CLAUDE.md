@@ -8,15 +8,17 @@ Never use real artist or album names in docs, examples, tests, or UI mockups. Us
 
 ## Core Philosophy
 
-**YAGNI** - Don't leave dead code around. Remove unused code. Run clippy before commits.
+**YAGNI** - Don't leave dead code around. Remove unused code.
 
-**No backwards compatibility concerns** - This project is new and quickly developing.
+**No backwards compatibility concerns** - This project is new and quickly developing. Our migration strategy is currently rm -rf ~/.bae.
 
 **Don't bail out** - When working on a fix, keep going until complete. Don't switch approaches ("let's just leave the warning") without asking first. Work through obstacles.
 
+**Do the real work** - Always implement the proper fix. Never suggest dropping a feature to avoid implementation difficulty. Simplification is good; giving up on functionality is not.
+
 **Only fix issues you introduce** - Don't fix pre-existing linter errors, warnings, or test failures unrelated to current work.
 
-**All work happens in worktrees** - Never work directly in the main checkout. For any new task, create a worktree: `git worktree add .worktrees/<branch-name> -b <branch-name>`, cd into it, and do all work there. The main checkout stays on `main`. Remember to run `npm install` in the worktree (see Worktree setup section below).
+**All work happens in worktrees** - Never work directly in the main checkout. For any new task, create a worktree: `git worktree add .worktrees/<branch-name> -b <branch-name>`, cd into it, and do all work there. The main checkout stays on `main`. Pull main frequently in the main checkout so that worktrees branch from the latest work. Remember to run `npm install` in the worktree (see Worktree setup section below).
 
 ## Git Conventions
 
