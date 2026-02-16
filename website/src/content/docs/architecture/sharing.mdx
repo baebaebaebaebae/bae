@@ -1,0 +1,56 @@
+---
+title: Sharing
+description: Identity, membership chain, signed changesets, and grant tokens
+---
+
+This page covers the technical mechanisms behind sharing. For how to use these features, see [Sharing a Library](/library/sharing), [Share Links](/library/share-links), and [Share Grants](/library/share-grants).
+
+## Identity
+
+Each bae user has a global Ed25519/X25519 keypair -- one identity across all libraries. The keypair is generated on first use and stored in the OS keyring. Public keys are identities. There is no central directory or account server. Users exchange public keys out-of-band (in person, over a chat app, etc.).
+
+## Membership chain
+
+A library's membership is tracked by an append-only chain of signed entries stored in the cloud home at `membership/{pubkey}/{seq}.enc`. Each entry records an Add or Remove action, the target's public key and role, and is signed by a current owner.
+
+The first entry is always the library creator adding themselves as owner. The chain is validated on construction -- entries with invalid signatures or from non-owners are rejected.
+
+## Signed changesets
+
+Every changeset pushed to the cloud home is signed by its author's Ed25519 key. On pull, bae verifies that the author was a valid member at the time the changeset was created (by checking the membership chain). Changesets from non-members or with invalid signatures are discarded.
+
+## Key wrapping
+
+The library's encryption key is wrapped (sealed-box encrypted) to each member's X25519 public key and stored in the cloud home at `keys/{user_pubkey}.enc`. Only the intended recipient can unwrap it with their private key. When a member is revoked, a new encryption key is generated and re-wrapped to all remaining members.
+
+## Invite codes
+
+An invite code bundles everything a joiner needs:
+
+- The library encryption key, sealed-box encrypted to the joiner's public key
+- Cloud home coordinates (provider type, folder ID or bucket)
+- Storage credentials (on S3, minted IAM credentials; on consumer clouds, folder sharing happens via the provider API)
+- A signed membership chain entry adding the joiner
+
+The owner generates the code after receiving the joiner's public key. The joiner pastes it into bae, which unwraps the encryption key, connects to the cloud home, and starts syncing.
+
+## Share link tokens
+
+A share link URL contains an HMAC-signed token encoding:
+
+- The resource ID (track or album)
+- An optional expiry timestamp
+
+The token is the authorization. Possession of the URL means permission to play. Tokens cannot be forged or modified (HMAC-signed). The server validates the signature and expiry on each request.
+
+## Share grant tokens
+
+A share grant token gives the recipient access to a single release. It contains:
+
+- The library encryption key, sealed-box encrypted to the recipient's public key
+- Cloud home coordinates for fetching the files
+- S3 credentials if applicable, also sealed-box encrypted
+- An optional expiration
+- The grantor's signature
+
+The recipient unwraps the token with their private key, connects to the sharer's cloud home, and streams the release directly.

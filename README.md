@@ -1,6 +1,6 @@
 # bae
 
-A music library manager that uses decentralized identity and zero-knowledge encryption over pluggable storage to enable multi-device sync, collaborative curation, and discovery.
+A music library manager that uses decentralized identity and end-to-end encryption over pluggable storage to enable multi-device sync, collaborative curation, and discovery.
 
 You pick releases from MusicBrainz or Discogs, point bae at your files, and it handles storage, playback, and organization. Everything in the cloud is encrypted. The storage provider sees opaque blobs. All trust lives in cryptography, not in the storage backend.
 

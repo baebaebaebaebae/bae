@@ -3,48 +3,40 @@ title: Sync
 description: Sync your library across devices
 ---
 
-bae can sync your library across multiple devices through your cloud home. Every edit, import, and deletion propagates automatically.
-
-## How it works
-
-When a cloud home is configured, bae records every change you make as a compact binary changeset. These changesets are encrypted and pushed to your cloud home. Other devices pull and apply them.
-
-The cloud home stores:
-
-- **Changesets** — incremental diffs of your database, one per edit session
-- **Snapshots** — periodic full copies for bootstrapping new devices
-- **Images** — album art and other library images
-- **Heads** — per-device sequence numbers for efficient polling
-
-Changesets are tiny (usually a few KB) compared to full database snapshots. A typical edit session produces one changeset covering all the changes you made.
+bae syncs your library across multiple devices through your cloud home. Every edit, import, and deletion propagates automatically.
 
 ## Setting up sync
 
-1. Go to **Settings → Sync**
+1. Go to **Settings > Sync**
 2. Sign in with a cloud provider (Google Drive, Dropbox, OneDrive, pCloud), use iCloud Drive (macOS), or enter S3 credentials
 3. bae generates a device ID and starts syncing
 
-Each device gets its own device ID. Changesets are namespaced by device, so multiple devices can push concurrently without conflicts.
+## How it works
+
+Changes are synced incrementally -- each edit produces a small changeset that is encrypted and pushed to the cloud home. Other devices pull and apply new changesets. bae syncs after every change and polls every 30 seconds to pick up changes from other devices. If the cloud home is unreachable, sync retries next cycle.
+
+New devices bootstrap from a periodic full snapshot, then apply only the changesets that came after it.
 
 ## Conflict resolution
 
-When two devices edit the same data, bae resolves conflicts automatically using last-writer-wins at the row level. Each row carries a hybrid logical clock (HLC) timestamp that's robust against clock skew.
+When two devices edit the same data, bae resolves conflicts automatically using last-writer-wins. If two devices edit different fields of the same release, both changes survive. True conflicts (same field edited on both sides) are resolved by timestamp. Deletes win over concurrent edits.
 
-If two devices edit *different fields* of the same row, both changes survive — the changeset only contains the columns that actually changed. True conflicts (same field edited on both sides) are resolved by timestamp.
+## What syncs
 
-Deletes win over concurrent edits. If one device deletes a release while another edits it, the deletion stands.
+- Metadata (albums, tracks, artists, labels)
+- Album art and artist images
+- Release files (if bae-managed)
 
-## Snapshots
+Device-specific settings (`config.yaml`) do not sync.
 
-Periodically, bae writes a full database snapshot to the cloud home. New devices start from the latest snapshot and then apply only the changesets that came after it. This keeps initial sync fast regardless of how long the library has been active.
+## Modes
 
-## Schema versioning
+Sync is not all-or-nothing:
 
-Every changeset carries a schema version number. When bae ships a database schema change:
-
-- **Additive changes** (new columns, new tables) are transparent — old and new clients interoperate without coordination
-- **Breaking changes** (column removal, reordering) bump a minimum version — older clients stop syncing until they upgrade, then bootstrap from a fresh snapshot
+- **Solo, local only** -- no cloud home, no sync. Everything stays on one device.
+- **Solo, multiple devices** -- changesets sync between your devices via the cloud home.
+- **Shared library** -- multiple users sync through the same cloud home, each with their own device ID. See [Sharing a Library](/library/sharing).
 
 ## Encryption
 
-All data in the cloud home is encrypted before upload using your library's encryption key. The bucket provider never sees plaintext metadata or images. See [Encryption](/storage/encryption) for details.
+All data in the cloud home is encrypted before upload. The cloud provider never sees plaintext. See [Encryption](/storage/encryption).

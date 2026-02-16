@@ -1,0 +1,104 @@
+---
+title: Discovery Network
+description: Decentralized release discovery using attestations and the Mainline DHT
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside type="note">
+The discovery network is not part of v0. The protocol design exists and is code-complete, but it will not be exposed in the UI until after v0.
+</Aside>
+
+## The curation mapping
+
+Every bae user who imports a release and matches it to an external ID (MusicBrainz or Discogs) creates a mapping:
+
+```
+External ID (universal -- "what this music is")
+        <->
+Content hash / infohash (universal -- "the actual bytes")
+```
+
+This is a curation mapping: someone verified that these bytes are this release. Sharing it publicly enables decentralized discovery without a central authority.
+
+## Three-layer lookup
+
+Discovery works in three layers:
+
+```
+External ID      -> content hashes       (the curation mapping)
+Content hash     -> peers who have it    (the DHT)
+Peer             -> actual bytes         (BitTorrent)
+```
+
+Each layer uses a different mechanism, but together they answer: "given a release I want, where can I get the files?"
+
+## The DHT as rendezvous
+
+bae uses the BitTorrent Mainline DHT for peer discovery. It is used as a rendezvous point, not as a database. For each external ID, a rendezvous key is derived:
+
+```
+rendezvous = SHA-1("bae:mbid:" + MBID)
+rendezvous = SHA-1("bae:discogs:" + DISCOGS_RELEASE_ID)
+```
+
+Every bae client that has a release matched to an external ID announces on that rendezvous key (standard DHT announce). A release matched to both MusicBrainz and Discogs announces on both keys.
+
+## Forward lookup
+
+"I want this album" -- the user knows the external ID and wants to find peers who have it.
+
+```
+1. User knows MBID X (from a MusicBrainz search)
+2. DHT lookup: find peers announcing SHA-1("bae:mbid:" + X)
+3. Discovers Alice, Bob, and Carlos are online
+4. Connects peer-to-peer to each
+5. Each peer sends their signed attestation:
+     Alice:  { mbid: X, infohash: ABC, sig: "..." }
+     Bob:    { mbid: X, infohash: ABC, sig: "..." }
+     Carlos: { mbid: X, infohash: DEF, sig: "..." }
+6. Aggregate locally:
+     infohash ABC -- 2 attestations (probably the common rip)
+     infohash DEF -- 1 attestation (maybe a remaster)
+7. Pick one, use standard BitTorrent to download
+```
+
+More attestations for the same infohash means higher confidence that the mapping is correct.
+
+## Reverse lookup
+
+"I have these files, what are they?" -- the user has files and wants to identify them.
+
+```
+1. User has files with infohash ABC
+2. DHT lookup: find peers in the torrent swarm for infohash ABC
+3. Connect and ask via BEP 10 extended messages: "what MBID is this?"
+4. Peers respond with signed attestations
+5. User now has proper metadata without manual tagging
+```
+
+## Why not a blockchain
+
+The attestation model does not need proof of work or consensus:
+
+- **No financial stakes** -- worst case is a bad mapping, not stolen money
+- **Identity-based** -- every attestation is signed by a keypair
+- **Confidence = attestation count** -- more independent signers means higher trust
+- **Bad mappings die naturally** -- zero corroboration, ignored by clients
+
+## Attestation properties
+
+- **Signed** -- every attestation is cryptographically signed by its author
+- **Cached** -- clients cache attestations locally and re-share to future queries, so knowledge spreads epidemically
+- **Tamper-evident** -- cannot be forged without the private key
+- **Permissionless** -- any bae client can participate, no registration or approval needed
+
+## Participation controls
+
+Discovery is off by default. Users opt in via settings. Three modes:
+
+- **Off** -- no DHT activity, no announcements, no attestations
+- **Attestations only** -- announce on the DHT and respond to queries, but do not seed files
+- **Full participation** -- attestations plus BitTorrent seeding
+
+Individual releases can be marked private to exclude them from discovery regardless of the global setting.

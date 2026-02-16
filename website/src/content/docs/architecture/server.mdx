@@ -1,0 +1,58 @@
+---
+title: bae-server
+description: Headless read-only server that pulls from the cloud home
+---
+
+`bae-server` is a headless, read-only server that pulls a library from the cloud home and serves it over HTTP. It does not write to the library or the cloud home. It has no local state beyond an ephemeral cache rebuilt from the cloud home on startup.
+
+## How it works
+
+On startup, bae-server:
+
+1. Downloads and decrypts `snapshot.db.enc` from the cloud home
+2. Applies any changesets newer than the snapshot
+3. Caches the resulting database and images locally
+
+For audio playback, it streams directly from the cloud home, decrypting on the fly. Release files are not downloaded ahead of time.
+
+When the library changes (new imports, edits, deletions), bae-server re-pulls from the cloud home to pick up the latest changesets. This can be triggered manually or run on a timer.
+
+## CLI flags
+
+| Flag | Purpose |
+|---|---|
+| `--web-dir` | Path to a bae-web build directory. Serves the web frontend alongside the API. |
+| `--recovery-key` | Encryption key for the library. Required for encrypted libraries. |
+| `--refresh` | Re-pull from the cloud home (rebuild the local cache). |
+| `--bind` | Address and port to listen on (e.g., `0.0.0.0:4533`). |
+
+Cloud home credentials (bucket, region, endpoint, access key, secret key) are passed via CLI flags or environment variables (`BAE_S3_*`).
+
+## Deployment
+
+bae-server is designed to run on a VPS or any internet-reachable machine. A typical setup:
+
+1. Run `bae-server` with your cloud home credentials and encryption key
+2. Point a domain at it (reverse proxy with nginx, Caddy, etc.)
+3. The server pulls from your cloud home and serves the library
+
+This gives you a public URL for [share links](/library/share-links) and [follow connections](/library/sharing#follow).
+
+For desktop users without a static IP or custom domain, options include Tailscale Funnel, ngrok, Cloudflare Tunnel, or UPnP port forwarding.
+
+## Composing with bae-desktop
+
+bae-desktop and bae-server serve different roles:
+
+- **bae-desktop** is the full app. It writes to the library, manages imports, edits metadata, and pushes changesets to the cloud home.
+- **bae-server** is read-only. It pulls from the cloud home and serves the library to remote clients.
+
+You can run both. Desktop for local use and editing, server for remote access and sharing. They do not interfere with each other -- desktop writes to the cloud home, server reads from it.
+
+## Subsonic compatibility
+
+bae-server implements the Subsonic API. Any Subsonic-compatible client (DSub, Symfonium, play:Sub, Submariner, etc.) can connect to it and browse, search, and stream your library. No special client needed.
+
+## Statelessness
+
+bae-server keeps no persistent state. Its local cache is rebuilt from the cloud home on every startup or refresh. You can destroy and recreate the server at any time without losing data -- the cloud home is the source of truth.

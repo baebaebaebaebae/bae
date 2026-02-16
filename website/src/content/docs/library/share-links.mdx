@@ -3,7 +3,7 @@ title: Share Links
 description: Share tracks and albums with anyone via a URL
 ---
 
-Share a track or album with anyone via a link. Whoever has the link can play it in their browser — no account, no app needed.
+Share a track or album with anyone via a link. The recipient plays it in their browser -- no account, no app needed.
 
 ## How it works
 
@@ -11,38 +11,20 @@ Share a track or album with anyone via a link. Whoever has the link can play it 
 2. bae generates a URL like `https://your-server.com/share/{token}`
 3. Send the link to anyone
 
-The recipient opens the link in their browser. They see cover art, track info, and an audio player. They can listen and download.
-
-## The share token
-
-The URL contains a signed token encoding:
-
-- **What to play** — track ID or album ID
-- **Expiry** — optional timestamp after which the link stops working
-- **HMAC signature** — prevents forging or tampering
-
-The token is the auth. Possession of the URL means permission to play. No credentials needed.
-
-## Server requirement
-
-Share links require your server to be reachable from the internet. Two options:
-
-**bae-desktop**: Leave the app running and make port 4533 reachable. Options include a reverse proxy with a custom domain, Tailscale Funnel, ngrok, or Cloudflare Tunnel.
-
-**bae-server**: Run `bae-server` in the cloud pointed at your cloud home. Same share link format, same token validation, no desktop app needed.
+The recipient opens the link and sees cover art, track info, and an audio player. They can listen and download.
 
 ## What recipients see
 
 - Cover art and track metadata
 - Audio player with playback controls
 - Download button for each track
-- "Open in bae" button to save to their own library (requires bae installed)
+- For albums, the full track list with individual playback and download
 
-For albums, the share page shows the full track list with individual playback and download.
+## Server requirement
 
-## Security
+Share links require your server to be reachable from the internet:
 
-- Links are scoped to a single track or album
-- Expired links stop working
-- Tokens can't be modified (HMAC-signed)
-- Recipients can only access the specific resource in the link
+- **bae-server** -- run in the cloud pointed at your cloud home. No desktop app needed.
+- **bae-desktop** -- leave the app running and make it reachable via a reverse proxy, Tailscale Funnel, ngrok, or Cloudflare Tunnel.
+
+Links can optionally expire. Expired links stop working.
