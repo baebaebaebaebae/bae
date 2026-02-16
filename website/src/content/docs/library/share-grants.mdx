@@ -5,41 +5,19 @@ description: Share individual releases across libraries
 
 Share grants let you share a single release with someone without giving them access to your entire library.
 
-## How it works
-
-A share grant is a self-contained token that gives the recipient access to one release. It contains:
-
-- The library encryption key (sealed-box encrypted to the recipient's public key)
-- Your cloud home coordinates so they can fetch the files
-- Optionally, S3 credentials for bucket access
-- An expiration date (optional)
-- Your signature, so the recipient can verify it came from you
-
-The encryption key and any S3 credentials are sealed-box encrypted to the recipient's public key. Only they can open it.
-
 ## Creating a grant
-
-To share a release:
 
 1. Open the release and choose **Share**
 2. Enter the recipient's public key
 3. Optionally set an expiration
-4. bae generates the grant token -- copy it or export as a file
+4. bae generates the grant token -- copy it or send it to the recipient
 
 ## Accepting a grant
 
-When you receive a share grant:
-
-1. Import it in bae (paste or open the file)
+1. Import the grant in bae (paste or open the file)
 2. bae verifies the signature and checks the expiration
-3. The encrypted payload is unwrapped with your private key
-4. The release becomes available in your library
+3. The release becomes available in your library
 
-The shared release plays back directly from the sharer's cloud home. You do not need to download or store the files yourself.
+The shared release streams directly from the sharer's cloud home. You do not need to download or store the files yourself.
 
-## Security properties
-
-- The encryption key is sealed-box encrypted to the recipient's public key -- only they can decrypt it
-- S3 credentials (if included) are encrypted end-to-end, never in the clear
-- The grant is signed, so it cannot be tampered with or forged
-- Expiration is checked on accept -- expired grants are rejected
+See [Sharing (Architecture)](/architecture/sharing) for how grant tokens are constructed and secured.

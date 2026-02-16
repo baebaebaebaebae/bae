@@ -3,67 +3,42 @@ title: Sharing a Library
 description: Follow, join, and collaborate on libraries
 ---
 
-bae supports multiple levels of sharing — from read-only browsing to full collaborative editing.
-
-## Identity
-
-Each bae user has a global Ed25519 keypair — one identity across all libraries. The keypair is generated on first use and stored in your OS keyring. Your public key is how other members recognize you.
-
-There is no global directory. You can't search for a user by name. All sharing happens via codes exchanged out-of-band (in person, over a chat app, etc.).
+bae supports multiple levels of sharing -- from read-only browsing to full collaborative editing.
 
 ## Follow
 
-Follow lets someone browse your full catalog as a read-only remote library. They stream through your server — they never touch your cloud home.
+Follow lets someone browse your full catalog as a read-only remote library. They stream through your server -- they never touch your cloud home.
 
-### How to set up follow
-
-1. You generate a **follow code** in bae
+1. Generate a **follow code** in bae
 2. Send it to the person you want to share with
 3. They paste it into bae
 4. Your library appears alongside theirs as a read-only remote library
 
-Follow requires either bae-desktop running or bae-server reachable from the internet. The follower connects directly to your server for playback.
+Follow requires either bae-desktop running or bae-server reachable from the internet.
 
 ## Join
 
-Join is for a collaborator who wants to contribute to the same library — importing music, editing metadata, and curating together. Both people get full read and write access, with every change synced to all members.
-
-### How to join
+Join is for a collaborator who wants full read and write access -- importing, editing metadata, curating together. Every change syncs to all members.
 
 1. The joiner shares their **public key** with the owner
-2. The owner sends back an **invite code** — this wraps the library's encryption key to the joiner's public key, grants storage access, and creates a signed membership entry
+2. The owner sends back an **invite code**
 3. The joiner pastes the invite code and syncs
 
-Under the hood: bae shares the cloud home folder (on consumer clouds) or mints credentials (on S3), wraps the encryption key in a sealed box to the joiner's public key, and bundles everything into the code.
+The invite code wraps the library's encryption key to the joiner's public key, grants storage access, and creates a membership entry.
 
 ### Roles
 
-- **Owner** — can invite and revoke members, and make all edits
-- **Member** — can make all edits, but cannot manage membership
-
-The first entry in the membership chain is always the library creator adding themselves as owner.
-
-## Membership chain
-
-A library's membership is tracked by an append-only chain of signed entries stored in the cloud home. Each entry records an Add or Remove action, signed by a current owner.
-
-## Signed changesets
-
-Every changeset pushed to the cloud home is signed by its author. On pull, bae verifies that the author was a valid member at the time the changeset was created. Changesets from non-members or with invalid signatures are discarded.
+- **Owner** -- can invite and revoke members, and make all edits
+- **Member** -- can make all edits, but cannot manage membership
 
 ## Revocation
 
-An owner can revoke any member:
+An owner can revoke any member. When a member is revoked, a new encryption key is generated and re-wrapped to all remaining members. The revoked member can no longer decrypt new data.
 
-1. A signed Remove entry is added to the membership chain
-2. A new library encryption key is generated
-3. The new key is re-wrapped to all remaining members
-4. The revoked member's wrapped key is deleted
-
-After revocation, the removed member can no longer decrypt new data. Old data (encrypted with the previous key) remains accessible to them.
-
-The last owner of a library cannot be revoked. At least one owner must always remain.
+The last owner of a library cannot be revoked.
 
 ## Attribution
 
-Every changeset carries the author's public key. bae maps public keys to display names locally, so you can see who imported a release or edited metadata.
+Every change carries the author's public key. bae maps public keys to display names locally, so you can see who imported a release or edited metadata.
+
+See [Sharing (Architecture)](/architecture/sharing) for technical details on the membership chain, signed changesets, and identity model.

@@ -5,6 +5,12 @@ description: Import music from local files
 
 bae imports FLAC files from your computer. You select a folder, bae scans it for releases, you match each one to a MusicBrainz or Discogs entry, and the metadata is pulled in.
 
+## Getting started
+
+Click **Import** in the title bar, then select **Local Files** and pick a folder.
+
+bae scans the folder recursively, detects releases, and shows them as candidates. You work through each one: identify it, pick artwork, choose a storage option, and import.
+
 ## Supported formats
 
 FLAC only -- both individual track files and CUE+FLAC disc images.
@@ -17,7 +23,7 @@ FLAC only -- both individual track files and CUE+FLAC disc images.
 
 ## Directory scanning
 
-When you select a folder, bae walks the directory tree recursively to find releases. A directory is treated as a single release if it contains audio files directly, or if its subdirectories look like disc folders (e.g. `CD1`, `CD2`, `Disc 1`, `Disc 2`, or plain numbers like `1`, `2`).
+A directory is treated as a single release if it contains audio files directly, or if its subdirectories look like disc folders (e.g. `CD1`, `CD2`, `Disc 1`, `Disc 2`, or plain numbers like `1`, `2`).
 
 Disc folder detection uses heuristics: subdirectory names must be short (15 characters or less) and either all numeric or share a common prefix of at least 2 characters. This distinguishes multi-disc releases from collections of separate albums with longer names.
 
