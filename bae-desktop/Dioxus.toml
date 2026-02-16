@@ -2,7 +2,7 @@
 name = "bae"
 
 [bundle]
-identifier = "fm.bae"
+identifier = "fm.bae.desktop"
 publisher = "bae"
 
 # Generated from /icon-source.png via:
