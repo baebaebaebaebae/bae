@@ -1,3 +1,10 @@
+mod cloud_proxy;
+
+use std::collections::HashMap;
+use std::ffi::CString;
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use bae_core::cloud_home::s3::S3CloudHome;
 use bae_core::db::Database;
 use bae_core::encryption::EncryptionService;
@@ -10,10 +17,7 @@ use bae_core::sync::cloud_home_bucket::CloudHomeSyncBucket;
 use bae_core::sync::pull::pull_changes;
 use bae_core::sync::snapshot::bootstrap_from_snapshot;
 use clap::Parser;
-use std::collections::HashMap;
-use std::ffi::CString;
-use std::path::PathBuf;
-use std::sync::Arc;
+use cloud_proxy::{ChainState, CloudProxyState};
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tower_http::services::{ServeDir, ServeFile};
@@ -176,8 +180,9 @@ async fn main() {
         encryption.fingerprint()
     );
 
-    // Connect to sync bucket.
-    let cloud_home = S3CloudHome::new(
+    // Connect to sync bucket (two S3CloudHome instances: one for the encrypted
+    // sync bucket used during bootstrap, one for the raw write proxy).
+    let cloud_home_for_bucket = S3CloudHome::new(
         args.s3_bucket.clone(),
         args.s3_region.clone(),
         args.s3_endpoint.clone(),
@@ -191,7 +196,23 @@ async fn main() {
         std::process::exit(1);
     });
 
-    let bucket = CloudHomeSyncBucket::new(Box::new(cloud_home), encryption.clone());
+    let cloud_home_for_proxy: Arc<dyn bae_core::cloud_home::CloudHome> = Arc::new(
+        S3CloudHome::new(
+            args.s3_bucket.clone(),
+            args.s3_region.clone(),
+            args.s3_endpoint.clone(),
+            args.s3_access_key.clone(),
+            args.s3_secret_key.clone(),
+            args.s3_key_prefix.clone(),
+        )
+        .await
+        .unwrap_or_else(|e| {
+            error!("Failed to connect to cloud home (proxy): {e}");
+            std::process::exit(1);
+        }),
+    );
+
+    let bucket = CloudHomeSyncBucket::new(Box::new(cloud_home_for_bucket), encryption.clone());
 
     info!("Connected to sync bucket: {}", args.s3_bucket);
 
@@ -242,6 +263,27 @@ async fn main() {
 
     // Step 4: Download images from the sync bucket.
     download_images(&bucket, &library_dir).await;
+
+    // Load membership chain from the bucket for write proxy auth.
+    let chain_state = match cloud_proxy::load_membership_chain(&bucket).await {
+        Ok(Some(chain)) => {
+            info!("Membership chain loaded for write proxy auth");
+            ChainState::Valid(chain)
+        }
+        Ok(None) => {
+            info!("No membership chain found; write proxy accepts any valid signature");
+            ChainState::None
+        }
+        Err(reason) => {
+            warn!("Membership chain is corrupt: {reason}; write proxy will reject all requests");
+            ChainState::Invalid
+        }
+    };
+
+    let cloud_proxy_state = CloudProxyState {
+        cloud_home: cloud_home_for_proxy,
+        chain_state,
+    };
 
     // Step 5: Open database read-only for serving.
     // WAL mode allows concurrent reads while the sync loop writes.
@@ -346,6 +388,8 @@ async fn main() {
         }
     });
 
+    let cloud_router = cloud_proxy::cloud_proxy_router(cloud_proxy_state);
+
     // If --web-dir is provided, serve static files with SPA fallback.
     let app = if let Some(ref web_dir) = args.web_dir {
         info!("Serving web UI from {}", web_dir.display());
@@ -354,11 +398,13 @@ async fn main() {
         axum::Router::new()
             .route("/health", health_handler)
             .merge(api_router)
+            .merge(cloud_router)
             .fallback_service(spa_fallback)
     } else {
         axum::Router::new()
             .route("/health", health_handler)
             .merge(api_router)
+            .merge(cloud_router)
     };
 
     let addr = format!("{}:{}", args.bind, args.port);
