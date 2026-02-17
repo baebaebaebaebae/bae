@@ -13,14 +13,17 @@ use clap::Parser;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::RwLock;
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::{error, info, warn};
 
-/// bae headless server -- read-only Subsonic API server.
+/// bae headless server -- Subsonic API server with background sync.
 ///
-/// Syncs from a sync bucket on boot: downloads the latest snapshot,
-/// applies any new changesets, downloads images, then serves the
-/// library via the Subsonic API.
+/// Syncs from a sync bucket on boot and periodically thereafter:
+/// downloads the latest snapshot, applies changesets, downloads images,
+/// then serves the library via the Subsonic API.
 ///
 /// Requires sync bucket S3 coordinates and the library encryption key.
 #[derive(Parser)]
@@ -88,6 +91,39 @@ struct Args {
     /// When both username and password are provided, authentication is required.
     #[arg(long, env = "BAE_SERVER_PASSWORD")]
     server_password: Option<String>,
+
+    /// Background sync interval in seconds.
+    #[arg(long, default_value = "30", env = "BAE_SYNC_INTERVAL")]
+    sync_interval: u64,
+}
+
+// libsqlite3-sys doesn't expose sqlite3_close_v2 in its generated bindings,
+// but the bundled SQLite library includes it. Declare the symbol directly.
+unsafe extern "C" {
+    fn sqlite3_close_v2(db: *mut libsqlite3_sys::sqlite3) -> std::os::raw::c_int;
+}
+
+/// Wrapper around a raw sqlite3 pointer that is Send.
+///
+/// Safety: the sync loop is the sole user of this write handle. The pointer
+/// is sent once to the sync thread and never shared. All FFI calls happen
+/// sequentially on that one thread.
+struct SqliteWriteHandle(*mut libsqlite3_sys::sqlite3);
+unsafe impl Send for SqliteWriteHandle {}
+
+impl Drop for SqliteWriteHandle {
+    fn drop(&mut self) {
+        unsafe {
+            sqlite3_close_v2(self.0);
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+struct HealthStatus {
+    status: &'static str,
+    last_sync: Option<String>,
+    changesets_applied: u64,
 }
 
 fn configure_logging() {
@@ -179,20 +215,31 @@ async fn main() {
         bootstrap_result.cursors.len()
     );
 
-    // Step 2: Pull changesets since the snapshot.
-    // Open DB read-write via raw sqlite3 for changeset application.
-    let changesets_applied =
-        apply_changesets(&bucket, &db_path, &bootstrap_result.cursors, &library_dir).await;
-    if changesets_applied > 0 {
-        info!("Applied {changesets_applied} changesets since snapshot");
+    // Step 2: Open DB read-write for changeset application.
+    // This handle stays open for the background sync loop.
+    let write_handle = open_write_handle(&db_path);
+    set_wal_mode(write_handle.0);
+
+    // Step 3: Pull changesets since the snapshot.
+    let (cursors, initial_applied) = pull_new_changesets(
+        write_handle.0,
+        &bucket,
+        &bootstrap_result.cursors,
+        &library_dir,
+    )
+    .await;
+
+    if initial_applied > 0 {
+        info!("Applied {initial_applied} changesets since snapshot");
     } else {
         info!("No new changesets since snapshot");
     }
 
-    // Step 3: Download images from the sync bucket.
+    // Step 4: Download images from the sync bucket.
     download_images(&bucket, &library_dir).await;
 
-    // Step 4: Open database read-only for serving.
+    // Step 5: Open database read-only for serving.
+    // WAL mode allows concurrent reads while the sync loop writes.
     info!("Opening database read-only at {}", db_path.display());
     let database = Database::open_read_only(db_path.to_str().unwrap())
         .await
@@ -236,12 +283,63 @@ async fn main() {
     let api_router = create_router(
         library_manager,
         Some(encryption),
-        library_dir,
+        library_dir.clone(),
         key_service,
         args.share_base_url,
         args.share_signing_key_version,
         auth,
     );
+
+    // Health status shared between sync loop and health endpoint.
+    let health = Arc::new(RwLock::new(HealthStatus {
+        status: "ok",
+        last_sync: None,
+        changesets_applied: initial_applied,
+    }));
+
+    // Step 6: Spawn background sync loop.
+    info!(
+        "Starting background sync (interval: {}s)",
+        args.sync_interval
+    );
+
+    let sync_bucket = Arc::new(bucket);
+    let sync_library_dir = library_dir;
+    let sync_health = health.clone();
+    let sync_interval = args.sync_interval.max(5);
+
+    // Run the sync loop on a dedicated thread with a single-threaded tokio
+    // runtime. The raw sqlite3 pointer isn't Send, so the async future from
+    // pull_changes can't be spawned on the multi-threaded runtime. A dedicated
+    // thread with its own runtime avoids the Send requirement entirely.
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("failed to build sync runtime");
+        rt.block_on(sync_loop(
+            sync_bucket,
+            write_handle,
+            sync_library_dir,
+            sync_interval,
+            cursors,
+            sync_health,
+        ));
+    });
+
+    // Build router with health endpoint.
+    let health_state = health.clone();
+    let health_handler = axum::routing::get(move || {
+        let health = health_state.clone();
+        async move {
+            let status = health.read().await;
+            axum::Json(HealthStatus {
+                status: status.status,
+                last_sync: status.last_sync.clone(),
+                changesets_applied: status.changesets_applied,
+            })
+        }
+    });
 
     // If --web-dir is provided, serve static files with SPA fallback.
     let app = if let Some(ref web_dir) = args.web_dir {
@@ -249,10 +347,13 @@ async fn main() {
         let spa_fallback =
             ServeDir::new(web_dir).fallback(ServeFile::new(web_dir.join("index.html")));
         axum::Router::new()
+            .route("/health", health_handler)
             .merge(api_router)
             .fallback_service(spa_fallback)
     } else {
-        api_router
+        axum::Router::new()
+            .route("/health", health_handler)
+            .merge(api_router)
     };
 
     let addr = format!("{}:{}", args.bind, args.port);
@@ -272,15 +373,8 @@ async fn main() {
     }
 }
 
-/// Open the database with raw sqlite3, pull and apply changesets, then close.
-///
-/// Returns the number of changesets applied.
-async fn apply_changesets(
-    bucket: &CloudHomeSyncBucket,
-    db_path: &std::path::Path,
-    snapshot_cursors: &HashMap<String, u64>,
-    library_dir: &LibraryDir,
-) -> u64 {
+/// Open a raw sqlite3 handle in read-write mode.
+fn open_write_handle(db_path: &std::path::Path) -> SqliteWriteHandle {
     unsafe {
         let c_path = CString::new(db_path.to_str().unwrap()).unwrap();
         let mut db: *mut libsqlite3_sys::sqlite3 = std::ptr::null_mut();
@@ -289,34 +383,92 @@ async fn apply_changesets(
             error!("Failed to open database for changeset application");
             std::process::exit(1);
         }
+        SqliteWriteHandle(db)
+    }
+}
 
-        // Use per-device cursors from the snapshot metadata.
-        // pull_changes will only fetch changesets with seq > cursor for each device.
-        let cursors = snapshot_cursors.clone();
+/// Enable WAL journal mode on the write handle so readers aren't blocked.
+fn set_wal_mode(db: *mut libsqlite3_sys::sqlite3) {
+    unsafe {
+        let sql = CString::new("PRAGMA journal_mode=WAL").unwrap();
+        let rc = libsqlite3_sys::sqlite3_exec(
+            db,
+            sql.as_ptr(),
+            None,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        );
+        if rc != libsqlite3_sys::SQLITE_OK {
+            error!("Failed to set WAL journal mode");
+            std::process::exit(1);
+        }
 
-        // bae-server is a passive consumer -- use a device ID that won't
-        // match any real device so pull_changes doesn't skip any heads.
-        let server_device_id = "__bae-server__";
+        info!("Database journal mode set to WAL");
+    }
+}
 
-        let result =
-            match pull_changes(db, bucket, server_device_id, &cursors, None, library_dir).await {
-                Ok((_updated_cursors, pull_result)) => pull_result.changesets_applied,
-                Err(e) => {
-                    warn!("Failed to pull changesets: {e}");
-                    0
-                }
-            };
+/// Pull new changesets and return updated cursors + count of applied changesets.
+async fn pull_new_changesets(
+    db: *mut libsqlite3_sys::sqlite3,
+    bucket: &CloudHomeSyncBucket,
+    cursors: &HashMap<String, u64>,
+    library_dir: &LibraryDir,
+) -> (HashMap<String, u64>, u64) {
+    let server_device_id = "__bae-server__";
 
-        libsqlite3_sys::sqlite3_close(db);
-        result
+    match unsafe { pull_changes(db, bucket, server_device_id, cursors, None, library_dir).await } {
+        Ok((updated_cursors, pull_result)) => (updated_cursors, pull_result.changesets_applied),
+        Err(e) => {
+            warn!("Failed to pull changesets: {e}");
+            (cursors.clone(), 0)
+        }
+    }
+}
+
+/// Background sync loop: periodically pulls changesets and downloads images.
+///
+/// Owns the write handle for its entire lifetime. The raw sqlite3 pointer
+/// never crosses a thread boundary -- it stays within this task.
+async fn sync_loop(
+    bucket: Arc<CloudHomeSyncBucket>,
+    write_handle: SqliteWriteHandle,
+    library_dir: LibraryDir,
+    interval_secs: u64,
+    initial_cursors: HashMap<String, u64>,
+    health: Arc<RwLock<HealthStatus>>,
+) {
+    let mut cursors = initial_cursors;
+
+    loop {
+        // TODO(phase-1a): add write-trigger channel — use tokio::select! to wake on
+        // either the timer or a write notification from the cloud proxy.
+        tokio::time::sleep(Duration::from_secs(interval_secs)).await;
+
+        let (updated_cursors, applied) =
+            pull_new_changesets(write_handle.0, &bucket, &cursors, &library_dir).await;
+
+        cursors = updated_cursors;
+
+        if applied > 0 {
+            info!("Sync: applied {applied} changesets");
+        }
+
+        // Update health status.
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut status = health.write().await;
+        status.last_sync = Some(now);
+        status.changesets_applied += applied;
+        drop(status);
+
+        // Download new images (skips already-cached ones).
+        download_images(&bucket, &library_dir).await;
     }
 }
 
 /// Download all images from the sync bucket.
-/// The bucket client handles decryption internally.
+/// Skips images that already exist locally. Only logs when there's
+/// actual work (new downloads or failures).
 async fn download_images(bucket: &CloudHomeSyncBucket, library_dir: &LibraryDir) {
-    info!("Downloading images...");
-
     let image_keys = match bucket.list_image_keys().await {
         Ok(keys) => keys,
         Err(e) => {
@@ -325,27 +477,17 @@ async fn download_images(bucket: &CloudHomeSyncBucket, library_dir: &LibraryDir)
         }
     };
 
-    if image_keys.is_empty() {
-        info!("No images to download");
-        return;
-    }
-
-    info!("Found {} images to download", image_keys.len());
     let mut downloaded = 0u64;
-    let mut skipped = 0u64;
     let mut failed = 0u64;
 
     for key in &image_keys {
         // key is like "images/ab/cd/{id}"
         let dest = library_dir.join(key);
 
-        // Skip images that already exist locally (from previous runs).
         if dest.exists() {
-            skipped += 1;
             continue;
         }
 
-        // Download the encrypted blob and decrypt.
         let id = match key.rsplit('/').next() {
             Some(id) => id,
             None => {
@@ -381,7 +523,10 @@ async fn download_images(bucket: &CloudHomeSyncBucket, library_dir: &LibraryDir)
         downloaded += 1;
     }
 
-    info!("Images: {downloaded} downloaded, {skipped} already cached");
+    if downloaded > 0 {
+        info!("Downloaded {downloaded} images");
+    }
+
     if failed > 0 {
         warn!("{failed} images failed to download");
     }

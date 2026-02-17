@@ -947,8 +947,10 @@ version = "0.0.0-dev"
 dependencies = [
  "axum 0.7.9",
  "bae-core",
+ "chrono",
  "clap",
  "libsqlite3-sys",
+ "serde",
  "tokio",
  "tower-http 0.5.2",
  "tracing",
