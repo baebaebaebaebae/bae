@@ -7,6 +7,7 @@
 
 pub mod dropbox;
 pub mod google_drive;
+pub mod http;
 pub mod icloud;
 pub mod onedrive;
 pub mod s3;
@@ -46,6 +47,9 @@ pub enum JoinInfo {
     OneDrive {
         drive_id: String,
         folder_id: String,
+    },
+    BaeServer {
+        url: String,
     },
 }
 
@@ -193,6 +197,15 @@ pub async fn create_cloud_home(
             let od =
                 onedrive::OneDriveCloudHome::new(drive_id, folder_id, tokens, key_service.clone());
             Ok(Box::new(od))
+        }
+        Some(CloudProvider::BaeServer) => {
+            let url = config.cloud_home_bae_server_url.clone().ok_or_else(|| {
+                CloudHomeError::Storage("bae server URL not configured".to_string())
+            })?;
+            let keypair = key_service
+                .get_or_create_user_keypair()
+                .map_err(|e| CloudHomeError::Storage(format!("keypair: {e}")))?;
+            Ok(Box::new(http::HttpCloudHome::new(url, keypair)))
         }
     }
 }

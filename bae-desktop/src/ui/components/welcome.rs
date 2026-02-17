@@ -380,6 +380,7 @@ async fn do_restore(
         cloud_home_onedrive_drive_id: None,
         cloud_home_onedrive_folder_id: None,
         cloud_home_icloud_container_path: None,
+        cloud_home_bae_server_url: None,
         share_base_url: None,
         share_default_expiry_days: None,
         share_signing_key_version: 1,
