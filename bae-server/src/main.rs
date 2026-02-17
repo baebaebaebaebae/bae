@@ -1,10 +1,14 @@
 mod cloud_proxy;
+mod registry;
+mod tenant;
 
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use bae_core::cloud_home::s3::S3CloudHome;
 use bae_core::db::Database;
 use bae_core::encryption::EncryptionService;
@@ -18,8 +22,11 @@ use bae_core::sync::pull::pull_changes;
 use bae_core::sync::snapshot::bootstrap_from_snapshot;
 use clap::Parser;
 use cloud_proxy::{ChainState, CloudProxyState};
+use registry::Registry;
 use std::time::Duration;
+use tenant::{TenantCache, TenantResolveResult};
 use tokio::sync::RwLock;
+use tower::ServiceExt;
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::{error, info, warn};
 
@@ -29,25 +36,26 @@ use tracing::{error, info, warn};
 /// downloads the latest snapshot, applies changesets, downloads images,
 /// then serves the library via the Subsonic API.
 ///
-/// Requires sync bucket S3 coordinates and the library encryption key.
+/// Requires sync bucket S3 coordinates and the library encryption key
+/// (single-tenant mode), or a registry YAML file (multi-tenant mode).
 #[derive(Parser)]
 #[command(name = "bae-server")]
 struct Args {
     /// Local working directory where the database and images are cached.
     #[arg(long, env = "BAE_LIBRARY_PATH")]
-    library_path: PathBuf,
+    library_path: Option<PathBuf>,
 
     /// Hex-encoded encryption key (64 hex chars = 32 bytes).
     #[arg(long, env = "BAE_RECOVERY_KEY")]
-    recovery_key: String,
+    recovery_key: Option<String>,
 
     /// Sync bucket name.
     #[arg(long, env = "BAE_S3_BUCKET")]
-    s3_bucket: String,
+    s3_bucket: Option<String>,
 
     /// S3 region.
     #[arg(long, env = "BAE_S3_REGION")]
-    s3_region: String,
+    s3_region: Option<String>,
 
     /// S3 endpoint URL (for S3-compatible services like MinIO).
     #[arg(long, env = "BAE_S3_ENDPOINT")]
@@ -55,11 +63,11 @@ struct Args {
 
     /// S3 access key.
     #[arg(long, env = "BAE_S3_ACCESS_KEY")]
-    s3_access_key: String,
+    s3_access_key: Option<String>,
 
     /// S3 secret key.
     #[arg(long, env = "BAE_S3_SECRET_KEY")]
-    s3_secret_key: String,
+    s3_secret_key: Option<String>,
 
     /// S3 key prefix (scopes all keys under this path within the bucket).
     #[arg(long, env = "BAE_S3_KEY_PREFIX")]
@@ -75,7 +83,7 @@ struct Args {
 
     /// Library ID (used for KeyService namespace).
     #[arg(long, env = "BAE_LIBRARY_ID")]
-    library_id: String,
+    library_id: Option<String>,
 
     /// Path to the built bae-web dist directory.
     /// When provided, serves the web UI at / alongside the API at /rest/*.
@@ -103,6 +111,14 @@ struct Args {
     /// Background sync interval in seconds.
     #[arg(long, default_value = "30", env = "BAE_SYNC_INTERVAL")]
     sync_interval: u64,
+
+    /// Enable multi-tenant mode.
+    #[arg(long, env = "BAE_MULTI_TENANT")]
+    multi_tenant: bool,
+
+    /// Path to the library registry YAML file (required in multi-tenant mode).
+    #[arg(long, env = "BAE_REGISTRY_PATH")]
+    registry_path: Option<PathBuf>,
 }
 
 // libsqlite3-sys doesn't expose sqlite3_close_v2 in its generated bindings,
@@ -116,7 +132,7 @@ unsafe extern "C" {
 /// Safety: the sync loop is the sole user of this write handle. The pointer
 /// is sent once to the sync thread and never shared. All FFI calls happen
 /// sequentially on that one thread.
-struct SqliteWriteHandle(*mut libsqlite3_sys::sqlite3);
+pub(crate) struct SqliteWriteHandle(pub(crate) *mut libsqlite3_sys::sqlite3);
 unsafe impl Send for SqliteWriteHandle {}
 
 impl Drop for SqliteWriteHandle {
@@ -132,6 +148,13 @@ struct HealthStatus {
     status: &'static str,
     last_sync: Option<String>,
     changesets_applied: u64,
+}
+
+#[derive(serde::Serialize)]
+struct MultiTenantHealthStatus {
+    status: &'static str,
+    tenants_loaded: usize,
+    tenants_registered: usize,
 }
 
 fn configure_logging() {
@@ -156,21 +179,59 @@ async fn main() {
     configure_logging();
     let args = Args::parse();
 
-    if !args.library_path.is_absolute() {
+    if args.multi_tenant {
+        run_multi_tenant(args).await;
+    } else {
+        run_single_tenant(args).await;
+    }
+}
+
+async fn run_single_tenant(args: Args) {
+    // In single-tenant mode, these fields are required.
+    let library_path = args.library_path.unwrap_or_else(|| {
+        error!("--library-path is required in single-tenant mode");
+        std::process::exit(1);
+    });
+    let recovery_key = args.recovery_key.unwrap_or_else(|| {
+        error!("--recovery-key is required in single-tenant mode");
+        std::process::exit(1);
+    });
+    let s3_bucket = args.s3_bucket.unwrap_or_else(|| {
+        error!("--s3-bucket is required in single-tenant mode");
+        std::process::exit(1);
+    });
+    let s3_region = args.s3_region.unwrap_or_else(|| {
+        error!("--s3-region is required in single-tenant mode");
+        std::process::exit(1);
+    });
+    let s3_access_key = args.s3_access_key.unwrap_or_else(|| {
+        error!("--s3-access-key is required in single-tenant mode");
+        std::process::exit(1);
+    });
+    let s3_secret_key = args.s3_secret_key.unwrap_or_else(|| {
+        error!("--s3-secret-key is required in single-tenant mode");
+        std::process::exit(1);
+    });
+    let library_id = args.library_id.unwrap_or_else(|| {
+        error!("--library-id is required in single-tenant mode");
+        std::process::exit(1);
+    });
+
+    if !library_path.is_absolute() {
         error!(
             "--library-path must be an absolute path, got: {}",
-            args.library_path.display()
+            library_path.display()
         );
         std::process::exit(1);
     }
 
-    info!("bae-server starting");
-    info!("Library path: {}", args.library_path.display());
-    info!("Library ID: {}", args.library_id);
+    info!("bae-server starting (single-tenant)");
+    info!("Library path: {}", library_path.display());
+    info!("Library ID: {library_id}");
 
-    let library_dir = LibraryDir::new(args.library_path.clone());
+    let library_dir = LibraryDir::new(library_path);
 
-    let encryption = EncryptionService::new(&args.recovery_key).unwrap_or_else(|e| {
+    let encryption = EncryptionService::new(&recovery_key).unwrap_or_else(|e| {
         error!("Invalid recovery key: {e}");
         std::process::exit(1);
     });
@@ -183,11 +244,11 @@ async fn main() {
     // Connect to sync bucket (two S3CloudHome instances: one for the encrypted
     // sync bucket used during bootstrap, one for the raw write proxy).
     let cloud_home_for_bucket = S3CloudHome::new(
-        args.s3_bucket.clone(),
-        args.s3_region.clone(),
+        s3_bucket.clone(),
+        s3_region.clone(),
         args.s3_endpoint.clone(),
-        args.s3_access_key.clone(),
-        args.s3_secret_key.clone(),
+        s3_access_key.clone(),
+        s3_secret_key.clone(),
         args.s3_key_prefix.clone(),
     )
     .await
@@ -198,11 +259,11 @@ async fn main() {
 
     let cloud_home_for_proxy: Arc<dyn bae_core::cloud_home::CloudHome> = Arc::new(
         S3CloudHome::new(
-            args.s3_bucket.clone(),
-            args.s3_region.clone(),
+            s3_bucket.clone(),
+            s3_region.clone(),
             args.s3_endpoint.clone(),
-            args.s3_access_key.clone(),
-            args.s3_secret_key.clone(),
+            s3_access_key.clone(),
+            s3_secret_key.clone(),
             args.s3_key_prefix.clone(),
         )
         .await
@@ -214,7 +275,7 @@ async fn main() {
 
     let bucket = CloudHomeSyncBucket::new(Box::new(cloud_home_for_bucket), encryption.clone());
 
-    info!("Connected to sync bucket: {}", args.s3_bucket);
+    info!("Connected to sync bucket: {s3_bucket}");
 
     // Create working directory.
     std::fs::create_dir_all(library_dir.as_ref()).unwrap_or_else(|e| {
@@ -296,10 +357,10 @@ async fn main() {
         });
 
     // Expose S3 credentials as env vars for KeyService (dev mode).
-    std::env::set_var("BAE_S3_ACCESS_KEY", &args.s3_access_key);
-    std::env::set_var("BAE_S3_SECRET_KEY", &args.s3_secret_key);
+    std::env::set_var("BAE_S3_ACCESS_KEY", &s3_access_key);
+    std::env::set_var("BAE_S3_SECRET_KEY", &s3_secret_key);
 
-    let key_service = KeyService::new(true, args.library_id.clone());
+    let key_service = KeyService::new(true, library_id.clone());
     let library_manager =
         SharedLibraryManager::new(LibraryManager::new(database, Some(encryption.clone())));
 
@@ -424,8 +485,96 @@ async fn main() {
     }
 }
 
+async fn run_multi_tenant(args: Args) {
+    let registry_path = args.registry_path.unwrap_or_else(|| {
+        error!("--registry-path is required in multi-tenant mode");
+        std::process::exit(1);
+    });
+
+    let registry = Registry::load(&registry_path).unwrap_or_else(|e| {
+        error!("Failed to load registry: {e}");
+        std::process::exit(1);
+    });
+
+    let tenant_count = registry.libraries.len();
+
+    info!("bae-server starting (multi-tenant, {tenant_count} libraries registered)");
+
+    let hostname_map = registry.by_hostname().unwrap_or_else(|e| {
+        error!("{e}");
+        std::process::exit(1);
+    });
+
+    let tenant_cache = Arc::new(TenantCache::new(hostname_map));
+
+    // Spawn reaper: every 60 seconds, evict idle tenants.
+    let reaper_cache = tenant_cache.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            reaper_cache.evict_idle().await;
+        }
+    });
+
+    // Health endpoint for multi-tenant mode.
+    let health_cache = tenant_cache.clone();
+    let health_handler = axum::routing::get(move || {
+        let cache = health_cache.clone();
+        async move {
+            axum::Json(MultiTenantHealthStatus {
+                status: "ok",
+                tenants_loaded: cache.loaded_count().await,
+                tenants_registered: cache.registered_count(),
+            })
+        }
+    });
+
+    // Catch-all handler that routes by Host header.
+    let app = axum::Router::new()
+        .route("/health", health_handler)
+        .fallback(
+            move |host: Option<axum::extract::Host>,
+                  request: axum::http::Request<axum::body::Body>| {
+                let cache = tenant_cache.clone();
+                async move {
+                    let raw_host = host.map(|h| h.0).unwrap_or_default();
+                    let hostname = raw_host.split(':').next().unwrap_or(&raw_host).to_string();
+
+                    match cache.resolve(&hostname).await {
+                        TenantResolveResult::Ready(router) => {
+                            router.oneshot(request).await.into_response()
+                        }
+                        TenantResolveResult::Loading => (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            [("Retry-After", "3")],
+                            "Library is loading, try again shortly",
+                        )
+                            .into_response(),
+                        TenantResolveResult::NotFound => StatusCode::NOT_FOUND.into_response(),
+                    }
+                }
+            },
+        );
+
+    let addr = format!("{}:{}", args.bind, args.port);
+
+    info!("Binding to {addr}");
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .unwrap_or_else(|e| {
+            error!("Failed to bind to {addr}: {e}");
+            std::process::exit(1);
+        });
+
+    info!("bae-server listening on http://{addr}");
+    if let Err(e) = axum::serve(listener, app).await {
+        error!("Server error: {e}");
+        std::process::exit(1);
+    }
+}
+
 /// Open a raw sqlite3 handle in read-write mode.
-fn open_write_handle(db_path: &std::path::Path) -> SqliteWriteHandle {
+pub(crate) fn open_write_handle(db_path: &std::path::Path) -> SqliteWriteHandle {
     unsafe {
         let c_path = CString::new(db_path.to_str().unwrap()).unwrap();
         let mut db: *mut libsqlite3_sys::sqlite3 = std::ptr::null_mut();
@@ -439,7 +588,7 @@ fn open_write_handle(db_path: &std::path::Path) -> SqliteWriteHandle {
 }
 
 /// Enable WAL journal mode on the write handle so readers aren't blocked.
-fn set_wal_mode(db: *mut libsqlite3_sys::sqlite3) {
+pub(crate) fn set_wal_mode(db: *mut libsqlite3_sys::sqlite3) {
     unsafe {
         let sql = CString::new("PRAGMA journal_mode=WAL").unwrap();
         let rc = libsqlite3_sys::sqlite3_exec(
@@ -459,7 +608,7 @@ fn set_wal_mode(db: *mut libsqlite3_sys::sqlite3) {
 }
 
 /// Pull new changesets and return updated cursors + count of applied changesets.
-async fn pull_new_changesets(
+pub(crate) async fn pull_new_changesets(
     db: *mut libsqlite3_sys::sqlite3,
     bucket: &CloudHomeSyncBucket,
     cursors: &HashMap<String, u64>,
@@ -491,7 +640,7 @@ async fn sync_loop(
     let mut cursors = initial_cursors;
 
     loop {
-        // TODO(phase-1a): add write-trigger channel — use tokio::select! to wake on
+        // TODO(phase-1a): add write-trigger channel -- use tokio::select! to wake on
         // either the timer or a write notification from the cloud proxy.
         tokio::time::sleep(Duration::from_secs(interval_secs)).await;
 
@@ -519,7 +668,7 @@ async fn sync_loop(
 /// Download all images from the sync bucket.
 /// Skips images that already exist locally. Only logs when there's
 /// actual work (new downloads or failures).
-async fn download_images(bucket: &CloudHomeSyncBucket, library_dir: &LibraryDir) {
+pub(crate) async fn download_images(bucket: &CloudHomeSyncBucket, library_dir: &LibraryDir) {
     let image_keys = match bucket.list_image_keys().await {
         Ok(keys) => keys,
         Err(e) => {
