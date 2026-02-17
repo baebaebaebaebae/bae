@@ -35,7 +35,8 @@ impl GoogleDriveCloudHome {
 
     pub fn oauth_config() -> OAuthConfig {
         OAuthConfig {
-            client_id: std::env::var("BAE_GOOGLE_DRIVE_CLIENT_ID").unwrap_or_default(),
+            client_id: "587178630174-qgjanf9erlj92st0ct3d1so81kjah5dk.apps.googleusercontent.com"
+                .to_string(),
             client_secret: None,
             auth_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
             token_url: "https://oauth2.googleapis.com/token".to_string(),

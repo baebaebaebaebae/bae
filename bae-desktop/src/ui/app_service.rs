@@ -1569,10 +1569,6 @@ impl AppService {
                         let oauth_config =
                             bae_core::cloud_home::google_drive::GoogleDriveCloudHome::oauth_config();
 
-                        if oauth_config.client_id.is_empty() {
-                            return Err("Google Drive client_id not configured. Set BAE_GOOGLE_DRIVE_CLIENT_ID environment variable.".to_string());
-                        }
-
                         let tokens = bae_core::oauth::authorize(&oauth_config)
                             .await
                             .map_err(|e| format!("Google Drive authorization failed: {e}"))?;
@@ -1688,10 +1684,6 @@ impl AppService {
                     bae_ui::stores::config::CloudProvider::Dropbox => {
                         let oauth_config =
                             bae_core::cloud_home::dropbox::DropboxCloudHome::oauth_config();
-
-                        if oauth_config.client_id.is_empty() {
-                            return Err("Dropbox client_id not configured. Set BAE_DROPBOX_CLIENT_ID environment variable.".to_string());
-                        }
 
                         let tokens = bae_core::oauth::authorize(&oauth_config)
                             .await

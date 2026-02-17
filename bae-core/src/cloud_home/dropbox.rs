@@ -37,7 +37,7 @@ impl DropboxCloudHome {
 
     pub fn oauth_config() -> OAuthConfig {
         OAuthConfig {
-            client_id: std::env::var("BAE_DROPBOX_CLIENT_ID").unwrap_or_default(),
+            client_id: "s883m4gtge6pej5".to_string(),
             client_secret: None,
             auth_url: "https://www.dropbox.com/oauth2/authorize".to_string(),
             token_url: "https://api.dropboxapi.com/oauth2/token".to_string(),
