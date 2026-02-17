@@ -283,6 +283,9 @@ pub struct ConfigYaml {
     /// S3 endpoint for cloud home (for S3-compatible services)
     #[serde(default)]
     pub cloud_home_s3_endpoint: Option<String>,
+    /// S3 key prefix for cloud home (scopes keys under a path, e.g. "libraries/{id}")
+    #[serde(default)]
+    pub cloud_home_s3_key_prefix: Option<String>,
     /// Google Drive folder ID for the cloud home
     #[serde(default)]
     pub cloud_home_google_drive_folder_id: Option<String>,
@@ -378,6 +381,8 @@ pub struct Config {
     pub cloud_home_s3_region: Option<String>,
     /// S3 endpoint for cloud home (for S3-compatible services)
     pub cloud_home_s3_endpoint: Option<String>,
+    /// S3 key prefix for cloud home (scopes keys under a path)
+    pub cloud_home_s3_key_prefix: Option<String>,
     /// Google Drive folder ID for the cloud home
     pub cloud_home_google_drive_folder_id: Option<String>,
     /// Dropbox folder path for the cloud home
@@ -466,6 +471,13 @@ impl Config {
             .filter(|s| !s.is_empty())
         {
             config.cloud_home_s3_endpoint = Some(v);
+        }
+
+        if let Some(v) = std::env::var("BAE_CLOUD_HOME_S3_KEY_PREFIX")
+            .ok()
+            .filter(|s| !s.is_empty())
+        {
+            config.cloud_home_s3_key_prefix = Some(v);
         }
 
         if let Some(v) = std::env::var("BAE_SHARE_BASE_URL")
@@ -572,6 +584,7 @@ impl Config {
             cloud_home_s3_bucket: yaml_config.cloud_home_s3_bucket,
             cloud_home_s3_region: yaml_config.cloud_home_s3_region,
             cloud_home_s3_endpoint: yaml_config.cloud_home_s3_endpoint,
+            cloud_home_s3_key_prefix: yaml_config.cloud_home_s3_key_prefix,
             cloud_home_google_drive_folder_id: yaml_config.cloud_home_google_drive_folder_id,
             cloud_home_dropbox_folder_path: yaml_config.cloud_home_dropbox_folder_path,
             cloud_home_onedrive_drive_id: yaml_config.cloud_home_onedrive_drive_id,
@@ -662,6 +675,7 @@ impl Config {
             cloud_home_s3_bucket: self.cloud_home_s3_bucket.clone(),
             cloud_home_s3_region: self.cloud_home_s3_region.clone(),
             cloud_home_s3_endpoint: self.cloud_home_s3_endpoint.clone(),
+            cloud_home_s3_key_prefix: self.cloud_home_s3_key_prefix.clone(),
             cloud_home_google_drive_folder_id: self.cloud_home_google_drive_folder_id.clone(),
             cloud_home_dropbox_folder_path: self.cloud_home_dropbox_folder_path.clone(),
             cloud_home_onedrive_drive_id: self.cloud_home_onedrive_drive_id.clone(),
@@ -721,6 +735,7 @@ impl Config {
             cloud_home_s3_bucket: None,
             cloud_home_s3_region: None,
             cloud_home_s3_endpoint: None,
+            cloud_home_s3_key_prefix: None,
             cloud_home_google_drive_folder_id: None,
             cloud_home_dropbox_folder_path: None,
             cloud_home_onedrive_drive_id: None,
@@ -908,6 +923,7 @@ mod tests {
             cloud_home_s3_bucket: None,
             cloud_home_s3_region: None,
             cloud_home_s3_endpoint: None,
+            cloud_home_s3_key_prefix: None,
             cloud_home_google_drive_folder_id: None,
             cloud_home_dropbox_folder_path: None,
             cloud_home_onedrive_drive_id: None,

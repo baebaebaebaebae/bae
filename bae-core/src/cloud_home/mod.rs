@@ -34,6 +34,8 @@ pub enum JoinInfo {
         endpoint: Option<String>,
         access_key: String,
         secret_key: String,
+        #[serde(default)]
+        key_prefix: Option<String>,
     },
     GoogleDrive {
         folder_id: String,
@@ -125,7 +127,10 @@ pub async fn create_cloud_home(
                 }
             };
 
-            let s3 = s3::S3CloudHome::new(bucket, region, endpoint, access_key, secret_key).await?;
+            let key_prefix = config.cloud_home_s3_key_prefix.clone();
+            let s3 =
+                s3::S3CloudHome::new(bucket, region, endpoint, access_key, secret_key, key_prefix)
+                    .await?;
             Ok(Box::new(s3))
         }
         Some(CloudProvider::GoogleDrive) => {

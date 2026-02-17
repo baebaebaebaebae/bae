@@ -439,12 +439,14 @@ async fn create_sync_handle(
         _ => return None,
     };
 
+    let key_prefix = config.cloud_home_s3_key_prefix.clone();
     let cloud_home = match S3CloudHome::new(
         bucket.clone(),
         region.clone(),
         endpoint,
         access_key,
         secret_key,
+        key_prefix,
     )
     .await
     {

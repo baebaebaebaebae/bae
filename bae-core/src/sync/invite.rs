@@ -264,6 +264,7 @@ mod tests {
                 endpoint: None,
                 access_key: "test-access-key".to_string(),
                 secret_key: "test-secret-key".to_string(),
+                key_prefix: None,
             })
         }
         async fn revoke_access(&self, _member_id: &str) -> Result<(), CloudHomeError> {

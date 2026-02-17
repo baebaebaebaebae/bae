@@ -456,11 +456,22 @@ pub fn LibrarySection() -> Element {
 /// Return a human-readable label for the cloud home type in a JoinInfo.
 fn cloud_home_display(join_info: &JoinInfo) -> String {
     match join_info {
-        JoinInfo::S3 { endpoint, .. } => {
+        JoinInfo::S3 {
+            endpoint,
+            key_prefix,
+            ..
+        } => {
+            let mut parts = Vec::new();
             if let Some(ep) = endpoint {
-                format!("S3 ({})", ep)
-            } else {
+                parts.push(ep.clone());
+            }
+            if let Some(prefix) = key_prefix {
+                parts.push(format!("prefix: {prefix}"));
+            }
+            if parts.is_empty() {
                 "S3".to_string()
+            } else {
+                format!("S3 ({})", parts.join(", "))
             }
         }
         JoinInfo::GoogleDrive { .. } => "Google Drive".to_string(),
@@ -478,19 +489,21 @@ async fn join_shared_library_from_code(
     use bae_core::sync::invite::accept_invitation;
 
     // Extract S3 credentials from the invite code.
-    let (bucket, region, endpoint, access_key, secret_key) = match &code.join_info {
+    let (bucket, region, endpoint, access_key, secret_key, key_prefix) = match &code.join_info {
         JoinInfo::S3 {
             bucket,
             region,
             endpoint,
             access_key,
             secret_key,
+            key_prefix,
         } => (
             bucket.clone(),
             region.clone(),
             endpoint.clone(),
             access_key.clone(),
             secret_key.clone(),
+            key_prefix.clone(),
         ),
         _ => return Err("Only S3 cloud homes are supported for joining at this time".to_string()),
     };
@@ -512,6 +525,7 @@ async fn join_shared_library_from_code(
         endpoint.clone(),
         access_key.clone(),
         secret_key.clone(),
+        key_prefix.clone(),
     )
     .await
     .map_err(|e| format!("Failed to connect to cloud home: {e}"))?;
@@ -543,6 +557,7 @@ async fn join_shared_library_from_code(
         endpoint.clone(),
         access_key.clone(),
         secret_key.clone(),
+        key_prefix.clone(),
     )
     .await
     .map_err(|e| format!("Failed to reconnect to cloud home: {e}"))?;
@@ -574,6 +589,7 @@ async fn join_shared_library_from_code(
         endpoint_str,
         &access_key,
         &secret_key,
+        key_prefix.as_deref(),
         &key_service,
         &mut status,
     )
@@ -599,6 +615,7 @@ async fn bootstrap_library(
     endpoint: &str,
     access_key: &str,
     secret_key: &str,
+    key_prefix: Option<&str>,
     key_service: &KeyService,
     status: &mut Signal<Option<JoinStatus>>,
 ) -> Result<Config, String> {
@@ -697,6 +714,7 @@ async fn bootstrap_library(
         } else {
             Some(endpoint.to_string())
         },
+        cloud_home_s3_key_prefix: key_prefix.map(|s| s.to_string()),
         cloud_home_google_drive_folder_id: None,
         cloud_home_dropbox_folder_path: None,
         cloud_home_onedrive_drive_id: None,

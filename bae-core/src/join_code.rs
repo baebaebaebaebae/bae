@@ -47,6 +47,7 @@ mod tests {
                 endpoint: None,
                 access_key: "AKIAEXAMPLE".into(),
                 secret_key: "secret123".into(),
+                key_prefix: None,
             },
             owner_pubkey: "deadbeef".into(),
         };
@@ -62,12 +63,14 @@ mod tests {
                 endpoint,
                 access_key,
                 secret_key,
+                key_prefix,
             } => {
                 assert_eq!(bucket, "my-bucket");
                 assert_eq!(region, "us-east-1");
                 assert_eq!(endpoint, None);
                 assert_eq!(access_key, "AKIAEXAMPLE");
                 assert_eq!(secret_key, "secret123");
+                assert_eq!(key_prefix, None);
             }
             _ => panic!("expected S3 variant"),
         }
@@ -84,6 +87,7 @@ mod tests {
                 endpoint: Some("https://s3.example.com".into()),
                 access_key: "ak".into(),
                 secret_key: "sk".into(),
+                key_prefix: None,
             },
             owner_pubkey: "cafebabe".into(),
         };

@@ -57,6 +57,10 @@ struct Args {
     #[arg(long, env = "BAE_S3_SECRET_KEY")]
     s3_secret_key: String,
 
+    /// S3 key prefix (scopes all keys under this path within the bucket).
+    #[arg(long, env = "BAE_S3_KEY_PREFIX")]
+    s3_key_prefix: Option<String>,
+
     /// Port for the Subsonic API server.
     #[arg(long, default_value = "4533", env = "BAE_PORT")]
     port: u16,
@@ -179,6 +183,7 @@ async fn main() {
         args.s3_endpoint.clone(),
         args.s3_access_key.clone(),
         args.s3_secret_key.clone(),
+        args.s3_key_prefix.clone(),
     )
     .await
     .unwrap_or_else(|e| {
