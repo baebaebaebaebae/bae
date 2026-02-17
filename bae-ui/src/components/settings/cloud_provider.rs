@@ -15,7 +15,6 @@ pub struct CloudProviderOption {
     pub provider: CloudProvider,
     pub label: &'static str,
     pub description: &'static str,
-    pub available: bool,
     pub connected_account: Option<String>,
 }
 
@@ -80,7 +79,6 @@ pub fn CloudProviderPicker(
                         let is_selected = selected.as_ref() == Some(&option.provider);
                         let provider_for_select = option.provider.clone();
                         let provider_for_sign_in = option.provider.clone();
-                        let is_available = option.available;
                         let connected = option.connected_account.clone();
                         let is_s3 = option.provider == CloudProvider::S3;
                         let is_icloud = option.provider == CloudProvider::ICloud;
@@ -105,11 +103,8 @@ pub fn CloudProviderPicker(
                                 key: "{label}",
                                 class: "p-3 rounded-lg cursor-pointer transition-colors",
                                 class: if is_selected { "bg-gray-700/50 border border-gray-600" } else { "hover:bg-gray-700/30 border border-transparent" },
-                                class: if !is_available { "opacity-50 cursor-not-allowed" } else { "" },
                                 onclick: move |_| {
-                                    if is_available {
-                                        on_select.call(provider_for_select.clone());
-                                    }
+                                    on_select.call(provider_for_select.clone());
                                 },
                                 div { class: "flex items-start gap-3",
                                     div { class: "mt-0.5 flex-shrink-0",
@@ -122,12 +117,7 @@ pub fn CloudProviderPicker(
                                         }
                                     }
                                     div { class: "flex-1 min-w-0",
-                                        div { class: "flex items-center gap-2",
-                                            span { class: "text-sm font-medium text-gray-200", "{label}" }
-                                            if !is_available {
-                                                span { class: "text-xs text-gray-500", "(macOS only)" }
-                                            }
-                                        }
+                                        span { class: "text-sm font-medium text-gray-200", "{label}" }
                                         if let Some(ref account) = connected {
                                             div { class: "flex items-center gap-2 mt-1",
                                                 span { class: "text-xs text-green-400", "Connected as {account}" }
@@ -153,7 +143,7 @@ pub fn CloudProviderPicker(
                                                         LoadingSpinner {}
                                                         "Signing in..."
                                                     }
-                                                } else if is_icloud && is_available {
+                                                } else if is_icloud {
                                                     Button {
                                                         variant: ButtonVariant::Primary,
                                                         size: ButtonSize::Small,

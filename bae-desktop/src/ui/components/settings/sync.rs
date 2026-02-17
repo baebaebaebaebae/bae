@@ -11,7 +11,6 @@ use dioxus::prelude::*;
 fn build_cloud_options(
     cloud_provider: &Option<CloudProvider>,
     cloud_home_configured: bool,
-    icloud_available: bool,
     cloud_account_display: &Option<String>,
     cloud_home_bucket: &Option<String>,
 ) -> Vec<CloudProviderOption> {
@@ -29,59 +28,58 @@ fn build_cloud_options(
             None
         };
 
-    vec![
-        CloudProviderOption {
-            provider: CloudProvider::ICloud,
-            label: "iCloud Drive",
-            description: "Automatic sync, no setup needed",
-            available: icloud_available,
-            connected_account: if matches!(cloud_provider, Some(CloudProvider::ICloud)) {
-                Some("iCloud Drive".to_string())
-            } else {
-                None
-            },
+    let mut options = Vec::new();
+
+    #[cfg(target_os = "macos")]
+    options.push(CloudProviderOption {
+        provider: CloudProvider::ICloud,
+        label: "iCloud Drive",
+        description: "Automatic sync, no setup needed",
+        connected_account: if matches!(cloud_provider, Some(CloudProvider::ICloud)) {
+            Some("iCloud Drive".to_string())
+        } else {
+            None
         },
-        CloudProviderOption {
-            provider: CloudProvider::GoogleDrive,
-            label: "Google Drive",
-            description: "Sign in to sync via Google Drive",
-            available: true,
-            connected_account: google_connected,
+    });
+
+    options.push(CloudProviderOption {
+        provider: CloudProvider::GoogleDrive,
+        label: "Google Drive",
+        description: "Sign in to sync via Google Drive",
+        connected_account: google_connected,
+    });
+    options.push(CloudProviderOption {
+        provider: CloudProvider::Dropbox,
+        label: "Dropbox",
+        description: "Sign in to sync via Dropbox",
+        connected_account: if matches!(cloud_provider, Some(CloudProvider::Dropbox))
+            && cloud_home_configured
+        {
+            cloud_account_display.clone()
+        } else {
+            None
         },
-        CloudProviderOption {
-            provider: CloudProvider::Dropbox,
-            label: "Dropbox",
-            description: "Sign in to sync via Dropbox",
-            available: true,
-            connected_account: if matches!(cloud_provider, Some(CloudProvider::Dropbox))
-                && cloud_home_configured
-            {
-                cloud_account_display.clone()
-            } else {
-                None
-            },
+    });
+    options.push(CloudProviderOption {
+        provider: CloudProvider::OneDrive,
+        label: "OneDrive",
+        description: "Sign in to sync via OneDrive",
+        connected_account: if matches!(cloud_provider, Some(CloudProvider::OneDrive))
+            && cloud_home_configured
+        {
+            cloud_account_display.clone()
+        } else {
+            None
         },
-        CloudProviderOption {
-            provider: CloudProvider::OneDrive,
-            label: "OneDrive",
-            description: "Sign in to sync via OneDrive",
-            available: true,
-            connected_account: if matches!(cloud_provider, Some(CloudProvider::OneDrive))
-                && cloud_home_configured
-            {
-                cloud_account_display.clone()
-            } else {
-                None
-            },
-        },
-        CloudProviderOption {
-            provider: CloudProvider::S3,
-            label: "S3-compatible",
-            description: "For Backblaze B2, Wasabi, MinIO, AWS, etc.",
-            available: true,
-            connected_account: s3_connected,
-        },
-    ]
+    });
+    options.push(CloudProviderOption {
+        provider: CloudProvider::S3,
+        label: "S3-compatible",
+        description: "For Backblaze B2, Wasabi, MinIO, AWS, etc.",
+        connected_account: s3_connected,
+    });
+
+    options
 }
 
 /// Sync section - shows sync status, other devices, user identity, cloud provider picker,
@@ -140,14 +138,12 @@ pub fn SyncSection() -> Element {
     let cloud_account_display = app.state.config().cloud_account_display().read().clone();
     let cloud_home_bucket = app.state.sync().cloud_home_bucket().read().clone();
     let cloud_home_configured = *app.state.sync().cloud_home_configured().read();
-    let icloud_available = *app.state.sync().icloud_available().read();
     let signing_in = *app.state.sync().signing_in().read();
     let sign_in_error = app.state.sync().sign_in_error().read().clone();
 
     let cloud_options = build_cloud_options(
         &cloud_provider,
         cloud_home_configured,
-        icloud_available,
         &cloud_account_display,
         &cloud_home_bucket,
     );

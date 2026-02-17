@@ -84,8 +84,6 @@ pub struct SyncState {
     pub cloud_home_endpoint: Option<String>,
     /// Whether cloud home is fully configured (bucket + region + credentials present).
     pub cloud_home_configured: bool,
-    /// Whether iCloud Drive is available on this platform.
-    pub icloud_available: bool,
     /// Whether an OAuth sign-in is currently in progress.
     pub signing_in: bool,
     /// Error from a sign-in attempt.
