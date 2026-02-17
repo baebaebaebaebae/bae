@@ -572,6 +572,9 @@ impl AppService {
                 bae_core::config::CloudProvider::OneDrive => {
                     bae_ui::stores::config::CloudProvider::OneDrive
                 }
+                bae_core::config::CloudProvider::BaeServer => {
+                    bae_ui::stores::config::CloudProvider::BaeServer
+                }
             });
             cs.cloud_account_display = if matches!(
                 config.cloud_provider,

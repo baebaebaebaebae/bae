@@ -10,6 +10,7 @@ pub enum CloudProvider {
     GoogleDrive,
     Dropbox,
     OneDrive,
+    BaeServer,
 }
 
 /// Application configuration state
