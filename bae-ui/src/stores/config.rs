@@ -10,7 +10,6 @@ pub enum CloudProvider {
     GoogleDrive,
     Dropbox,
     OneDrive,
-    PCloud,
 }
 
 /// Application configuration state

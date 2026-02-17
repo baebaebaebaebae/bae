@@ -49,7 +49,7 @@ trait CloudHome {
 }
 ```
 
-Implementations: S3 (via aws-sdk-s3), Google Drive, Dropbox, OneDrive, pCloud (via their REST APIs), iCloud Drive (via local filesystem).
+Implementations: S3 (via aws-sdk-s3), Google Drive, Dropbox, OneDrive (via their REST APIs), iCloud Drive (via local filesystem).
 
 ### Storage operations
 

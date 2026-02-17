@@ -86,7 +86,6 @@ pub fn CloudProviderPicker(
                         let is_icloud = option.provider == CloudProvider::ICloud;
                         let needs_oauth = matches!(
                             option.provider,
-                            CloudProvider::GoogleDrive
 
                             // Radio button
 
@@ -97,9 +96,7 @@ pub fn CloudProviderPicker(
                             // S3 inline edit form
 
                             // S3 configured summary (when selected but not editing)
-                            | CloudProvider::Dropbox
-                            | CloudProvider::OneDrive
-                            | CloudProvider::PCloud
+                            CloudProvider::GoogleDrive | CloudProvider::Dropbox | CloudProvider::OneDrive
                         );
                         let label = option.label;
                         let description = option.description;

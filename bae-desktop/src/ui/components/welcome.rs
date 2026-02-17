@@ -378,8 +378,6 @@ async fn do_restore(
         cloud_home_dropbox_folder_path: None,
         cloud_home_onedrive_drive_id: None,
         cloud_home_onedrive_folder_id: None,
-        cloud_home_pcloud_folder_id: None,
-        cloud_home_pcloud_api_host: None,
         cloud_home_icloud_container_path: None,
         share_base_url: None,
         share_default_expiry_days: None,
