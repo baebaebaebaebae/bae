@@ -42,7 +42,7 @@ impl OneDriveCloudHome {
 
     pub fn oauth_config() -> OAuthConfig {
         OAuthConfig {
-            client_id: std::env::var("BAE_ONEDRIVE_CLIENT_ID").unwrap_or_default(),
+            client_id: "b2a6e449-420d-4aa7-bd0c-672410d94a22".to_string(),
             client_secret: None,
             auth_url: "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize"
                 .to_string(),

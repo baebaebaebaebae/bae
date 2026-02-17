@@ -2729,13 +2729,6 @@ async fn sign_in_onedrive(
 ) -> Result<(), String> {
     let oauth_config = bae_core::cloud_home::onedrive::OneDriveCloudHome::oauth_config();
 
-    if oauth_config.client_id.is_empty() {
-        return Err(
-            "OneDrive client_id not configured. Set BAE_ONEDRIVE_CLIENT_ID environment variable."
-                .to_string(),
-        );
-    }
-
     // Step 1: OAuth authorization (opens browser)
     let tokens = bae_core::oauth::authorize(&oauth_config)
         .await
