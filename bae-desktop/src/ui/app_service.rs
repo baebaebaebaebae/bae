@@ -3578,7 +3578,7 @@ fn detect_icloud_container() -> Option<std::path::PathBuf> {
 
         // Create NSString for the container identifier (needs null-terminated C string)
         let nsstring_class = Class::get("NSString")?;
-        let container_cstr = std::ffi::CString::new("iCloud.fm.bae").ok()?;
+        let container_cstr = std::ffi::CString::new("iCloud.fm.bae.desktop").ok()?;
         let container_nsstring: *mut Object = msg_send![
             nsstring_class,
             stringWithUTF8String: container_cstr.as_ptr()
