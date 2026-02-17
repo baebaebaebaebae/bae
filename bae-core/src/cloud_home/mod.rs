@@ -9,7 +9,6 @@ pub mod dropbox;
 pub mod google_drive;
 pub mod icloud;
 pub mod onedrive;
-pub mod pcloud;
 pub mod s3;
 
 use async_trait::async_trait;
@@ -45,9 +44,6 @@ pub enum JoinInfo {
     OneDrive {
         drive_id: String,
         folder_id: String,
-    },
-    PCloud {
-        folder_id: u64,
     },
 }
 
@@ -192,23 +188,6 @@ pub async fn create_cloud_home(
             let od =
                 onedrive::OneDriveCloudHome::new(drive_id, folder_id, tokens, key_service.clone());
             Ok(Box::new(od))
-        }
-        Some(CloudProvider::PCloud) => {
-            let folder_id = config.cloud_home_pcloud_folder_id.ok_or_else(|| {
-                CloudHomeError::Storage("pCloud folder ID not configured".to_string())
-            })?;
-
-            let api_host = config
-                .cloud_home_pcloud_api_host
-                .clone()
-                .unwrap_or_else(|| "api.pcloud.com".to_string());
-
-            let token_json = require_oauth_token(key_service, "pCloud")?;
-            let tokens: crate::oauth::OAuthTokens = serde_json::from_str(&token_json)
-                .map_err(|e| CloudHomeError::Storage(format!("invalid OAuth token JSON: {e}")))?;
-
-            let pc = pcloud::PCloudCloudHome::new(folder_id, api_host, tokens.access_token);
-            Ok(Box::new(pc))
         }
     }
 }

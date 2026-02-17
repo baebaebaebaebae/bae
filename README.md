@@ -8,7 +8,7 @@ You pick releases from MusicBrainz or Discogs, point bae at your files, and it h
 
 **Import and play.** Import from local folders (file-per-track or CUE/FLAC). Match to a MusicBrainz or Discogs release for metadata, cover art, credits, label info. Browse and play with native audio, CUE pregap support, and media key integration.
 
-**Sync across devices.** Sign in with a cloud provider (Google Drive, Dropbox, OneDrive, pCloud) or configure an S3-compatible bucket. This creates your cloud home -- one encrypted location that holds everything. Your library syncs incrementally via changesets. Same user, multiple devices, one library.
+**Sync across devices.** Sign in with a cloud provider (Google Drive, Dropbox, OneDrive) or configure an S3-compatible bucket. This creates your cloud home -- one encrypted location that holds everything. Your library syncs incrementally via changesets. Same user, multiple devices, one library.
 
 **Share links.** Right-click a track, copy a share link, paste it anywhere. Recipients click and listen in their browser -- no account, no app needed.
 
@@ -22,7 +22,7 @@ You pick releases from MusicBrainz or Discogs, point bae at your files, and it h
 
 - **Identity**: each user has a locally generated Ed25519/X25519 keypair. Public keys are identities. No central identity server.
 - **Encryption**: one symmetric key per library, shared by all members. Everything in the cloud home is encrypted before it leaves the device.
-- **Storage**: pluggable via a `CloudHome` trait -- Google Drive, Dropbox, OneDrive, pCloud, iCloud Drive, any S3-compatible bucket, or local-only.
+- **Storage**: pluggable via a `CloudHome` trait -- Google Drive, Dropbox, OneDrive, iCloud Drive, any S3-compatible bucket, or local-only.
 - **Sync**: SQLite session extension captures changesets automatically. Row-level last-writer-wins conflict resolution via hybrid logical clock. Deterministic merge.
 - **Membership**: append-only chain of signed membership entries. Each changeset is signed by its author and verified against the membership chain on pull.
 - **Subsonic API**: localhost:4533 for external clients (DSub, play:Sub, etc.)

@@ -1,7 +1,7 @@
 //! OAuth 2.0 helper for consumer cloud provider authentication.
 //!
 //! Provides PKCE-based authorization code flow with a localhost callback server.
-//! Used by Google Drive, Dropbox, OneDrive, and pCloud cloud home backends.
+//! Used by Google Drive, Dropbox, and OneDrive cloud home backends.
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::RngCore;

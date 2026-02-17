@@ -21,7 +21,7 @@ pub enum CloudHomeCredentials {
         access_key: String,
         secret_key: String,
     },
-    /// Consumer cloud providers (Google Drive, Dropbox, OneDrive, pCloud): OAuth token JSON.
+    /// Consumer cloud providers (Google Drive, Dropbox, OneDrive): OAuth token JSON.
     OAuth { token_json: String },
     /// iCloud: no credentials needed (macOS handles auth).
     None,

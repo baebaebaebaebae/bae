@@ -75,19 +75,6 @@ fn build_cloud_options(
             },
         },
         CloudProviderOption {
-            provider: CloudProvider::PCloud,
-            label: "pCloud",
-            description: "Sign in to sync via pCloud",
-            available: true,
-            connected_account: if matches!(cloud_provider, Some(CloudProvider::PCloud))
-                && cloud_home_configured
-            {
-                cloud_account_display.clone()
-            } else {
-                None
-            },
-        },
-        CloudProviderOption {
             provider: CloudProvider::S3,
             label: "S3-compatible",
             description: "For Backblaze B2, Wasabi, MinIO, AWS, etc.",

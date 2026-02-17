@@ -303,13 +303,6 @@ fn mock_cloud_options() -> Vec<CloudProviderOption> {
             connected_account: None,
         },
         CloudProviderOption {
-            provider: CloudProvider::PCloud,
-            label: "pCloud",
-            description: "Sign in to sync via pCloud",
-            available: true,
-            connected_account: None,
-        },
-        CloudProviderOption {
             provider: CloudProvider::S3,
             label: "S3-compatible",
             description: "For Backblaze B2, Wasabi, MinIO, AWS, etc.",

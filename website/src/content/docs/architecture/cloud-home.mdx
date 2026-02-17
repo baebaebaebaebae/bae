@@ -45,7 +45,7 @@ Callers (sync engine, image uploader, file storage) use this interface directly.
 
 ## Access management
 
-How `grant_access` and `revoke_access` work depends on the backend. Consumer clouds (Google Drive, Dropbox, OneDrive, pCloud) share the folder via the provider's API -- the joiner signs into their own account and the shared folder is already accessible. S3-compatible backends mint scoped IAM credentials for each member, embedded in the invite code.
+How `grant_access` and `revoke_access` work depends on the backend. Consumer clouds (Google Drive, Dropbox, OneDrive) share the folder via the provider's API -- the joiner signs into their own account and the shared folder is already accessible. S3-compatible backends mint scoped IAM credentials for each member, embedded in the invite code.
 
 In both cases, the encryption key is delivered separately via the membership chain, wrapped to the joiner's public key.
 
@@ -57,5 +57,4 @@ In both cases, the encryption key is delivered separately via the membership cha
 | Google Drive | OAuth | bae creates a folder in the user's Drive |
 | Dropbox | OAuth | |
 | OneDrive | OAuth | |
-| pCloud | OAuth | |
 | iCloud Drive | Local filesystem | macOS only, uses the iCloud container, no sign-in needed |
