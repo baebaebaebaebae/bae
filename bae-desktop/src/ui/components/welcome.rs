@@ -374,6 +374,7 @@ async fn do_restore(
         cloud_home_s3_bucket: None,
         cloud_home_s3_region: None,
         cloud_home_s3_endpoint: None,
+        cloud_home_s3_key_prefix: None,
         cloud_home_google_drive_folder_id: None,
         cloud_home_dropbox_folder_path: None,
         cloud_home_onedrive_drive_id: None,

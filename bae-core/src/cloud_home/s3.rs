@@ -18,6 +18,7 @@ pub struct S3CloudHome {
     endpoint: Option<String>,
     access_key: String,
     secret_key: String,
+    key_prefix: Option<String>,
 }
 
 impl S3CloudHome {
@@ -27,6 +28,7 @@ impl S3CloudHome {
         endpoint: Option<String>,
         access_key: String,
         secret_key: String,
+        key_prefix: Option<String>,
     ) -> Result<Self, CloudHomeError> {
         let credentials = Credentials::new(&access_key, &secret_key, None, None, "bae-cloud-home");
 
@@ -51,17 +53,32 @@ impl S3CloudHome {
             endpoint,
             access_key,
             secret_key,
+            key_prefix,
         })
+    }
+
+    /// Prepend the key prefix (if configured) to produce the full S3 object key.
+    fn full_key(&self, key: &str) -> String {
+        apply_prefix(self.key_prefix.as_deref(), key)
+    }
+}
+
+/// Prepend an optional prefix to a key. Trailing slashes on the prefix are normalized.
+fn apply_prefix(prefix: Option<&str>, key: &str) -> String {
+    match prefix {
+        Some(p) => format!("{}/{}", p.trim_end_matches('/'), key),
+        None => key.to_string(),
     }
 }
 
 #[async_trait]
 impl CloudHome for S3CloudHome {
     async fn write(&self, key: &str, data: Vec<u8>) -> Result<(), CloudHomeError> {
+        let full = self.full_key(key);
         self.client
             .put_object()
             .bucket(&self.bucket)
-            .key(key)
+            .key(&full)
             .body(data.into())
             .send()
             .await
@@ -70,11 +87,12 @@ impl CloudHome for S3CloudHome {
     }
 
     async fn read(&self, key: &str) -> Result<Vec<u8>, CloudHomeError> {
+        let full = self.full_key(key);
         let resp = self
             .client
             .get_object()
             .bucket(&self.bucket)
-            .key(key)
+            .key(&full)
             .send()
             .await
             .map_err(|e| {
@@ -98,12 +116,13 @@ impl CloudHome for S3CloudHome {
     }
 
     async fn read_range(&self, key: &str, start: u64, end: u64) -> Result<Vec<u8>, CloudHomeError> {
+        let full = self.full_key(key);
         let range = format!("bytes={start}-{}", end.saturating_sub(1));
         let resp = self
             .client
             .get_object()
             .bucket(&self.bucket)
-            .key(key)
+            .key(&full)
             .range(range)
             .send()
             .await
@@ -128,6 +147,12 @@ impl CloudHome for S3CloudHome {
     }
 
     async fn list(&self, prefix: &str) -> Result<Vec<String>, CloudHomeError> {
+        let full_prefix = self.full_key(prefix);
+        let strip_prefix = self
+            .key_prefix
+            .as_ref()
+            .map(|p| format!("{}/", p.trim_end_matches('/')));
+
         let mut keys = Vec::new();
         let mut continuation_token: Option<String> = None;
 
@@ -136,7 +161,7 @@ impl CloudHome for S3CloudHome {
                 .client
                 .list_objects_v2()
                 .bucket(&self.bucket)
-                .prefix(prefix);
+                .prefix(&full_prefix);
 
             if let Some(token) = continuation_token.take() {
                 req = req.continuation_token(token);
@@ -149,7 +174,11 @@ impl CloudHome for S3CloudHome {
 
             for obj in resp.contents() {
                 if let Some(key) = obj.key() {
-                    keys.push(key.to_string());
+                    let stripped = match &strip_prefix {
+                        Some(p) => key.strip_prefix(p.as_str()).unwrap_or(key),
+                        None => key,
+                    };
+                    keys.push(stripped.to_string());
                 }
             }
 
@@ -164,10 +193,11 @@ impl CloudHome for S3CloudHome {
     }
 
     async fn delete(&self, key: &str) -> Result<(), CloudHomeError> {
+        let full = self.full_key(key);
         self.client
             .delete_object()
             .bucket(&self.bucket)
-            .key(key)
+            .key(&full)
             .send()
             .await
             .map_err(|e| CloudHomeError::Storage(format!("delete {key}: {e}")))?;
@@ -175,11 +205,12 @@ impl CloudHome for S3CloudHome {
     }
 
     async fn exists(&self, key: &str) -> Result<bool, CloudHomeError> {
+        let full = self.full_key(key);
         match self
             .client
             .head_object()
             .bucket(&self.bucket)
-            .key(key)
+            .key(&full)
             .send()
             .await
         {
@@ -208,11 +239,35 @@ impl CloudHome for S3CloudHome {
             endpoint: self.endpoint.clone(),
             access_key: self.access_key.clone(),
             secret_key: self.secret_key.clone(),
+            key_prefix: self.key_prefix.clone(),
         })
     }
 
     async fn revoke_access(&self, _member_id: &str) -> Result<(), CloudHomeError> {
         // S3 access is managed externally (IAM/pre-shared credentials).
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn full_key_prepends_prefix() {
+        let key = apply_prefix(Some("libs/abc"), "heads/dev1.json");
+        assert_eq!(key, "libs/abc/heads/dev1.json");
+    }
+
+    #[test]
+    fn full_key_no_prefix() {
+        let key = apply_prefix(None, "heads/dev1.json");
+        assert_eq!(key, "heads/dev1.json");
+    }
+
+    #[test]
+    fn full_key_strips_trailing_slash() {
+        let key = apply_prefix(Some("libs/abc/"), "heads/dev1.json");
+        assert_eq!(key, "libs/abc/heads/dev1.json");
     }
 }
