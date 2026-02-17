@@ -600,11 +600,6 @@ impl AppService {
             ss.cloud_home_region = config.cloud_home_s3_region.clone();
             ss.cloud_home_endpoint = config.cloud_home_s3_endpoint.clone();
             ss.cloud_home_configured = config.sync_enabled(&self.key_service);
-
-            #[cfg(target_os = "macos")]
-            {
-                ss.icloud_available = detect_icloud_container().is_some();
-            }
         }
     }
 
