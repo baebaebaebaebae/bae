@@ -10,6 +10,7 @@ pub mod config;
 pub mod content_type;
 pub mod cue_flac;
 pub mod db;
+pub mod device_link;
 pub mod discogs;
 pub mod encryption;
 pub mod file_service;

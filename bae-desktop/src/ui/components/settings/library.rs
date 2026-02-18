@@ -377,6 +377,65 @@ pub fn LibrarySection() -> Element {
         }
     };
 
+    // Device link QR state
+    let mut device_link_qr_svg = use_signal(|| Option::<String>::None);
+
+    let show_link_device_button = matches!(
+        app.config.cloud_provider,
+        Some(bae_core::config::CloudProvider::BaeCloud)
+    ) && app.config.cloud_home_bae_cloud_url.is_some();
+
+    let on_link_device = {
+        let app = app.clone();
+        move |_| {
+            let proxy_url = match &app.config.cloud_home_bae_cloud_url {
+                Some(url) => url.clone(),
+                None => {
+                    error!("No bae cloud URL configured");
+                    return;
+                }
+            };
+
+            let encryption_key_hex = match app.key_service.get_or_create_encryption_key() {
+                Ok(key) => key,
+                Err(e) => {
+                    error!("Failed to get encryption key: {e}");
+                    return;
+                }
+            };
+
+            let encryption_key_bytes = match hex::decode(&encryption_key_hex) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    error!("Failed to decode encryption key hex: {e}");
+                    return;
+                }
+            };
+
+            let user_keypair = match app.key_service.get_or_create_user_keypair() {
+                Ok(kp) => kp,
+                Err(e) => {
+                    error!("Failed to get user keypair: {e}");
+                    return;
+                }
+            };
+
+            match bae_core::device_link::generate_qr_svg(
+                &proxy_url,
+                &encryption_key_bytes,
+                &user_keypair.signing_key,
+                &app.config.library_id,
+            ) {
+                Ok(svg) => device_link_qr_svg.set(Some(svg)),
+                Err(e) => error!("Failed to generate QR code: {e}"),
+            }
+        }
+    };
+
+    let on_close_device_link = move |_| {
+        device_link_qr_svg.set(None);
+    };
+
     let on_rename = move |(path, new_name): (String, String)| {
         let library_path = PathBuf::from(&path);
         if let Err(e) = Config::rename_library(&library_path, &new_name) {
@@ -445,6 +504,10 @@ pub fn LibrarySection() -> Element {
                 on_switch_source,
                 on_rename,
                 on_remove,
+                show_link_device_button,
+                on_link_device,
+                device_link_qr_svg: device_link_qr_svg.read().clone(),
+                on_close_device_link,
             }
         }
     }
