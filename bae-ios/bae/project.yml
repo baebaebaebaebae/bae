@@ -1,0 +1,20 @@
+name: bae
+options:
+  bundleIdPrefix: fm.bae
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.0"
+targets:
+  bae:
+    type: application
+    platform: iOS
+    sources:
+      - bae
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: fm.bae.bae
+        PRODUCT_NAME: bae
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: 1
+        INFOPLIST_FILE: bae/Info.plist
+        SWIFT_VERSION: "5.10"
