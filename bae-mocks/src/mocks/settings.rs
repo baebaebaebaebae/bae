@@ -52,6 +52,10 @@ pub fn SettingsMock(initial_state: Option<String>) -> Element {
                             on_switch_source: |_| {},
                             on_rename: |_| {},
                             on_remove: |_| {},
+                            show_link_device_button: false,
+                            on_link_device: |_| {},
+                            device_link_qr_svg: None,
+                            on_close_device_link: |_| {},
                         }
                     },
                     SettingsTab::Sync => rsx! {

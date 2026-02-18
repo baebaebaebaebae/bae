@@ -28,6 +28,10 @@ pub fn LibrarySectionView(
     on_switch_source: EventHandler<LibrarySource>,
     on_rename: EventHandler<(String, String)>,
     on_remove: EventHandler<String>,
+    show_link_device_button: bool,
+    on_link_device: EventHandler<()>,
+    device_link_qr_svg: Option<String>,
+    on_close_device_link: EventHandler<()>,
 ) -> Element {
     let mut renaming_path = use_signal(|| None::<String>);
     let mut rename_value = use_signal(String::new);
@@ -54,6 +58,26 @@ pub fn LibrarySectionView(
     let is_local_active = active_source == LibrarySource::Local;
 
     rsx! {
+        // Device link QR modal overlay
+        if let Some(svg) = &device_link_qr_svg {
+            div {
+                class: "fixed inset-0 z-50 flex items-center justify-center bg-black/70",
+                onclick: move |_| on_close_device_link.call(()),
+                div {
+                    class: "bg-white rounded-xl p-8 max-w-sm w-full shadow-2xl flex flex-col items-center gap-4",
+                    onclick: move |e| e.stop_propagation(),
+                    div { class: "w-64 h-64", dangerous_inner_html: "{svg}" }
+                    p { class: "text-sm text-gray-700 text-center",
+                        "Scan with bae on your phone to link this library"
+                    }
+                    button {
+                        class: "px-4 py-2 text-sm bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-md transition-colors",
+                        onclick: move |_| on_close_device_link.call(()),
+                        "Close"
+                    }
+                }
+            }
+        }
         SettingsSection {
             div { class: "flex items-center justify-between",
                 div {
@@ -93,9 +117,15 @@ pub fn LibrarySectionView(
                         onclick: move |_| on_follow.call(()),
                         "Follow Server..."
                     }
+                    if show_link_device_button {
+                        button {
+                            class: "px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded-md transition-colors",
+                            onclick: move |_| on_link_device.call(()),
+                            "Link Device"
+                        }
+                    }
                 }
             }
-
             // Local libraries
             div { class: "space-y-2",
                 for lib in &libraries {
@@ -216,7 +246,6 @@ pub fn LibrarySectionView(
                     }
                 }
             }
-
             // Followed libraries section
             if !followed_libraries.is_empty() {
                 div { class: "mt-6",
