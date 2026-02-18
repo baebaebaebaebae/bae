@@ -17,6 +17,9 @@ struct ContentView: View {
                 do {
                     try keychainService.saveCredentials(creds)
                     appState.screen = .linked(creds)
+                    if let url = URL(string: creds.proxyUrl) {
+                        appState.cloudClient = CloudHomeClient(baseURL: url)
+                    }
                 } catch {
                     // Save failed; user stays on onboarding and can retry
                 }
@@ -25,6 +28,7 @@ struct ContentView: View {
             LinkedView(credentials: creds) {
                 do {
                     try keychainService.deleteCredentials()
+                    appState.cloudClient = nil
                     appState.screen = .onboarding
                 } catch {
                     // Delete failed; user stays on linked view
