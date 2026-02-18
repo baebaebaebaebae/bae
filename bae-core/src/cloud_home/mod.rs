@@ -48,7 +48,7 @@ pub enum JoinInfo {
         drive_id: String,
         folder_id: String,
     },
-    BaeServer {
+    BaeCloud {
         url: String,
     },
 }
@@ -198,9 +198,9 @@ pub async fn create_cloud_home(
                 onedrive::OneDriveCloudHome::new(drive_id, folder_id, tokens, key_service.clone());
             Ok(Box::new(od))
         }
-        Some(CloudProvider::BaeServer) => {
-            let url = config.cloud_home_bae_server_url.clone().ok_or_else(|| {
-                CloudHomeError::Storage("bae server URL not configured".to_string())
+        Some(CloudProvider::BaeCloud) => {
+            let url = config.cloud_home_bae_cloud_url.clone().ok_or_else(|| {
+                CloudHomeError::Storage("bae cloud URL not configured".to_string())
             })?;
             let keypair = key_service
                 .get_or_create_user_keypair()

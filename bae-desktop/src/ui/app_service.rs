@@ -572,8 +572,8 @@ impl AppService {
                 bae_core::config::CloudProvider::OneDrive => {
                     bae_ui::stores::config::CloudProvider::OneDrive
                 }
-                bae_core::config::CloudProvider::BaeServer => {
-                    bae_ui::stores::config::CloudProvider::BaeServer
+                bae_core::config::CloudProvider::BaeCloud => {
+                    bae_ui::stores::config::CloudProvider::BaeCloud
                 }
             });
             cs.cloud_account_display = if matches!(
@@ -581,6 +581,11 @@ impl AppService {
                 Some(bae_core::config::CloudProvider::ICloud)
             ) {
                 Some("iCloud Drive".to_string())
+            } else if matches!(
+                config.cloud_provider,
+                Some(bae_core::config::CloudProvider::BaeCloud)
+            ) {
+                config.cloud_home_bae_cloud_username.clone()
             } else {
                 cs.cloud_account_display.clone()
             };
@@ -1839,6 +1844,22 @@ impl AppService {
         let key_service = self.key_service.clone();
         let mut new_config = self.config.clone();
 
+        // Best-effort logout for bae cloud (don't block on failure)
+        if matches!(
+            new_config.cloud_provider,
+            Some(config::CloudProvider::BaeCloud)
+        ) {
+            if let Some(bae_core::keys::CloudHomeCredentials::BaeCloud { session_token }) =
+                key_service.get_cloud_home_credentials()
+            {
+                spawn(async move {
+                    if let Err(e) = bae_core::bae_cloud_api::logout(&session_token).await {
+                        tracing::warn!("bae cloud logout failed (best-effort): {e}");
+                    }
+                });
+            }
+        }
+
         // Clear all cloud home config fields
         new_config.cloud_provider = None;
         new_config.cloud_home_s3_bucket = None;
@@ -1849,6 +1870,8 @@ impl AppService {
         new_config.cloud_home_onedrive_drive_id = None;
         new_config.cloud_home_onedrive_folder_id = None;
         new_config.cloud_home_icloud_container_path = None;
+        new_config.cloud_home_bae_cloud_url = None;
+        new_config.cloud_home_bae_cloud_username = None;
 
         if let Err(e) = new_config.save() {
             tracing::error!("Failed to save config after disconnect: {e}");
@@ -1872,6 +1895,164 @@ impl AppService {
             ss.cloud_home_configured = false;
             ss.sign_in_error = None;
         }
+    }
+
+    /// Sign up for a new bae cloud account, provision the library, and configure sync.
+    pub fn sign_up_bae_cloud(&self, email: String, username: String, password: String) {
+        let state = self.state;
+        let mut new_config = self.config.clone();
+        let key_service = self.key_service.clone();
+
+        state.sync().signing_in().set(true);
+        state.sync().sign_in_error().set(None);
+
+        spawn(async move {
+            let result: Result<(), String> = async {
+                // 1. Call signup API
+                let resp = bae_core::bae_cloud_api::signup(&email, &username, &password).await?;
+
+                // 2. Get or create Ed25519 keypair
+                let keypair = key_service
+                    .get_or_create_user_keypair()
+                    .map_err(|e| format!("keypair error: {e}"))?;
+
+                // 3. Sign provision message
+                let timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+                    .to_string();
+                let message = format!("provision:{}:{timestamp}", resp.library_id);
+                let signature = keypair.sign(message.as_bytes());
+
+                let pubkey_hex = hex::encode(keypair.public_key);
+                let sig_hex = hex::encode(signature);
+
+                // 4. Call provision API
+                bae_core::bae_cloud_api::provision(
+                    &resp.session_token,
+                    &pubkey_hex,
+                    &sig_hex,
+                    &timestamp,
+                )
+                .await?;
+
+                // 5. Save credentials to keyring
+                key_service
+                    .set_cloud_home_credentials(&bae_core::keys::CloudHomeCredentials::BaeCloud {
+                        session_token: resp.session_token,
+                    })
+                    .map_err(|e| format!("keyring error: {e}"))?;
+
+                // 6. Update config
+                new_config.cloud_provider = Some(config::CloudProvider::BaeCloud);
+                new_config.cloud_home_bae_cloud_url = Some(resp.library_url);
+                new_config.cloud_home_bae_cloud_username = Some(username.clone());
+                new_config
+                    .save()
+                    .map_err(|e| format!("config save error: {e}"))?;
+
+                // 7. Update store
+                {
+                    let mut config_lens = state.config();
+                    let mut cs = config_lens.write();
+                    cs.cloud_provider = Some(bae_ui::stores::config::CloudProvider::BaeCloud);
+                    cs.cloud_account_display = Some(username);
+                }
+                state
+                    .sync()
+                    .cloud_home_configured()
+                    .set(new_config.sync_enabled(&key_service));
+
+                Ok(())
+            }
+            .await;
+
+            if let Err(e) = result {
+                state.sync().sign_in_error().set(Some(e));
+            }
+            state.sync().signing_in().set(false);
+        });
+    }
+
+    /// Log in to an existing bae cloud account and configure sync.
+    pub fn log_in_bae_cloud(&self, email: String, password: String) {
+        let state = self.state;
+        let mut new_config = self.config.clone();
+        let key_service = self.key_service.clone();
+
+        state.sync().signing_in().set(true);
+        state.sync().sign_in_error().set(None);
+
+        spawn(async move {
+            let result: Result<(), String> = async {
+                // 1. Call login API
+                let resp = bae_core::bae_cloud_api::login(&email, &password).await?;
+
+                // 2. If not yet provisioned, provision now
+                if !resp.provisioned {
+                    let keypair = key_service
+                        .get_or_create_user_keypair()
+                        .map_err(|e| format!("keypair error: {e}"))?;
+
+                    let timestamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs()
+                        .to_string();
+                    let message = format!("provision:{}:{timestamp}", resp.library_id);
+                    let signature = keypair.sign(message.as_bytes());
+
+                    let pubkey_hex = hex::encode(keypair.public_key);
+                    let sig_hex = hex::encode(signature);
+
+                    bae_core::bae_cloud_api::provision(
+                        &resp.session_token,
+                        &pubkey_hex,
+                        &sig_hex,
+                        &timestamp,
+                    )
+                    .await?;
+                }
+
+                // 3. Save credentials to keyring
+                key_service
+                    .set_cloud_home_credentials(&bae_core::keys::CloudHomeCredentials::BaeCloud {
+                        session_token: resp.session_token,
+                    })
+                    .map_err(|e| format!("keyring error: {e}"))?;
+
+                // 4. Update config
+                new_config.cloud_provider = Some(config::CloudProvider::BaeCloud);
+                new_config.cloud_home_bae_cloud_url = Some(resp.library_url);
+                // For login we don't have the username from the response, use email prefix
+                let display_name = email.split('@').next().unwrap_or(&email).to_string();
+                new_config.cloud_home_bae_cloud_username = Some(display_name.clone());
+                new_config
+                    .save()
+                    .map_err(|e| format!("config save error: {e}"))?;
+
+                // 5. Update store
+                {
+                    let mut config_lens = state.config();
+                    let mut cs = config_lens.write();
+                    cs.cloud_provider = Some(bae_ui::stores::config::CloudProvider::BaeCloud);
+                    cs.cloud_account_display = Some(display_name);
+                }
+                state
+                    .sync()
+                    .cloud_home_configured()
+                    .set(new_config.sync_enabled(&key_service));
+
+                Ok(())
+            }
+            .await;
+
+            if let Err(e) = result {
+                state.sync().sign_in_error().set(Some(e));
+            }
+            state.sync().signing_in().set(false);
+        });
     }
 
     // =========================================================================

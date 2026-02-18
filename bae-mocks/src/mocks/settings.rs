@@ -4,9 +4,9 @@ use super::framework::{ControlRegistryBuilder, MockPage, MockPanel};
 use bae_ui::stores::config::{CloudProvider, FollowedLibraryInfo, LibrarySource};
 use bae_ui::stores::{DeviceActivityInfo, Member, MemberRole, SharedReleaseDisplay};
 use bae_ui::{
-    AboutSectionView, BitTorrentSectionView, BitTorrentSettings, CloudProviderOption,
-    DiscogsSectionView, LibraryInfo, LibrarySectionView, SettingsTab, SettingsView,
-    SubsonicSectionView, SyncSectionView,
+    AboutSectionView, BaeCloudAuthMode, BitTorrentSectionView, BitTorrentSettings,
+    CloudProviderOption, DiscogsSectionView, LibraryInfo, LibrarySectionView, SettingsTab,
+    SettingsView, SubsonicSectionView, SyncSectionView,
 };
 use dioxus::prelude::*;
 
@@ -99,6 +99,17 @@ pub fn SettingsMock(initial_state: Option<String>) -> Element {
                             on_endpoint_change: |_| {},
                             on_access_key_change: |_| {},
                             on_secret_key_change: |_| {},
+                            // bae cloud form state
+                            bae_cloud_is_editing: false,
+                            bae_cloud_mode: BaeCloudAuthMode::SignUp,
+                            bae_cloud_email: String::new(),
+                            bae_cloud_username: String::new(),
+                            bae_cloud_password: String::new(),
+                            on_bae_cloud_mode_change: |_| {},
+                            on_bae_cloud_email_change: |_| {},
+                            on_bae_cloud_username_change: |_| {},
+                            on_bae_cloud_password_change: |_| {},
+                            on_bae_cloud_submit: |_| {},
                             // Invite
                             show_invite_form: false,
                             invite_pubkey: String::new(),
@@ -304,6 +315,12 @@ fn mock_shared_releases() -> Vec<SharedReleaseDisplay> {
 
 fn mock_cloud_options() -> Vec<CloudProviderOption> {
     vec![
+        CloudProviderOption {
+            provider: CloudProvider::BaeCloud,
+            label: "bae cloud",
+            description: "Encrypted cloud sync",
+            connected_account: None,
+        },
         CloudProviderOption {
             provider: CloudProvider::ICloud,
             label: "iCloud Drive",

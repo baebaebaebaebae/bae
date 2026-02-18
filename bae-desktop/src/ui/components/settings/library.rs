@@ -477,7 +477,7 @@ fn cloud_home_display(join_info: &JoinInfo) -> String {
         JoinInfo::GoogleDrive { .. } => "Google Drive".to_string(),
         JoinInfo::Dropbox { .. } => "Dropbox".to_string(),
         JoinInfo::OneDrive { .. } => "OneDrive".to_string(),
-        JoinInfo::BaeServer { url } => format!("bae server ({url})"),
+        JoinInfo::BaeCloud { url } => format!("bae cloud ({url})"),
     }
 }
 
@@ -721,7 +721,8 @@ async fn bootstrap_library(
         cloud_home_onedrive_drive_id: None,
         cloud_home_onedrive_folder_id: None,
         cloud_home_icloud_container_path: None,
-        cloud_home_bae_server_url: None,
+        cloud_home_bae_cloud_url: None,
+        cloud_home_bae_cloud_username: None,
         share_base_url: None,
         share_default_expiry_days: None,
         share_signing_key_version: 1,

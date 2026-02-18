@@ -2,7 +2,9 @@
 
 use crate::components::helpers::Tooltip;
 use crate::components::icons::{CheckIcon, CopyIcon};
-use crate::components::settings::cloud_provider::{CloudProviderOption, CloudProviderPicker};
+use crate::components::settings::cloud_provider::{
+    BaeCloudAuthMode, CloudProviderOption, CloudProviderPicker,
+};
 use crate::components::{
     Button, ButtonSize, ButtonVariant, ChromelessButton, SettingsCard, SettingsSection, TextInput,
     TextInputSize, TextInputType,
@@ -76,6 +78,28 @@ pub fn SyncSectionView(
     edit_access_key: String,
     /// Edit field: secret key.
     edit_secret_key: String,
+
+    // --- bae cloud edit state props (passed through to CloudProviderPicker) ---
+    /// Whether the bae cloud form is shown.
+    bae_cloud_is_editing: bool,
+    /// Current auth mode (signup or login).
+    bae_cloud_mode: BaeCloudAuthMode,
+    /// Email field.
+    bae_cloud_email: String,
+    /// Username field (signup only).
+    bae_cloud_username: String,
+    /// Password field.
+    bae_cloud_password: String,
+    /// Called when the auth mode toggle is clicked.
+    on_bae_cloud_mode_change: EventHandler<BaeCloudAuthMode>,
+    /// Called when the email input changes.
+    on_bae_cloud_email_change: EventHandler<String>,
+    /// Called when the username input changes.
+    on_bae_cloud_username_change: EventHandler<String>,
+    /// Called when the password input changes.
+    on_bae_cloud_password_change: EventHandler<String>,
+    /// Called when the submit button is clicked.
+    on_bae_cloud_submit: EventHandler<()>,
 
     // --- Members props ---
     /// Current library members from membership chain. Empty if solo/not syncing.
@@ -535,6 +559,11 @@ pub fn SyncSectionView(
                 s3_endpoint: edit_endpoint,
                 s3_access_key: edit_access_key,
                 s3_secret_key: edit_secret_key,
+                bae_cloud_is_editing,
+                bae_cloud_mode,
+                bae_cloud_email,
+                bae_cloud_username,
+                bae_cloud_password,
                 on_select: move |p| on_select_provider.call(p),
                 on_sign_in: move |p| on_sign_in.call(p),
                 on_disconnect: move |_| on_disconnect_provider.call(()),
@@ -547,6 +576,11 @@ pub fn SyncSectionView(
                 on_s3_endpoint_change: move |v| on_endpoint_change.call(v),
                 on_s3_access_key_change: move |v| on_access_key_change.call(v),
                 on_s3_secret_key_change: move |v| on_secret_key_change.call(v),
+                on_bae_cloud_mode_change: move |m| on_bae_cloud_mode_change.call(m),
+                on_bae_cloud_email_change: move |v| on_bae_cloud_email_change.call(v),
+                on_bae_cloud_username_change: move |v| on_bae_cloud_username_change.call(v),
+                on_bae_cloud_password_change: move |v| on_bae_cloud_password_change.call(v),
+                on_bae_cloud_submit: move |_| on_bae_cloud_submit.call(()),
             }
 
             // Shared with Me
