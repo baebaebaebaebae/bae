@@ -264,25 +264,59 @@ Owner writes a Remove membership entry and calls `CloudHome::revoke_access` (uns
 
 Every changeset envelope carries `author_pubkey`, so changes are attributed to the user who made them.
 
-## bae-server
+## Deployment modes
 
-`bae-server` -- a headless, read-only server that pulls from the cloud home.
+bae has two deployment modes for remote access. Which one you use depends on whether the server has your encryption key.
 
-- Given cloud home URL + encryption key: downloads `snapshot.db.enc`, applies changesets, caches DB + images locally
-- Streams audio from the cloud home, decrypting on the fly
-- Optional `--web-dir` serves the bae-web frontend alongside the API
-- `--recovery-key` for encrypted libraries, `--refresh` to re-pull from cloud home
-- Stateless -- no writes, no migrations, ephemeral cache rebuilt from the cloud home
+### Trusted: `bae-desktop --headless`
+
+The server has the master key. It decrypts locally, serves Subsonic, manages the library. This is bae-desktop without a GUI -- same binary, same capabilities.
+
+Use this when you control the machine and trust it with your keys: a home server, a NAS, a VPS you manage.
+
+- Full Subsonic API (works with any Subsonic client)
+- Decrypts audio on the fly
+- Syncs with cloud home
+- Manages library (import, edit, delete)
+
+### Untrusted: bae-proxy
+
+The server never has keys. It proxies encrypted blobs between clients and storage. All decryption happens on the client (bae-desktop, bae-mobile, bae-web).
+
+Use this for cloud hosting where the server operator (including bae cloud) should not be able to read your data.
+
+- Proxies encrypted blobs to/from S3-compatible storage
+- Routes by Host header (multi-tenant)
+- Ed25519 auth for write operations
+- Serves bae-web for share links (client-side decryption in browser)
+- Zero-knowledge -- never sees plaintext
+
+### When to use which
+
+| | Trusted (`--headless`) | Untrusted (bae-proxy) |
+|---|---|---|
+| Server has keys | Yes | No |
+| Subsonic clients | Yes | No |
+| Cloud sync | Yes | Yes |
+| Share links | No | Yes (via bae-web) |
+| Mobile playback | Via Subsonic | Via bae-mobile (client-side decryption) |
+| Typical setup | Home server, NAS | bae cloud, self-hosted proxy |
+
+You can run both. A home server running `bae-desktop --headless` for Subsonic + a bae-proxy for share links and mobile access.
 
 ## How It Composes
 
 **Solo user, local only**:
-- Changeset sync replaces full-snapshot sync with incremental changesets to the cloud home
-- Faster, uses less bandwidth
+- Changeset sync with incremental changesets to the cloud home
+- Faster than full-snapshot sync, uses less bandwidth
 
 **Solo user, multiple devices**:
-- Changeset sync syncs between devices via the shared cloud home
+- Changeset sync between devices via the shared cloud home
 - Same user, different device IDs, merge via LWW
+
+**Solo user, remote access**:
+- `bae-desktop --headless` on a home server for Subsonic
+- Or bae-proxy for zero-knowledge cloud access + bae-mobile
 
 **Friends sharing a library**:
 - Changeset sync + shared libraries: multiple users, signed changesets, membership chain
