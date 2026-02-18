@@ -33,6 +33,7 @@ pub fn run(
     user_keypair: Option<UserKeypair>,
     _import_handle: ImportServiceHandle,
     _playback_handle: PlaybackHandle,
+    cloud_home: Option<std::sync::Arc<dyn bae_core::cloud_home::CloudHome>>,
 ) {
     runtime.block_on(async {
         let auth = crate::build_subsonic_auth(&config, &key_service);
@@ -45,6 +46,7 @@ pub fn run(
             config.library_dir.clone(),
             key_service,
             auth,
+            cloud_home,
         ));
 
         info!("bae headless server running");

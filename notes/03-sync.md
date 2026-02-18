@@ -266,43 +266,41 @@ Every changeset envelope carries `author_pubkey`, so changes are attributed to t
 
 ## Deployment modes
 
-bae has two deployment modes for remote access. Which one you use depends on whether the server has your encryption key.
+bae has two deployment modes for remote access. The choice depends on whether you trust the server with your encryption keys.
 
-### Trusted: `bae-desktop --headless`
+### Trusted: bae-desktop
 
-The server has the master key. It decrypts locally, serves Subsonic, manages the library. This is bae-desktop without a GUI -- same binary, same capabilities.
-
-Use this when you control the machine and trust it with your keys: a home server, a NAS, a VPS you manage.
+bae-desktop (GUI or `--headless`) on a machine you control. It has the master key. It decrypts locally, serves Subsonic, manages the library, and proxies cloud home data to followers and share link recipients.
 
 - Full Subsonic API (works with any Subsonic client)
-- Decrypts audio on the fly
+- Decrypts audio on the fly for streaming
 - Syncs with cloud home
+- Serves cloud home proxy routes for followers
+- Serves share link data
 - Manages library (import, edit, delete)
 
 ### Untrusted: bae-proxy
 
-The server never has keys. It proxies encrypted blobs between clients and storage. All decryption happens on the client (bae-desktop, bae-mobile, bae-web).
-
-Use this for cloud hosting where the server operator (including bae cloud) should not be able to read your data.
+bae-proxy is a zero-knowledge subset of bae-desktop. It proxies encrypted blobs between clients and storage. It never has keys, never decrypts. All decryption happens on the client (bae-desktop, bae-mobile, bae-web).
 
 - Proxies encrypted blobs to/from S3-compatible storage
 - Routes by Host header (multi-tenant)
 - Ed25519 auth for write operations
-- Serves bae-web for share links (client-side decryption in browser)
+- Serves cloud home data for followers
+- Serves share link data (bae-web decrypts in browser)
 - Zero-knowledge -- never sees plaintext
 
 ### When to use which
 
-| | Trusted (`--headless`) | Untrusted (bae-proxy) |
+| | Trusted (bae-desktop) | Untrusted (bae-proxy) |
 |---|---|---|
 | Server has keys | Yes | No |
 | Subsonic clients | Yes | No |
 | Cloud sync | Yes | Yes |
-| Share links | No | Yes (via bae-web) |
+| Share links | Yes | Yes (via bae-web) |
+| Follow connections | Yes | Yes |
 | Mobile playback | Via Subsonic | Via bae-mobile (client-side decryption) |
 | Typical setup | Home server, NAS | bae cloud, self-hosted proxy |
-
-You can run both. A home server running `bae-desktop --headless` for Subsonic + a bae-proxy for share links and mobile access.
 
 ## How It Composes
 
@@ -315,7 +313,7 @@ You can run both. A home server running `bae-desktop --headless` for Subsonic + 
 - Same user, different device IDs, merge via LWW
 
 **Solo user, remote access**:
-- `bae-desktop --headless` on a home server for Subsonic
+- bae-desktop on a home server or VPS for Subsonic + follow + share links
 - Or bae-proxy for zero-knowledge cloud access + bae-mobile
 
 **Friends sharing a library**:

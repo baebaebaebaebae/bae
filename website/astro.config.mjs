@@ -40,9 +40,9 @@ export default defineConfig({
 				{
 					label: 'Sharing',
 					items: [
-						{ label: 'Sharing a Library', slug: 'library/sharing' },
-						{ label: 'Share Links', slug: 'library/share-links' },
-						{ label: 'Share Grants', slug: 'library/share-grants' },
+						{ label: 'Share', slug: 'library/share' },
+						{ label: 'Follow', slug: 'library/follow' },
+						{ label: 'Collaborate', slug: 'library/collaborate' },
 					],
 				},
 				{

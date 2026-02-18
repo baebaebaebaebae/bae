@@ -709,11 +709,9 @@ impl AppService {
     /// Will be called from the sync settings UI ("Copy Follow Code" button).
     #[allow(dead_code)]
     pub fn generate_own_follow_code(&self) -> Result<String, String> {
-        let proxy_url = self
-            .config
-            .cloud_home_bae_cloud_url
-            .as_ref()
-            .ok_or_else(|| "No cloud home proxy URL configured".to_string())?;
+        let proxy_url = self.config.share_base_url.as_ref().ok_or_else(|| {
+            "Set a public URL in Settings > Server to generate follow codes.".to_string()
+        })?;
 
         let encryption_key_hex = self
             .key_service
@@ -1060,45 +1058,6 @@ impl AppService {
                         state.album_detail().transfer_progress().set(None);
                         state.album_detail().transfer_error().set(Some(error));
                     }
-                }
-            }
-        });
-    }
-
-    /// Create a share grant for a release and display the result in the store.
-    ///
-    /// The grant is a self-contained JSON token the user copies and sends
-    /// to the recipient out-of-band.
-    pub fn create_share_grant(&self, release_id: &str, recipient_pubkey_hex: &str) {
-        let state = self.state;
-        let library_manager = self.library_manager.clone();
-        let key_service = self.key_service.clone();
-        let config = self.config.clone();
-        let user_keypair = self.user_keypair.clone();
-        let release_id = release_id.to_string();
-        let recipient_pubkey_hex = recipient_pubkey_hex.to_string();
-
-        // Clear previous results
-        state.album_detail().share_grant_json().set(None);
-        state.album_detail().share_error().set(None);
-
-        spawn(async move {
-            let result = create_share_grant_async(
-                &library_manager,
-                &key_service,
-                &config,
-                user_keypair.as_ref(),
-                &release_id,
-                &recipient_pubkey_hex,
-            )
-            .await;
-
-            match result {
-                Ok(json) => {
-                    state.album_detail().share_grant_json().set(Some(json));
-                }
-                Err(e) => {
-                    state.album_detail().share_error().set(Some(e));
                 }
             }
         });
@@ -2103,69 +2062,6 @@ impl AppService {
             state.sync().signing_in().set(false);
         });
     }
-
-    // =========================================================================
-    // Shared Release Methods
-    // =========================================================================
-
-    /// Load accepted share grants from the database and update the store.
-    pub fn load_shared_releases(&self) {
-        let state = self.state;
-        let library_manager = self.library_manager.clone();
-
-        spawn(async move {
-            match bae_core::sync::shared_release::list_shared_releases(
-                library_manager.get().database(),
-            )
-            .await
-            {
-                Ok(releases) => {
-                    let display: Vec<bae_ui::stores::SharedReleaseDisplay> = releases
-                        .into_iter()
-                        .map(|r| bae_ui::stores::SharedReleaseDisplay {
-                            grant_id: r.grant_id,
-                            release_id: r.release_id,
-                            from_library_id: r.from_library_id,
-                            from_user_pubkey: r.from_user_pubkey,
-                            bucket: r.bucket,
-                            region: r.region,
-                            endpoint: r.endpoint,
-                            expires: r.expires,
-                        })
-                        .collect();
-                    state.sync().shared_releases().set(display);
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to load shared releases: {e}");
-                }
-            }
-        });
-    }
-
-    /// Remove a shared release grant from the local database.
-    pub fn revoke_shared_release(&self, grant_id: String) {
-        let state = self.state;
-        let library_manager = self.library_manager.clone();
-
-        spawn(async move {
-            match bae_core::sync::shared_release::revoke_grant(
-                library_manager.get().database(),
-                &grant_id,
-            )
-            .await
-            {
-                Ok(()) => {
-                    // Remove from store directly.
-                    let mut releases = state.sync().shared_releases().read().clone();
-                    releases.retain(|r| r.grant_id != grant_id);
-                    state.sync().shared_releases().set(releases);
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to revoke shared release: {e}");
-                }
-            }
-        });
-    }
 }
 
 // =============================================================================
@@ -2675,7 +2571,6 @@ async fn load_album_detail(
             detail.transfer_error = None;
             detail.remote_covers = vec![];
             detail.loading_remote_covers = false;
-            detail.share_grant_json = None;
             detail.share_error = None;
             detail.loading = false;
         }
@@ -3752,75 +3647,6 @@ async fn load_membership_from_bucket(
         .collect();
 
     Ok(members)
-}
-
-/// Create a share grant JSON token for a release.
-async fn create_share_grant_async(
-    library_manager: &SharedLibraryManager,
-    key_service: &KeyService,
-    config: &config::Config,
-    user_keypair: Option<&UserKeypair>,
-    release_id: &str,
-    recipient_pubkey_hex: &str,
-) -> Result<String, String> {
-    let keypair = user_keypair
-        .ok_or("No user keypair configured. Set up your identity in Settings first.")?;
-
-    let encryption_service = library_manager
-        .get()
-        .encryption_service()
-        .cloned()
-        .ok_or("Encryption is not configured.")?;
-
-    // Verify the release is managed in the cloud.
-    let release = library_manager
-        .get()
-        .database()
-        .get_release_by_id(release_id)
-        .await
-        .map_err(|e| format!("Failed to look up release: {e}"))?
-        .ok_or("Release not found.")?;
-
-    if !release.managed_in_cloud {
-        return Err("Release must be managed in the cloud to share.".to_string());
-    }
-
-    // Use cloud home config for bucket/region/endpoint.
-    let bucket = config
-        .cloud_home_s3_bucket
-        .as_deref()
-        .ok_or("Cloud home S3 bucket not configured.")?;
-    let region = config
-        .cloud_home_s3_region
-        .as_deref()
-        .ok_or("Cloud home S3 region not configured.")?;
-    let endpoint = config.cloud_home_s3_endpoint.as_deref();
-
-    // Read S3 credentials from keyring.
-    let (access_key, secret_key) = match key_service.get_cloud_home_credentials() {
-        Some(bae_core::keys::CloudHomeCredentials::S3 {
-            access_key,
-            secret_key,
-        }) => (Some(access_key), Some(secret_key)),
-        _ => (None, None),
-    };
-
-    let grant = bae_core::sync::share_grant::create_share_grant(
-        keypair,
-        recipient_pubkey_hex,
-        &encryption_service,
-        &config.library_id,
-        release_id,
-        bucket,
-        region,
-        endpoint,
-        access_key.as_deref(),
-        secret_key.as_deref(),
-        None, // no expiry for v1
-    )
-    .map_err(|e| format!("{e}"))?;
-
-    serde_json::to_string_pretty(&grant).map_err(|e| format!("Failed to serialize grant: {e}"))
 }
 
 async fn create_share_link_async(

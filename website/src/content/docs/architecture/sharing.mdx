@@ -1,9 +1,9 @@
 ---
 title: Sharing
-description: Identity, membership chain, signed changesets, and grant tokens
+description: Identity, membership chain, signed changesets, and share link tokens
 ---
 
-This page covers the technical mechanisms behind sharing. For how to use these features, see [Sharing a Library](/library/sharing), [Share Links](/library/share-links), and [Share Grants](/library/share-grants).
+This page covers the technical mechanisms behind sharing. For how to use these features, see [Share](/library/share), [Follow](/library/follow), and [Collaborate](/library/collaborate).
 
 ## Identity
 
@@ -42,15 +42,3 @@ A share link URL contains an HMAC-signed token encoding:
 - An optional expiry timestamp
 
 The token is the authorization. Possession of the URL means permission to play. Tokens cannot be forged or modified (HMAC-signed). The server validates the signature and expiry on each request.
-
-## Share grant tokens
-
-A share grant token gives the recipient access to a single release. It contains:
-
-- The library encryption key, sealed-box encrypted to the recipient's public key
-- Cloud home coordinates for fetching the files
-- S3 credentials if applicable, also sealed-box encrypted
-- An optional expiration
-- The grantor's signature
-
-The recipient unwraps the token with their private key, connects to the sharer's cloud home, and streams the release directly.

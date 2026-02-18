@@ -118,23 +118,13 @@ pub fn SyncSection() -> Element {
     let invite_status = app.state.sync().invite_status().read().clone();
     let share_info = app.state.sync().share_info().read().clone();
 
-    // --- Shared releases from store ---
-    let shared_releases = app.state.sync().shared_releases().read().clone();
-
-    // --- Local accept form state ---
-    let mut accept_grant_text = use_signal(String::new);
-    let mut is_accepting_grant = use_signal(|| false);
-    let mut accept_grant_error = use_signal(|| Option::<String>::None);
-
     // --- Recovery key state ---
     let mut recovery_key = use_signal(|| Option::<String>::None);
 
-    // Load membership and shared releases on mount
+    // Load membership on mount
     let app_for_membership = app.clone();
-    let app_for_load_shared = app.clone();
     use_effect(move || {
         app_for_membership.load_membership();
-        app_for_load_shared.load_shared_releases();
     });
 
     let copy_pubkey = {
@@ -195,8 +185,6 @@ pub fn SyncSection() -> Element {
     let app_for_invite = app.clone();
     let app_for_dismiss = app.clone();
     let app_for_remove = app.clone();
-    let app_for_accept = app.clone();
-    let app_for_revoke = app.clone();
     let app_for_sign_in = app.clone();
     let app_for_disconnect = app.clone();
     let app_for_select = app.clone();
@@ -376,54 +364,6 @@ pub fn SyncSection() -> Element {
                 show_invite_form.set(false);
                 invite_pubkey.set(String::new());
                 invite_role.set(MemberRole::Member);
-            },
-
-            // Shared releases
-            shared_releases,
-            accept_grant_text: accept_grant_text.read().clone(),
-            is_accepting_grant: *is_accepting_grant.read(),
-            accept_grant_error: accept_grant_error.read().clone(),
-            on_accept_grant_text_change: move |v| accept_grant_text.set(v),
-            on_accept_grant: move |json: String| {
-                let app = app_for_accept.clone();
-                is_accepting_grant.set(true);
-                accept_grant_error.set(None);
-
-                spawn(async move {
-                    let result: Result<(), String> = async {
-                        let keypair = app
-                            .user_keypair
-                            .as_ref()
-                            .ok_or_else(|| "No user keypair available".to_string())?;
-
-                        let grant: bae_core::sync::share_grant::ShareGrant = serde_json::from_str(
-                                &json,
-                            )
-                            .map_err(|e| format!("Invalid JSON: {e}"))?;
-                        bae_core::sync::shared_release::accept_and_store_grant(
-                                app.library_manager.get().database(),
-                                &grant,
-                                keypair,
-                            )
-                            .await
-                            .map_err(|e| format!("{e}"))?;
-                        Ok(())
-                    }
-                        .await;
-                    match result {
-                        Ok(()) => {
-                            accept_grant_text.set(String::new());
-                            app.load_shared_releases();
-                        }
-                        Err(e) => {
-                            accept_grant_error.set(Some(e));
-                        }
-                    }
-                    is_accepting_grant.set(false);
-                });
-            },
-            on_revoke_shared_release: move |grant_id: String| {
-                app_for_revoke.revoke_shared_release(grant_id);
             },
 
             // Recovery key

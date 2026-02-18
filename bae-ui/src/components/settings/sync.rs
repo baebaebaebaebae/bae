@@ -11,9 +11,7 @@ use crate::components::{
 };
 use crate::floating_ui::Placement;
 use crate::stores::config::CloudProvider;
-use crate::stores::{
-    DeviceActivityInfo, InviteStatus, Member, MemberRole, ShareInfo, SharedReleaseDisplay,
-};
+use crate::stores::{DeviceActivityInfo, InviteStatus, Member, MemberRole, ShareInfo};
 use dioxus::prelude::*;
 
 /// Data bundle for sync bucket configuration fields (avoids 5 separate EventHandler props for save).
@@ -149,22 +147,6 @@ pub fn SyncSectionView(
     on_copy_share_info: EventHandler<String>,
     /// Dismiss the share info panel.
     on_dismiss_share_info: EventHandler<()>,
-
-    // --- Shared releases props ---
-    /// Releases shared with us via accepted share grants.
-    shared_releases: Vec<SharedReleaseDisplay>,
-    /// Accept form: JSON text input.
-    accept_grant_text: String,
-    /// Whether an accept operation is in progress.
-    is_accepting_grant: bool,
-    /// Error from a grant accept attempt.
-    accept_grant_error: Option<String>,
-    /// Called when the accept textarea content changes.
-    on_accept_grant_text_change: EventHandler<String>,
-    /// Called when the user clicks Accept.
-    on_accept_grant: EventHandler<String>,
-    /// Called when the user clicks Remove on a shared release.
-    on_revoke_shared_release: EventHandler<String>,
 
     // --- Recovery key props ---
     /// The revealed encryption key (hex). None = not yet revealed.
@@ -583,86 +565,6 @@ pub fn SyncSectionView(
                 on_bae_cloud_submit: move |_| on_bae_cloud_submit.call(()),
             }
 
-            // Shared with Me
-            SettingsCard {
-                h3 { class: "text-lg font-medium text-white mb-4", "Shared with Me" }
-
-                // Accept grant form
-                div { class: "space-y-3 mb-4",
-                    label { class: "block text-sm text-gray-400",
-                        "Paste a share grant JSON token to gain access to a shared release."
-                    }
-                    textarea {
-                        class: "w-full h-24 bg-gray-700 text-white text-sm font-mono rounded-lg p-3 border border-gray-600 focus:border-blue-500 focus:outline-none resize-none placeholder-gray-500",
-                        placeholder: "Paste share grant JSON here...",
-                        value: "{accept_grant_text}",
-                        oninput: move |e| on_accept_grant_text_change.call(e.value()),
-                    }
-
-                    if let Some(ref err) = accept_grant_error {
-                        div { class: "p-3 bg-red-900/30 border border-red-700 rounded-lg text-sm text-red-300",
-                            "{err}"
-                        }
-                    }
-
-                    {
-                        let text = accept_grant_text.clone();
-                        rsx! {
-                            Button {
-                                variant: ButtonVariant::Primary,
-                                size: ButtonSize::Small,
-                                disabled: text.trim().is_empty() || is_accepting_grant,
-                                loading: is_accepting_grant,
-                                onclick: move |_| on_accept_grant.call(text.clone()),
-                                if is_accepting_grant {
-                                    "Accepting..."
-                                } else {
-                                    "Accept"
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Shared releases list
-                if shared_releases.is_empty() {
-                    p { class: "text-sm text-gray-500", "No shared releases yet." }
-                } else {
-                    div { class: "space-y-2",
-                        for release in shared_releases.iter() {
-                            {
-                                let grant_id = release.grant_id.clone();
-                                rsx! {
-                                    div {
-                                        key: "{release.grant_id}",
-                                        class: "flex items-center justify-between p-3 bg-gray-700/50 rounded-lg",
-                                        div { class: "min-w-0 flex-1",
-                                            div { class: "flex items-center gap-2 text-sm",
-                                                span { class: "text-gray-200 font-mono truncate", {truncate_id(&release.release_id)} }
-                                                span { class: "text-gray-500", "from" }
-                                                span { class: "text-gray-400 font-mono", {truncate_pubkey(&release.from_user_pubkey)} }
-                                            }
-                                            div { class: "flex items-center gap-3 mt-1 text-xs text-gray-500",
-                                                span { "Bucket: {release.bucket}" }
-                                                if let Some(ref exp) = release.expires {
-                                                    span { "Expires: {exp}" }
-                                                }
-                                            }
-                                        }
-                                        Button {
-                                            variant: ButtonVariant::Secondary,
-                                            size: ButtonSize::Small,
-                                            onclick: move |_| on_revoke_shared_release.call(grant_id.clone()),
-                                            "Remove"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             // Recovery key
             SettingsCard {
                 h3 { class: "text-lg font-medium text-white mb-2", "Recovery key" }
@@ -708,15 +610,6 @@ pub fn SyncSectionView(
                 }
             }
         }
-    }
-}
-
-/// Truncate an ID for display: first 8 characters.
-fn truncate_id(id: &str) -> String {
-    if id.len() > 12 {
-        format!("{}...", &id[..8])
-    } else {
-        id.to_string()
     }
 }
 

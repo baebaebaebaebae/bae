@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 /// Payload encoded inside a follow code.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct FollowPayload {
-    /// Proxy base URL (e.g. "https://alice.bae.fm")
+    /// Server base URL (e.g. "https://alice.bae.fm")
     url: String,
     /// Base64-encoded library encryption key
     key: String,

@@ -312,14 +312,6 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
         }
     });
 
-    // Share grant callback
-    let on_create_share_grant = EventHandler::new({
-        let app = app.clone();
-        move |(release_id, recipient_pubkey): (String, String)| {
-            app.create_share_grant(&release_id, &recipient_pubkey);
-        }
-    });
-
     // Check if viewing a followed library (read-only mode)
     let active_source = app.state.library().active_source().read().clone();
     let is_followed = matches!(active_source, LibrarySource::Followed(_));
@@ -369,7 +361,6 @@ pub fn AlbumDetail(album_id: ReadSignal<String>, release_id: ReadSignal<String>)
                 on_eject,
                 on_fetch_remote_covers,
                 on_select_cover,
-                on_create_share_grant,
                 on_copy_share_link,
             }
 
