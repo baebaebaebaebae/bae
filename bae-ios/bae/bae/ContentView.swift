@@ -37,18 +37,29 @@ struct ContentView: View {
                 }
             }
         case .library(let creds):
-            LinkedView(credentials: creds) {
-                do {
-                    try keychainService.deleteCredentials()
-                    // Delete local database and cached data
-                    try? FileManager.default.removeItem(at: BootstrapService.databasePath())
-                    try? FileManager.default.removeItem(at: BootstrapService.syncCursorsPath())
-                    try? FileManager.default.removeItem(at: BootstrapService.imageCachePath())
-                    appState.cloudClient = nil
-                    appState.bootstrapResult = nil
-                    appState.screen = .onboarding
-                } catch {
-                    // Delete failed; user stays on library view
+            if let dbService = try? DatabaseService(path: BootstrapService.databasePath()) {
+                LibraryView(databaseService: dbService, credentials: creds) {
+                    do {
+                        try keychainService.deleteCredentials()
+                        try? FileManager.default.removeItem(at: BootstrapService.databasePath())
+                        try? FileManager.default.removeItem(at: BootstrapService.syncCursorsPath())
+                        try? FileManager.default.removeItem(at: BootstrapService.imageCachePath())
+                        appState.cloudClient = nil
+                        appState.bootstrapResult = nil
+                        appState.screen = .onboarding
+                    } catch {
+                        // Delete failed; user stays on library view
+                    }
+                }
+            } else {
+                ContentUnavailableView {
+                    Label("Database Error", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text("Could not open the library database.")
+                } actions: {
+                    Button("Re-sync") {
+                        appState.screen = .bootstrapping(creds)
+                    }
                 }
             }
         }
