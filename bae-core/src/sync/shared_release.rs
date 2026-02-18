@@ -243,7 +243,14 @@ mod tests {
 
         assert_eq!(shared.release_id, release_id);
         assert_eq!(shared.bucket, "test-bucket");
-        assert_eq!(shared.library_key, enc.key_bytes());
+        // Share grants now wrap the per-release derived key, not the master key.
+        let expected_key = enc.derive_release_encryption(release_id).key_bytes();
+        assert_eq!(shared.library_key, expected_key);
+        assert_ne!(
+            shared.library_key,
+            enc.key_bytes(),
+            "must NOT be master key"
+        );
         assert_eq!(shared.s3_access_key.as_deref(), Some("AKID"));
         assert_eq!(shared.s3_secret_key.as_deref(), Some("secret123"));
 

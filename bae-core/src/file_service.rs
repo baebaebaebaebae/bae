@@ -61,14 +61,17 @@ pub async fn read_file(
 
     let raw_bytes = tokio::fs::read(&source_path).await?;
 
-    let data = decrypt_if_needed(&file, encryption_service, raw_bytes).await?;
+    let data = decrypt_if_needed(&file, &file.release_id, encryption_service, raw_bytes).await?;
 
     Ok((file, data))
 }
 
 /// Decrypt raw bytes if the file has encryption_nonce set.
+///
+/// Uses a per-release derived key for decryption.
 pub async fn decrypt_if_needed(
     file: &DbFile,
+    release_id: &str,
     encryption_service: Option<&EncryptionService>,
     raw_bytes: Vec<u8>,
 ) -> Result<Vec<u8>, FileError> {
@@ -77,7 +80,7 @@ pub async fn decrypt_if_needed(
     }
 
     let enc = encryption_service.ok_or(FileError::EncryptionNotConfigured)?;
-    let enc = enc.clone();
+    let enc = enc.derive_release_encryption(release_id);
 
     tokio::task::spawn_blocking(move || enc.decrypt(&raw_bytes).map_err(FileError::Decryption))
         .await?
@@ -102,7 +105,9 @@ mod tests {
     async fn decrypt_if_needed_returns_plaintext_for_unencrypted() {
         let file = make_file(false);
         let data = b"hello world".to_vec();
-        let result = decrypt_if_needed(&file, None, data.clone()).await.unwrap();
+        let result = decrypt_if_needed(&file, "release-1", None, data.clone())
+            .await
+            .unwrap();
         assert_eq!(result, data);
     }
 
@@ -110,20 +115,21 @@ mod tests {
     async fn decrypt_if_needed_fails_without_encryption_service() {
         let file = make_file(true);
         let data = b"encrypted junk".to_vec();
-        let result = decrypt_if_needed(&file, None, data).await;
+        let result = decrypt_if_needed(&file, "release-1", None, data).await;
         assert!(matches!(result, Err(FileError::EncryptionNotConfigured)));
     }
 
     #[tokio::test]
     async fn decrypt_if_needed_decrypts() {
-        let enc = EncryptionService::new_with_key(&[42u8; 32]);
+        let master = EncryptionService::new_with_key(&[42u8; 32]);
+        let release_enc = master.derive_release_encryption("release-1");
         let plaintext = b"test audio data";
-        let encrypted = enc.encrypt(plaintext);
+        let encrypted = release_enc.encrypt(plaintext);
 
         let mut file = make_file(true);
         file.encryption_nonce = Some(encrypted[..24].to_vec());
 
-        let result = decrypt_if_needed(&file, Some(&enc), encrypted)
+        let result = decrypt_if_needed(&file, "release-1", Some(&master), encrypted)
             .await
             .unwrap();
         assert_eq!(result, plaintext);

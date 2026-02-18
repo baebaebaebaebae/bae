@@ -88,11 +88,26 @@ pub trait SyncBucketClient: Send + Sync {
 
     /// Upload an image (plaintext — the implementation encrypts it).
     /// Writes to `images/{id[0..2]}/{id[2..4]}/{id}`.
-    async fn upload_image(&self, id: &str, data: Vec<u8>) -> Result<(), BucketError>;
+    ///
+    /// `release_id`: `Some(id)` for cover images (uses per-release key),
+    /// `None` for artist images (uses master key).
+    async fn upload_image(
+        &self,
+        id: &str,
+        release_id: Option<&str>,
+        data: Vec<u8>,
+    ) -> Result<(), BucketError>;
 
     /// Download a decrypted image by ID.
     /// Reads from `images/{id[0..2]}/{id[2..4]}/{id}`.
-    async fn download_image(&self, id: &str) -> Result<Vec<u8>, BucketError>;
+    ///
+    /// `release_id`: `Some(id)` for cover images (uses per-release key),
+    /// `None` for artist images (uses master key).
+    async fn download_image(
+        &self,
+        id: &str,
+        release_id: Option<&str>,
+    ) -> Result<Vec<u8>, BucketError>;
 
     /// Upload an encrypted snapshot.
     /// Writes to `snapshot.db.enc` (overwrites any previous snapshot).

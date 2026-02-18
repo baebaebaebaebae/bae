@@ -9,30 +9,39 @@ use std::ptr;
 
 use libsqlite3_sys as ffi;
 
+/// An image ID and its type from a changeset operation.
+#[derive(Debug, Clone)]
+pub struct ScannedImage {
+    pub id: String,
+    /// "cover" or "artist".
+    pub image_type: String,
+}
+
 /// Result of scanning a changeset for image-related operations.
 pub struct ChangesetImageScan {
-    /// Image IDs that were inserted or updated (need upload on push, download on pull).
-    pub upserted_image_ids: Vec<String>,
+    /// Images that were inserted or updated (need upload on push, download on pull).
+    pub upserted_images: Vec<ScannedImage>,
     /// Image IDs that were deleted.
     pub deleted_image_ids: Vec<String>,
 }
 
 /// Scan a changeset for `library_images` operations.
 ///
-/// Iterates all operations in the changeset and collects image IDs from
-/// INSERT/UPDATE (into `upserted_image_ids`) and DELETE (into `deleted_image_ids`).
-/// Operations on other tables are ignored.
+/// Iterates all operations in the changeset and collects images from
+/// INSERT (into `upserted_images` with type info) and DELETE (into
+/// `deleted_image_ids`). UPDATE operations are skipped — image bytes
+/// don't change on metadata updates. Operations on other tables are ignored.
 ///
 /// Returns empty lists for empty changesets.
 pub fn scan_changeset_for_images(changeset_bytes: &[u8]) -> Result<ChangesetImageScan, String> {
     if changeset_bytes.is_empty() {
         return Ok(ChangesetImageScan {
-            upserted_image_ids: Vec::new(),
+            upserted_images: Vec::new(),
             deleted_image_ids: Vec::new(),
         });
     }
 
-    let mut upserted = Vec::new();
+    let mut upserted: Vec<ScannedImage> = Vec::new();
     let mut deleted = Vec::new();
 
     unsafe {
@@ -68,20 +77,19 @@ pub fn scan_changeset_for_images(changeset_bytes: &[u8]) -> Result<ChangesetImag
                 continue;
             }
 
-            // Column 0 is the `id` column (TEXT PRIMARY KEY).
-            // INSERT: id is in new values (all columns are "new").
-            // UPDATE: id is in old values (PK is always in "old"; new values
-            //         only contain modified columns).
-            // DELETE: id is in old values (all columns are "old").
+            // Column 0 = `id` (TEXT PK), column 1 = `type` (TEXT: "cover" or "artist").
+            // INSERT: all columns in "new" — upload the image.
+            // UPDATE: skip — image bytes don't change on metadata updates,
+            //   and the `type` column may not be present in the changeset
+            //   (unchanged columns are omitted), so we can't reliably
+            //   determine cover vs artist for key derivation.
+            // DELETE: all columns in "old" — delete the image.
             match op {
                 ffi::SQLITE_INSERT => {
-                    if let Some(id) = extract_new_value(iter, 0) {
-                        upserted.push(id);
-                    }
-                }
-                ffi::SQLITE_UPDATE => {
-                    if let Some(id) = extract_old_value(iter, 0) {
-                        upserted.push(id);
+                    if let (Some(id), Some(image_type)) =
+                        (extract_new_value(iter, 0), extract_new_value(iter, 1))
+                    {
+                        upserted.push(ScannedImage { id, image_type });
                     }
                 }
                 ffi::SQLITE_DELETE => {
@@ -100,7 +108,7 @@ pub fn scan_changeset_for_images(changeset_bytes: &[u8]) -> Result<ChangesetImag
     }
 
     Ok(ChangesetImageScan {
-        upserted_image_ids: upserted,
+        upserted_images: upserted,
         deleted_image_ids: deleted,
     })
 }
@@ -199,7 +207,9 @@ mod tests {
             );
 
             let scan = scan_changeset_for_images(&cs).expect("scan");
-            assert_eq!(scan.upserted_image_ids, vec!["img-001"]);
+            assert_eq!(scan.upserted_images.len(), 1);
+            assert_eq!(scan.upserted_images[0].id, "img-001");
+            assert_eq!(scan.upserted_images[0].image_type, "cover");
             assert!(scan.deleted_image_ids.is_empty());
 
             ffi::sqlite3_close(db);
@@ -219,14 +229,28 @@ mod tests {
                     "INSERT INTO library_images (id, type, content_type, file_size, source, _updated_at, created_at) \
                      VALUES ('img-001', 'cover', 'image/jpeg', 100, 'local', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
                     "INSERT INTO library_images (id, type, content_type, file_size, source, _updated_at, created_at) \
-                     VALUES ('img-002', 'cover', 'image/png', 200, 'local', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                     VALUES ('img-002', 'artist', 'image/png', 200, 'local', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
                 ],
             );
 
             let scan = scan_changeset_for_images(&cs).expect("scan");
-            assert_eq!(scan.upserted_image_ids.len(), 2);
-            assert!(scan.upserted_image_ids.contains(&"img-001".to_string()));
-            assert!(scan.upserted_image_ids.contains(&"img-002".to_string()));
+            assert_eq!(scan.upserted_images.len(), 2);
+            let ids: Vec<&str> = scan.upserted_images.iter().map(|s| s.id.as_str()).collect();
+            assert!(ids.contains(&"img-001"));
+            assert!(ids.contains(&"img-002"));
+            // Verify types are captured
+            let cover = scan
+                .upserted_images
+                .iter()
+                .find(|s| s.id == "img-001")
+                .unwrap();
+            assert_eq!(cover.image_type, "cover");
+            let artist = scan
+                .upserted_images
+                .iter()
+                .find(|s| s.id == "img-002")
+                .unwrap();
+            assert_eq!(artist.image_type, "artist");
             assert!(scan.deleted_image_ids.is_empty());
 
             ffi::sqlite3_close(db);
@@ -234,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn detects_update() {
+    fn skips_update() {
         unsafe {
             let db = open_memory_db();
             create_images_table(db);
@@ -246,7 +270,9 @@ mod tests {
                  VALUES ('img-001', 'cover', 'image/jpeg', 100, 'local', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
             );
 
-            // Update inside the session.
+            // Update inside the session — should be skipped because image
+            // bytes don't change on metadata updates, and the `type` column
+            // may not be present in the changeset.
             let cs = make_changeset(
                 db,
                 &["library_images"],
@@ -254,7 +280,7 @@ mod tests {
             );
 
             let scan = scan_changeset_for_images(&cs).expect("scan");
-            assert_eq!(scan.upserted_image_ids, vec!["img-001"]);
+            assert!(scan.upserted_images.is_empty(), "UPDATEs should be skipped");
             assert!(scan.deleted_image_ids.is_empty());
 
             ffi::sqlite3_close(db);
@@ -282,7 +308,7 @@ mod tests {
             );
 
             let scan = scan_changeset_for_images(&cs).expect("scan");
-            assert!(scan.upserted_image_ids.is_empty());
+            assert!(scan.upserted_images.is_empty());
             assert_eq!(scan.deleted_image_ids, vec!["img-001"]);
 
             ffi::sqlite3_close(db);
@@ -301,11 +327,11 @@ mod tests {
             let cs = make_changeset(
                 db,
                 &["artists"],
-                &["INSERT INTO artists (id, name, _updated_at, created_at) VALUES ('a1', 'Miles', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"],
+                &["INSERT INTO artists (id, name, _updated_at, created_at) VALUES ('a1', 'Artist Name', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"],
             );
 
             let scan = scan_changeset_for_images(&cs).expect("scan");
-            assert!(scan.upserted_image_ids.is_empty());
+            assert!(scan.upserted_images.is_empty());
             assert!(scan.deleted_image_ids.is_empty());
 
             ffi::sqlite3_close(db);
@@ -315,7 +341,7 @@ mod tests {
     #[test]
     fn empty_changeset() {
         let scan = scan_changeset_for_images(&[]).expect("scan");
-        assert!(scan.upserted_image_ids.is_empty());
+        assert!(scan.upserted_images.is_empty());
         assert!(scan.deleted_image_ids.is_empty());
     }
 
@@ -333,14 +359,16 @@ mod tests {
                 db,
                 &["library_images", "artists"],
                 &[
-                    "INSERT INTO artists (id, name, _updated_at, created_at) VALUES ('a1', 'Miles', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                    "INSERT INTO artists (id, name, _updated_at, created_at) VALUES ('a1', 'Artist Name', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
                     "INSERT INTO library_images (id, type, content_type, file_size, source, _updated_at, created_at) \
                      VALUES ('img-001', 'cover', 'image/jpeg', 100, 'local', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
                 ],
             );
 
             let scan = scan_changeset_for_images(&cs).expect("scan");
-            assert_eq!(scan.upserted_image_ids, vec!["img-001"]);
+            assert_eq!(scan.upserted_images.len(), 1);
+            assert_eq!(scan.upserted_images[0].id, "img-001");
+            assert_eq!(scan.upserted_images[0].image_type, "cover");
             assert!(scan.deleted_image_ids.is_empty());
 
             ffi::sqlite3_close(db);

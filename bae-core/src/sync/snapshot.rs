@@ -441,11 +441,20 @@ mod tests {
             Ok(())
         }
 
-        async fn upload_image(&self, _id: &str, _data: Vec<u8>) -> Result<(), BucketError> {
+        async fn upload_image(
+            &self,
+            _id: &str,
+            _release_id: Option<&str>,
+            _data: Vec<u8>,
+        ) -> Result<(), BucketError> {
             Ok(())
         }
 
-        async fn download_image(&self, id: &str) -> Result<Vec<u8>, BucketError> {
+        async fn download_image(
+            &self,
+            id: &str,
+            _release_id: Option<&str>,
+        ) -> Result<Vec<u8>, BucketError> {
             Err(BucketError::NotFound(format!("images/{id}")))
         }
 

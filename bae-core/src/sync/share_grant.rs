@@ -37,7 +37,7 @@ pub struct ShareGrant {
 /// The inner payload encrypted to the recipient.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GrantPayload {
-    /// The library encryption key (used to decrypt all files in the library).
+    /// Per-release derived key (decrypts audio + art for one release only).
     #[serde(with = "hex_array_32")]
     pub library_key: [u8; 32],
     pub s3_access_key: Option<String>,
@@ -103,9 +103,10 @@ pub fn create_share_grant(
             .map_err(|_| ShareGrantError::Crypto("recipient pubkey wrong length".to_string()))?;
     let x25519_pk = keys::ed25519_to_x25519_public_key(&ed25519_pk);
 
-    // Build and serialize the payload with the library key.
+    // Build and serialize the payload with the per-release derived key.
+    let release_enc = encryption_service.derive_release_encryption(release_id);
     let payload = GrantPayload {
-        library_key: encryption_service.key_bytes(),
+        library_key: release_enc.key_bytes(),
         s3_access_key: s3_access_key.map(|s| s.to_string()),
         s3_secret_key: s3_secret_key.map(|s| s.to_string()),
     };
@@ -268,7 +269,14 @@ mod tests {
 
         // Accept.
         let payload = accept_share_grant(&grant, &recipient).unwrap();
-        assert_eq!(payload.library_key, enc.key_bytes());
+        // Wrapped key should be the per-release derived key, not the master key.
+        let expected_key = enc.derive_release_encryption(release_id).key_bytes();
+        assert_eq!(payload.library_key, expected_key);
+        assert_ne!(
+            payload.library_key,
+            enc.key_bytes(),
+            "must NOT wrap master key"
+        );
         assert_eq!(payload.s3_access_key.as_deref(), Some("AKID"));
         assert_eq!(payload.s3_secret_key.as_deref(), Some("secret123"));
     }
@@ -377,8 +385,9 @@ mod tests {
         let payload = accept_share_grant(&grant, &recipient).unwrap();
         assert!(payload.s3_access_key.is_none());
         assert!(payload.s3_secret_key.is_none());
-        // Library key should still be correct.
-        assert_eq!(payload.library_key, enc.key_bytes());
+        // Wrapped key should be the per-release derived key.
+        let expected_key = enc.derive_release_encryption("rel-1").key_bytes();
+        assert_eq!(payload.library_key, expected_key);
     }
 
     #[test]
@@ -408,7 +417,8 @@ mod tests {
 
         // Accept the deserialized grant.
         let payload = accept_share_grant(&deserialized, &recipient).unwrap();
-        assert_eq!(payload.library_key, enc.key_bytes());
+        let expected_key = enc.derive_release_encryption("rel-1").key_bytes();
+        assert_eq!(payload.library_key, expected_key);
         assert_eq!(payload.s3_access_key.as_deref(), Some("AK"));
     }
 
@@ -434,7 +444,8 @@ mod tests {
         .unwrap();
 
         let payload = accept_share_grant(&grant, &recipient).unwrap();
-        assert_eq!(payload.library_key, enc.key_bytes());
+        let expected_key = enc.derive_release_encryption("rel-1").key_bytes();
+        assert_eq!(payload.library_key, expected_key);
     }
 
     #[test]

@@ -126,11 +126,13 @@ pub async fn load_track_audio(
             }
         };
 
-        // Decrypt if encryption service is available (managed files are encrypted)
+        // Decrypt with per-release derived key
         if let Some(enc) = encryption_service {
-            let enc = enc.clone();
+            let release_enc = enc.derive_release_encryption(&track.release_id);
             tokio::task::spawn_blocking(move || {
-                enc.decrypt(&encrypted_data).map_err(PlaybackError::decrypt)
+                release_enc
+                    .decrypt(&encrypted_data)
+                    .map_err(PlaybackError::decrypt)
             })
             .await
             .map_err(PlaybackError::task)??
@@ -205,17 +207,22 @@ pub async fn load_track_audio(
                 .await
                 .map_err(|e| PlaybackError::io(format!("Failed to read file: {}", e)))?;
 
-            crate::file_service::decrypt_if_needed(audio_file, encryption_service, raw)
-                .await
-                .map_err(|e| match e {
-                    crate::file_service::FileError::EncryptionNotConfigured => {
-                        PlaybackError::decrypt(crate::encryption::EncryptionError::KeyManagement(
-                            "Cannot play encrypted files: encryption not configured".into(),
-                        ))
-                    }
-                    crate::file_service::FileError::Decryption(e) => PlaybackError::decrypt(e),
-                    other => PlaybackError::io(other.to_string()),
-                })?
+            crate::file_service::decrypt_if_needed(
+                audio_file,
+                &track.release_id,
+                encryption_service,
+                raw,
+            )
+            .await
+            .map_err(|e| match e {
+                crate::file_service::FileError::EncryptionNotConfigured => {
+                    PlaybackError::decrypt(crate::encryption::EncryptionError::KeyManagement(
+                        "Cannot play encrypted files: encryption not configured".into(),
+                    ))
+                }
+                crate::file_service::FileError::Decryption(e) => PlaybackError::decrypt(e),
+                other => PlaybackError::io(other.to_string()),
+            })?
         }
     };
 

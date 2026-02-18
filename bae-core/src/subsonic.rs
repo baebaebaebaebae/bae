@@ -1312,14 +1312,16 @@ async fn buffer_track_audio(
         .await
         .map_err(|e| format!("Failed to read file: {}", e))?;
 
-    // Decrypt if needed
+    // Decrypt with per-release derived key
     let is_encrypted = release.managed_locally && state.encryption_service.is_some();
     let decrypted = if is_encrypted {
         let enc = state
             .encryption_service
             .as_ref()
             .ok_or("Cannot stream encrypted files: encryption not configured")?;
-        enc.decrypt(&file_data)
+        let release_enc = enc.derive_release_encryption(&release.id);
+        release_enc
+            .decrypt(&file_data)
             .map_err(|e| format!("Failed to decrypt file: {}", e))?
     } else {
         file_data

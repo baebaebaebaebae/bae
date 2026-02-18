@@ -1479,11 +1479,12 @@ impl PlaybackService {
 
         // Create a new cloud reader at the seek position
         if let Some(storage) = &prepared.cloud_storage {
-            // Shared releases carry their own per-release encryption service
+            // Shared releases carry their own per-release encryption service.
+            // Own library uses a per-release derived key.
             let enc = prepared.encryption_override.clone().or_else(|| {
                 self.encryption_service
                     .as_ref()
-                    .map(|e| Arc::new(e.clone()))
+                    .map(|e| Arc::new(e.derive_release_encryption(&prepared.track.release_id)))
             });
 
             let reader = Box::new(

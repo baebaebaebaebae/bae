@@ -149,18 +149,34 @@ impl SyncBucketClient for CloudHomeSyncBucket {
         Ok(())
     }
 
-    async fn upload_image(&self, id: &str, data: Vec<u8>) -> Result<(), BucketError> {
+    async fn upload_image(
+        &self,
+        id: &str,
+        release_id: Option<&str>,
+        data: Vec<u8>,
+    ) -> Result<(), BucketError> {
         let key = Self::image_key(id);
-        let encrypted = self.enc().encrypt(&data);
+        let enc = match release_id {
+            Some(rid) => self.enc().derive_release_encryption(rid),
+            None => self.enc().clone(),
+        };
+        let encrypted = enc.encrypt(&data);
         self.home.write(&key, encrypted).await?;
         Ok(())
     }
 
-    async fn download_image(&self, id: &str) -> Result<Vec<u8>, BucketError> {
+    async fn download_image(
+        &self,
+        id: &str,
+        release_id: Option<&str>,
+    ) -> Result<Vec<u8>, BucketError> {
         let key = Self::image_key(id);
         let encrypted = self.home.read(&key).await?;
-        self.enc()
-            .decrypt(&encrypted)
+        let enc = match release_id {
+            Some(rid) => self.enc().derive_release_encryption(rid),
+            None => self.enc().clone(),
+        };
+        enc.decrypt(&encrypted)
             .map_err(|e| BucketError::Decryption(format!("image {id}: {e}")))
     }
 
