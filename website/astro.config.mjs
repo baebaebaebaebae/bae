@@ -34,7 +34,6 @@ export default defineConfig({
 					items: [
 						{ label: 'Overview', slug: 'storage/overview' },
 						{ label: 'Sync', slug: 'storage/sync' },
-						{ label: 'Encryption', slug: 'storage/encryption' },
 					],
 				},
 				{
@@ -51,6 +50,7 @@ export default defineConfig({
 						{ label: 'Overview', slug: 'architecture/overview' },
 						{ label: 'Data Model', slug: 'architecture/data-model' },
 						{ label: 'Cloud Home', slug: 'architecture/cloud-home' },
+						{ label: 'Encryption', slug: 'architecture/encryption' },
 						{ label: 'Sharing', slug: 'architecture/sharing' },
 						{ label: 'Server Components', slug: 'architecture/server' },
 						{ label: 'Discovery Network', slug: 'architecture/discovery' },
