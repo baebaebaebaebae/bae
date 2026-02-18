@@ -38,6 +38,9 @@ pub fn proxy_router(state: Arc<ProxyState>) -> Router {
                 .delete(delete_key)
                 .head(head_key),
         )
+        .route("/share/{share_id}/meta", get(share_meta))
+        .route("/share/{share_id}/manifest", get(share_manifest))
+        .route("/share/{share_id}/file/{*key}", get(share_file))
         .route("/health", get(health))
         .with_state(state)
 }
@@ -388,6 +391,146 @@ async fn head_key(
     }
 }
 
+async fn share_meta(
+    State(state): State<Arc<ProxyState>>,
+    Host(raw_host): Host,
+    Path(share_id): Path<String>,
+) -> Response {
+    let hostname = extract_hostname(&raw_host);
+    let registry = state.registry.read().await;
+    let entry = match registry.find_by_hostname(hostname) {
+        Some(e) => e.clone(),
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+    drop(registry);
+
+    if let Err(resp) = get_s3_client(&state.s3_clients, &entry.library_id, &entry).await {
+        return resp;
+    }
+
+    let clients = state.s3_clients.read().await;
+    let client = clients.get(&entry.library_id).unwrap();
+
+    let key = format!("shares/{share_id}/meta.enc");
+    match client.get_object(&key).await {
+        Ok(data) => (
+            StatusCode::OK,
+            [
+                ("content-type", "application/octet-stream"),
+                ("access-control-allow-origin", "*"),
+            ],
+            data,
+        )
+            .into_response(),
+        Err(err) => s3_error_to_response(err),
+    }
+}
+
+async fn share_manifest(
+    State(state): State<Arc<ProxyState>>,
+    Host(raw_host): Host,
+    Path(share_id): Path<String>,
+) -> Response {
+    let hostname = extract_hostname(&raw_host);
+    let registry = state.registry.read().await;
+    let entry = match registry.find_by_hostname(hostname) {
+        Some(e) => e.clone(),
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+    drop(registry);
+
+    if let Err(resp) = get_s3_client(&state.s3_clients, &entry.library_id, &entry).await {
+        return resp;
+    }
+
+    let clients = state.s3_clients.read().await;
+    let client = clients.get(&entry.library_id).unwrap();
+
+    let key = format!("shares/{share_id}/manifest.json");
+    match client.get_object(&key).await {
+        Ok(data) => (
+            StatusCode::OK,
+            [
+                ("content-type", "application/json"),
+                ("access-control-allow-origin", "*"),
+            ],
+            data,
+        )
+            .into_response(),
+        Err(err) => s3_error_to_response(err),
+    }
+}
+
+async fn share_file(
+    State(state): State<Arc<ProxyState>>,
+    Host(raw_host): Host,
+    headers: HeaderMap,
+    Path((share_id, key)): Path<(String, String)>,
+) -> Response {
+    let hostname = extract_hostname(&raw_host);
+    let registry = state.registry.read().await;
+    let entry = match registry.find_by_hostname(hostname) {
+        Some(e) => e.clone(),
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+    drop(registry);
+
+    if let Err(resp) = get_s3_client(&state.s3_clients, &entry.library_id, &entry).await {
+        return resp;
+    }
+
+    let clients = state.s3_clients.read().await;
+    let client = clients.get(&entry.library_id).unwrap();
+
+    // Read manifest to check if key is allowed
+    let manifest_key = format!("shares/{share_id}/manifest.json");
+    let manifest_data = match client.get_object(&manifest_key).await {
+        Ok(data) => data,
+        Err(S3Error::NotFound) => return StatusCode::NOT_FOUND.into_response(),
+        Err(err) => return s3_error_to_response(err),
+    };
+
+    let manifest: crate::share::ShareManifest = match serde_json::from_slice(&manifest_data) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!("failed to parse manifest for share {share_id}: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    if !manifest.files.contains(&key) {
+        return (StatusCode::FORBIDDEN, "file not in share manifest").into_response();
+    }
+
+    // Serve the file, with range support
+    if let Some(range_header) = headers.get("range").and_then(|v| v.to_str().ok()) {
+        if let Some((start, end)) = parse_range_header(range_header) {
+            return match client.get_object_range(&key, start, end).await {
+                Ok(data) => (
+                    StatusCode::PARTIAL_CONTENT,
+                    [("access-control-allow-origin", "*")],
+                    data,
+                )
+                    .into_response(),
+                Err(err) => s3_error_to_response(err),
+            };
+        }
+    }
+
+    match client.get_object(&key).await {
+        Ok(data) => (
+            StatusCode::OK,
+            [
+                ("content-type", "application/octet-stream"),
+                ("access-control-allow-origin", "*"),
+            ],
+            data,
+        )
+            .into_response(),
+        Err(err) => s3_error_to_response(err),
+    }
+}
+
 /// Parse a `Range: bytes=START-END` header.
 /// Returns (start, end) where both are inclusive, or None if unparseable.
 fn parse_range_header(header: &str) -> Option<(u64, u64)> {
@@ -546,5 +689,20 @@ mod tests {
         assert_eq!(parse_range_header("invalid"), None);
         assert_eq!(parse_range_header("bytes="), None);
         assert_eq!(parse_range_header("bytes=100-"), None);
+    }
+
+    #[test]
+    fn share_manifest_parse() {
+        let json = r#"{"files":["storage/ab/cd/file-1","images/ab/cd/img-1"]}"#;
+        let manifest: crate::share::ShareManifest = serde_json::from_str(json).unwrap();
+        assert_eq!(manifest.files.len(), 2);
+        assert!(manifest.files.contains(&"storage/ab/cd/file-1".to_string()));
+    }
+
+    #[test]
+    fn share_manifest_empty_files() {
+        let json = r#"{"files":[]}"#;
+        let manifest: crate::share::ShareManifest = serde_json::from_str(json).unwrap();
+        assert!(manifest.files.is_empty());
     }
 }

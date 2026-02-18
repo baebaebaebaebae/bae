@@ -1,4 +1,5 @@
 pub mod api;
+pub mod crypto;
 pub mod pages;
 pub mod playback;
 

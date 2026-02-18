@@ -21,6 +21,7 @@ pub mod reverse_lookup;
 pub mod service;
 pub mod session;
 pub mod session_ext;
+pub mod share_format;
 pub mod share_grant;
 pub mod shared_release;
 pub mod snapshot;

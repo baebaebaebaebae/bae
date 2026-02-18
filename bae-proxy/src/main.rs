@@ -1,6 +1,7 @@
 mod proxy;
 mod registry;
 mod s3;
+mod share;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

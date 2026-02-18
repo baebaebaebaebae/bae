@@ -137,6 +137,27 @@ pub enum ShareInfo {
     Album(SharedAlbum),
 }
 
+// -- Cloud share types (decrypted from meta.enc) --
+
+#[derive(Deserialize, Clone, Debug, PartialEq)]
+pub struct CloudShareMeta {
+    pub album_name: String,
+    pub artist: String,
+    pub year: Option<i32>,
+    pub cover_image_key: Option<String>,
+    pub tracks: Vec<CloudShareTrack>,
+    pub release_key_b64: String,
+}
+
+#[derive(Deserialize, Clone, Debug, PartialEq)]
+pub struct CloudShareTrack {
+    pub number: Option<i32>,
+    pub title: String,
+    pub duration_secs: Option<i64>,
+    pub file_key: String,
+    pub format: String,
+}
+
 fn cover_url_for(cover_art: &Option<String>) -> Option<String> {
     cover_art
         .as_ref()
@@ -362,4 +383,47 @@ pub async fn fetch_share_info(token: &str) -> Result<ShareInfo, String> {
         }
         other => Err(format!("Unknown share kind: {other}")),
     }
+}
+
+/// Fetch encrypted share metadata from bae-proxy.
+pub async fn fetch_share_meta_encrypted(share_id: &str) -> Result<Vec<u8>, String> {
+    let url = format!("/share/{share_id}/meta");
+    let resp = reqwest::get(&url)
+        .await
+        .map_err(|e| format!("Network error: {e}"))?;
+
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err("Share not found.".to_string());
+    }
+    if !resp.status().is_success() {
+        return Err(format!("Server error: {}", resp.status()));
+    }
+
+    resp.bytes()
+        .await
+        .map(|b| b.to_vec())
+        .map_err(|e| format!("Read error: {e}"))
+}
+
+/// Fetch an encrypted file via bae-proxy share route.
+pub async fn fetch_share_file(share_id: &str, file_key: &str) -> Result<Vec<u8>, String> {
+    let url = format!("/share/{share_id}/file/{file_key}");
+    let resp = reqwest::get(&url)
+        .await
+        .map_err(|e| format!("Network error: {e}"))?;
+
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err("File not found.".to_string());
+    }
+    if resp.status() == reqwest::StatusCode::FORBIDDEN {
+        return Err("Access denied.".to_string());
+    }
+    if !resp.status().is_success() {
+        return Err(format!("Server error: {}", resp.status()));
+    }
+
+    resp.bytes()
+        .await
+        .map(|b| b.to_vec())
+        .map_err(|e| format!("Read error: {e}"))
 }
