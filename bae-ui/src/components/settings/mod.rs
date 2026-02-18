@@ -19,7 +19,7 @@ pub use bittorrent::{BitTorrentSectionView, BitTorrentSettings};
 pub use card::{SettingsCard, SettingsSection};
 pub use cloud_provider::{BaeCloudAuthMode, CloudProviderOption, CloudProviderPicker};
 pub use discogs::DiscogsSectionView;
-pub use follow_library::{FollowLibraryView, FollowTestStatus};
+pub use follow_library::{FollowLibraryView, FollowSyncStatus};
 pub use join_library::{JoinLibraryView, JoinStatus};
 pub use library::{LibraryInfo, LibrarySectionView};
 pub use subsonic::SubsonicSectionView;

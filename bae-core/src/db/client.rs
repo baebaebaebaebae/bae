@@ -90,6 +90,30 @@ impl Database {
         })
     }
 
+    /// Open an existing database read-write without running migrations.
+    ///
+    /// Use this for databases bootstrapped from a snapshot where the schema
+    /// already exists. Writes (e.g. sync cursors) work, but no migrations run.
+    pub async fn open(database_path: &str) -> Result<Self, sqlx::Error> {
+        let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", database_path))?
+            .journal_mode(SqliteJournalMode::Wal);
+
+        info!(
+            "Opening read-write (no migrations) sqlite://{}",
+            database_path
+        );
+
+        let write_conn = opts.clone().connect().await?;
+        let read_pool = SqlitePool::connect_with(opts).await?;
+
+        Ok(Database {
+            inner: Arc::new(DatabaseInner {
+                writer: Some(Mutex::new(write_conn)),
+                read_pool,
+            }),
+        })
+    }
+
     /// Open database in read-only mode (no migrations, no writes).
     /// Write methods will return an error if called.
     pub async fn open_read_only(database_path: &str) -> Result<Self, sqlx::Error> {

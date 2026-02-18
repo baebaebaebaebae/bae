@@ -249,7 +249,7 @@ pub fn LibrarySectionView(
                                                     }
                                                 }
                                             }
-                                            p { class: "text-xs text-gray-500 mt-1 truncate", "{flib.server_url} ({flib.username})" }
+                                            p { class: "text-xs text-gray-500 mt-1 truncate", "{flib.proxy_url}" }
                                         }
                                         div { class: "flex items-center gap-2 ml-4 flex-shrink-0",
                                             if !is_active {

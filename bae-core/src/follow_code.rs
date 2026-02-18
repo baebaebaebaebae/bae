@@ -5,23 +5,20 @@ use serde::{Deserialize, Serialize};
 /// Payload encoded inside a follow code.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct FollowPayload {
-    /// Server URL (e.g. "http://192.168.1.100:4533")
+    /// Proxy base URL (e.g. "https://alice.bae.fm")
     url: String,
-    /// Username for authentication
-    user: String,
-    /// Password for authentication
-    pass: String,
+    /// Base64-encoded library encryption key
+    key: String,
     /// Optional display name for the library
     #[serde(default, skip_serializing_if = "Option::is_none")]
     name: Option<String>,
 }
 
 /// Encode follow credentials into an opaque follow code string.
-pub fn encode(server_url: &str, username: &str, password: &str, name: Option<&str>) -> String {
+pub fn encode(proxy_url: &str, encryption_key: &[u8], name: Option<&str>) -> String {
     let payload = FollowPayload {
-        url: server_url.to_string(),
-        user: username.to_string(),
-        pass: password.to_string(),
+        url: proxy_url.to_string(),
+        key: URL_SAFE_NO_PAD.encode(encryption_key),
         name: name.map(|s| s.to_string()),
     };
     let json = serde_json::to_string(&payload).expect("FollowPayload serialization cannot fail");
@@ -29,14 +26,17 @@ pub fn encode(server_url: &str, username: &str, password: &str, name: Option<&st
 }
 
 /// Decode a follow code into its components.
-/// Returns (server_url, username, password, name).
-pub fn decode(code: &str) -> Result<(String, String, String, Option<String>), FollowCodeError> {
+/// Returns (proxy_url, encryption_key_bytes, name).
+pub fn decode(code: &str) -> Result<(String, Vec<u8>, Option<String>), FollowCodeError> {
     let bytes = URL_SAFE_NO_PAD
         .decode(code.trim())
         .map_err(|_| FollowCodeError::InvalidBase64)?;
     let payload: FollowPayload =
         serde_json::from_slice(&bytes).map_err(|e| FollowCodeError::InvalidJson(e.to_string()))?;
-    Ok((payload.url, payload.user, payload.pass, payload.name))
+    let key_bytes = URL_SAFE_NO_PAD
+        .decode(&payload.key)
+        .map_err(|_| FollowCodeError::InvalidBase64)?;
+    Ok((payload.url, key_bytes, payload.name))
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -53,17 +53,12 @@ mod tests {
 
     #[test]
     fn encode_decode_roundtrip() {
-        let code = encode(
-            "http://192.168.1.100:4533",
-            "listener",
-            "secret123",
-            Some("Friend's Library"),
-        );
-        let (url, user, pass, name) = decode(&code).unwrap();
-        assert_eq!(url, "http://192.168.1.100:4533");
-        assert_eq!(user, "listener");
-        assert_eq!(pass, "secret123");
-        assert_eq!(name, Some("Friend's Library".to_string()));
+        let key = vec![0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44];
+        let code = encode("https://alice.bae.fm", &key, Some("Test Library"));
+        let (url, decoded_key, name) = decode(&code).unwrap();
+        assert_eq!(url, "https://alice.bae.fm");
+        assert_eq!(decoded_key, key);
+        assert_eq!(name, Some("Test Library".to_string()));
     }
 
     #[test]
@@ -85,19 +80,29 @@ mod tests {
 
     #[test]
     fn name_is_optional() {
-        let code = encode("http://localhost:4533", "admin", "pass", None);
-        let (url, user, pass, name) = decode(&code).unwrap();
-        assert_eq!(url, "http://localhost:4533");
-        assert_eq!(user, "admin");
-        assert_eq!(pass, "pass");
+        let key = vec![0x01, 0x02, 0x03];
+        let code = encode("https://example.com", &key, None);
+        let (url, decoded_key, name) = decode(&code).unwrap();
+        assert_eq!(url, "https://example.com");
+        assert_eq!(decoded_key, key);
         assert_eq!(name, None);
     }
 
     #[test]
     fn decode_trims_whitespace() {
-        let code = encode("http://example.com:4533", "user", "pw", None);
+        let key = vec![0x01, 0x02, 0x03];
+        let code = encode("https://example.com", &key, None);
         let padded = format!("  {} \n", code);
-        let (url, _, _, _) = decode(&padded).unwrap();
-        assert_eq!(url, "http://example.com:4533");
+        let (url, _, _) = decode(&padded).unwrap();
+        assert_eq!(url, "https://example.com");
+    }
+
+    #[test]
+    fn roundtrip_32_byte_key() {
+        let key = vec![0xAB; 32];
+        let code = encode("https://proxy.example.com", &key, Some("Full Key"));
+        let (_, decoded_key, _) = decode(&code).unwrap();
+        assert_eq!(decoded_key.len(), 32);
+        assert_eq!(decoded_key, key);
     }
 }

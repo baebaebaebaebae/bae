@@ -314,17 +314,16 @@ pub struct ConfigYaml {
     pub followed_libraries: Vec<FollowedLibrary>,
 }
 
-/// A remote server the user is "following" (read-only browsing + streaming).
+/// A remote library the user is "following" (read-only sync + streaming).
+/// The encryption key is stored in the keyring, not here.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FollowedLibrary {
     /// Unique ID (UUID)
     pub id: String,
     /// User-chosen display name
     pub name: String,
-    /// Server URL (e.g. "http://192.168.1.100:4533")
-    pub server_url: String,
-    /// Username (password stored in keyring)
-    pub username: String,
+    /// bae-proxy URL (e.g. "https://alice.bae.fm")
+    pub proxy_url: String,
 }
 
 /// Metadata about a discovered library (for the library switcher UI)
@@ -813,6 +812,12 @@ impl Config {
         Ok(yaml.library_id)
     }
 
+    /// Directory for a followed library's local data (snapshot DB, cursors).
+    pub fn followed_library_dir(followed_id: &str) -> PathBuf {
+        let home_dir = dirs::home_dir().expect("Failed to get home directory");
+        home_dir.join(".bae").join("followed").join(followed_id)
+    }
+
     /// Add a followed library to the config and persist.
     pub fn add_followed_library(&mut self, lib: FollowedLibrary) -> Result<(), ConfigError> {
         self.followed_libraries.push(lib);
@@ -1155,8 +1160,7 @@ mod tests {
         config.followed_libraries = vec![FollowedLibrary {
             id: "follow-1".to_string(),
             name: "Friend's Library".to_string(),
-            server_url: "http://192.168.1.50:4533".to_string(),
-            username: "listener".to_string(),
+            proxy_url: "https://alice.bae.fm".to_string(),
         }];
         config.save_to_config_yaml().unwrap();
 
@@ -1167,11 +1171,7 @@ mod tests {
         assert_eq!(yaml.followed_libraries.len(), 1);
         assert_eq!(yaml.followed_libraries[0].id, "follow-1");
         assert_eq!(yaml.followed_libraries[0].name, "Friend's Library");
-        assert_eq!(
-            yaml.followed_libraries[0].server_url,
-            "http://192.168.1.50:4533"
-        );
-        assert_eq!(yaml.followed_libraries[0].username, "listener");
+        assert_eq!(yaml.followed_libraries[0].proxy_url, "https://alice.bae.fm");
     }
 
     #[test]
@@ -1192,8 +1192,7 @@ mod tests {
             .add_followed_library(FollowedLibrary {
                 id: "f1".to_string(),
                 name: "Server A".to_string(),
-                server_url: "http://a:4533".to_string(),
-                username: "user".to_string(),
+                proxy_url: "https://a.bae.fm".to_string(),
             })
             .unwrap();
         assert_eq!(config.followed_libraries.len(), 1);
@@ -1202,8 +1201,7 @@ mod tests {
             .add_followed_library(FollowedLibrary {
                 id: "f2".to_string(),
                 name: "Server B".to_string(),
-                server_url: "http://b:4533".to_string(),
-                username: "user2".to_string(),
+                proxy_url: "https://b.bae.fm".to_string(),
             })
             .unwrap();
         assert_eq!(config.followed_libraries.len(), 2);

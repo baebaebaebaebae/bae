@@ -21,7 +21,7 @@
 //! 7. Send `Seeked` progress event
 
 use crate::cloud_storage::CloudStorage;
-use crate::db::DbTrack;
+use crate::db::{Database, DbTrack};
 use crate::encryption::EncryptionService;
 use crate::library::LibraryManager;
 use crate::playback::cpal_output::AudioOutput;
@@ -39,8 +39,25 @@ use std::sync::{mpsc, Arc, Mutex};
 use tokio::sync::mpsc as tokio_mpsc;
 use tracing::{error, info, trace, warn};
 
+/// Override source for playing tracks from a followed library.
+///
+/// When set on PlaybackService, `prepare_track` queries this database and
+/// fetches audio through this cloud storage instead of the local library.
+pub struct FollowedSource {
+    pub database: Database,
+    pub cloud_storage: Arc<dyn CloudStorage>,
+    pub encryption: EncryptionService,
+}
+
+// FollowedSource contains Database which isn't Debug
+impl std::fmt::Debug for FollowedSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FollowedSource").finish_non_exhaustive()
+    }
+}
+
 /// Playback commands sent to the service
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum PlaybackCommand {
     Play(String),
     PlayAlbum(Vec<String>),
@@ -66,6 +83,10 @@ pub enum PlaybackCommand {
     SetRepeatMode(RepeatMode),
     /// Skip to a specific position in the queue (manual action, skip pregap)
     SkipTo(usize),
+    /// Set a followed library as the audio source for subsequent Play commands.
+    SetFollowedSource(FollowedSource),
+    /// Clear the followed source, reverting to the local library.
+    ClearFollowedSource,
 }
 /// Current playback state
 #[derive(Debug, Clone)]
@@ -161,6 +182,16 @@ impl PlaybackHandle {
     }
     pub fn skip_to(&self, index: usize) {
         let _ = self.command_tx.send(PlaybackCommand::SkipTo(index));
+    }
+    /// Set a followed library as the audio source for subsequent Play commands.
+    pub fn set_followed_source(&self, source: FollowedSource) {
+        let _ = self
+            .command_tx
+            .send(PlaybackCommand::SetFollowedSource(source));
+    }
+    /// Clear the followed source, reverting to the local library.
+    pub fn clear_followed_source(&self) {
+        let _ = self.command_tx.send(PlaybackCommand::ClearFollowedSource);
     }
 }
 
@@ -404,6 +435,125 @@ async fn prepare_track(
     })
 }
 
+/// Prepare a track from a followed library for playback.
+///
+/// Audio is always fetched from cloud storage (via the followed library's proxy).
+/// Uses the followed library's database and encryption service.
+async fn prepare_followed_track(
+    source: &FollowedSource,
+    track_id: &str,
+) -> Result<PreparedTrack, PlaybackError> {
+    let db = &source.database;
+
+    let track = db
+        .get_track_by_id(track_id)
+        .await
+        .map_err(PlaybackError::database)?
+        .ok_or_else(|| PlaybackError::not_found("Track", track_id))?;
+
+    let release = db
+        .get_release_by_id(&track.release_id)
+        .await
+        .map_err(PlaybackError::database)?
+        .ok_or_else(|| PlaybackError::not_found("Release", &track.release_id))?;
+
+    let audio_format = db
+        .get_audio_format_by_track_id(track_id)
+        .await
+        .map_err(PlaybackError::database)?
+        .ok_or_else(|| PlaybackError::not_found("Audio format", track_id))?;
+
+    let file_id = audio_format
+        .file_id
+        .as_ref()
+        .ok_or_else(|| PlaybackError::not_found("file_id in audio_format", track_id))?;
+
+    let audio_file = db
+        .get_file_by_id(file_id)
+        .await
+        .map_err(PlaybackError::database)?
+        .ok_or_else(|| PlaybackError::not_found("Audio file", file_id))?;
+
+    let pregap_ms = audio_format.pregap_ms;
+
+    let (start_byte, end_byte) =
+        match (audio_format.start_byte_offset, audio_format.end_byte_offset) {
+            (Some(s), Some(e)) => (Some(s as u64), Some(e as u64)),
+            _ => (None, None),
+        };
+
+    let all_flac_headers = audio_format.flac_headers.clone();
+    let needs_headers = audio_format.needs_headers;
+    let flac_headers = if needs_headers {
+        all_flac_headers.clone()
+    } else {
+        None
+    };
+
+    let file_size = if let (Some(start), Some(end)) = (start_byte, end_byte) {
+        end - start
+    } else {
+        audio_file.file_size as u64
+    };
+    let headers_len = flac_headers.as_ref().map(|h| h.len() as u64).unwrap_or(0);
+
+    let buffer = create_sparse_buffer();
+
+    // Use per-release derived encryption for the storage key
+    let enc = source.encryption.derive_release_encryption(&release.id);
+    let encryption_arc = Arc::new(enc);
+
+    // Cloud storage path for the audio file
+    let storage_key = crate::storage::storage_path(file_id);
+
+    let read_config = AudioReadConfig {
+        path: storage_key.clone(),
+        flac_headers: flac_headers.clone(),
+        start_byte,
+        end_byte,
+    };
+
+    let reader: Box<dyn AudioDataReader> = Box::new(CloudStorageReader::new(
+        read_config,
+        source.cloud_storage.clone(),
+        Some(encryption_arc.clone()),
+        true,
+    ));
+
+    reader.start_reading(buffer.clone());
+
+    let audio_data_start = if needs_headers {
+        headers_len
+    } else {
+        audio_format.audio_data_start as u64
+    };
+
+    let duration = track
+        .duration_ms
+        .map(|ms| std::time::Duration::from_millis(ms as u64))
+        .unwrap_or(std::time::Duration::from_secs(300));
+
+    Ok(PreparedTrack {
+        track,
+        buffer,
+        flac_headers: all_flac_headers,
+        seektable_json: audio_format.seektable_json.clone(),
+        sample_rate: audio_format.sample_rate as u32,
+        audio_data_start,
+        file_size: file_size + headers_len,
+        source_path: storage_key,
+        pregap_ms,
+        duration,
+        is_local_storage: false,
+        track_start_byte_offset: start_byte,
+        track_end_byte_offset: end_byte,
+        cloud_storage: Some(source.cloud_storage.clone()),
+        cloud_encrypted: true,
+        encryption_nonce: audio_file.encryption_nonce,
+        encryption_override: Some(encryption_arc),
+    })
+}
+
 /// Playback service that manages audio playback
 pub struct PlaybackService {
     library_manager: LibraryManager,
@@ -425,6 +575,8 @@ pub struct PlaybackService {
     next_prepared: Option<PreparedTrack>,
     /// Preloaded next track streaming source (decoder already started)
     next_streaming_source: Option<Arc<Mutex<StreamingPcmSource>>>,
+    /// Override source for playing from a followed library.
+    followed_source: Option<FollowedSource>,
 }
 
 impl PlaybackService {
@@ -623,6 +775,7 @@ impl PlaybackService {
                     current_streaming_source: None,
                     next_prepared: None,
                     next_streaming_source: None,
+                    followed_source: None,
                 };
                 service.run().await;
             });
@@ -949,6 +1102,14 @@ impl PlaybackService {
                         self.play_track(&track_id, false, false).await;
                     }
                 }
+                PlaybackCommand::SetFollowedSource(source) => {
+                    info!("Playback source set to followed library");
+                    self.followed_source = Some(source);
+                }
+                PlaybackCommand::ClearFollowedSource => {
+                    info!("Playback source cleared, using local library");
+                    self.followed_source = None;
+                }
             }
         }
         info!("PlaybackService stopped");
@@ -974,8 +1135,12 @@ impl PlaybackService {
         });
 
         // Prepare track: fetch metadata, create buffer, start reading
-        let prepared = match prepare_track(&self.library_manager, &self.library_dir, track_id).await
-        {
+        let prepared = if let Some(ref followed) = self.followed_source {
+            prepare_followed_track(followed, track_id).await
+        } else {
+            prepare_track(&self.library_manager, &self.library_dir, track_id).await
+        };
+        let prepared = match prepared {
             Ok(p) => p,
             Err(e) => {
                 error!("Failed to prepare track {}: {}", track_id, e);
@@ -1082,8 +1247,12 @@ impl PlaybackService {
     /// This eagerly starts the decoder so samples are ready when we switch tracks.
     async fn preload_next_track(&mut self, track_id: &str) {
         // Prepare track: fetch metadata, create buffer, start reading
-        let prepared = match prepare_track(&self.library_manager, &self.library_dir, track_id).await
-        {
+        let prepared = if let Some(ref followed) = self.followed_source {
+            prepare_followed_track(followed, track_id).await
+        } else {
+            prepare_track(&self.library_manager, &self.library_dir, track_id).await
+        };
+        let prepared = match prepared {
             Ok(p) => p,
             Err(e) => {
                 error!("Failed to preload track {}: {}", track_id, e);

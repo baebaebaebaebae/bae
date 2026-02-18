@@ -28,7 +28,7 @@ Leave bae-desktop running, or run bae-server, and you can generate share links -
 
 A friend who also has bae wants to browse your full catalog, not just one-off links. You generate a follow code and send it to them. They paste it into bae and your library appears alongside their own as a read-only remote library.
 
-Follow goes through bae-desktop or bae-server. The follower streams through your server, never touches the cloud home.
+The follow code contains the proxy URL and the library encryption key. The follower pulls encrypted snapshots and changesets from the cloud home (via bae-proxy), decrypts them locally, and gets a full read-only copy of the library database. Audio is fetched encrypted and decrypted client-side.
 
 ## Stage 5: Join
 

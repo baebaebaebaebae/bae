@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use aws_config::{BehaviorVersion, Region};
 use aws_credential_types::Credentials;
 use aws_sdk_s3::{primitives::ByteStreamError, Client, Error as S3Error};
@@ -340,5 +342,57 @@ impl CloudStorage for S3CloudStorage {
 
         debug!("Successfully deleted from {}", storage_location);
         Ok(())
+    }
+}
+
+/// Adapter that bridges a `CloudHome` into the `CloudStorage` trait.
+///
+/// Used for followed library playback: the follower accesses audio files
+/// through the cloud home (e.g. HttpCloudHome via bae-proxy) using the
+/// CloudStorage interface that the playback system expects.
+pub struct CloudHomeStorageAdapter {
+    home: Arc<dyn crate::cloud_home::CloudHome>,
+}
+
+impl CloudHomeStorageAdapter {
+    pub fn new(home: Arc<dyn crate::cloud_home::CloudHome>) -> Self {
+        Self { home }
+    }
+}
+
+#[async_trait::async_trait]
+impl CloudStorage for CloudHomeStorageAdapter {
+    async fn upload(&self, key: &str, data: &[u8]) -> Result<String, CloudStorageError> {
+        self.home
+            .write(key, data.to_vec())
+            .await
+            .map_err(|e| CloudStorageError::Download(e.to_string()))?;
+        Ok(key.to_string())
+    }
+
+    async fn download(&self, key: &str) -> Result<Vec<u8>, CloudStorageError> {
+        self.home
+            .read(key)
+            .await
+            .map_err(|e| CloudStorageError::Download(e.to_string()))
+    }
+
+    async fn download_range(
+        &self,
+        key: &str,
+        start: u64,
+        end: u64,
+    ) -> Result<Vec<u8>, CloudStorageError> {
+        self.home
+            .read_range(key, start, end)
+            .await
+            .map_err(|e| CloudStorageError::Download(e.to_string()))
+    }
+
+    async fn delete(&self, key: &str) -> Result<(), CloudStorageError> {
+        self.home
+            .delete(key)
+            .await
+            .map_err(|e| CloudStorageError::Download(e.to_string()))
     }
 }
