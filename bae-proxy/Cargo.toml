@@ -1,28 +1,32 @@
 [package]
-name = "bae-server"
+name = "bae-proxy"
 version = "0.0.0-dev"
-authors = ["dima"]
 edition = "2021"
 
 [[bin]]
-name = "bae-server"
+name = "bae-proxy"
 path = "src/main.rs"
 
 [dependencies]
-bae-core = { path = "../bae-core" }
-chrono = "0.4"
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1"
+aws-credential-types = "1"
+aws-types = "1"
+axum = "0.7"
 clap = { version = "4.5", features = ["derive", "env"] }
+ed25519-dalek = { version = "2", features = ["std", "rand_core"] }
 hex = "0.4"
-libsqlite3-sys = { version = "0.30.1", features = ["session", "bundled"] }
+notify = "7"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
 tokio = { version = "1.0", features = ["full"] }
-axum = "0.7"
-tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.5", features = ["fs"] }
+tower-http = { version = "0.6", features = ["fs"] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+rand = "0.8"
 
 [lints.clippy]
 too_many_arguments = "allow"
