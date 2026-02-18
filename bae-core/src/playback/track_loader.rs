@@ -3,53 +3,8 @@ use crate::cloud_storage::CloudStorage;
 use crate::encryption::EncryptionService;
 use crate::library::LibraryManager;
 use crate::playback::{PcmSource, PlaybackError};
-use crate::sync::shared_release::SharedRelease;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
-
-/// Resolved shared release storage: S3 client, encryption service, and storage key.
-pub struct SharedReleaseStorage {
-    pub storage: Arc<dyn CloudStorage>,
-    pub encryption: Arc<EncryptionService>,
-    pub storage_key: String,
-}
-
-/// Build an S3 client and encryption service from a resolved shared release.
-pub async fn create_shared_release_storage(
-    shared: SharedRelease,
-    file_id: &str,
-) -> Result<SharedReleaseStorage, PlaybackError> {
-    let access_key = shared.s3_access_key.ok_or_else(|| {
-        PlaybackError::cloud(crate::cloud_storage::CloudStorageError::Config(
-            "Shared release missing S3 access key".into(),
-        ))
-    })?;
-    let secret_key = shared.s3_secret_key.ok_or_else(|| {
-        PlaybackError::cloud(crate::cloud_storage::CloudStorageError::Config(
-            "Shared release missing S3 secret key".into(),
-        ))
-    })?;
-
-    let s3_config = crate::cloud_storage::S3Config {
-        bucket_name: shared.bucket,
-        region: shared.region,
-        access_key_id: access_key,
-        secret_access_key: secret_key,
-        endpoint_url: shared.endpoint,
-    };
-    let storage = crate::cloud_storage::S3CloudStorage::new_with_bucket_creation(s3_config, false)
-        .await
-        .map_err(PlaybackError::cloud)?;
-    let storage: Arc<dyn CloudStorage> = Arc::new(storage);
-    let encryption = Arc::new(EncryptionService::from_key(shared.library_key));
-    let storage_key = crate::storage::storage_path(file_id);
-
-    Ok(SharedReleaseStorage {
-        storage,
-        encryption,
-        storage_key,
-    })
-}
 
 /// Read a track's audio file and decode to PCM for playback.
 ///
@@ -140,90 +95,37 @@ pub async fn load_track_audio(
             encrypted_data
         }
     } else {
-        // No cloud storage passed in — check if this is a shared release
-        let shared = match crate::sync::shared_release::resolve_release(
-            library_manager.database(),
-            &track.release_id,
-        )
-        .await
-        {
-            Ok(s) => s,
-            Err(e) => {
-                warn!(
-                    "Failed to resolve shared release for {}: {e}",
-                    track.release_id
-                );
-                None
-            }
+        // Local file - derive path from release storage flags
+        let source_path = if release.managed_locally {
+            audio_file.local_storage_path(library_dir)
+        } else if let Some(ref unmanaged_path) = release.unmanaged_path {
+            std::path::Path::new(unmanaged_path).join(&audio_file.original_filename)
+        } else {
+            return Err(PlaybackError::not_found("file location", track_id));
         };
 
-        if let Some(shared) = shared {
-            let srs = create_shared_release_storage(shared, &audio_file.id).await?;
+        debug!("Reading from local file: {}", source_path.display());
 
-            debug!("Downloading shared release file: {}", srs.storage_key);
-
-            // Check cache first
-            let cache_key = format!("file:{}", audio_file.id);
-            let encrypted_data = match cache.get(&cache_key).await {
-                Ok(Some(cached_data)) => {
-                    debug!("Cache hit for shared file: {}", audio_file.id);
-                    cached_data
-                }
-                Ok(None) | Err(_) => {
-                    debug!("Cache miss - downloading shared file: {}", audio_file.id);
-                    let data = srs
-                        .storage
-                        .download(&srs.storage_key)
-                        .await
-                        .map_err(PlaybackError::cloud)?;
-
-                    if let Err(e) = cache.put(&cache_key, &data).await {
-                        warn!("Failed to cache file (non-fatal): {}", e);
-                    }
-                    data
-                }
-            };
-
-            // Shared releases are always encrypted with the per-release key
-            let enc = srs.encryption;
-            tokio::task::spawn_blocking(move || {
-                enc.decrypt(&encrypted_data).map_err(PlaybackError::decrypt)
-            })
+        let raw = tokio::fs::read(&source_path)
             .await
-            .map_err(PlaybackError::task)??
-        } else {
-            // Local file - derive path from release storage flags
-            let source_path = if release.managed_locally {
-                audio_file.local_storage_path(library_dir)
-            } else if let Some(ref unmanaged_path) = release.unmanaged_path {
-                std::path::Path::new(unmanaged_path).join(&audio_file.original_filename)
-            } else {
-                return Err(PlaybackError::not_found("file location", track_id));
-            };
+            .map_err(|e| PlaybackError::io(format!("Failed to read file: {}", e)))?;
 
-            debug!("Reading from local file: {}", source_path.display());
-
-            let raw = tokio::fs::read(&source_path)
-                .await
-                .map_err(|e| PlaybackError::io(format!("Failed to read file: {}", e)))?;
-
-            crate::file_service::decrypt_if_needed(
-                audio_file,
-                &track.release_id,
-                encryption_service,
-                raw,
-            )
-            .await
-            .map_err(|e| match e {
-                crate::file_service::FileError::EncryptionNotConfigured => {
-                    PlaybackError::decrypt(crate::encryption::EncryptionError::KeyManagement(
-                        "Cannot play encrypted files: encryption not configured".into(),
-                    ))
-                }
-                crate::file_service::FileError::Decryption(e) => PlaybackError::decrypt(e),
-                other => PlaybackError::io(other.to_string()),
-            })?
-        }
+        crate::file_service::decrypt_if_needed(
+            audio_file,
+            &track.release_id,
+            encryption_service,
+            raw,
+        )
+        .await
+        .map_err(|e| match e {
+            crate::file_service::FileError::EncryptionNotConfigured => {
+                PlaybackError::decrypt(crate::encryption::EncryptionError::KeyManagement(
+                    "Cannot play encrypted files: encryption not configured".into(),
+                ))
+            }
+            crate::file_service::FileError::Decryption(e) => PlaybackError::decrypt(e),
+            other => PlaybackError::io(other.to_string()),
+        })?
     };
 
     debug!("Read {} bytes of audio data", file_data.len());

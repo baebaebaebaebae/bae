@@ -1,0 +1,21 @@
+---
+title: Follow
+description: Browse someone's library as a read-only remote library
+---
+
+Follow lets someone browse your full catalog as a read-only remote library. They stream through your server -- they never touch your cloud home.
+
+## How it works
+
+1. Generate a **follow code** in bae
+2. Send it to the person you want to share with
+3. They paste it into bae
+4. Your library appears alongside theirs as a read-only remote library
+
+The follow code encodes your server URL, encryption key, and library name. The follower decrypts locally -- the server just proxies encrypted blobs.
+
+## Server requirement
+
+Follow requires either bae-desktop or a bae-proxy reachable from the internet. Set a public URL in Settings > Server.
+
+See [Sharing (Architecture)](/architecture/sharing) for technical details on identity and the membership chain.

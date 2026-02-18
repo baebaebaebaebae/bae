@@ -15,7 +15,6 @@ use super::export_error_toast::ExportErrorToast;
 use super::play_album_button::PlayAlbumButton;
 use super::release_info_modal::ReleaseInfoModal;
 use super::release_tabs_section::{ReleaseTabsSection, ReleaseTorrentInfo};
-use super::share_grant_dialog::ShareGrantDialog;
 use super::storage_modal::StorageModal;
 use super::track_row::TrackRow;
 use crate::components::{GalleryItem, GalleryItemContent, GalleryLightbox};
@@ -56,8 +55,6 @@ pub fn AlbumDetailView(
     on_eject: EventHandler<String>,
     on_fetch_remote_covers: EventHandler<()>,
     on_select_cover: EventHandler<CoverChange>,
-    /// Called with (release_id, recipient_pubkey_hex) to create a share grant
-    on_create_share_grant: EventHandler<(String, String)>,
     /// Called with release_id to create a cloud share link and copy to clipboard
     on_copy_share_link: EventHandler<String>,
     #[props(default)] torrent_info: std::collections::HashMap<String, ReleaseTorrentInfo>,
@@ -72,7 +69,6 @@ pub fn AlbumDetailView(
     let mut show_release_delete_confirm = use_signal(|| None::<String>);
     let mut show_release_info_modal = use_signal(|| None::<String>);
     let mut show_storage_modal = use_signal(|| None::<String>);
-    let mut show_share_dialog = use_signal(|| None::<String>);
     let mut show_gallery = use_signal(|| false);
     let mut show_cover_picker = use_signal(|| false);
 
@@ -106,9 +102,6 @@ pub fn AlbumDetailView(
                         on_view_storage: EventHandler::new(move |id: String| {
                             show_storage_modal.set(Some(id));
                         }),
-                        on_share: EventHandler::new(move |id: String| {
-                            show_share_dialog.set(Some(id));
-                        }),
                         on_copy_share_link,
                         on_open_gallery: EventHandler::new(move |_: String| {
                             show_gallery.set(true);
@@ -135,7 +128,6 @@ pub fn AlbumDetailView(
                         on_release_select,
                         on_view_files: move |id| show_release_info_modal.set(Some(id)),
                         on_view_storage: move |id| show_storage_modal.set(Some(id)),
-                        on_share: move |id| show_share_dialog.set(Some(id)),
                         on_delete_release: move |id| show_release_delete_confirm.set(Some(id)),
                         on_export: on_export_release,
                         on_copy_share_link,
@@ -186,8 +178,6 @@ pub fn AlbumDetailView(
             on_eject,
         }
 
-        ShareGrantDialogWrapper { state, show: show_share_dialog, on_create_share_grant }
-
         GalleryLightboxWrapper { state, show: show_gallery }
 
         CoverPickerWrapper { state, show: show_cover_picker, on_select: on_select_cover }
@@ -216,7 +206,6 @@ fn AlbumInfoSection(
     on_delete_album: EventHandler<String>,
     on_view_release_info: EventHandler<String>,
     on_view_storage: EventHandler<String>,
-    on_share: EventHandler<String>,
     on_copy_share_link: EventHandler<String>,
     on_open_gallery: EventHandler<String>,
     on_change_cover: EventHandler<String>,
@@ -253,7 +242,6 @@ fn AlbumInfoSection(
             on_delete_album,
             on_view_release_info,
             on_view_storage,
-            on_share,
             on_copy_share_link,
             on_open_gallery,
             on_change_cover,
@@ -289,7 +277,6 @@ fn ReleaseTabsSectionWrapper(
     on_release_select: EventHandler<String>,
     on_view_files: EventHandler<String>,
     on_view_storage: EventHandler<String>,
-    on_share: EventHandler<String>,
     on_delete_release: EventHandler<String>,
     on_export: EventHandler<String>,
     on_copy_share_link: EventHandler<String>,
@@ -316,7 +303,6 @@ fn ReleaseTabsSectionWrapper(
             export_error,
             on_view_files,
             on_view_storage,
-            on_share,
             on_delete_release,
             on_export,
             is_on_cloud,
@@ -615,35 +601,6 @@ fn StorageModalWrapper(
             },
             on_eject: move |_| {
                 on_eject.call(release_id_for_eject.clone());
-            },
-        }
-    }
-}
-
-#[component]
-fn ShareGrantDialogWrapper(
-    state: ReadStore<AlbumDetailState>,
-    show: Signal<Option<String>>,
-    on_create_share_grant: EventHandler<(String, String)>,
-) -> Element {
-    let is_open_memo = use_memo(move || show().is_some());
-    let is_open: ReadSignal<bool> = is_open_memo.into();
-
-    let grant_json = state.share_grant_json().read().clone();
-    let grant_error = state.share_error().read().clone();
-    let has_cloud_profile = *state.managed_in_cloud().read();
-
-    let release_id = show().unwrap_or_default();
-
-    rsx! {
-        ShareGrantDialog {
-            is_open,
-            on_close: move |_| show.set(None),
-            grant_json,
-            grant_error,
-            has_cloud_profile,
-            on_create_grant: move |pubkey: String| {
-                on_create_share_grant.call((release_id.clone(), pubkey));
             },
         }
     }

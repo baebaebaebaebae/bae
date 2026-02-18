@@ -877,36 +877,6 @@ pub struct DbLibraryImage {
 }
 
 // ============================================================================
-// Share Grants
-// ============================================================================
-
-/// An accepted share grant stored in the local DB.
-///
-/// This represents a grant the user received from someone else, giving access
-/// to one release in a remote library.
-#[derive(Debug, Clone)]
-pub struct DbShareGrant {
-    pub id: String,
-    pub from_library_id: String,
-    pub from_user_pubkey: String,
-    pub release_id: String,
-    pub bucket: String,
-    pub region: String,
-    pub endpoint: Option<String>,
-    pub wrapped_payload: Vec<u8>,
-    pub expires: Option<String>,
-    pub signature: String,
-    pub accepted_at: Option<String>,
-    pub created_at: String,
-    /// Hex-encoded 32-byte release decryption key, populated on accept.
-    pub release_key_hex: Option<String>,
-    /// S3 access key from the unwrapped payload, populated on accept.
-    pub s3_access_key: Option<String>,
-    /// S3 secret key from the unwrapped payload, populated on accept.
-    pub s3_secret_key: Option<String>,
-}
-
-// ============================================================================
 // Attestations
 // ============================================================================
 

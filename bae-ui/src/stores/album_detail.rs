@@ -57,9 +57,7 @@ pub struct AlbumDetailState {
     pub remote_covers: Vec<RemoteCoverOption>,
     /// Whether remote covers are currently loading
     pub loading_remote_covers: bool,
-    /// Share grant JSON (set after creating a grant, displayed in copyable area)
-    pub share_grant_json: Option<String>,
-    /// Share grant error message
+    /// Share error message (e.g., share link creation failure)
     pub share_error: Option<String>,
     /// Set to true when a share link has been copied to clipboard
     pub share_link_copied: bool,

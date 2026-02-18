@@ -26,7 +26,7 @@ You pick releases from MusicBrainz or Discogs, point bae at your files, and it h
 - **Sync**: SQLite session extension captures changesets automatically. Row-level last-writer-wins conflict resolution via hybrid logical clock. Deterministic merge.
 - **Membership**: append-only chain of signed membership entries. Each changeset is signed by its author and verified against the membership chain on pull.
 - **Subsonic API**: localhost:4533 for external clients (DSub, play:Sub, etc.)
-- **bae-proxy**: multi-tenant encrypted blob proxy. Routes requests by Host header, scopes to per-library S3 prefixes. Zero-knowledge — never decrypts.
+- **bae-proxy**: Zero-knowledge subset of bae-desktop for untrusted cloud hosting. Proxies encrypted blobs by Host header, scoped to per-library S3 prefixes. Never decrypts.
 
 ## Crates
 

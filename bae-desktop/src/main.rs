@@ -234,6 +234,24 @@ fn main() {
         None
     };
 
+    // Create a CloudHome for proxy routes (followers, share links).
+    // Only when a cloud provider is explicitly configured.
+    let cloud_home_for_proxy: Option<std::sync::Arc<dyn bae_core::cloud_home::CloudHome>> =
+        if config.cloud_provider.is_some() {
+            match runtime_handle.block_on(bae_core::cloud_home::create_cloud_home(
+                &config,
+                &key_service,
+            )) {
+                Ok(ch) => Some(std::sync::Arc::from(ch)),
+                Err(e) => {
+                    error!("Failed to create cloud home for proxy routes: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
     // Ensure manifest.json exists (idempotent, runs every startup)
     ensure_manifest(&config, encryption_service.as_ref());
 
@@ -298,6 +316,7 @@ fn main() {
             user_keypair,
             import_handle,
             playback_handle,
+            cloud_home_for_proxy,
         );
         return;
     }
@@ -348,6 +367,8 @@ fn main() {
 
         let subsonic_auth = build_subsonic_auth(&config, &key_service);
 
+        let subsonic_cloud_home = cloud_home_for_proxy.clone();
+
         runtime_handle.spawn(async move {
             start_subsonic_server(
                 subsonic_library,
@@ -357,6 +378,7 @@ fn main() {
                 subsonic_library_dir,
                 subsonic_key_service,
                 subsonic_auth,
+                subsonic_cloud_home,
             )
             .await
         });
@@ -437,7 +459,7 @@ pub(crate) fn build_subsonic_auth(
     }
 }
 
-/// Start the Subsonic API server
+/// Start the Subsonic API server, optionally with cloud home proxy routes.
 pub(crate) async fn start_subsonic_server(
     library_manager: SharedLibraryManager,
     encryption_service: Option<encryption::EncryptionService>,
@@ -446,15 +468,26 @@ pub(crate) async fn start_subsonic_server(
     library_dir: bae_core::library_dir::LibraryDir,
     key_service: bae_core::keys::KeyService,
     auth: bae_core::subsonic::SubsonicAuth,
+    cloud_home: Option<std::sync::Arc<dyn bae_core::cloud_home::CloudHome>>,
 ) {
     info!("Starting Subsonic API server...");
-    let app = create_router(
+    let mut app = create_router(
         library_manager,
         encryption_service,
         library_dir,
         key_service,
         auth,
     );
+
+    if let Some(ch) = cloud_home {
+        let cloud_state =
+            std::sync::Arc::new(bae_core::cloud_routes::CloudRouteState { cloud_home: ch });
+        let cloud_router = bae_core::cloud_routes::create_cloud_router(cloud_state);
+        app = app.merge(cloud_router);
+
+        info!("Cloud home proxy routes enabled (/cloud/*, /share/*)");
+    }
+
     let addr = format!("{}:{}", bind_address, port);
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => {

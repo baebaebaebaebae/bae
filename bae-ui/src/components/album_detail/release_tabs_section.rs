@@ -25,7 +25,6 @@ pub fn ReleaseTabsSection(
     export_error: Signal<Option<String>>,
     on_view_files: EventHandler<String>,
     on_view_storage: EventHandler<String>,
-    on_share: EventHandler<String>,
     on_delete_release: EventHandler<String>,
     on_export: EventHandler<String>,
     /// Whether the current release is on cloud storage (share requires cloud)
@@ -69,10 +68,6 @@ pub fn ReleaseTabsSection(
                                 on_view_storage: {
                                     let release_id = release_id.clone();
                                     move |_| on_view_storage.call(release_id.clone())
-                                },
-                                on_share: {
-                                    let release_id = release_id.clone();
-                                    move |_| on_share.call(release_id.clone())
                                 },
                                 is_on_cloud,
                                 on_copy_share_link: {
@@ -119,7 +114,6 @@ fn ReleaseTab(
     torrent: ReleaseTorrentInfo,
     on_view_files: EventHandler<()>,
     on_view_storage: EventHandler<()>,
-    on_share: EventHandler<()>,
     is_on_cloud: bool,
     on_copy_share_link: EventHandler<()>,
     on_export: EventHandler<()>,
@@ -212,14 +206,6 @@ fn ReleaseTab(
                         "Storage"
                     }
                     if is_on_cloud {
-                        MenuItem {
-                            disabled: is_deleting() || is_exporting(),
-                            onclick: move |_| {
-                                show_release_dropdown.set(None);
-                                on_share.call(());
-                            },
-                            "Share"
-                        }
                         MenuItem {
                             disabled: is_deleting() || is_exporting(),
                             onclick: move |_| {
