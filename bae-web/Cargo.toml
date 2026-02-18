@@ -6,14 +6,21 @@ edition = "2021"
 [dependencies]
 bae-common = { path = "../bae-common" }
 bae-ui = { path = "../bae-ui" }
+base64 = "0.22"
+chacha20poly1305 = "0.10"
 chrono = "0.4"
 dioxus = { workspace = true, features = ["router", "web", "asset", "document", "launch"] }
+js-sys-x = { workspace = true }
 reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = { workspace = true }
 wasm-bindgen-x = { workspace = true }
-web-sys-x = { workspace = true, features = ["Window", "HtmlMediaElement", "HtmlAudioElement", "MediaError"] }
+web-sys-x = { workspace = true, features = [
+    "Window", "Document", "Element", "Node", "HtmlElement",
+    "HtmlMediaElement", "HtmlAudioElement", "MediaError",
+    "Blob", "BlobPropertyBag", "Url", "Location",
+] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
