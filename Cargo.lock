@@ -919,6 +919,7 @@ dependencies = [
  "bae-ui",
  "base64",
  "chrono",
+ "clap",
  "cocoa 0.25.0",
  "dioxus",
  "dirs 5.0.1",
