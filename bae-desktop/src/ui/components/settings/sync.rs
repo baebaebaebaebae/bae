@@ -4,7 +4,7 @@
 use crate::ui::app_service::use_app;
 use bae_ui::stores::config::CloudProvider;
 use bae_ui::stores::{AppStateStoreExt, ConfigStateStoreExt, MemberRole, SyncStateStoreExt};
-use bae_ui::{CloudProviderOption, SyncBucketConfig, SyncSectionView};
+use bae_ui::{BaeCloudAuthMode, CloudProviderOption, SyncBucketConfig, SyncSectionView};
 use dioxus::prelude::*;
 
 /// Build the list of cloud provider options from current state.
@@ -29,6 +29,19 @@ fn build_cloud_options(
         };
 
     let mut options = Vec::new();
+
+    options.push(CloudProviderOption {
+        provider: CloudProvider::BaeCloud,
+        label: "bae cloud",
+        description: "Encrypted cloud sync",
+        connected_account: if matches!(cloud_provider, Some(CloudProvider::BaeCloud))
+            && cloud_home_configured
+        {
+            cloud_account_display.clone()
+        } else {
+            None
+        },
+    });
 
     #[cfg(target_os = "macos")]
     options.push(CloudProviderOption {
@@ -156,6 +169,16 @@ pub fn SyncSection() -> Element {
     let mut edit_access_key = use_signal(String::new);
     let mut edit_secret_key = use_signal(String::new);
 
+    // --- Local bae cloud form state ---
+    let mut bae_cloud_mode = use_signal(|| BaeCloudAuthMode::SignUp);
+    let mut bae_cloud_email = use_signal(String::new);
+    let mut bae_cloud_username = use_signal(String::new);
+    let mut bae_cloud_password = use_signal(String::new);
+
+    // Show the bae cloud form when BaeCloud is selected and not yet connected
+    let bae_cloud_is_editing =
+        matches!(cloud_provider, Some(CloudProvider::BaeCloud)) && !cloud_home_configured;
+
     // --- Local invite form state ---
     let mut show_invite_form = use_signal(|| false);
     let mut invite_pubkey = use_signal(String::new);
@@ -177,6 +200,7 @@ pub fn SyncSection() -> Element {
     let app_for_sign_in = app.clone();
     let app_for_disconnect = app.clone();
     let app_for_select = app.clone();
+    let app_for_bae_cloud_submit = app.clone();
     #[cfg(target_os = "macos")]
     let app_for_icloud = app.clone();
 
@@ -226,6 +250,31 @@ pub fn SyncSection() -> Element {
             edit_endpoint: edit_endpoint.read().clone(),
             edit_access_key: edit_access_key.read().clone(),
             edit_secret_key: edit_secret_key.read().clone(),
+
+            // bae cloud form state
+            bae_cloud_is_editing,
+            bae_cloud_mode: bae_cloud_mode.read().clone(),
+            bae_cloud_email: bae_cloud_email.read().clone(),
+            bae_cloud_username: bae_cloud_username.read().clone(),
+            bae_cloud_password: bae_cloud_password.read().clone(),
+            on_bae_cloud_mode_change: move |mode| bae_cloud_mode.set(mode),
+            on_bae_cloud_email_change: move |v| bae_cloud_email.set(v),
+            on_bae_cloud_username_change: move |v| bae_cloud_username.set(v),
+            on_bae_cloud_password_change: move |v| bae_cloud_password.set(v),
+            on_bae_cloud_submit: move |_| {
+                let mode = bae_cloud_mode.read().clone();
+                let email = bae_cloud_email.read().clone();
+                let password = bae_cloud_password.read().clone();
+                match mode {
+                    BaeCloudAuthMode::SignUp => {
+                        let username = bae_cloud_username.read().clone();
+                        app_for_bae_cloud_submit.sign_up_bae_cloud(email, username, password);
+                    }
+                    BaeCloudAuthMode::LogIn => {
+                        app_for_bae_cloud_submit.log_in_bae_cloud(email, password);
+                    }
+                }
+            },
 
             // S3 callbacks
             on_edit_start: move |_| {

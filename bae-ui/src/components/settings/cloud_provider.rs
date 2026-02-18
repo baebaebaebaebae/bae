@@ -18,6 +18,13 @@ pub struct CloudProviderOption {
     pub connected_account: Option<String>,
 }
 
+/// Auth mode for bae cloud signup/login form.
+#[derive(Clone, Debug, PartialEq)]
+pub enum BaeCloudAuthMode {
+    SignUp,
+    LogIn,
+}
+
 /// Cloud provider picker -- lets the user select and configure a cloud home backend.
 #[component]
 pub fn CloudProviderPicker(
@@ -38,6 +45,13 @@ pub fn CloudProviderPicker(
     s3_access_key: String,
     s3_secret_key: String,
 
+    // --- bae cloud form state ---
+    bae_cloud_is_editing: bool,
+    bae_cloud_mode: BaeCloudAuthMode,
+    bae_cloud_email: String,
+    bae_cloud_username: String,
+    bae_cloud_password: String,
+
     // --- Callbacks ---
     on_select: EventHandler<CloudProvider>,
     on_sign_in: EventHandler<CloudProvider>,
@@ -52,11 +66,21 @@ pub fn CloudProviderPicker(
     on_s3_endpoint_change: EventHandler<String>,
     on_s3_access_key_change: EventHandler<String>,
     on_s3_secret_key_change: EventHandler<String>,
+    // bae cloud callbacks
+    on_bae_cloud_mode_change: EventHandler<BaeCloudAuthMode>,
+    on_bae_cloud_email_change: EventHandler<String>,
+    on_bae_cloud_username_change: EventHandler<String>,
+    on_bae_cloud_password_change: EventHandler<String>,
+    on_bae_cloud_submit: EventHandler<()>,
 ) -> Element {
     let s3_has_required = !s3_bucket.is_empty()
         && !s3_region.is_empty()
         && !s3_access_key.is_empty()
         && !s3_secret_key.is_empty();
+
+    let bae_cloud_has_required = !bae_cloud_email.is_empty()
+        && !bae_cloud_password.is_empty()
+        && (bae_cloud_mode == BaeCloudAuthMode::LogIn || !bae_cloud_username.is_empty());
 
     rsx! {
         SettingsCard {
@@ -66,13 +90,11 @@ pub fn CloudProviderPicker(
                     "Where should bae store your library data for sync?"
                 }
             }
-
             if let Some(ref err) = sign_in_error {
                 div { class: "mb-4 p-3 bg-red-900/30 border border-red-700 rounded-lg text-sm text-red-300",
                     "{err}"
                 }
             }
-
             div { class: "space-y-1",
                 for option in options.iter() {
                     {
@@ -82,18 +104,9 @@ pub fn CloudProviderPicker(
                         let connected = option.connected_account.clone();
                         let is_s3 = option.provider == CloudProvider::S3;
                         let is_icloud = option.provider == CloudProvider::ICloud;
+                        let is_bae_cloud = option.provider == CloudProvider::BaeCloud;
                         let needs_oauth = matches!(
                             option.provider,
-
-                            // Radio button
-
-                            // Description or connected account
-
-                            // Action area (only when selected)
-
-                            // S3 inline edit form
-
-                            // S3 configured summary (when selected but not editing)
                             CloudProvider::GoogleDrive | CloudProvider::Dropbox | CloudProvider::OneDrive
                         );
                         let label = option.label;
@@ -175,6 +188,89 @@ pub fn CloudProviderPicker(
                                                             on_s3_edit_start.call(());
                                                         },
                                                         "Configure"
+                                                    }
+                                                } else if is_bae_cloud && !bae_cloud_is_editing {
+                            // noop: the form renders below
+
+        
+                                                }
+                                                // bae cloud inline form
+                                                // Mode toggle
+                                            }
+                                            // S3 inline edit form
+                                        }
+                                        if is_selected && is_bae_cloud && bae_cloud_is_editing {
+                                            div {
+                                                class: "mt-3 space-y-3",
+                                                onclick: move |evt: Event<MouseData>| evt.stop_propagation(),
+                                                div { class: "flex gap-3 text-sm",
+                                                    span {
+                                                        class: if bae_cloud_mode == BaeCloudAuthMode::SignUp { "text-blue-400 cursor-default" } else { "text-gray-400 hover:text-gray-200 cursor-pointer" },
+                                                        onclick: move |_| {
+                                                            on_bae_cloud_mode_change.call(BaeCloudAuthMode::SignUp);
+                                                        },
+                                                        "Sign up"
+                                                    }
+                                                    span {
+                                                        class: if bae_cloud_mode == BaeCloudAuthMode::LogIn { "text-blue-400 cursor-default" } else { "text-gray-400 hover:text-gray-200 cursor-pointer" },
+                                                        onclick: move |_| {
+                                                            on_bae_cloud_mode_change.call(BaeCloudAuthMode::LogIn);
+                                                        },
+                                                        "Log in"
+                                                    }
+                                                }
+                                                div {
+                                                    label { class: "block text-xs font-medium text-gray-400 mb-1",
+                                                        "Email"
+                                                    }
+                                                    TextInput {
+                                                        value: bae_cloud_email.to_string(),
+                                                        on_input: move |v| on_bae_cloud_email_change.call(v),
+                                                        size: TextInputSize::Medium,
+                                                        input_type: TextInputType::Text,
+                                                        placeholder: "you@example.com",
+                                                    }
+                                                }
+                                                if bae_cloud_mode == BaeCloudAuthMode::SignUp {
+                                                    div {
+                                                        label { class: "block text-xs font-medium text-gray-400 mb-1",
+                                                            "Username"
+                                                        }
+                                                        TextInput {
+                                                            value: bae_cloud_username.to_string(),
+                                                            on_input: move |v| on_bae_cloud_username_change.call(v),
+                                                            size: TextInputSize::Medium,
+                                                            input_type: TextInputType::Text,
+                                                            placeholder: "alice",
+                                                        }
+                                                    }
+                                                }
+                                                div {
+                                                    label { class: "block text-xs font-medium text-gray-400 mb-1",
+                                                        "Password"
+                                                    }
+                                                    TextInput {
+                                                        value: bae_cloud_password.to_string(),
+                                                        on_input: move |v| on_bae_cloud_password_change.call(v),
+                                                        size: TextInputSize::Medium,
+                                                        input_type: TextInputType::Password,
+                                                        placeholder: "Password",
+                                                    }
+                                                }
+                                                div { class: "flex gap-2",
+                                                    Button {
+                                                        variant: ButtonVariant::Primary,
+                                                        size: ButtonSize::Small,
+                                                        disabled: !bae_cloud_has_required,
+                                                        onclick: move |evt: Event<MouseData>| {
+                                                            evt.stop_propagation();
+                                                            on_bae_cloud_submit.call(());
+                                                        },
+                                                        if bae_cloud_mode == BaeCloudAuthMode::SignUp {
+                                                            "Sign up"
+                                                        } else {
+                                                            "Log in"
+                                                        }
                                                     }
                                                 }
                                             }

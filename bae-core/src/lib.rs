@@ -1,4 +1,5 @@
 pub mod audio_codec;
+pub mod bae_cloud_api;
 pub mod cache;
 #[cfg(feature = "cd-rip")]
 pub mod cd;

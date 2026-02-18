@@ -23,6 +23,8 @@ pub enum CloudHomeCredentials {
     },
     /// Consumer cloud providers (Google Drive, Dropbox, OneDrive): OAuth token JSON.
     OAuth { token_json: String },
+    /// bae cloud: session token from signup/login.
+    BaeCloud { session_token: String },
     /// iCloud: no credentials needed (macOS handles auth).
     None,
 }
