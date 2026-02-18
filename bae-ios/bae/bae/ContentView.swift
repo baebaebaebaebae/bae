@@ -16,22 +16,39 @@ struct ContentView: View {
             OnboardingView { creds in
                 do {
                     try keychainService.saveCredentials(creds)
-                    appState.screen = .linked(creds)
                     if let url = URL(string: creds.proxyUrl) {
                         appState.cloudClient = CloudHomeClient(baseURL: url)
                     }
+                    appState.screen = .bootstrapping(creds)
                 } catch {
                     // Save failed; user stays on onboarding and can retry
                 }
             }
-        case .linked(let creds):
+        case .bootstrapping(let creds):
+            if let client = appState.cloudClient {
+                let crypto = PlaceholderCryptoService()
+                let bootstrap = BootstrapService(
+                    cloudClient: client, crypto: crypto, encryptionKey: creds.encryptionKey)
+                BootstrapView(bootstrapService: bootstrap) { result in
+                    appState.bootstrapResult = result
+                    appState.screen = .library(creds)
+                } onError: { _ in
+                    // Stay on bootstrap view showing error
+                }
+            }
+        case .library(let creds):
             LinkedView(credentials: creds) {
                 do {
                     try keychainService.deleteCredentials()
+                    // Delete local database and cached data
+                    try? FileManager.default.removeItem(at: BootstrapService.databasePath())
+                    try? FileManager.default.removeItem(at: BootstrapService.syncCursorsPath())
+                    try? FileManager.default.removeItem(at: BootstrapService.imageCachePath())
                     appState.cloudClient = nil
+                    appState.bootstrapResult = nil
                     appState.screen = .onboarding
                 } catch {
-                    // Delete failed; user stays on linked view
+                    // Delete failed; user stays on library view
                 }
             }
         }
