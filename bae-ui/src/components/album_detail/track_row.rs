@@ -23,8 +23,6 @@ pub fn TrackRow(
     is_paused: bool,
     is_loading: bool,
     show_spinner: bool,
-    /// Whether to show the "Copy Share Link" menu item
-    show_share_link: bool,
     /// When true, hides export and other local-only actions
     #[props(default)]
     read_only: bool,
@@ -35,7 +33,6 @@ pub fn TrackRow(
     on_add_next: EventHandler<String>,
     on_add_to_queue: EventHandler<String>,
     on_export: EventHandler<String>,
-    on_copy_share_link: EventHandler<String>,
     on_artist_click: EventHandler<String>,
 ) -> Element {
     // Read track data at this leaf level
@@ -182,28 +179,24 @@ pub fn TrackRow(
             if is_available {
                 TrackMenu {
                     track_id: track_id_for_menu,
-                    show_share_link,
                     read_only,
                     on_export,
                     on_add_next,
                     on_add_to_queue,
-                    on_copy_share_link,
                 }
             }
         }
     }
 }
 
-/// Track context menu (export, play next, add to queue, copy share link)
+/// Track context menu (export, play next, add to queue)
 #[component]
 fn TrackMenu(
     track_id: String,
-    show_share_link: bool,
     read_only: bool,
     on_export: EventHandler<String>,
     on_add_next: EventHandler<String>,
     on_add_to_queue: EventHandler<String>,
-    on_copy_share_link: EventHandler<String>,
 ) -> Element {
     let mut show_menu = use_signal(|| false);
     let is_open: ReadSignal<bool> = show_menu.into();
@@ -263,18 +256,6 @@ fn TrackMenu(
                     }
                 },
                 "Add to Queue"
-            }
-            if show_share_link {
-                MenuItem {
-                    onclick: {
-                        let track_id = track_id.clone();
-                        move |_| {
-                            show_menu.set(false);
-                            on_copy_share_link.call(track_id.clone());
-                        }
-                    },
-                    "Copy Share Link"
-                }
             }
         }
     }

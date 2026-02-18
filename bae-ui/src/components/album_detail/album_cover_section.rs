@@ -24,6 +24,7 @@ pub fn AlbumCoverSection(
     on_view_release_info: EventHandler<String>,
     on_view_storage: EventHandler<String>,
     on_share: EventHandler<String>,
+    on_copy_share_link: EventHandler<String>,
     on_open_gallery: EventHandler<String>,
     on_change_cover: EventHandler<String>,
     /// Whether the current release is on cloud storage (share requires cloud)
@@ -130,6 +131,17 @@ pub fn AlbumCoverSection(
                                     }
                                 },
                                 "Share"
+                            }
+                            MenuItem {
+                                disabled: is_deleting || is_exporting,
+                                onclick: {
+                                    let release_id = release_id.clone();
+                                    move |_| {
+                                        show_dropdown.set(false);
+                                        on_copy_share_link.call(release_id.clone());
+                                    }
+                                },
+                                "Copy Link"
                             }
                         }
                         MenuItem {

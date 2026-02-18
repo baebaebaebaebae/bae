@@ -204,10 +204,6 @@ fn default_true() -> bool {
     true
 }
 
-fn default_share_signing_version() -> u32 {
-    1
-}
-
 /// YAML config file structure for non-secret settings (per-library)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigYaml {
@@ -312,12 +308,6 @@ pub struct ConfigYaml {
     /// Base URL for share links (e.g. "https://listen.example.com")
     #[serde(default)]
     pub share_base_url: Option<String>,
-    /// Default expiry for share links in days (None = never expires)
-    #[serde(default)]
-    pub share_default_expiry_days: Option<u32>,
-    /// Signing key version for share tokens. Incrementing invalidates all outstanding links.
-    #[serde(default = "default_share_signing_version")]
-    pub share_signing_key_version: u32,
 
     /// Remote servers the user is following (read-only browsing + streaming)
     #[serde(default)]
@@ -406,10 +396,6 @@ pub struct Config {
     pub cloud_home_bae_cloud_username: Option<String>,
     /// Base URL for share links (e.g. "https://listen.example.com")
     pub share_base_url: Option<String>,
-    /// Default expiry for share links in days (None = never expires)
-    pub share_default_expiry_days: Option<u32>,
-    /// Signing key version for share tokens. Incrementing invalidates all outstanding links.
-    pub share_signing_key_version: u32,
     /// Remote servers the user is following
     pub followed_libraries: Vec<FollowedLibrary>,
 }
@@ -611,8 +597,6 @@ impl Config {
             cloud_home_bae_cloud_url: yaml_config.cloud_home_bae_cloud_url,
             cloud_home_bae_cloud_username: yaml_config.cloud_home_bae_cloud_username,
             share_base_url: yaml_config.share_base_url,
-            share_default_expiry_days: yaml_config.share_default_expiry_days,
-            share_signing_key_version: yaml_config.share_signing_key_version,
             followed_libraries: yaml_config.followed_libraries,
         }
     }
@@ -705,8 +689,6 @@ impl Config {
             cloud_home_bae_cloud_url: self.cloud_home_bae_cloud_url.clone(),
             cloud_home_bae_cloud_username: self.cloud_home_bae_cloud_username.clone(),
             share_base_url: self.share_base_url.clone(),
-            share_default_expiry_days: self.share_default_expiry_days,
-            share_signing_key_version: self.share_signing_key_version,
             followed_libraries: self.followed_libraries.clone(),
         };
         std::fs::write(
@@ -767,8 +749,6 @@ impl Config {
             cloud_home_bae_cloud_url: None,
             cloud_home_bae_cloud_username: None,
             share_base_url: None,
-            share_default_expiry_days: None,
-            share_signing_key_version: 1,
             followed_libraries: vec![],
         };
 
@@ -957,8 +937,6 @@ mod tests {
             cloud_home_bae_cloud_url: None,
             cloud_home_bae_cloud_username: None,
             share_base_url: None,
-            share_default_expiry_days: None,
-            share_signing_key_version: 1,
             followed_libraries: vec![],
         }
     }

@@ -35,9 +35,6 @@ pub fn AlbumDetailView(
     tracks: ReadStore<Vec<Track>>,
     /// Playback state (from separate playback store)
     playback: PlaybackDisplay,
-    /// Whether to show the "Copy Share Link" menu item
-    #[props(default)]
-    show_share_link: bool,
     /// When true, hides edit/delete/export/storage/share actions (used for followed libraries)
     #[props(default)]
     read_only: bool,
@@ -52,7 +49,6 @@ pub fn AlbumDetailView(
     on_track_add_next: EventHandler<String>,
     on_track_add_to_queue: EventHandler<String>,
     on_track_export: EventHandler<String>,
-    on_track_copy_share_link: EventHandler<String>,
     on_artist_click: EventHandler<String>,
     on_play_album: EventHandler<Vec<String>>,
     on_add_album_to_queue: EventHandler<Vec<String>>,
@@ -62,6 +58,8 @@ pub fn AlbumDetailView(
     on_select_cover: EventHandler<CoverChange>,
     /// Called with (release_id, recipient_pubkey_hex) to create a share grant
     on_create_share_grant: EventHandler<(String, String)>,
+    /// Called with release_id to create a cloud share link and copy to clipboard
+    on_copy_share_link: EventHandler<String>,
     #[props(default)] torrent_info: std::collections::HashMap<String, ReleaseTorrentInfo>,
     #[props(default)] on_start_seeding: Option<EventHandler<String>>,
     #[props(default)] on_stop_seeding: Option<EventHandler<String>>,
@@ -111,6 +109,7 @@ pub fn AlbumDetailView(
                         on_share: EventHandler::new(move |id: String| {
                             show_share_dialog.set(Some(id));
                         }),
+                        on_copy_share_link,
                         on_open_gallery: EventHandler::new(move |_: String| {
                             show_gallery.set(true);
                         }),
@@ -139,6 +138,7 @@ pub fn AlbumDetailView(
                         on_share: move |id| show_share_dialog.set(Some(id)),
                         on_delete_release: move |id| show_release_delete_confirm.set(Some(id)),
                         on_export: on_export_release,
+                        on_copy_share_link,
                         on_start_seeding,
                         on_stop_seeding,
                     }
@@ -147,7 +147,6 @@ pub fn AlbumDetailView(
                         state,
                         tracks,
                         playback,
-                        show_share_link: show_share_link && !read_only,
                         read_only,
                         on_track_play,
                         on_track_pause,
@@ -155,7 +154,6 @@ pub fn AlbumDetailView(
                         on_track_add_next,
                         on_track_add_to_queue,
                         on_track_export,
-                        on_track_copy_share_link,
                         on_artist_click,
                     }
                 }
@@ -219,6 +217,7 @@ fn AlbumInfoSection(
     on_view_release_info: EventHandler<String>,
     on_view_storage: EventHandler<String>,
     on_share: EventHandler<String>,
+    on_copy_share_link: EventHandler<String>,
     on_open_gallery: EventHandler<String>,
     on_change_cover: EventHandler<String>,
     on_artist_click: EventHandler<String>,
@@ -255,6 +254,7 @@ fn AlbumInfoSection(
             on_view_release_info,
             on_view_storage,
             on_share,
+            on_copy_share_link,
             on_open_gallery,
             on_change_cover,
             is_on_cloud,
@@ -292,6 +292,7 @@ fn ReleaseTabsSectionWrapper(
     on_share: EventHandler<String>,
     on_delete_release: EventHandler<String>,
     on_export: EventHandler<String>,
+    on_copy_share_link: EventHandler<String>,
     on_start_seeding: Option<EventHandler<String>>,
     on_stop_seeding: Option<EventHandler<String>>,
 ) -> Element {
@@ -319,6 +320,7 @@ fn ReleaseTabsSectionWrapper(
             on_delete_release,
             on_export,
             is_on_cloud,
+            on_copy_share_link,
             torrent_info,
             on_start_seeding,
             on_stop_seeding,
@@ -332,7 +334,6 @@ fn TrackListSection(
     state: ReadStore<AlbumDetailState>,
     tracks: ReadStore<Vec<Track>>,
     playback: PlaybackDisplay,
-    show_share_link: bool,
     read_only: bool,
     on_track_play: EventHandler<String>,
     on_track_pause: EventHandler<()>,
@@ -340,7 +341,6 @@ fn TrackListSection(
     on_track_add_next: EventHandler<String>,
     on_track_add_to_queue: EventHandler<String>,
     on_track_export: EventHandler<String>,
-    on_track_copy_share_link: EventHandler<String>,
     on_artist_click: EventHandler<String>,
 ) -> Element {
     // Use lenses for individual fields - avoids subscribing to track import_state changes
@@ -429,7 +429,6 @@ fn TrackListSection(
                                 is_paused,
                                 is_loading,
                                 show_spinner: is_loading,
-                                show_share_link,
                                 read_only,
                                 on_play: on_track_play,
                                 on_pause: on_track_pause,
@@ -437,7 +436,6 @@ fn TrackListSection(
                                 on_add_next: on_track_add_next,
                                 on_add_to_queue: on_track_add_to_queue,
                                 on_export: on_track_export,
-                                on_copy_share_link: on_track_copy_share_link,
                                 on_artist_click,
                             }
                         }

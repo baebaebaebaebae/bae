@@ -916,6 +916,7 @@ dependencies = [
  "backtrace",
  "bae-core",
  "bae-ui",
+ "base64",
  "chrono",
  "cocoa 0.25.0",
  "dioxus",

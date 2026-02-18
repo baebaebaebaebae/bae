@@ -1,8 +1,6 @@
 //! Subsonic section view
 
-use crate::components::{
-    Button, ButtonSize, ButtonVariant, Select, SelectOption, SettingsCard, SettingsSection,
-};
+use crate::components::{Button, ButtonSize, ButtonVariant, SettingsCard, SettingsSection};
 use dioxus::prelude::*;
 
 /// Subsonic section view
@@ -39,11 +37,8 @@ pub fn SubsonicSectionView(
     on_port_change: EventHandler<String>,
     // Share link settings
     share_base_url: String,
-    share_default_expiry: String,
-    share_signing_key_version: u32,
     is_editing_share: bool,
     edit_share_base_url: String,
-    edit_share_expiry: String,
     is_saving_share: bool,
     has_share_changes: bool,
     share_save_error: Option<String>,
@@ -51,8 +46,6 @@ pub fn SubsonicSectionView(
     on_share_cancel: EventHandler<()>,
     on_share_save: EventHandler<()>,
     on_share_base_url_change: EventHandler<String>,
-    on_share_expiry_change: EventHandler<String>,
-    on_invalidate_links: EventHandler<()>,
     on_auth_enabled_change: EventHandler<bool>,
     on_username_change: EventHandler<String>,
     on_password_change: EventHandler<String>,
@@ -275,29 +268,6 @@ pub fn SubsonicSectionView(
                                 "The public URL where your bae instance is accessible."
                             }
                         }
-                        div {
-                            label { class: "block text-sm text-gray-400 mb-1", "Default Expiry" }
-                            Select {
-                                value: edit_share_expiry.clone(),
-                                onchange: move |val: String| on_share_expiry_change.call(val),
-                                SelectOption {
-                                    value: "never".to_string(),
-                                    label: "Never".to_string(),
-                                }
-                                SelectOption {
-                                    value: "7".to_string(),
-                                    label: "7 days".to_string(),
-                                }
-                                SelectOption {
-                                    value: "30".to_string(),
-                                    label: "30 days".to_string(),
-                                }
-                                SelectOption {
-                                    value: "90".to_string(),
-                                    label: "90 days".to_string(),
-                                }
-                            }
-                        }
                     }
 
                     if let Some(error) = share_save_error {
@@ -336,26 +306,6 @@ pub fn SubsonicSectionView(
                                 span { class: "text-white font-mono", "{share_base_url}" }
                             }
                         }
-                        div { class: "flex items-center gap-2",
-                            span { class: "text-gray-400", "Default Expiry:" }
-                            span { class: "text-white", {expiry_display_label(&share_default_expiry)} }
-                        }
-                        div { class: "flex items-center gap-2",
-                            span { class: "text-gray-400", "Key Version:" }
-                            span { class: "text-white font-mono", "{share_signing_key_version}" }
-                        }
-                    }
-
-                    div { class: "mt-4",
-                        Button {
-                            variant: ButtonVariant::Secondary,
-                            size: ButtonSize::Small,
-                            onclick: move |_| on_invalidate_links.call(()),
-                            "Invalidate All Share Links"
-                        }
-                        p { class: "text-xs text-gray-500 mt-2",
-                            "Increments the signing key version, making all previously generated share links invalid."
-                        }
                     }
                 }
             }
@@ -375,14 +325,5 @@ pub fn SubsonicSectionView(
                 }
             }
         }
-    }
-}
-
-fn expiry_display_label(value: &str) -> &str {
-    match value {
-        "7" => "7 days",
-        "30" => "30 days",
-        "90" => "90 days",
-        _ => "Never",
     }
 }

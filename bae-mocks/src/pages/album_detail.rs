@@ -48,6 +48,7 @@ pub fn AlbumDetail(album_id: String) -> Element {
         loading_remote_covers: false,
         share_grant_json: None,
         share_error: None,
+        share_link_copied: false,
     });
 
     // Get tracks lens for per-track reactivity
@@ -76,7 +77,6 @@ pub fn AlbumDetail(album_id: String) -> Element {
                 on_track_add_next: |_| {},
                 on_track_add_to_queue: |_| {},
                 on_track_export: |_| {},
-                on_track_copy_share_link: |_| {},
                 on_artist_click: move |artist_id: String| {
                     navigator().push(Route::ArtistDetail { artist_id });
                 },
@@ -87,6 +87,7 @@ pub fn AlbumDetail(album_id: String) -> Element {
                 on_fetch_remote_covers: |_| {},
                 on_select_cover: |_| {},
                 on_create_share_grant: |_| {},
+                on_copy_share_link: |_| {},
             }
         } else {
             ErrorDisplay { message: "Album not found in demo data".to_string() }

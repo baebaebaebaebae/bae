@@ -26,7 +26,6 @@ pub mod network;
 pub mod oauth;
 pub mod playback;
 pub mod retry;
-pub mod share_token;
 pub mod sodium_ffi;
 pub mod storage;
 pub mod subsonic;

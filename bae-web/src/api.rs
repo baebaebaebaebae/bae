@@ -15,8 +15,6 @@ struct SubsonicInner {
     #[serde(rename = "albumList")]
     album_list: Option<AlbumListData>,
     album: Option<AlbumWithSongs>,
-    #[serde(rename = "shareInfo")]
-    share_info: Option<ShareInfoData>,
 }
 
 #[derive(Deserialize)]
@@ -55,86 +53,6 @@ struct SubsonicSong {
     title: String,
     track: Option<i32>,
     duration: Option<i32>,
-}
-
-// -- Share info types (used by the public share page) --
-
-#[derive(Deserialize)]
-struct ShareInfoData {
-    kind: String,
-    track: Option<ShareTrackData>,
-    album: Option<ShareAlbumData>,
-}
-
-#[derive(Deserialize)]
-struct ShareTrackData {
-    id: String,
-    title: String,
-    artist: Option<String>,
-    album: Option<String>,
-    #[serde(rename = "albumId")]
-    album_id: Option<String>,
-    #[serde(rename = "coverArt")]
-    cover_art: Option<String>,
-    duration: Option<i64>,
-}
-
-#[derive(Deserialize)]
-struct ShareAlbumData {
-    id: String,
-    name: String,
-    artist: Option<String>,
-    year: Option<i32>,
-    #[serde(rename = "coverArt")]
-    cover_art: Option<String>,
-    song: Option<Vec<ShareSongData>>,
-}
-
-#[derive(Deserialize)]
-struct ShareSongData {
-    id: String,
-    title: String,
-    track: Option<i32>,
-    duration: Option<i64>,
-}
-
-/// Shared track info for the share page.
-#[derive(Clone, Debug, PartialEq)]
-pub struct SharedTrack {
-    pub id: String,
-    pub title: String,
-    pub artist: String,
-    pub album: String,
-    pub album_id: String,
-    pub cover_art_id: Option<String>,
-    pub duration_secs: Option<i64>,
-}
-
-/// Shared album info for the share page.
-#[derive(Clone, Debug, PartialEq)]
-pub struct SharedAlbum {
-    pub id: String,
-    pub name: String,
-    pub artist: String,
-    pub year: Option<i32>,
-    pub cover_art_id: Option<String>,
-    pub songs: Vec<SharedAlbumSong>,
-}
-
-/// A song within a shared album.
-#[derive(Clone, Debug, PartialEq)]
-pub struct SharedAlbumSong {
-    pub id: String,
-    pub title: String,
-    pub track_number: Option<i32>,
-    pub duration_secs: Option<i64>,
-}
-
-/// What the share link points to.
-#[derive(Clone, Debug, PartialEq)]
-pub enum ShareInfo {
-    Track(SharedTrack),
-    Album(SharedAlbum),
 }
 
 // -- Cloud share types (decrypted from meta.enc) --
@@ -315,74 +233,8 @@ pub async fn fetch_album(album_id: &str) -> Result<AlbumDetailState, String> {
         loading_remote_covers: false,
         share_grant_json: None,
         share_error: None,
+        share_link_copied: false,
     })
-}
-
-/// Fetch share info for a share token (public share page).
-pub async fn fetch_share_info(token: &str) -> Result<ShareInfo, String> {
-    let url = format!("/rest/getShareInfo?shareToken={}", token);
-    let resp = reqwest::get(&url)
-        .await
-        .map_err(|e| format!("Network error: {e}"))?;
-
-    if resp.status() == 403 || resp.status() == 400 {
-        return Err("This share link is invalid or has expired.".to_string());
-    }
-    if resp.status() == 404 {
-        return Err("This content is no longer available.".to_string());
-    }
-    if !resp.status().is_success() {
-        return Err(format!("Server error: {}", resp.status()));
-    }
-
-    let envelope: SubsonicEnvelope = resp.json().await.map_err(|e| format!("Parse error: {e}"))?;
-
-    let data = envelope
-        .subsonic_response
-        .share_info
-        .ok_or_else(|| "No share info in response".to_string())?;
-
-    match data.kind.as_str() {
-        "track" => {
-            let t = data
-                .track
-                .ok_or_else(|| "Missing track data in response".to_string())?;
-            Ok(ShareInfo::Track(SharedTrack {
-                id: t.id,
-                title: t.title,
-                artist: t.artist.unwrap_or_else(|| "Unknown Artist".to_string()),
-                album: t.album.unwrap_or_default(),
-                album_id: t.album_id.unwrap_or_default(),
-                cover_art_id: t.cover_art,
-                duration_secs: t.duration,
-            }))
-        }
-        "album" => {
-            let a = data
-                .album
-                .ok_or_else(|| "Missing album data in response".to_string())?;
-            let songs = a
-                .song
-                .unwrap_or_default()
-                .into_iter()
-                .map(|s| SharedAlbumSong {
-                    id: s.id,
-                    title: s.title,
-                    track_number: s.track,
-                    duration_secs: s.duration,
-                })
-                .collect();
-            Ok(ShareInfo::Album(SharedAlbum {
-                id: a.id,
-                name: a.name,
-                artist: a.artist.unwrap_or_else(|| "Unknown Artist".to_string()),
-                year: a.year,
-                cover_art_id: a.cover_art,
-                songs,
-            }))
-        }
-        other => Err(format!("Unknown share kind: {other}")),
-    }
 }
 
 /// Fetch encrypted share metadata from bae-proxy.

@@ -1494,8 +1494,6 @@ async fn test_subsonic_stream_cue_flac_track2_correct_range() {
         encryption_service: encryption_service.clone(),
         library_dir: LibraryDir::new(db_dir),
         key_service,
-        share_base_url: None,
-        share_signing_key_version: 1,
         auth: bae_core::subsonic::SubsonicAuth {
             enabled: false,
             username: None,

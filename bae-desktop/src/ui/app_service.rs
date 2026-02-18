@@ -556,8 +556,6 @@ impl AppService {
             cs.torrent_max_uploads = config.torrent_max_uploads;
             cs.torrent_max_uploads_per_torrent = config.torrent_max_uploads_per_torrent;
             cs.share_base_url = config.share_base_url.clone();
-            cs.share_default_expiry_days = config.share_default_expiry_days;
-            cs.share_signing_key_version = config.share_signing_key_version;
             cs.cloud_provider = config.cloud_provider.as_ref().map(|p| match p {
                 bae_core::config::CloudProvider::S3 => bae_ui::stores::config::CloudProvider::S3,
                 bae_core::config::CloudProvider::ICloud => {
@@ -1082,6 +1080,40 @@ impl AppService {
                 Ok(json) => {
                     state.album_detail().share_grant_json().set(Some(json));
                 }
+                Err(e) => {
+                    state.album_detail().share_error().set(Some(e));
+                }
+            }
+        });
+    }
+
+    /// Create a cloud share link for a release: encrypt metadata, upload to cloud home, copy URL to clipboard.
+    pub fn create_share_link(&self, release_id: &str) {
+        let state = self.state;
+        let library_manager = self.library_manager.clone();
+        let key_service = self.key_service.clone();
+        let config = self.config.clone();
+        let release_id = release_id.to_string();
+
+        // Clear previous results
+        state.album_detail().share_error().set(None);
+        state.album_detail().share_link_copied().set(false);
+
+        spawn(async move {
+            match create_share_link_async(&library_manager, &key_service, &config, &release_id)
+                .await
+            {
+                Ok(url) => match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&url)) {
+                    Ok(()) => {
+                        state.album_detail().share_link_copied().set(true);
+                    }
+                    Err(e) => {
+                        state
+                            .album_detail()
+                            .share_error()
+                            .set(Some(format!("Clipboard: {e}")));
+                    }
+                },
                 Err(e) => {
                     state.album_detail().share_error().set(Some(e));
                 }
@@ -3627,6 +3659,155 @@ async fn create_share_grant_async(
     .map_err(|e| format!("{e}"))?;
 
     serde_json::to_string_pretty(&grant).map_err(|e| format!("Failed to serialize grant: {e}"))
+}
+
+async fn create_share_link_async(
+    library_manager: &SharedLibraryManager,
+    key_service: &KeyService,
+    config: &config::Config,
+    release_id: &str,
+) -> Result<String, String> {
+    use bae_core::cloud_home;
+    use bae_core::encryption::{generate_random_key, EncryptionService};
+    use bae_core::sync::share_format;
+    use base64::Engine;
+
+    // 1. Verify release exists and is managed in the cloud
+    let db = library_manager.get().database();
+    let release = db
+        .get_release_by_id(release_id)
+        .await
+        .map_err(|e| format!("Database error: {e}"))?
+        .ok_or("Release not found.")?;
+    if !release.managed_in_cloud {
+        return Err("Release must be managed in the cloud to share.".to_string());
+    }
+
+    // 2. Get album metadata
+    let album = db
+        .get_album_by_id(&release.album_id)
+        .await
+        .map_err(|e| format!("Database error: {e}"))?
+        .ok_or("Album not found.")?;
+    let artists = db
+        .get_artists_for_album(&release.album_id)
+        .await
+        .map_err(|e| format!("Database error: {e}"))?;
+    let artist_name = artists
+        .first()
+        .map(|a| a.name.clone())
+        .unwrap_or_else(|| "Unknown Artist".to_string());
+
+    // 3. Get tracks and their file mappings
+    let tracks = db
+        .get_tracks_for_release(release_id)
+        .await
+        .map_err(|e| format!("Database error: {e}"))?;
+    let files = db
+        .get_files_for_release(release_id)
+        .await
+        .map_err(|e| format!("Database error: {e}"))?;
+
+    // 4. Build track list with file keys
+    let mut share_tracks = Vec::new();
+    let mut manifest_files = Vec::new();
+
+    for track in &tracks {
+        let audio_format = db
+            .get_audio_format_by_track_id(&track.id)
+            .await
+            .map_err(|e| format!("Database error: {e}"))?;
+        if let Some(af) = audio_format {
+            let file = files
+                .iter()
+                .find(|f| af.file_id.as_deref() == Some(f.id.as_str()));
+            if let Some(file) = file {
+                let file_key = bae_core::storage::storage_path(&file.id);
+                let format = share_format::format_for_content_type(&af.content_type);
+                share_tracks.push(share_format::ShareMetaTrack {
+                    number: track.track_number,
+                    title: track.title.clone(),
+                    duration_secs: track.duration_ms.map(|ms| ms / 1000),
+                    file_key: file_key.clone(),
+                    format: format.to_string(),
+                });
+                manifest_files.push(file_key);
+            }
+        }
+    }
+
+    // 5. Get cover image key
+    let cover_release_id = album.cover_release_id.as_deref().unwrap_or(release_id);
+    let cover_image_key = find_cover_image_key(db, cover_release_id).await;
+    if let Some(ref key) = cover_image_key {
+        manifest_files.push(key.clone());
+    }
+
+    // 6. Get per-release encryption key
+    let encryption = library_manager
+        .get()
+        .encryption_service()
+        .cloned()
+        .ok_or("Encryption not configured.")?;
+    let release_enc = encryption.derive_release_encryption(release_id);
+    let release_key_b64 = base64::engine::general_purpose::STANDARD.encode(release_enc.key_bytes());
+
+    // 7. Build ShareMeta
+    let meta = share_format::ShareMeta {
+        album_name: album.title,
+        artist: artist_name,
+        year: album.year,
+        cover_image_key,
+        tracks: share_tracks,
+        release_key_b64,
+    };
+    let meta_json = serde_json::to_vec(&meta).map_err(|e| format!("Serialize error: {e}"))?;
+
+    // 8. Generate per-share key and encrypt
+    let per_share_key = generate_random_key();
+    let per_share_enc = EncryptionService::from_key(per_share_key);
+    let meta_encrypted = per_share_enc.encrypt_chunked(&meta_json);
+
+    // 9. Build manifest
+    let manifest = share_format::ShareManifest {
+        files: manifest_files,
+    };
+    let manifest_json =
+        serde_json::to_vec(&manifest).map_err(|e| format!("Serialize error: {e}"))?;
+
+    // 10. Upload to cloud home
+    let share_id = uuid::Uuid::new_v4().to_string();
+    let cloud_home = cloud_home::create_cloud_home(config, key_service)
+        .await
+        .map_err(|e| format!("Cloud home error: {e}"))?;
+    cloud_home
+        .write(&format!("shares/{share_id}/meta.enc"), meta_encrypted)
+        .await
+        .map_err(|e| format!("Upload error: {e}"))?;
+    cloud_home
+        .write(&format!("shares/{share_id}/manifest.json"), manifest_json)
+        .await
+        .map_err(|e| format!("Upload error: {e}"))?;
+
+    // 11. Build URL
+    let base_url = config
+        .share_base_url
+        .as_deref()
+        .ok_or("Share base URL not configured in settings.")?;
+    let key_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(per_share_key);
+    Ok(format!("{base_url}/share/{share_id}#{key_b64}"))
+}
+
+/// Find the S3 key for a release's cover image.
+/// Returns `images/{ab}/{cd}/{release_id}` or None.
+async fn find_cover_image_key(db: &bae_core::db::Database, release_id: &str) -> Option<String> {
+    use bae_core::db::LibraryImageType;
+    let image = db
+        .get_library_image(release_id, &LibraryImageType::Cover)
+        .await
+        .ok()??;
+    let hex = image.id.replace('-', "");
+    Some(format!("images/{}/{}/{}", &hex[..2], &hex[2..4], &image.id))
 }
 
 /// Detect the iCloud Drive ubiquity container for the app.
