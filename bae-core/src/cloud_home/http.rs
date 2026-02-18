@@ -1,6 +1,6 @@
 //! HTTP-backed `CloudHome` implementation.
 //!
-//! Talks to a bae-server's `/cloud/*` write proxy endpoints.
+//! Talks to a bae-proxy's `/cloud/*` write proxy endpoints.
 //! Requests are authenticated with Ed25519 signatures.
 
 use async_trait::async_trait;
@@ -10,7 +10,7 @@ use crate::keys::UserKeypair;
 
 use super::{CloudHome, CloudHomeError, JoinInfo};
 
-/// HTTP-backed cloud home that proxies through a bae-server.
+/// HTTP-backed cloud home that proxies through a bae-proxy.
 pub struct HttpCloudHome {
     base_url: String,
     keypair: UserKeypair,
