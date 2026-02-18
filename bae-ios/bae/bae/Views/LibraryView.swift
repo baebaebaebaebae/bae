@@ -2,12 +2,13 @@ import SwiftUI
 
 struct LibraryView: View {
     let databaseService: DatabaseService
+    let imageService: ImageService?
     let credentials: LibraryCredentials
     let onUnlink: () -> Void
 
     var body: some View {
         TabView {
-            ArtistListView(databaseService: databaseService)
+            ArtistListView(databaseService: databaseService, imageService: imageService)
                 .tabItem {
                     Label("Library", systemImage: "books.vertical")
                 }

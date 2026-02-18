@@ -16,8 +16,17 @@ struct ContentView: View {
             OnboardingView { creds in
                 do {
                     try keychainService.saveCredentials(creds)
+                    let crypto = PlaceholderCryptoService()
                     if let url = URL(string: creds.proxyUrl) {
-                        appState.cloudClient = CloudHomeClient(baseURL: url)
+                        let client = CloudHomeClient(baseURL: url)
+                        appState.cloudClient = client
+                        appState.imageService = ImageService(
+                            cloudClient: client, crypto: crypto,
+                            encryptionKey: creds.encryptionKey)
+                    } else {
+                        appState.imageService = ImageService(
+                            cloudClient: nil, crypto: crypto,
+                            encryptionKey: creds.encryptionKey)
                     }
                     appState.screen = .bootstrapping(creds)
                 } catch {
@@ -38,13 +47,17 @@ struct ContentView: View {
             }
         case .library(let creds):
             if let dbService = try? DatabaseService(path: BootstrapService.databasePath()) {
-                LibraryView(databaseService: dbService, credentials: creds) {
+                LibraryView(
+                    databaseService: dbService, imageService: appState.imageService,
+                    credentials: creds
+                ) {
                     do {
                         try keychainService.deleteCredentials()
                         try? FileManager.default.removeItem(at: BootstrapService.databasePath())
                         try? FileManager.default.removeItem(at: BootstrapService.syncCursorsPath())
                         try? FileManager.default.removeItem(at: BootstrapService.imageCachePath())
                         appState.cloudClient = nil
+                        appState.imageService = nil
                         appState.bootstrapResult = nil
                         appState.screen = .onboarding
                     } catch {

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AlbumDetailView: View {
     let databaseService: DatabaseService
+    let imageService: ImageService?
     let album: Album
     @State private var detail: AlbumDetail?
 
@@ -9,16 +10,23 @@ struct AlbumDetailView: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 8) {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.systemGray5))
-                        .aspectRatio(1, contentMode: .fit)
-                        .frame(maxWidth: 200)
-                        .overlay {
-                            Image(systemName: "photo")
-                                .font(.largeTitle)
-                                .foregroundStyle(.secondary)
-                        }
+                    if let imageService {
+                        AsyncAlbumArt(
+                            imageId: album.coverReleaseId, imageService: imageService, size: 200
+                        )
                         .frame(maxWidth: .infinity)
+                    } else {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(.systemGray5))
+                            .aspectRatio(1, contentMode: .fit)
+                            .frame(maxWidth: 200)
+                            .overlay {
+                                Image(systemName: "photo")
+                                    .font(.largeTitle)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                    }
                     Text(album.title)
                         .font(.title2)
                         .fontWeight(.bold)

@@ -11,6 +11,7 @@ class AppState {
     var screen: AppScreen
     var cloudClient: CloudHomeClient?
     var bootstrapResult: BootstrapResult?
+    var imageService: ImageService?
 
     init(keychainService: KeychainService) {
         if let creds = keychainService.loadCredentials() {
@@ -21,7 +22,15 @@ class AppState {
                 screen = .bootstrapping(creds)
             }
             if let url = URL(string: creds.proxyUrl) {
-                cloudClient = CloudHomeClient(baseURL: url)
+                let client = CloudHomeClient(baseURL: url)
+                cloudClient = client
+                let crypto = PlaceholderCryptoService()
+                imageService = ImageService(
+                    cloudClient: client, crypto: crypto, encryptionKey: creds.encryptionKey)
+            } else {
+                let crypto = PlaceholderCryptoService()
+                imageService = ImageService(
+                    cloudClient: nil, crypto: crypto, encryptionKey: creds.encryptionKey)
             }
         } else {
             screen = .onboarding
