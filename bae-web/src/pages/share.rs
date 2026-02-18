@@ -1,24 +1,6 @@
-use crate::api::{self, ShareInfo, SharedAlbum, SharedAlbumSong};
+use crate::api;
 use dioxus::prelude::*;
 use wasm_bindgen_x::JsCast;
-
-fn cover_art_url(cover_art_id: &Option<String>, token: &str) -> Option<String> {
-    cover_art_id
-        .as_ref()
-        .map(|id| format!("/rest/getCoverArt?id={id}&shareToken={token}"))
-}
-
-fn stream_url(track_id: &str, token: &str) -> String {
-    format!("/rest/stream?id={track_id}&shareToken={token}")
-}
-
-fn download_url(track_id: &str, token: &str) -> String {
-    format!("/rest/stream?id={track_id}&shareToken={token}&download=true")
-}
-
-fn bae_url(token: &str) -> String {
-    format!("bae://share/{token}")
-}
 
 fn format_duration(secs: i64) -> String {
     let mins = secs / 60;
@@ -132,82 +114,11 @@ pub fn ShareView(token: String) -> Element {
     if let Some(frag) = fragment {
         rsx! { CloudShareView { share_id: token, fragment: frag } }
     } else {
-        rsx! { LegacyShareView { token } }
-    }
-}
-
-// -- Legacy (Subsonic) share --
-
-#[component]
-fn LegacyShareView(token: String) -> Element {
-    let tok = token.clone();
-    let data = use_resource(move || {
-        let tok = tok.clone();
-        async move { api::fetch_share_info(&tok).await }
-    });
-    let read = data.read();
-
-    let result = match &*read {
-        Some(Ok(info)) => Ok(info.clone()),
-        Some(Err(e)) => Err(e.clone()),
-        None => {
-            return rsx! {
-                SharePageShell {
-                    div { class: "text-gray-400 text-sm", "Loading..." }
-                }
-            };
-        }
-    };
-    drop(read);
-
-    match result {
-        Ok(ShareInfo::Track(track)) => {
-            let cover_url = cover_art_url(&track.cover_art_id, &token);
-            let audio_src = stream_url(&track.id, &token);
-            let dl_url = download_url(&track.id, &token);
-            let open_url = bae_url(&token);
-
-            rsx! {
-                SharePageShell {
-                    ShareCard {
-                        cover_url,
-                        primary_title: track.title.clone(),
-                        secondary_line: track.artist.clone(),
-                        tertiary_line: if track.album.is_empty() { None } else { Some(track.album.clone()) },
-                        audio { class: "w-full mt-4", controls: true, src: audio_src }
-                        div { class: "flex justify-center gap-3 mt-3",
-                            a {
-                                class: "inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-surface-input)] text-gray-300 hover:text-white hover:bg-[var(--color-hover)] transition-colors text-sm",
-                                href: dl_url,
-                                download: true,
-                                DownloadIcon {}
-                                "Download"
-                            }
-                            a {
-                                class: "inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity text-sm",
-                                href: open_url,
-                                ExternalLinkIcon {}
-                                "Open in bae"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Ok(ShareInfo::Album(album)) => {
-            rsx! {
-                SharePageShell {
-                    AlbumShareCard { album, token: token.clone() }
-                }
-            }
-        }
-        Err(e) => {
-            rsx! {
-                SharePageShell {
-                    div { class: "text-center",
-                        p { class: "text-gray-400 text-lg mb-2", "Link unavailable" }
-                        p { class: "text-gray-500 text-sm", "{e}" }
-                    }
+        rsx! {
+            SharePageShell {
+                div { class: "text-center",
+                    p { class: "text-gray-400 text-lg mb-2", "Invalid share link" }
+                    p { class: "text-gray-500 text-sm", "This link is missing the decryption key." }
                 }
             }
         }
@@ -536,108 +447,6 @@ fn ShareCard(
     }
 }
 
-/// Album share card with a track list and switchable audio source (legacy Subsonic mode).
-#[component]
-fn AlbumShareCard(album: SharedAlbum, token: String) -> Element {
-    let mut current_track_id: Signal<Option<String>> = use_signal(|| None);
-    let cover_url = cover_art_url(&album.cover_art_id, &token);
-    let open_url = bae_url(&token);
-
-    let tertiary = album.year.map(|y| format!("({y})"));
-
-    rsx! {
-        ShareCard {
-            cover_url,
-            primary_title: album.name.clone(),
-            secondary_line: album.artist.clone(),
-            tertiary_line: tertiary,
-            div { class: "mt-4 border-t border-[var(--color-border-subtle)]",
-                for song in &album.songs {
-                    TrackRow {
-                        download_href: download_url(&song.id, &token),
-                        song: song.clone(),
-                        is_playing: current_track_id().as_deref() == Some(&song.id),
-                        on_click: move |id: String| {
-                            current_track_id.set(Some(id));
-                        },
-                    }
-                }
-            }
-            if let Some(track_id) = current_track_id() {
-                audio {
-                    class: "w-full mt-3",
-                    controls: true,
-                    autoplay: true,
-                    key: "{track_id}",
-                    src: stream_url(&track_id, &token),
-                    onended: move |_| {
-                        if let Some(current) = current_track_id() {
-                            let pos = album.songs.iter().position(|s| s.id == current);
-                            if let Some(idx) = pos {
-                                if idx + 1 < album.songs.len() {
-                                    current_track_id.set(Some(album.songs[idx + 1].id.clone()));
-                                } else {
-                                    current_track_id.set(None);
-                                }
-                            }
-                        }
-                    },
-                }
-            }
-            div { class: "flex justify-center mt-3",
-                a {
-                    class: "inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity text-sm",
-                    href: open_url,
-                    ExternalLinkIcon {}
-                    "Open in bae"
-                }
-            }
-        }
-    }
-}
-
-/// A single row in the album track list (legacy Subsonic mode).
-#[component]
-fn TrackRow(
-    song: SharedAlbumSong,
-    is_playing: bool,
-    on_click: EventHandler<String>,
-    download_href: String,
-) -> Element {
-    let id = song.id.clone();
-    let highlight = if is_playing {
-        "text-[var(--color-accent)]"
-    } else {
-        "text-gray-300 hover:text-white"
-    };
-
-    rsx! {
-        div { class: "flex items-center gap-1 hover:bg-[var(--color-hover)] rounded",
-            button {
-                class: "flex-1 flex items-center gap-3 px-2 py-2.5 text-left transition-colors cursor-pointer {highlight} rounded min-w-0",
-                onclick: move |_| on_click.call(id.clone()),
-                span { class: "w-6 text-right text-xs text-gray-500 shrink-0",
-                    if let Some(n) = song.track_number {
-                        "{n}"
-                    }
-                }
-                span { class: "flex-1 text-sm truncate", "{song.title}" }
-                if let Some(secs) = song.duration_secs {
-                    span { class: "text-xs text-gray-500 shrink-0", "{format_duration(secs)}" }
-                }
-            }
-            a {
-                class: "p-2 text-gray-500 hover:text-white transition-colors shrink-0",
-                href: download_href,
-                download: true,
-                title: "Download",
-                onclick: move |e: Event<MouseData>| e.stop_propagation(),
-                DownloadIcon {}
-            }
-        }
-    }
-}
-
 #[component]
 fn DownloadIcon() -> Element {
     rsx! {
@@ -652,24 +461,6 @@ fn DownloadIcon() -> Element {
             path { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }
             polyline { points: "7 10 12 15 17 10" }
             line { x1: "12", y1: "15", x2: "12", y2: "3" }
-        }
-    }
-}
-
-#[component]
-fn ExternalLinkIcon() -> Element {
-    rsx! {
-        svg {
-            class: "w-4 h-4",
-            fill: "none",
-            stroke: "currentColor",
-            stroke_width: "2",
-            stroke_linecap: "round",
-            stroke_linejoin: "round",
-            view_box: "0 0 24 24",
-            path { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }
-            polyline { points: "15 3 21 3 21 9" }
-            line { x1: "10", y1: "14", x2: "21", y2: "3" }
         }
     }
 }

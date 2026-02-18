@@ -286,8 +286,6 @@ fn main() {
         let subsonic_bind_address = config.server_bind_address.clone();
         let subsonic_library_dir = config.library_dir.clone();
         let subsonic_key_service = key_service.clone();
-        let subsonic_share_base_url = config.share_base_url.clone();
-        let subsonic_share_signing_key_version = config.share_signing_key_version;
 
         let subsonic_auth = if config.server_auth_enabled {
             let password = key_service.get_server_password();
@@ -312,8 +310,6 @@ fn main() {
                 subsonic_bind_address,
                 subsonic_library_dir,
                 subsonic_key_service,
-                subsonic_share_base_url,
-                subsonic_share_signing_key_version,
                 subsonic_auth,
             )
             .await
@@ -382,8 +378,6 @@ async fn start_subsonic_server(
     bind_address: String,
     library_dir: bae_core::library_dir::LibraryDir,
     key_service: bae_core::keys::KeyService,
-    share_base_url: Option<String>,
-    share_signing_key_version: u32,
     auth: bae_core::subsonic::SubsonicAuth,
 ) {
     info!("Starting Subsonic API server...");
@@ -392,8 +386,6 @@ async fn start_subsonic_server(
         encryption_service,
         library_dir,
         key_service,
-        share_base_url,
-        share_signing_key_version,
         auth,
     );
     let addr = format!("{}:{}", bind_address, port);

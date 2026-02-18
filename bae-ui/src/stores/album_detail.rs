@@ -61,4 +61,6 @@ pub struct AlbumDetailState {
     pub share_grant_json: Option<String>,
     /// Share grant error message
     pub share_error: Option<String>,
+    /// Set to true when a share link has been copied to clipboard
+    pub share_link_copied: bool,
 }

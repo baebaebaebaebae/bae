@@ -32,6 +32,7 @@ chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3.31"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 uuid = { version = "1.0", features = ["v4"] }
+base64 = "0.22"
 dirs = "5.0"
 backtrace = "0.3.76"
 

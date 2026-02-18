@@ -1,3 +1,4 @@
+use crate::content_type::ContentType;
 use serde::{Deserialize, Serialize};
 
 /// Metadata for a shared album, encrypted with per-share key and stored as `shares/{share_id}/meta.enc`.
@@ -30,6 +31,19 @@ pub struct ShareManifest {
     pub files: Vec<String>,
 }
 
+/// Map a ContentType to the short format string used in ShareMetaTrack.
+pub fn format_for_content_type(ct: &ContentType) -> &'static str {
+    match ct {
+        ContentType::Flac => "flac",
+        ContentType::Mpeg => "mp3",
+        ContentType::Ogg => "ogg",
+        ContentType::Wav => "wav",
+        ContentType::Aac => "aac",
+        ContentType::Mp4Audio => "m4a",
+        _ => "bin",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,6 +72,23 @@ mod tests {
         assert_eq!(parsed.album_name, "Test Album");
         assert_eq!(parsed.tracks.len(), 1);
         assert_eq!(parsed.tracks[0].format, "flac");
+    }
+
+    #[test]
+    fn format_for_content_type_audio() {
+        assert_eq!(format_for_content_type(&ContentType::Flac), "flac");
+        assert_eq!(format_for_content_type(&ContentType::Mpeg), "mp3");
+        assert_eq!(format_for_content_type(&ContentType::Ogg), "ogg");
+        assert_eq!(format_for_content_type(&ContentType::Wav), "wav");
+        assert_eq!(format_for_content_type(&ContentType::Aac), "aac");
+        assert_eq!(format_for_content_type(&ContentType::Mp4Audio), "m4a");
+    }
+
+    #[test]
+    fn format_for_content_type_non_audio() {
+        assert_eq!(format_for_content_type(&ContentType::Jpeg), "bin");
+        assert_eq!(format_for_content_type(&ContentType::Png), "bin");
+        assert_eq!(format_for_content_type(&ContentType::OctetStream), "bin");
     }
 
     #[test]

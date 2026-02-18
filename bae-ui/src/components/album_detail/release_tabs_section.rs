@@ -30,6 +30,8 @@ pub fn ReleaseTabsSection(
     on_export: EventHandler<String>,
     /// Whether the current release is on cloud storage (share requires cloud)
     is_on_cloud: bool,
+    /// Called with release_id to create a cloud share link and copy to clipboard
+    on_copy_share_link: EventHandler<String>,
     // Optional: torrent info per release (keyed by release_id)
     #[props(default)] torrent_info: std::collections::HashMap<String, ReleaseTorrentInfo>,
     // Optional: torrent action callbacks
@@ -73,6 +75,10 @@ pub fn ReleaseTabsSection(
                                     move |_| on_share.call(release_id.clone())
                                 },
                                 is_on_cloud,
+                                on_copy_share_link: {
+                                    let release_id = release_id.clone();
+                                    move |_| on_copy_share_link.call(release_id.clone())
+                                },
                                 on_export: {
                                     let release_id = release_id.clone();
                                     move |_| on_export.call(release_id.clone())
@@ -115,6 +121,7 @@ fn ReleaseTab(
     on_view_storage: EventHandler<()>,
     on_share: EventHandler<()>,
     is_on_cloud: bool,
+    on_copy_share_link: EventHandler<()>,
     on_export: EventHandler<()>,
     on_delete: EventHandler<()>,
     #[props(default)] on_start_seeding: Option<EventHandler<()>>,
@@ -212,6 +219,14 @@ fn ReleaseTab(
                                 on_share.call(());
                             },
                             "Share"
+                        }
+                        MenuItem {
+                            disabled: is_deleting() || is_exporting(),
+                            onclick: move |_| {
+                                show_release_dropdown.set(None);
+                                on_copy_share_link.call(());
+                            },
+                            "Copy Link"
                         }
                     }
                     if torrent.has_torrent {

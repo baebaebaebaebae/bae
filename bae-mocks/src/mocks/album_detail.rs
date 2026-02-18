@@ -160,6 +160,7 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
         loading_remote_covers: false,
         share_grant_json: None,
         share_error: None,
+        share_link_copied: false,
     });
 
     // Get tracks lens for per-track reactivity
@@ -192,7 +193,6 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
                 state,
                 tracks,
                 playback,
-                show_share_link: true,
                 on_release_select: move |id| selected_release_id.set(Some(id)),
                 on_album_deleted: |_| {},
                 on_export_release: |_| {},
@@ -204,7 +204,6 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
                 on_track_add_next: |_| {},
                 on_track_add_to_queue: |_| {},
                 on_track_export: |_| {},
-                on_track_copy_share_link: |_| {},
                 on_artist_click: |_| {},
                 on_play_album: |_| {},
                 on_add_album_to_queue: |_| {},
@@ -213,6 +212,7 @@ pub fn AlbumDetailMock(initial_state: Option<String>) -> Element {
                 on_fetch_remote_covers: |_| {},
                 on_select_cover: |_| {},
                 on_create_share_grant: |_| {},
+                on_copy_share_link: |_| {},
             }
         }
     }

@@ -5,20 +5,6 @@ use bae_ui::stores::{AppStateStoreExt, ConfigStateStoreExt};
 use bae_ui::SubsonicSectionView;
 use dioxus::prelude::*;
 
-fn expiry_to_string(days: Option<u32>) -> String {
-    match days {
-        Some(d) => d.to_string(),
-        None => "never".to_string(),
-    }
-}
-
-fn string_to_expiry(val: &str) -> Option<u32> {
-    match val {
-        "never" | "" => None,
-        s => s.parse().ok(),
-    }
-}
-
 #[component]
 pub fn SubsonicSection() -> Element {
     let app = use_app();
@@ -28,8 +14,6 @@ pub fn SubsonicSection() -> Element {
     let store_enabled = *config_store.server_enabled().read();
     let store_port = *config_store.server_port().read();
     let store_share_base_url = config_store.share_base_url().read().clone();
-    let store_share_expiry = *config_store.share_default_expiry_days().read();
-    let store_share_version = *config_store.share_signing_key_version().read();
     let store_auth_enabled = *config_store.server_auth_enabled().read();
     let store_username = config_store.server_username().read().clone();
     let store_password_set = app.key_service.get_server_password().is_some();
@@ -59,12 +43,9 @@ pub fn SubsonicSection() -> Element {
     let mut share_save_error = use_signal(|| Option::<String>::None);
     let initial_url = store_share_base_url.clone().unwrap_or_default();
     let mut edit_share_base_url = use_signal(move || initial_url.clone());
-    let mut edit_share_expiry = use_signal(move || expiry_to_string(store_share_expiry));
 
     let current_url = store_share_base_url.clone().unwrap_or_default();
-    let current_expiry = expiry_to_string(store_share_expiry);
-    let has_share_changes =
-        *edit_share_base_url.read() != current_url || *edit_share_expiry.read() != current_expiry;
+    let has_share_changes = *edit_share_base_url.read() != current_url;
 
     // Server settings save
     let save_changes = {
@@ -130,7 +111,6 @@ pub fn SubsonicSection() -> Element {
         let app = app.clone();
         move |_| {
             let new_url = edit_share_base_url.read().clone();
-            let new_expiry = string_to_expiry(&edit_share_expiry.read());
 
             is_saving_share.set(true);
             share_save_error.set(None);
@@ -143,7 +123,6 @@ pub fn SubsonicSection() -> Element {
 
             app.save_config(move |config| {
                 config.share_base_url = url_option;
-                config.share_default_expiry_days = new_expiry;
             });
 
             is_saving_share.set(false);
@@ -154,19 +133,8 @@ pub fn SubsonicSection() -> Element {
     let cancel_url = store_share_base_url.clone().unwrap_or_default();
     let cancel_share_edit = move |_| {
         edit_share_base_url.set(cancel_url.clone());
-        edit_share_expiry.set(expiry_to_string(store_share_expiry));
         is_editing_share.set(false);
         share_save_error.set(None);
-    };
-
-    // Invalidate all share links
-    let invalidate_links = {
-        let app = app.clone();
-        move |_| {
-            app.save_config(move |config| {
-                config.share_signing_key_version += 1;
-            });
-        }
     };
 
     let display_url = store_share_base_url.unwrap_or_default();
@@ -195,11 +163,8 @@ pub fn SubsonicSection() -> Element {
             on_port_change: move |val| port.set(val),
             // Share link props
             share_base_url: display_url,
-            share_default_expiry: expiry_to_string(store_share_expiry),
-            share_signing_key_version: store_share_version,
             is_editing_share: *is_editing_share.read(),
             edit_share_base_url: edit_share_base_url.read().clone(),
-            edit_share_expiry: edit_share_expiry.read().clone(),
             is_saving_share: *is_saving_share.read(),
             has_share_changes,
             share_save_error: share_save_error.read().clone(),
@@ -207,8 +172,6 @@ pub fn SubsonicSection() -> Element {
             on_share_cancel: cancel_share_edit,
             on_share_save: save_share_changes,
             on_share_base_url_change: move |val| edit_share_base_url.set(val),
-            on_share_expiry_change: move |val| edit_share_expiry.set(val),
-            on_invalidate_links: invalidate_links,
             on_auth_enabled_change: move |val| auth_enabled.set(val),
             on_username_change: move |val| username.set(val),
             on_password_change: move |val| password.set(val),

@@ -60,10 +60,6 @@ pub struct ConfigState {
 
     /// Base URL for share links (e.g. "https://listen.example.com")
     pub share_base_url: Option<String>,
-    /// Default expiry for share links in days (None = never expires)
-    pub share_default_expiry_days: Option<u32>,
-    /// Signing key version for share tokens
-    pub share_signing_key_version: u32,
     /// Followed remote libraries
     pub followed_libraries: Vec<FollowedLibraryInfo>,
 }

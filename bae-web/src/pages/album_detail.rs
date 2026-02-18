@@ -126,7 +126,6 @@ pub fn AlbumDetail(album_id: String) -> Element {
                         }
                     },
                     on_track_export: |_| {},
-                    on_track_copy_share_link: |_| {},
                     on_artist_click: |_| {},
                     on_play_album: move |track_ids: Vec<String>| {
                         let album_state = state.read().clone();
@@ -143,6 +142,7 @@ pub fn AlbumDetail(album_id: String) -> Element {
                     on_fetch_remote_covers: |_| {},
                     on_select_cover: |_| {},
                     on_create_share_grant: |_| {},
+                    on_copy_share_link: |_| {},
                 }
             }
         }
