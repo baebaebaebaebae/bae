@@ -69,6 +69,7 @@ CREATE TABLE releases (
     managed_locally BOOLEAN NOT NULL DEFAULT FALSE,
     managed_in_cloud BOOLEAN NOT NULL DEFAULT FALSE,
     unmanaged_path TEXT,
+    private BOOLEAN NOT NULL DEFAULT 0,
     _updated_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY (album_id) REFERENCES albums (id) ON DELETE CASCADE,
@@ -203,3 +204,36 @@ CREATE INDEX idx_audio_formats_track_id ON audio_formats (track_id);
 CREATE INDEX idx_library_images_type ON library_images (type);
 CREATE INDEX idx_imports_status ON imports (status);
 CREATE INDEX idx_imports_release_id ON imports (release_id);
+
+CREATE TABLE sync_cursors (
+    device_id TEXT PRIMARY KEY,
+    last_seq INTEGER NOT NULL
+);
+
+CREATE TABLE sync_state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE attribution_names (
+    pubkey_hex TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL
+);
+
+CREATE TABLE attestations (
+    id TEXT PRIMARY KEY,
+    mbid TEXT NOT NULL,
+    infohash TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    format TEXT NOT NULL,
+    author_pubkey TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_attestations_mbid ON attestations(mbid);
+CREATE INDEX idx_attestations_infohash ON attestations(infohash);
+CREATE INDEX idx_attestations_content_hash ON attestations(content_hash);
+CREATE UNIQUE INDEX idx_attestations_unique ON attestations (mbid, infohash, author_pubkey);
+CREATE INDEX idx_attestations_author_pubkey ON attestations (author_pubkey);
