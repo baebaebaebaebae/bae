@@ -61,7 +61,7 @@ Managed by `KeyService`. On macOS, uses the protected data store with iCloud Key
 - `cloud_home_credentials` -- serialized enum: S3 access+secret, OAuth token, or none (iCloud)
 - `discogs_api_key`
 - `server_password`
-- `followed_password:{followed_id}` -- per-followed-library password
+- `followed_encryption_key:{followed_id}` -- per-followed-library encryption key (base64url-encoded 32 bytes)
 - `bae_user_signing_key` -- global (not library-scoped), Ed25519 signing key
 - `bae_user_public_key` -- global, Ed25519 public key
 

@@ -324,4 +324,44 @@ You can run both. A home server running `bae-desktop --headless` for Subsonic + 
 
 Each capability is independent. Solo users only need changeset sync.
 
+## Followed libraries
+
+A user can follow another user's library to get a read-only copy. The follow mechanism uses the same sync infrastructure as shared libraries but in read-only mode.
+
+### Follow code
+
+A follow code encodes: the proxy URL (e.g. `https://alice.bae.fm`), the library encryption key, and an optional display name. The code is base64url-encoded JSON:
+
+```json
+{ "url": "https://alice.bae.fm", "key": "<base64url-encoded 32-byte key>", "name": "My Library" }
+```
+
+The encryption key IS the access control. The proxy allows unauthenticated reads (all data is encrypted), so anyone with the key can decrypt. This is the same principle as share links.
+
+### How it works
+
+1. Owner generates a follow code from Settings > Library > Copy Code
+2. Follower pastes the code in Settings > Library > Follow
+3. On follow: the encryption key is stored in the OS keyring, proxy URL saved to config
+4. On first browse: bae downloads the library snapshot from the proxy, decrypts it, writes a local `library.db` under `~/.bae/followed/{id}/`
+5. The local DB is opened read-only for browsing (albums, tracks, releases)
+6. Audio playback: tracks are fetched encrypted from the proxy (via `CloudHomeStorageAdapter`), decrypted client-side using the library key, and played locally
+
+### Implementation
+
+- `HttpCloudHome::new_readonly(proxy_url)` -- no keypair, reads only
+- `CloudHomeStorageAdapter` bridges `CloudHome` to the `CloudStorage` trait used by the playback system
+- `FollowedSource` on `PlaybackService` overrides the database and cloud storage when playing followed library tracks
+- `bootstrap_from_snapshot()` handles initial sync; periodic refresh can re-bootstrap or apply incremental changesets
+
+### Comparison to shared libraries
+
+| | Shared library | Followed library |
+|---|---|---|
+| Access level | Read + write | Read only |
+| Membership chain | Yes (signed entries) | No |
+| Changeset push | Yes | No |
+| Encryption key source | Wrapped to user pubkey | Embedded in follow code |
+| Bootstrap | Snapshot + pull | Snapshot only |
+| Cloud home access | Full (own credentials) | Read-only via proxy |
 

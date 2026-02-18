@@ -593,8 +593,7 @@ impl AppService {
                 .map(|fl| bae_ui::stores::config::FollowedLibraryInfo {
                     id: fl.id.clone(),
                     name: fl.name.clone(),
-                    server_url: fl.server_url.clone(),
-                    username: fl.username.clone(),
+                    proxy_url: fl.proxy_url.clone(),
                 })
                 .collect();
         }
@@ -646,15 +645,22 @@ impl AppService {
         let library_manager = self.library_manager.clone();
         let imgs = self.image_server.clone();
 
+        // Clear any followed source -- we're back to the local library
+        self.playback_handle.clear_followed_source();
+
         spawn(async move {
             load_library(&state, &library_manager, &imgs).await;
         });
     }
 
-    /// Load albums from a followed server into the library state.
+    /// Load albums from a followed library's local DB into the library state.
+    ///
+    /// If the followed library hasn't been synced yet (no local DB), triggers an
+    /// initial sync from the remote snapshot first.
     pub fn load_followed_library(&self, followed_id: &str) {
         let state = self.state;
         let key_service = self.key_service.clone();
+        let imgs = self.image_server.clone();
 
         // Read connection details from the Store (not the stale boot config)
         let followed = {
@@ -670,24 +676,63 @@ impl AppService {
             return;
         };
 
-        let password = match key_service.get_followed_password(&followed.id) {
-            Some(p) => p,
+        let encryption_key = match key_service.get_followed_encryption_key(&followed.id) {
+            Some(k) => k,
             None => {
-                state
-                    .library()
-                    .error()
-                    .set(Some("No password found for followed library".to_string()));
+                state.library().error().set(Some(
+                    "No encryption key found for followed library".to_string(),
+                ));
                 return;
             }
         };
 
+        let followed_id = followed.id.clone();
+        let playback_handle = self.playback_handle.clone();
+
         spawn(async move {
-            load_followed_library(&state, &followed.server_url, &followed.username, &password)
-                .await;
+            load_followed_library_from_db(
+                &state,
+                &followed_id,
+                &followed.proxy_url,
+                &encryption_key,
+                &imgs,
+                &playback_handle,
+            )
+            .await;
         });
     }
 
-    /// Generate a follow code for an existing followed library.
+    /// Generate a follow code for the owner's own library.
+    ///
+    /// Reads the proxy URL from config and encryption key from keyring.
+    /// Only works when cloud sync is configured via bae cloud (HttpCloudHome).
+    /// Will be called from the sync settings UI ("Copy Follow Code" button).
+    #[allow(dead_code)]
+    pub fn generate_own_follow_code(&self) -> Result<String, String> {
+        let proxy_url = self
+            .config
+            .cloud_home_bae_cloud_url
+            .as_ref()
+            .ok_or_else(|| "No cloud home proxy URL configured".to_string())?;
+
+        let encryption_key_hex = self
+            .key_service
+            .get_encryption_key()
+            .ok_or_else(|| "No encryption key found".to_string())?;
+
+        let encryption_key =
+            hex::decode(&encryption_key_hex).map_err(|e| format!("Invalid encryption key: {e}"))?;
+
+        let library_name = self.config.library_name.as_deref();
+
+        Ok(bae_core::follow_code::encode(
+            proxy_url,
+            &encryption_key,
+            library_name,
+        ))
+    }
+
+    /// Generate a follow code for an existing followed library (for resharing).
     pub fn generate_follow_code(&self, followed_id: &str) -> Result<String, String> {
         // Read from the Store (not the stale boot-time config) so newly-added
         // followed libraries are found during the same session.
@@ -697,15 +742,14 @@ impl AppService {
             .find(|f| f.id == followed_id)
             .ok_or_else(|| format!("Followed library '{followed_id}' not found"))?;
 
-        let password = self
+        let encryption_key = self
             .key_service
-            .get_followed_password(followed_id)
-            .ok_or_else(|| "No password found for followed library".to_string())?;
+            .get_followed_encryption_key(followed_id)
+            .ok_or_else(|| "No encryption key found for followed library".to_string())?;
 
         Ok(bae_core::follow_code::encode(
-            &followed.server_url,
-            &followed.username,
-            &password,
+            &followed.proxy_url,
+            &encryption_key,
             Some(&followed.name),
         ))
     }
@@ -722,45 +766,18 @@ impl AppService {
         album_id: &str,
         release_id: Option<&str>,
         active_source: &bae_ui::stores::config::LibrarySource,
-        followed_libs: &[bae_ui::stores::config::FollowedLibraryInfo],
     ) {
         let state = self.state;
 
         match active_source {
             bae_ui::stores::config::LibrarySource::Followed(ref followed_id) => {
-                let key_service = self.key_service.clone();
                 let album_id = album_id.to_string();
-
-                let followed = followed_libs.iter().find(|f| f.id == *followed_id).cloned();
-
-                let Some(followed) = followed else {
-                    state
-                        .album_detail()
-                        .error()
-                        .set(Some("Followed library not found".to_string()));
-                    return;
-                };
-
-                let password = match key_service.get_followed_password(&followed.id) {
-                    Some(p) => p,
-                    None => {
-                        state
-                            .album_detail()
-                            .error()
-                            .set(Some("No password found for followed library".to_string()));
-                        return;
-                    }
-                };
+                let followed_id = followed_id.clone();
+                let imgs = self.image_server.clone();
 
                 spawn(async move {
-                    load_followed_album_detail(
-                        &state,
-                        &followed.server_url,
-                        &followed.username,
-                        &password,
-                        &album_id,
-                    )
-                    .await;
+                    load_followed_album_detail_from_db(&state, &followed_id, &album_id, &imgs)
+                        .await;
                 });
             }
             bae_ui::stores::config::LibrarySource::Local => {
@@ -2198,52 +2215,46 @@ async fn load_library(
     }
 }
 
-/// Load albums from a followed Subsonic server into the Store.
-async fn load_followed_library(
+/// Ensure a followed library has a local DB (bootstrap from snapshot if needed),
+/// then load its albums into the Store and set the playback source.
+async fn load_followed_library_from_db(
     state: &Store<AppState>,
-    server_url: &str,
-    username: &str,
-    password: &str,
+    followed_id: &str,
+    proxy_url: &str,
+    encryption_key: &[u8],
+    imgs: &ImageServerHandle,
+    playback_handle: &playback::PlaybackHandle,
 ) {
     state.library().loading().set(true);
     state.library().error().set(None);
 
-    let client = bae_core::subsonic_client::SubsonicClient::new(
-        server_url.to_string(),
-        username.to_string(),
-        password.to_string(),
-    );
+    let db = match open_followed_db(followed_id, proxy_url, encryption_key).await {
+        Ok(db) => db,
+        Err(e) => {
+            let mut lib_lens = state.library();
+            let mut lib = lib_lens.write();
+            lib.error = Some(format!("Failed to sync followed library: {e}"));
+            lib.loading = false;
+            return;
+        }
+    };
 
-    match client.get_album_list("newest", 500, 0).await {
-        Ok(albums) => {
-            let display_albums: Vec<bae_ui::Album> = albums
-                .iter()
-                .map(|a| bae_ui::Album {
-                    id: a.id.clone(),
-                    title: a.name.clone(),
-                    year: a.year,
-                    cover_url: a
-                        .cover_art
-                        .as_ref()
-                        .map(|id| client.get_cover_art_url(id, Some(300))),
-                    is_compilation: false,
-                    date_added: chrono::Utc::now(),
-                })
-                .collect();
-
-            let mut artists_map: HashMap<String, Vec<bae_ui::Artist>> = HashMap::new();
-            for a in &albums {
-                if let Some(ref artist_name) = a.artist {
-                    artists_map.insert(
-                        a.id.clone(),
-                        vec![bae_ui::Artist {
-                            id: a.artist_id.clone().unwrap_or_default(),
-                            name: artist_name.clone(),
-                            image_url: None,
-                        }],
-                    );
+    match db.get_albums().await {
+        Ok(album_list) => {
+            let mut artists_map = HashMap::new();
+            for album in &album_list {
+                if let Ok(db_artists) = db.get_artists_for_album(&album.id).await {
+                    let artists = db_artists
+                        .iter()
+                        .map(|a| artist_from_db_ref(a, imgs))
+                        .collect();
+                    artists_map.insert(album.id.clone(), artists);
                 }
             }
+            let display_albums = album_list
+                .iter()
+                .map(|a| album_from_db_ref(a, imgs))
+                .collect();
 
             let mut lib_lens = state.library();
             let mut lib = lib_lens.write();
@@ -2255,70 +2266,98 @@ async fn load_followed_library(
         Err(e) => {
             let mut lib_lens = state.library();
             let mut lib = lib_lens.write();
-            lib.error = Some(format!("Failed to load followed library: {}", e));
+            lib.error = Some(format!("Failed to load followed library: {e}"));
             lib.loading = false;
+            return;
         }
+    }
+
+    // Set the followed source on the playback handle so tracks play from the cloud
+    if let Ok(key_arr) = <[u8; 32]>::try_from(encryption_key) {
+        let encryption = bae_core::encryption::EncryptionService::from_key(key_arr);
+        let cloud_home =
+            bae_core::cloud_home::http::HttpCloudHome::new_readonly(proxy_url.to_string());
+        let cloud_storage: std::sync::Arc<dyn bae_core::cloud_storage::CloudStorage> =
+            std::sync::Arc::new(bae_core::cloud_storage::CloudHomeStorageAdapter::new(
+                std::sync::Arc::new(cloud_home),
+            ));
+
+        playback_handle.set_followed_source(bae_core::playback::FollowedSource {
+            database: db,
+            cloud_storage,
+            encryption,
+        });
+    } else {
+        tracing::error!(
+            "Followed library encryption key is {} bytes, expected 32",
+            encryption_key.len()
+        );
     }
 }
 
-/// Load album detail from a followed Subsonic server into the Store.
-async fn load_followed_album_detail(
+/// Load album detail from a followed library's local DB into the Store.
+async fn load_followed_album_detail_from_db(
     state: &Store<AppState>,
-    server_url: &str,
-    username: &str,
-    password: &str,
+    followed_id: &str,
     album_id: &str,
+    imgs: &ImageServerHandle,
 ) {
     state.album_detail().loading().set(true);
     state.album_detail().error().set(None);
 
-    let client = bae_core::subsonic_client::SubsonicClient::new(
-        server_url.to_string(),
-        username.to_string(),
-        password.to_string(),
-    );
+    let db_path = bae_core::config::Config::followed_library_dir(followed_id).join("library.db");
 
-    match client.get_album(album_id).await {
-        Ok(album) => {
-            let cover_url = album
-                .cover_art
-                .as_ref()
-                .map(|id| client.get_cover_art_url(id, Some(600)));
+    let db =
+        match bae_core::db::Database::open_read_only(db_path.to_str().unwrap_or_default()).await {
+            Ok(db) => db,
+            Err(e) => {
+                state
+                    .album_detail()
+                    .error()
+                    .set(Some(format!("Followed library not synced: {e}")));
+                state.album_detail().loading().set(false);
+                return;
+            }
+        };
 
-            let display_album = bae_ui::Album {
-                id: album.id.clone(),
-                title: album.name.clone(),
-                year: album.year,
-                cover_url,
-                is_compilation: false,
-                date_added: chrono::Utc::now(),
+    match db.get_album_by_id(album_id).await {
+        Ok(Some(album)) => {
+            let display_album = album_from_db_ref(&album, imgs);
+
+            let artists = match db.get_artists_for_album(album_id).await {
+                Ok(db_artists) => db_artists
+                    .iter()
+                    .map(|a| artist_from_db_ref(a, imgs))
+                    .collect(),
+                Err(_) => vec![],
             };
 
-            let artists = if let Some(ref artist_name) = album.artist {
-                vec![bae_ui::Artist {
-                    id: album.artist_id.clone().unwrap_or_default(),
-                    name: artist_name.clone(),
-                    image_url: None,
-                }]
+            // Get the first release for this album to show tracks
+            let releases = db
+                .get_releases_for_album(album_id)
+                .await
+                .unwrap_or_default();
+
+            let display_releases: Vec<Release> = releases.iter().map(release_from_db_ref).collect();
+
+            let selected_release_id = releases.first().map(|r| r.id.clone());
+
+            let (tracks, files) = if let Some(release) = releases.first() {
+                let db_tracks = db
+                    .get_tracks_for_release(&release.id)
+                    .await
+                    .unwrap_or_default();
+                let db_files = db
+                    .get_files_for_release(&release.id)
+                    .await
+                    .unwrap_or_default();
+                (
+                    db_tracks.iter().map(track_from_db_ref).collect::<Vec<_>>(),
+                    db_files.iter().map(file_from_db_ref).collect::<Vec<_>>(),
+                )
             } else {
-                vec![]
+                (vec![], vec![])
             };
-
-            let tracks: Vec<bae_ui::Track> = album
-                .song
-                .as_deref()
-                .unwrap_or(&[])
-                .iter()
-                .map(|s| bae_ui::Track {
-                    id: s.id.clone(),
-                    title: s.title.clone(),
-                    track_number: s.track,
-                    disc_number: None,
-                    duration_ms: s.duration.map(|d| d as i64 * 1000),
-                    is_available: true,
-                    import_state: bae_ui::TrackImportState::None,
-                })
-                .collect();
 
             let track_count = tracks.len();
             let track_ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
@@ -2335,23 +2374,146 @@ async fn load_followed_album_detail(
             detail.track_count = track_count;
             detail.track_ids = track_ids;
             detail.track_disc_info = track_disc_info;
-            detail.releases = vec![];
-            detail.files = vec![];
+            detail.releases = display_releases;
+            detail.files = files;
             detail.images = vec![];
-            detail.selected_release_id = None;
+            detail.selected_release_id = selected_release_id;
             detail.managed_locally = false;
-            detail.managed_in_cloud = false;
+            detail.managed_in_cloud = true;
             detail.is_unmanaged = false;
             detail.loading = false;
+        }
+        Ok(None) => {
+            state
+                .album_detail()
+                .error()
+                .set(Some("Album not found in followed library".to_string()));
+            state.album_detail().loading().set(false);
         }
         Err(e) => {
             state
                 .album_detail()
                 .error()
-                .set(Some(format!("Failed to load album: {}", e)));
+                .set(Some(format!("Failed to load album: {e}")));
             state.album_detail().loading().set(false);
         }
     }
+}
+
+/// Open or bootstrap a followed library's local DB, then pull incremental changes.
+///
+/// If the DB file doesn't exist yet, downloads and decrypts the remote snapshot,
+/// stores the returned cursors, then pulls any changesets newer than the snapshot.
+/// If the DB already exists, reads stored cursors and pulls incrementally.
+///
+/// Returns a read-write Database handle (needed for cursor writes and changeset application).
+async fn open_followed_db(
+    followed_id: &str,
+    proxy_url: &str,
+    encryption_key: &[u8],
+) -> Result<bae_core::db::Database, String> {
+    use bae_core::sync::pull::pull_changes;
+    use std::ffi::CString;
+
+    let key_arr: [u8; 32] = encryption_key
+        .try_into()
+        .map_err(|_| "Invalid encryption key length (expected 32 bytes)".to_string())?;
+    let encryption = bae_core::encryption::EncryptionService::from_key(key_arr);
+    let cloud_home = bae_core::cloud_home::http::HttpCloudHome::new_readonly(proxy_url.to_string());
+    let bucket = bae_core::sync::cloud_home_bucket::CloudHomeSyncBucket::new(
+        Box::new(cloud_home),
+        encryption.clone(),
+    );
+
+    let dir = bae_core::config::Config::followed_library_dir(followed_id);
+    let db_path = dir.join("library.db");
+
+    let mut cursors = std::collections::HashMap::new();
+
+    // Bootstrap from snapshot if no local DB exists yet
+    if !db_path.exists() {
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("Failed to create followed library directory: {e}"))?;
+
+        tracing::info!("Bootstrapping followed library {followed_id} from snapshot");
+
+        let bootstrap_result =
+            bae_core::sync::snapshot::bootstrap_from_snapshot(&bucket, &encryption, &db_path)
+                .await
+                .map_err(|e| format!("Failed to bootstrap from snapshot: {e}"))?;
+
+        cursors = bootstrap_result.cursors;
+
+        tracing::info!(
+            "Followed library {followed_id} bootstrapped ({} device cursors)",
+            cursors.len()
+        );
+    }
+
+    // Open read-write (no migrations -- schema comes from snapshot)
+    let db = bae_core::db::Database::open(db_path.to_str().unwrap_or_default())
+        .await
+        .map_err(|e| format!("Failed to open followed library database: {e}"))?;
+
+    // If we didn't just bootstrap, load stored cursors
+    if cursors.is_empty() {
+        cursors = db
+            .get_all_sync_cursors()
+            .await
+            .map_err(|e| format!("Failed to read sync cursors: {e}"))?;
+    }
+
+    // Pull incremental changes
+    let library_dir = bae_core::library_dir::LibraryDir::new(&dir);
+
+    // Use a stable device ID for this follower (just needs to be unique and consistent)
+    let follower_device_id = format!("follower-{followed_id}");
+
+    let updated_cursors = unsafe {
+        let c_path = CString::new(db_path.to_str().unwrap()).expect("DB path contains null byte");
+        let mut raw_db: *mut libsqlite3_sys::sqlite3 = std::ptr::null_mut();
+        let rc = libsqlite3_sys::sqlite3_open(c_path.as_ptr(), &mut raw_db);
+        if rc != libsqlite3_sys::SQLITE_OK {
+            return Err("Failed to open database for changeset application".to_string());
+        }
+
+        let result = match pull_changes(
+            raw_db,
+            &bucket,
+            &follower_device_id,
+            &cursors,
+            None,
+            &library_dir,
+        )
+        .await
+        {
+            Ok((updated, pull_result)) => {
+                if pull_result.changesets_applied > 0 {
+                    tracing::info!(
+                        "Followed library {followed_id}: applied {} changesets",
+                        pull_result.changesets_applied
+                    );
+                }
+                Ok(updated)
+            }
+            Err(e) => {
+                libsqlite3_sys::sqlite3_close(raw_db);
+                Err(format!("Failed to pull changes: {e}"))
+            }
+        };
+
+        libsqlite3_sys::sqlite3_close(raw_db);
+        result
+    }?;
+
+    // Persist updated cursors
+    for (device_id, seq) in &updated_cursors {
+        db.set_sync_cursor(device_id, *seq)
+            .await
+            .map_err(|e| format!("Failed to save sync cursor: {e}"))?;
+    }
+
+    Ok(db)
 }
 
 /// All data needed for the album detail view, loaded before touching the store.

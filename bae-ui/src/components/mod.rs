@@ -75,7 +75,7 @@ pub use select::{Select, SelectOption};
 pub use settings::{
     AboutSectionView, BaeCloudAuthMode, BitTorrentSectionView, BitTorrentSettings,
     CloudProviderOption, CloudProviderPicker, DiscogsSectionView, FollowLibraryView,
-    FollowTestStatus, JoinLibraryView, JoinStatus, LibraryInfo, LibrarySectionView, SettingsCard,
+    FollowSyncStatus, JoinLibraryView, JoinStatus, LibraryInfo, LibrarySectionView, SettingsCard,
     SettingsSection, SettingsTab, SettingsView, SubsonicSectionView, SyncBucketConfig,
     SyncSectionView,
 };

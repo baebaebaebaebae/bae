@@ -69,8 +69,7 @@ pub struct ConfigState {
 pub struct FollowedLibraryInfo {
     pub id: String,
     pub name: String,
-    pub server_url: String,
-    pub username: String,
+    pub proxy_url: String,
 }
 
 /// Which library source is currently active

@@ -13,7 +13,7 @@ use super::{CloudHome, CloudHomeError, JoinInfo};
 /// HTTP-backed cloud home that proxies through a bae-proxy.
 pub struct HttpCloudHome {
     base_url: String,
-    keypair: UserKeypair,
+    keypair: Option<UserKeypair>,
     client: Client,
 }
 
@@ -21,23 +21,42 @@ impl HttpCloudHome {
     pub fn new(base_url: String, keypair: UserKeypair) -> Self {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
-            keypair,
+            keypair: Some(keypair),
             client: Client::new(),
         }
     }
 
-    /// Build the three auth headers for a request.
+    /// Create a read-only instance without a keypair.
+    /// Reads work because bae-proxy allows unauthenticated reads (all data is encrypted).
+    /// Writes will fail with 401/403 from bae-proxy.
+    pub fn new_readonly(base_url: String) -> Self {
+        Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            keypair: None,
+            client: Client::new(),
+        }
+    }
+
+    /// Build auth headers for a request. Returns empty headers when no keypair is set.
     fn sign_request(&self, method: &str, path: &str) -> [(&'static str, String); 3] {
+        let Some(ref keypair) = self.keypair else {
+            return [
+                ("X-Bae-Pubkey", String::new()),
+                ("X-Bae-Timestamp", String::new()),
+                ("X-Bae-Signature", String::new()),
+            ];
+        };
+
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
 
         let message = format!("{}\n{}\n{}", method, path, timestamp);
-        let signature = self.keypair.sign(message.as_bytes());
+        let signature = keypair.sign(message.as_bytes());
 
         [
-            ("X-Bae-Pubkey", hex::encode(self.keypair.public_key)),
+            ("X-Bae-Pubkey", hex::encode(keypair.public_key)),
             ("X-Bae-Timestamp", timestamp.to_string()),
             ("X-Bae-Signature", hex::encode(signature)),
         ]
@@ -344,5 +363,24 @@ mod tests {
             err.to_string().contains("access is managed by the server"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn readonly_sign_request_returns_empty_headers() {
+        let cloud_home = HttpCloudHome::new_readonly("https://example.com".to_string());
+        let headers = cloud_home.sign_request("GET", "/cloud/some/key");
+
+        assert_eq!(headers[0].0, "X-Bae-Pubkey");
+        assert_eq!(headers[0].1, "");
+        assert_eq!(headers[1].0, "X-Bae-Timestamp");
+        assert_eq!(headers[1].1, "");
+        assert_eq!(headers[2].0, "X-Bae-Signature");
+        assert_eq!(headers[2].1, "");
+    }
+
+    #[test]
+    fn readonly_base_url_trailing_slash_stripped() {
+        let cloud_home = HttpCloudHome::new_readonly("https://example.com/".to_string());
+        assert_eq!(cloud_home.base_url, "https://example.com");
     }
 }

@@ -545,58 +545,77 @@ impl KeyService {
     }
 
     // -------------------------------------------------------------------------
-    // Followed library passwords (library-scoped, per followed server)
+    // Followed library encryption keys (library-scoped, per followed library)
     // -------------------------------------------------------------------------
 
-    /// Read the password for a followed library. Returns None if not set.
+    /// Read the encryption key for a followed library. Returns None if not set.
+    /// The key is stored base64-encoded in the keyring and returned as raw bytes.
     ///
-    /// Dev mode: reads `BAE_FOLLOWED_{followed_id}_PASSWORD` env var.
+    /// Dev mode: reads `BAE_FOLLOWED_{followed_id}_KEY` env var (base64).
     /// Prod mode: reads from OS keyring.
-    pub fn get_followed_password(&self, followed_id: &str) -> Option<String> {
-        if self.dev_mode {
-            std::env::var(format!("BAE_FOLLOWED_{}_PASSWORD", followed_id))
+    pub fn get_followed_encryption_key(&self, followed_id: &str) -> Option<Vec<u8>> {
+        let b64 = if self.dev_mode {
+            std::env::var(format!("BAE_FOLLOWED_{}_KEY", followed_id))
                 .ok()
                 .filter(|k| !k.is_empty())
         } else {
-            let account = self.account(&format!("followed_password:{}", followed_id));
+            let account = self.account(&format!("followed_key:{}", followed_id));
             keyring_core::Entry::new("bae", &account)
                 .ok()
                 .and_then(|e| e.get_password().ok())
                 .filter(|k| !k.is_empty())
-        }
+        };
+
+        b64.and_then(|s| {
+            use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+            use base64::Engine;
+            URL_SAFE_NO_PAD.decode(&s).ok()
+        })
     }
 
-    /// Save the password for a followed library.
+    /// Save the encryption key for a followed library.
+    /// The key is stored as base64url in the keyring.
     ///
     /// Dev mode: sets the env var.
     /// Prod mode: writes to OS keyring.
-    pub fn set_followed_password(&self, followed_id: &str, password: &str) -> Result<(), KeyError> {
+    pub fn set_followed_encryption_key(
+        &self,
+        followed_id: &str,
+        key: &[u8],
+    ) -> Result<(), KeyError> {
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use base64::Engine;
+        let b64 = URL_SAFE_NO_PAD.encode(key);
+
         if self.dev_mode {
-            std::env::set_var(format!("BAE_FOLLOWED_{}_PASSWORD", followed_id), password);
+            std::env::set_var(format!("BAE_FOLLOWED_{}_KEY", followed_id), &b64);
             return Ok(());
         }
 
-        let account = self.account(&format!("followed_password:{}", followed_id));
-        keyring_core::Entry::new("bae", &account)?.set_password(password)?;
+        let account = self.account(&format!("followed_key:{}", followed_id));
+        keyring_core::Entry::new("bae", &account)?.set_password(&b64)?;
 
-        info!("Saved password for followed library {}", followed_id);
+        info!("Saved encryption key for followed library {}", followed_id);
         Ok(())
     }
 
-    /// Delete the password for a followed library.
+    /// Delete the encryption key for a followed library.
     ///
     /// Dev mode: removes the env var.
     /// Prod mode: deletes from OS keyring. Silently ignores missing entries.
-    pub fn delete_followed_password(&self, followed_id: &str) -> Result<(), KeyError> {
+    pub fn delete_followed_encryption_key(&self, followed_id: &str) -> Result<(), KeyError> {
         if self.dev_mode {
-            std::env::remove_var(format!("BAE_FOLLOWED_{}_PASSWORD", followed_id));
+            std::env::remove_var(format!("BAE_FOLLOWED_{}_KEY", followed_id));
             return Ok(());
         }
 
-        let account = self.account(&format!("followed_password:{}", followed_id));
+        let account = self.account(&format!("followed_key:{}", followed_id));
         match keyring_core::Entry::new("bae", &account)?.delete_credential() {
             Ok(()) => {
-                info!("Deleted password for followed library {}", followed_id);
+                info!(
+                    "Deleted encryption key for followed library {}",
+                    followed_id
+                );
                 Ok(())
             }
             Err(keyring_core::Error::NoEntry) => Ok(()),

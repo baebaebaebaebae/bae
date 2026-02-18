@@ -32,15 +32,15 @@ pub fn proxy_router(state: Arc<ProxyState>) -> Router {
     Router::new()
         .route("/cloud", get(list_keys))
         .route(
-            "/cloud/{*key}",
+            "/cloud/*key",
             get(read_key)
                 .put(write_key)
                 .delete(delete_key)
                 .head(head_key),
         )
-        .route("/share/{share_id}/meta", get(share_meta))
-        .route("/share/{share_id}/manifest", get(share_manifest))
-        .route("/share/{share_id}/file/{*key}", get(share_file))
+        .route("/share/:share_id/meta", get(share_meta))
+        .route("/share/:share_id/manifest", get(share_manifest))
+        .route("/share/:share_id/file/*key", get(share_file))
         .route("/health", get(health))
         .with_state(state)
 }
@@ -188,8 +188,6 @@ async fn health(State(state): State<Arc<ProxyState>>) -> Response {
 async fn list_keys(
     State(state): State<Arc<ProxyState>>,
     Host(raw_host): Host,
-    headers: HeaderMap,
-    method: Method,
     Query(query): Query<ListQuery>,
 ) -> Response {
     let hostname = extract_hostname(&raw_host);
@@ -200,12 +198,6 @@ async fn list_keys(
         None => return StatusCode::NOT_FOUND.into_response(),
     };
     drop(registry);
-
-    if let Some(ref pubkey) = entry.ed25519_pubkey {
-        if let Err(resp) = verify_auth(&headers, &method, "/cloud", pubkey) {
-            return resp;
-        }
-    }
 
     if let Err(resp) = get_s3_client(&state.s3_clients, &entry.library_id, &entry).await {
         return resp;
@@ -227,7 +219,6 @@ async fn read_key(
     State(state): State<Arc<ProxyState>>,
     Host(raw_host): Host,
     headers: HeaderMap,
-    method: Method,
     Path(key): Path<String>,
 ) -> Response {
     let hostname = extract_hostname(&raw_host);
@@ -238,14 +229,6 @@ async fn read_key(
         None => return StatusCode::NOT_FOUND.into_response(),
     };
     drop(registry);
-
-    let request_path = format!("/cloud/{key}");
-
-    if let Some(ref pubkey) = entry.ed25519_pubkey {
-        if let Err(resp) = verify_auth(&headers, &method, &request_path, pubkey) {
-            return resp;
-        }
-    }
 
     if let Err(resp) = get_s3_client(&state.s3_clients, &entry.library_id, &entry).await {
         return resp;
@@ -356,8 +339,6 @@ async fn delete_key(
 async fn head_key(
     State(state): State<Arc<ProxyState>>,
     Host(raw_host): Host,
-    headers: HeaderMap,
-    method: Method,
     Path(key): Path<String>,
 ) -> Response {
     let hostname = extract_hostname(&raw_host);
@@ -368,14 +349,6 @@ async fn head_key(
         None => return StatusCode::NOT_FOUND.into_response(),
     };
     drop(registry);
-
-    let request_path = format!("/cloud/{key}");
-
-    if let Some(ref pubkey) = entry.ed25519_pubkey {
-        if let Err(resp) = verify_auth(&headers, &method, &request_path, pubkey) {
-            return resp;
-        }
-    }
 
     if let Err(resp) = get_s3_client(&state.s3_clients, &entry.library_id, &entry).await {
         return resp;
@@ -704,5 +677,98 @@ mod tests {
         let json = r#"{"files":[]}"#;
         let manifest: crate::share::ShareManifest = serde_json::from_str(json).unwrap();
         assert!(manifest.files.is_empty());
+    }
+
+    // --- Route-level auth tests ---
+
+    use crate::registry::LibraryEntry;
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::util::ServiceExt;
+
+    fn test_registry_entry() -> LibraryEntry {
+        LibraryEntry {
+            hostname: "test.bae.fm".to_string(),
+            library_id: "lib-test".to_string(),
+            s3_bucket: "test-bucket".to_string(),
+            s3_region: "us-east-1".to_string(),
+            s3_endpoint: "http://localhost:19000".to_string(),
+            s3_access_key: "testkey".to_string(),
+            s3_secret_key: "testsecret".to_string(),
+            s3_key_prefix: "".to_string(),
+            ed25519_pubkey: Some("aa".repeat(32)),
+        }
+    }
+
+    fn test_app() -> Router {
+        let registry = Registry {
+            libraries: vec![test_registry_entry()],
+        };
+        let state = Arc::new(ProxyState {
+            registry: Arc::new(RwLock::new(registry)),
+            s3_clients: Arc::new(RwLock::new(HashMap::new())),
+        });
+        proxy_router(state)
+    }
+
+    /// Read routes (GET, HEAD, LIST) must not require auth headers.
+    /// They'll fail at S3 (no real backend), but the status must NOT be 401.
+    #[tokio::test]
+    async fn read_key_works_without_auth() {
+        let app = test_app();
+        let req = Request::get("/cloud/test-key")
+            .header("host", "test.bae.fm")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_ne!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert_ne!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn head_key_works_without_auth() {
+        let app = test_app();
+        let req = Request::head("/cloud/test-key")
+            .header("host", "test.bae.fm")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_ne!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert_ne!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn list_keys_works_without_auth() {
+        let app = test_app();
+        let req = Request::get("/cloud?prefix=test/")
+            .header("host", "test.bae.fm")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_ne!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert_ne!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// Write routes (PUT, DELETE) must require auth headers -- return 401 without them.
+    #[tokio::test]
+    async fn write_key_fails_without_auth() {
+        let app = test_app();
+        let req = Request::put("/cloud/test-key")
+            .header("host", "test.bae.fm")
+            .body(Body::from("data"))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn delete_key_fails_without_auth() {
+        let app = test_app();
+        let req = Request::delete("/cloud/test-key")
+            .header("host", "test.bae.fm")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 }

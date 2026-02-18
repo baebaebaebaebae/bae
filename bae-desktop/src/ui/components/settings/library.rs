@@ -7,7 +7,6 @@ use bae_core::encryption::EncryptionService;
 use bae_core::join_code;
 use bae_core::keys::KeyService;
 use bae_core::library_dir::LibraryDir;
-use bae_core::subsonic_client::SubsonicClient;
 use bae_core::sync::bucket::SyncBucketClient;
 use bae_core::sync::cloud_home_bucket::CloudHomeSyncBucket;
 use bae_core::sync::pull::pull_changes;
@@ -15,7 +14,7 @@ use bae_core::sync::snapshot::bootstrap_from_snapshot;
 use bae_ui::stores::config::{FollowedLibraryInfo, LibrarySource};
 use bae_ui::stores::{AppStateStoreExt, ConfigStateStoreExt, LibraryStateStoreExt};
 use bae_ui::{
-    FollowLibraryView, FollowTestStatus, JoinLibraryView, JoinStatus, LibrarySectionView,
+    FollowLibraryView, FollowSyncStatus, JoinLibraryView, JoinStatus, LibrarySectionView,
 };
 use dioxus::prelude::*;
 use std::ffi::CString;
@@ -43,7 +42,7 @@ enum LibrarySubView {
     Main,
     /// Join shared library form.
     Join,
-    /// Follow server form.
+    /// Follow library form.
     Follow,
 }
 
@@ -68,11 +67,11 @@ pub fn LibrarySection() -> Element {
     // Follow form state
     let mut follow_code_input = use_signal(String::new);
     let mut follow_code_error = use_signal(|| Option::<String>::None);
-    let mut follow_name = use_signal(String::new);
-    let mut follow_url = use_signal(String::new);
-    let mut follow_username = use_signal(String::new);
-    let mut follow_password = use_signal(String::new);
-    let mut follow_test_status = use_signal(|| Option::<FollowTestStatus>::None);
+    let mut follow_decoded_name = use_signal(|| Option::<String>::None);
+    let mut follow_decoded_url = use_signal(|| Option::<String>::None);
+    // Stash the decoded encryption key (raw bytes) for use on save
+    let mut follow_decoded_key = use_signal(|| Option::<Vec<u8>>::None);
+    let mut follow_save_status = use_signal(|| Option::<FollowSyncStatus>::None);
     let mut follow_saving = use_signal(|| false);
 
     let on_switch = {
@@ -204,11 +203,10 @@ pub fn LibrarySection() -> Element {
     let on_follow_start = move |_| {
         follow_code_input.set(String::new());
         follow_code_error.set(None);
-        follow_name.set(String::new());
-        follow_url.set(String::new());
-        follow_username.set(String::new());
-        follow_password.set(String::new());
-        follow_test_status.set(None);
+        follow_decoded_name.set(None);
+        follow_decoded_url.set(None);
+        follow_decoded_key.set(None);
+        follow_save_status.set(None);
         follow_saving.set(false);
         sub_view.set(LibrarySubView::Follow);
     };
@@ -217,21 +215,24 @@ pub fn LibrarySection() -> Element {
         follow_code_input.set(value.clone());
         if value.trim().is_empty() {
             follow_code_error.set(None);
+            follow_decoded_name.set(None);
+            follow_decoded_url.set(None);
+            follow_decoded_key.set(None);
             return;
         }
         match bae_core::follow_code::decode(&value) {
-            Ok((url, user, pass, name)) => {
+            Ok((url, key, name)) => {
                 follow_code_error.set(None);
-                follow_url.set(url);
-                follow_username.set(user);
-                follow_password.set(pass);
-                if let Some(n) = name {
-                    follow_name.set(n);
-                }
-                follow_test_status.set(None);
+                follow_decoded_url.set(Some(url));
+                follow_decoded_name.set(name);
+                follow_decoded_key.set(Some(key));
+                follow_save_status.set(None);
             }
             Err(e) => {
                 follow_code_error.set(Some(e.to_string()));
+                follow_decoded_name.set(None);
+                follow_decoded_url.set(None);
+                follow_decoded_key.set(None);
             }
         }
     };
@@ -240,40 +241,35 @@ pub fn LibrarySection() -> Element {
         sub_view.set(LibrarySubView::Main);
     };
 
-    let on_follow_test = move |_| {
-        let url = follow_url.read().clone();
-        let username = follow_username.read().clone();
-        let password = follow_password.read().clone();
-        follow_test_status.set(Some(FollowTestStatus::Testing));
-
-        spawn(async move {
-            let client = SubsonicClient::new(url, username, password);
-            match client.ping().await {
-                Ok(()) => follow_test_status.set(Some(FollowTestStatus::Success)),
-                Err(e) => follow_test_status.set(Some(FollowTestStatus::Error(format!("{e}")))),
-            }
-        });
-    };
-
     let on_follow_save = {
         let app = app.clone();
         move |_| {
-            let name = follow_name.read().clone();
-            let url = follow_url.read().clone();
-            let username = follow_username.read().clone();
-            let password = follow_password.read().clone();
+            let proxy_url = match follow_decoded_url.read().clone() {
+                Some(u) => u,
+                None => return,
+            };
+            let encryption_key = match follow_decoded_key.read().clone() {
+                Some(k) => k,
+                None => return,
+            };
+            let name = follow_decoded_name
+                .read()
+                .clone()
+                .unwrap_or_else(|| "Followed Library".to_string());
             let mut config = app.config.clone();
             let key_service = app.key_service.clone();
             let state = app.state;
 
             follow_saving.set(true);
+            follow_save_status.set(Some(FollowSyncStatus::Syncing("Saving...".to_string())));
 
             let id = uuid::Uuid::new_v4().to_string();
 
-            // Save password to keyring
-            if let Err(e) = key_service.set_followed_password(&id, &password) {
-                error!("Failed to save followed library password: {e}");
+            // Save encryption key to keyring
+            if let Err(e) = key_service.set_followed_encryption_key(&id, &encryption_key) {
+                error!("Failed to save followed library encryption key: {e}");
                 follow_saving.set(false);
+                follow_save_status.set(Some(FollowSyncStatus::Error(format!("{e}"))));
                 return;
             }
 
@@ -281,29 +277,29 @@ pub fn LibrarySection() -> Element {
             let followed = FollowedLibrary {
                 id: id.clone(),
                 name: name.clone(),
-                server_url: url.clone(),
-                username: username.clone(),
+                proxy_url: proxy_url.clone(),
             };
 
             if let Err(e) = config.add_followed_library(followed) {
                 error!("Failed to save followed library config: {e}");
                 follow_saving.set(false);
+                follow_save_status.set(Some(FollowSyncStatus::Error(format!("{e}"))));
                 return;
             }
 
-            info!("Added followed library '{name}' at {url}");
+            info!("Added followed library '{name}' at {proxy_url}");
 
             // Update store
             let mut followed_list = state.read().config.followed_libraries.clone();
             followed_list.push(FollowedLibraryInfo {
                 id,
                 name,
-                server_url: url,
-                username,
+                proxy_url,
             });
             state.config().followed_libraries().set(followed_list);
 
             follow_saving.set(false);
+            follow_save_status.set(Some(FollowSyncStatus::Success));
             sub_view.set(LibrarySubView::Main);
         }
     };
@@ -315,15 +311,23 @@ pub fn LibrarySection() -> Element {
             let key_service = app.key_service.clone();
             let state = app.state;
 
-            // Delete password from keyring
-            if let Err(e) = key_service.delete_followed_password(&id) {
-                error!("Failed to delete followed library password: {e}");
+            // Delete encryption key from keyring
+            if let Err(e) = key_service.delete_followed_encryption_key(&id) {
+                error!("Failed to delete followed library encryption key: {e}");
             }
 
             // Remove from config
             if let Err(e) = config.remove_followed_library(&id) {
                 error!("Failed to remove followed library config: {e}");
                 return;
+            }
+
+            // Remove local DB and data
+            let dir = bae_core::config::Config::followed_library_dir(&id);
+            if dir.exists() {
+                if let Err(e) = std::fs::remove_dir_all(&dir) {
+                    error!("Failed to remove followed library data: {e}");
+                }
             }
 
             info!("Removed followed library {id}");
@@ -417,18 +421,11 @@ pub fn LibrarySection() -> Element {
             FollowLibraryView {
                 follow_code: follow_code_input.read().clone(),
                 code_error: follow_code_error.read().clone(),
-                name: follow_name.read().clone(),
-                server_url: follow_url.read().clone(),
-                username: follow_username.read().clone(),
-                password: follow_password.read().clone(),
-                test_status: follow_test_status.read().clone(),
+                decoded_name: follow_decoded_name.read().clone(),
+                decoded_url: follow_decoded_url.read().clone(),
                 is_saving: *follow_saving.read(),
+                save_status: follow_save_status.read().clone(),
                 on_code_change: on_follow_code_change,
-                on_name_change: move |v| follow_name.set(v),
-                on_server_url_change: move |v| follow_url.set(v),
-                on_username_change: move |v| follow_username.set(v),
-                on_password_change: move |v| follow_password.set(v),
-                on_test: on_follow_test,
                 on_save: on_follow_save,
                 on_cancel: on_follow_cancel,
             }

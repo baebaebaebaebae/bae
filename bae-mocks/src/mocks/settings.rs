@@ -259,8 +259,7 @@ fn mock_followed_libraries() -> Vec<FollowedLibraryInfo> {
     vec![FollowedLibraryInfo {
         id: "follow-1".to_string(),
         name: "Friend's Library".to_string(),
-        server_url: "http://192.168.1.50:4533".to_string(),
-        username: "listener".to_string(),
+        proxy_url: "https://alice.bae.fm".to_string(),
     }]
 }
 
