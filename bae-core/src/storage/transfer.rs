@@ -152,7 +152,8 @@ async fn do_transfer(
         let data = if source_encrypted {
             let enc =
                 encryption_service.ok_or("Encryption service required for encrypted source")?;
-            enc.decrypt(&raw_data)?
+            let release_enc = enc.derive_release_encryption(release_id);
+            release_enc.decrypt(&raw_data)?
         } else {
             raw_data
         };
@@ -190,11 +191,8 @@ async fn do_transfer(
     match &target {
         TransferTarget::ManagedLocal => {
             let database = std::sync::Arc::new(mgr.database().clone());
-            let storage = ReleaseStorageImpl::new_local(
-                library_dir.clone(),
-                encryption_service.cloned(),
-                database,
-            );
+            let release_enc = encryption_service.map(|e| e.derive_release_encryption(release_id));
+            let storage = ReleaseStorageImpl::new_local(library_dir.clone(), release_enc, database);
 
             for (i, file) in old_files.iter().enumerate() {
                 let data = &file_data[i].1;

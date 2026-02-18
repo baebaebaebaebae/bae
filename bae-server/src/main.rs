@@ -697,13 +697,18 @@ pub(crate) async fn download_images(bucket: &CloudHomeSyncBucket, library_dir: &
             }
         };
 
-        let decrypted = match bucket.download_image(id).await {
+        // Try downloading as a cover image first (per-release key where id = release_id),
+        // then fall back to master key (for artist images).
+        let decrypted = match bucket.download_image(id, Some(id)).await {
             Ok(data) => data,
-            Err(e) => {
-                warn!("Failed to download image {id}: {e}");
-                failed += 1;
-                continue;
-            }
+            Err(_) => match bucket.download_image(id, None).await {
+                Ok(data) => data,
+                Err(e) => {
+                    warn!("Failed to download image {id}: {e}");
+                    failed += 1;
+                    continue;
+                }
+            },
         };
 
         if let Some(parent) = dest.parent() {

@@ -445,6 +445,15 @@ impl EncryptionService {
         Ok(plaintext[offset_in_first_chunk..end].to_vec())
     }
 
+    /// Derive a per-release encryption service.
+    ///
+    /// Uses HKDF: master_key + "bae-release-v1:{release_id}" -> 32-byte key.
+    /// Deterministic: same master + release_id always gives the same key.
+    pub fn derive_release_encryption(&self, release_id: &str) -> EncryptionService {
+        let derived = self.derive_key(&format!("bae-release-v1:{release_id}"));
+        EncryptionService::from_key(derived)
+    }
+
     /// Derive a 32-byte key using HKDF-SHA256 with the given info label.
     ///
     /// The derivation is deterministic: same master key + same info string always
@@ -928,5 +937,48 @@ mod tests {
         assert!(compute_key_fingerprint("not-hex").is_none());
         assert!(compute_key_fingerprint(&hex::encode([0u8; 16])).is_none()); // wrong length
         assert!(compute_key_fingerprint("").is_none());
+    }
+
+    #[test]
+    fn derive_release_encryption_deterministic() {
+        let service = create_test_service();
+        let derived1 = service.derive_release_encryption("rel-123");
+        let derived2 = service.derive_release_encryption("rel-123");
+        assert_eq!(derived1.key_bytes(), derived2.key_bytes());
+    }
+
+    #[test]
+    fn derive_release_encryption_different_releases() {
+        let service = create_test_service();
+        let key_a = service.derive_release_encryption("rel-aaa").key_bytes();
+        let key_b = service.derive_release_encryption("rel-bbb").key_bytes();
+        assert_ne!(key_a, key_b);
+    }
+
+    #[test]
+    fn derive_release_encryption_different_master_keys() {
+        let svc1 = EncryptionService::new_with_key(&[0u8; 32]);
+        let svc2 = EncryptionService::new_with_key(&[1u8; 32]);
+        let key1 = svc1.derive_release_encryption("rel-123").key_bytes();
+        let key2 = svc2.derive_release_encryption("rel-123").key_bytes();
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn derive_release_encryption_roundtrip() {
+        let master = create_test_service();
+        let release_enc = master.derive_release_encryption("rel-456");
+        let plaintext = b"test audio data for this release";
+
+        let encrypted = release_enc.encrypt(plaintext);
+        let decrypted = release_enc.decrypt(&encrypted).unwrap();
+        assert_eq!(decrypted, plaintext);
+
+        // Cannot decrypt with master key
+        assert!(master.decrypt(&encrypted).is_err());
+
+        // Cannot decrypt with wrong release key
+        let wrong_enc = master.derive_release_encryption("rel-999");
+        assert!(wrong_enc.decrypt(&encrypted).is_err());
     }
 }

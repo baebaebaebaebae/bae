@@ -154,22 +154,30 @@ async fn upload_changeset_images(
     let scan = changeset_scanner::scan_changeset_for_images(changeset_bytes)
         .map_err(SyncCycleError::ImageScan)?;
 
-    for image_id in &scan.upserted_image_ids {
-        let image_path = library_dir.image_path(image_id);
+    for image in &scan.upserted_images {
+        let image_path = library_dir.image_path(&image.id);
         if !image_path.exists() {
-            warn!(image_id, "image file not found locally, skipping upload");
+            warn!(image_id = %image.id, "image file not found locally, skipping upload");
             continue;
         }
 
         let bytes =
             std::fs::read(&image_path).map_err(|e| SyncCycleError::ImageUpload(e.to_string()))?;
 
+        // Cover images use per-release key (id = release_id).
+        // Artist images use master key.
+        let release_id = if image.image_type == "cover" {
+            Some(image.id.as_str())
+        } else {
+            None
+        };
+
         bucket
-            .upload_image(image_id, bytes)
+            .upload_image(&image.id, release_id, bytes)
             .await
             .map_err(|e| SyncCycleError::ImageUpload(e.to_string()))?;
 
-        info!(image_id, "uploaded image");
+        info!(image_id = %image.id, "uploaded image");
     }
 
     Ok(())

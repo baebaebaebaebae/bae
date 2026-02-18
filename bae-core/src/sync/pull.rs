@@ -272,27 +272,35 @@ async fn download_changeset_images(
         }
     };
 
-    for image_id in &scan.upserted_image_ids {
-        let image_path = library_dir.image_path(image_id);
+    for image in &scan.upserted_images {
+        let image_path = library_dir.image_path(&image.id);
         if image_path.exists() {
             continue;
         }
 
-        match bucket.download_image(image_id).await {
+        // Cover images use per-release key (id = release_id).
+        // Artist images use master key.
+        let release_id = if image.image_type == "cover" {
+            Some(image.id.as_str())
+        } else {
+            None
+        };
+
+        match bucket.download_image(&image.id, release_id).await {
             Ok(bytes) => {
                 if let Some(parent) = image_path.parent() {
                     if let Err(e) = std::fs::create_dir_all(parent) {
-                        warn!(image_id, error = %e, "failed to create image directory");
+                        warn!(image_id = %image.id, error = %e, "failed to create image directory");
                         continue;
                     }
                 }
 
                 if let Err(e) = std::fs::write(&image_path, bytes) {
-                    warn!(image_id, error = %e, "failed to write image");
+                    warn!(image_id = %image.id, error = %e, "failed to write image");
                 }
             }
             Err(e) => {
-                warn!(image_id, error = %e, "failed to download image");
+                warn!(image_id = %image.id, error = %e, "failed to download image");
             }
         }
     }

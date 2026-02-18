@@ -389,13 +389,16 @@ impl ImportService {
         }
     }
 
-    /// Create a storage implementation for managed local storage
-    fn create_storage(&self) -> ReleaseStorageImpl {
-        ReleaseStorageImpl::new_local(
-            self.library_dir.clone(),
-            self.encryption_service.clone(),
-            self.database.clone(),
-        )
+    /// Create a storage implementation for managed local storage.
+    ///
+    /// Uses a per-release derived encryption key so each release's files
+    /// are encrypted with a unique key.
+    fn create_storage(&self, release_id: &str) -> ReleaseStorageImpl {
+        let enc = self
+            .encryption_service
+            .as_ref()
+            .map(|e| e.derive_release_encryption(release_id));
+        ReleaseStorageImpl::new_local(self.library_dir.clone(), enc, self.database.clone())
     }
 
     /// Analyze CUE/FLAC files once and cache the results for reuse.
@@ -606,7 +609,7 @@ impl ImportService {
             .await
             .map_err(|e| format!("Failed to mark release as managed locally: {}", e))?;
 
-        let storage = self.create_storage();
+        let storage = self.create_storage(&db_release.id);
         let total_files = discovered_files.len();
 
         info!(

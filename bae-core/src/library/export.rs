@@ -64,15 +64,14 @@ impl ExportService {
                 .await
                 .map_err(|e| format!("Failed to read file {}: {}", source_path.display(), e))?;
 
-            // Decrypt if needed
+            // Decrypt with per-release derived key
             let file_data = if is_encrypted {
-                let enc_service = encryption_service
-                    .ok_or_else(|| {
-                        "Cannot export encrypted files: encryption not configured".to_string()
-                    })?
-                    .clone();
+                let enc_service = encryption_service.ok_or_else(|| {
+                    "Cannot export encrypted files: encryption not configured".to_string()
+                })?;
+                let release_enc = enc_service.derive_release_encryption(release_id);
                 tokio::task::spawn_blocking(move || {
-                    enc_service
+                    release_enc
                         .decrypt(&data)
                         .map_err(|e| format!("Failed to decrypt file: {}", e))
                 })
