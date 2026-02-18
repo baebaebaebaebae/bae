@@ -189,14 +189,7 @@ pub fn CloudProviderPicker(
                                                         },
                                                         "Configure"
                                                     }
-                                                } else if is_bae_cloud && !bae_cloud_is_editing {
-                            // noop: the form renders below
-
-        
-                                                    // bae cloud inline form
-                                                    // Mode toggle
                                                 }
-                                                // S3 inline edit form
                                             }
                                         }
                                         if is_selected && is_bae_cloud && bae_cloud_is_editing {

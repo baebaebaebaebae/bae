@@ -6,16 +6,38 @@ use bae_core::subsonic::create_router;
 use bae_core::{audio_codec, cache, config, encryption, import, playback};
 #[cfg(feature = "torrent")]
 use bae_core::{network, torrent};
+use clap::Parser;
 #[cfg(feature = "torrent")]
 use tracing::warn;
 use tracing::{error, info};
 
 mod crash_report;
+mod headless;
 mod media_controls;
 mod ui;
 mod updater;
 
 pub use ui::AppContext;
+
+#[derive(Parser)]
+#[command(name = "bae")]
+struct Cli {
+    /// Run without GUI (headless server mode)
+    #[arg(long)]
+    headless: bool,
+
+    /// Override Subsonic server port
+    #[arg(long)]
+    port: Option<u16>,
+
+    /// Override bind address
+    #[arg(long)]
+    bind: Option<String>,
+
+    /// Remaining arguments (e.g., bae:// URLs from macOS)
+    #[arg(trailing_var_arg = true, hide = true)]
+    rest: Vec<String>,
+}
 
 /// Initialize cache manager
 async fn create_cache_manager() -> cache::CacheManager {
@@ -87,12 +109,18 @@ fn is_first_run() -> bool {
 }
 
 fn main() {
+    let cli = Cli::parse();
+
     crash_report::install_panic_hook();
     config::init_keyring();
     configure_logging();
 
     // Detect first run BEFORE Config::load() (which creates the pointer file)
     if is_first_run() {
+        if cli.headless {
+            eprintln!("Error: no library found. Run bae without --headless to create one.");
+            std::process::exit(1);
+        }
         info!("First run detected — launching welcome screen");
         let dev_mode = config::Config::is_dev_mode();
         ui::components::welcome::launch_welcome(dev_mode);
@@ -147,6 +175,13 @@ fn main() {
     if config.encryption_key_stored {
         if let Some(ref fp) = config.encryption_key_fingerprint {
             if key_service.get_encryption_key().is_none() {
+                if cli.headless {
+                    eprintln!(
+                        "Error: encryption key missing from keyring. \
+                         Run bae without --headless to unlock."
+                    );
+                    std::process::exit(1);
+                }
                 info!("Encryption key missing from keyring — launching unlock screen");
                 ui::components::unlock::launch_unlock(key_service, fp.clone());
                 return;
@@ -243,6 +278,30 @@ fn main() {
         "127.0.0.1",
     ));
 
+    if cli.headless {
+        if let Some(port) = cli.port {
+            config.server_port = port;
+        }
+        if let Some(ref bind) = cli.bind {
+            config.server_bind_address = bind.clone();
+        }
+        config.server_enabled = true;
+
+        headless::run(
+            runtime,
+            config,
+            library_manager,
+            encryption_service,
+            key_service,
+            sync_handle,
+            image_server,
+            user_keypair,
+            import_handle,
+            playback_handle,
+        );
+        return;
+    }
+
     let media_controls = match media_controls::setup_media_controls(
         playback_handle.clone(),
         library_manager.clone(),
@@ -287,20 +346,7 @@ fn main() {
         let subsonic_library_dir = config.library_dir.clone();
         let subsonic_key_service = key_service.clone();
 
-        let subsonic_auth = if config.server_auth_enabled {
-            let password = key_service.get_server_password();
-            bae_core::subsonic::SubsonicAuth {
-                enabled: config.server_username.is_some() && password.is_some(),
-                username: config.server_username.clone(),
-                password,
-            }
-        } else {
-            bae_core::subsonic::SubsonicAuth {
-                enabled: false,
-                username: None,
-                password: None,
-            }
-        };
+        let subsonic_auth = build_subsonic_auth(&config, &key_service);
 
         runtime_handle.spawn(async move {
             start_subsonic_server(
@@ -370,8 +416,29 @@ fn ensure_manifest(
     }
 }
 
+/// Build Subsonic authentication from config and key service.
+pub(crate) fn build_subsonic_auth(
+    config: &config::Config,
+    key_service: &KeyService,
+) -> bae_core::subsonic::SubsonicAuth {
+    if config.server_auth_enabled {
+        let password = key_service.get_server_password();
+        bae_core::subsonic::SubsonicAuth {
+            enabled: config.server_username.is_some() && password.is_some(),
+            username: config.server_username.clone(),
+            password,
+        }
+    } else {
+        bae_core::subsonic::SubsonicAuth {
+            enabled: false,
+            username: None,
+            password: None,
+        }
+    }
+}
+
 /// Start the Subsonic API server
-async fn start_subsonic_server(
+pub(crate) async fn start_subsonic_server(
     library_manager: SharedLibraryManager,
     encryption_service: Option<encryption::EncryptionService>,
     port: u16,

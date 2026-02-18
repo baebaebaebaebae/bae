@@ -3235,19 +3235,19 @@ fn staging_path(library_dir: &LibraryDir) -> std::path::PathBuf {
 
 /// Stage outgoing changeset bytes to disk before pushing, so they can be
 /// retried if the push fails.
-fn stage_changeset(library_dir: &LibraryDir, packed: &[u8]) {
+pub(crate) fn stage_changeset(library_dir: &LibraryDir, packed: &[u8]) {
     if let Err(e) = std::fs::write(staging_path(library_dir), packed) {
         tracing::error!("Failed to stage outgoing changeset: {e}");
     }
 }
 
 /// Clear the staged changeset after a successful push.
-fn clear_staged_changeset(library_dir: &LibraryDir) {
+pub(crate) fn clear_staged_changeset(library_dir: &LibraryDir) {
     let _ = std::fs::remove_file(staging_path(library_dir));
 }
 
 /// Read a previously staged changeset (if any) for retry.
-fn read_staged_changeset(library_dir: &LibraryDir) -> Option<Vec<u8>> {
+pub(crate) fn read_staged_changeset(library_dir: &LibraryDir) -> Option<Vec<u8>> {
     let path = staging_path(library_dir);
     if path.exists() {
         match std::fs::read(&path) {
@@ -3268,7 +3268,7 @@ fn read_staged_changeset(library_dir: &LibraryDir) -> Option<Vec<u8>> {
 }
 
 /// Push a changeset to the sync bucket and update the device head.
-async fn push_changeset(
+pub(crate) async fn push_changeset(
     bucket: &dyn SyncBucketClient,
     device_id: &str,
     seq: u64,
