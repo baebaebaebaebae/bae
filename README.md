@@ -26,7 +26,7 @@ You pick releases from MusicBrainz or Discogs, point bae at your files, and it h
 - **Sync**: SQLite session extension captures changesets automatically. Row-level last-writer-wins conflict resolution via hybrid logical clock. Deterministic merge.
 - **Membership**: append-only chain of signed membership entries. Each changeset is signed by its author and verified against the membership chain on pull.
 - **Subsonic API**: localhost:4533 for external clients (DSub, play:Sub, etc.)
-- **bae-server**: headless read-only server that pulls from the cloud home, decrypts on the fly, and serves the API + web frontend.
+- **bae-proxy**: multi-tenant encrypted blob proxy. Routes requests by Host header, scopes to per-library S3 prefixes. Zero-knowledge — never decrypts.
 
 ## Crates
 
@@ -35,7 +35,7 @@ You pick releases from MusicBrainz or Discogs, point bae at your files, and it h
 | `bae-core` | Library, database, sync engine, encryption, cloud backends, import pipeline |
 | `bae-desktop` | Dioxus desktop app (macOS) |
 | `bae-ui` | Pure UI components (compiles for wasm), no dependency on bae-core |
-| `bae-server` | Headless server, syncs from cloud home |
+| `bae-proxy` | Multi-tenant encrypted blob proxy, zero-knowledge |
 | `bae-web` | Browser frontend for share pages and remote browsing |
 | `bae-mocks` | Interactive mock panels for UI development |
 

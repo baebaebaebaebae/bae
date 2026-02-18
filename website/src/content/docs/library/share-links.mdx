@@ -24,7 +24,7 @@ The recipient opens the link and sees cover art, track info, and an audio player
 
 Share links require your server to be reachable from the internet:
 
-- **bae-server** -- run in the cloud pointed at your cloud home. No desktop app needed.
-- **bae-desktop** -- leave the app running and make it reachable via a reverse proxy, Tailscale Funnel, ngrok, or Cloudflare Tunnel.
+- **bae-proxy** -- share links are served through bae-proxy. bae-web fetches encrypted share data via bae-proxy and decrypts it in the browser using the key from the URL fragment.
+- **bae-desktop --headless** -- run on a home server or VPS and make it reachable via a reverse proxy, Tailscale Funnel, ngrok, or Cloudflare Tunnel.
 
 Links can optionally expire. Expired links stop working.

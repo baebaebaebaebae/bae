@@ -52,7 +52,7 @@ export default defineConfig({
 						{ label: 'Data Model', slug: 'architecture/data-model' },
 						{ label: 'Cloud Home', slug: 'architecture/cloud-home' },
 						{ label: 'Sharing', slug: 'architecture/sharing' },
-						{ label: 'bae-server', slug: 'architecture/server' },
+						{ label: 'Server Components', slug: 'architecture/server' },
 						{ label: 'Discovery Network', slug: 'architecture/discovery' },
 					],
 				},
