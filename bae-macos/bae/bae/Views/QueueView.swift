@@ -3,6 +3,7 @@ import SwiftUI
 struct QueueView: View {
     let appService: AppService
     let onClose: () -> Void
+    @State private var hoveredIndex: Int?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,6 +26,10 @@ struct QueueView: View {
                 List {
                     ForEach(Array(appService.queueItems.enumerated()), id: \.element.trackId) { index, item in
                         queueItemRow(item, index: index)
+                            .draggable(item.trackId) {
+                                Text(item.title)
+                                    .padding(4)
+                            }
                     }
                     .onMove { from, to in
                         guard let fromIndex = from.first else { return }
@@ -34,6 +39,7 @@ struct QueueView: View {
                         )
                     }
                 }
+                .environment(\.editMode, .constant(.active))
                 .scrollContentBackground(.hidden)
                 .background(Theme.background)
             }
@@ -111,9 +117,23 @@ struct QueueView: View {
 
     private func queueItemRow(_ item: BridgeQueueItem, index: Int) -> some View {
         HStack(spacing: 10) {
-            queueItemArt(coverImageId: item.coverImageId)
-                .frame(width: 40, height: 40)
-                .clipShape(RoundedRectangle(cornerRadius: 3))
+            ZStack {
+                queueItemArt(coverImageId: item.coverImageId)
+                    .frame(width: 40, height: 40)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+
+                if hoveredIndex == index {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(.black.opacity(0.5))
+                        .frame(width: 40, height: 40)
+                    Button(action: { appService.skipToQueueIndex(index: UInt32(index)) }) {
+                        Image(systemName: "play.fill")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)
@@ -127,13 +147,24 @@ struct QueueView: View {
 
             Spacer()
 
-            if let durationMs = item.durationMs {
+            if hoveredIndex == index {
+                Button(action: { appService.removeFromQueue(index: UInt32(index)) }) {
+                    Image(systemName: "xmark")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Remove from queue")
+            } else if let durationMs = item.durationMs {
                 Text(formatDuration(durationMs))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
         }
         .contentShape(Rectangle())
+        .onHover { isHovered in
+            hoveredIndex = isHovered ? index : nil
+        }
         .onTapGesture(count: 2) {
             appService.skipToQueueIndex(index: UInt32(index))
         }
