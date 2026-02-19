@@ -117,6 +117,7 @@ jobs:
         brew install xcodegen
         ./bae-bridge/build-macos.sh
         ln -sf ../bae-bridge/BaeBridgeFFI.xcframework bae-macos/BaeBridgeFFI.xcframework
+        cp bae-bridge/swift-bindings/bae_bridge.swift bae-macos/bae/bae/bae_bridge.swift
         cd bae-macos/bae && xcodegen
         xcodebuild -project bae.xcodeproj -scheme bae -configuration Debug \
           CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
