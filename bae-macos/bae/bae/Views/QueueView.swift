@@ -1,9 +1,26 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+struct QueueItemViewModel: Identifiable {
+    let id: String
+    let title: String
+    let artistNames: String
+    let albumTitle: String
+    let durationMs: Int64?
+    let coverArtURL: URL?
+}
+
 struct QueueView: View {
-    let appService: AppService
+    let isActive: Bool
+    let nowPlayingTitle: String?
+    let nowPlayingArtist: String?
+    let nowPlayingArtURL: URL?
+    let items: [QueueItemViewModel]
     let onClose: () -> Void
+    let onClear: () -> Void
+    let onSkipTo: (Int) -> Void
+    let onRemove: (Int) -> Void
+    let onReorder: (Int, Int) -> Void
     @State private var hoveredIndex: Int?
     @State private var draggedTrackId: String?
     @State private var dropInsertIndex: Int?
@@ -13,12 +30,12 @@ struct QueueView: View {
             header
             Divider()
 
-            if appService.isActive {
+            if isActive {
                 nowPlayingSection
                 Divider()
             }
 
-            if appService.queueItems.isEmpty {
+            if items.isEmpty {
                 ContentUnavailableView(
                     "Queue is empty",
                     systemImage: "list.bullet",
@@ -28,7 +45,7 @@ struct QueueView: View {
             } else {
                 ScrollView {
                     VStack(spacing: 0) {
-                        ForEach(Array(appService.queueItems.enumerated()), id: \.element.trackId) { index, item in
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                             VStack(spacing: 0) {
                                 // Insertion line above this row
                                 if dropInsertIndex == index {
@@ -37,24 +54,19 @@ struct QueueView: View {
                                 queueItemRow(item, index: index)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 4)
-                                    .opacity(draggedTrackId == item.trackId ? 0.3 : 1.0)
+                                    .opacity(draggedTrackId == item.id ? 0.3 : 1.0)
                                 Divider().padding(.leading, 62)
                             }
                             .onDrop(of: [UTType.plainText], delegate: QueueDropDelegate(
                                 targetIndex: index,
-                                items: appService.queueItems,
+                                items: items,
                                 draggedTrackId: $draggedTrackId,
                                 dropInsertIndex: $dropInsertIndex,
-                                onReorder: { from, to in
-                                    appService.reorderQueue(
-                                        fromIndex: UInt32(from),
-                                        toIndex: UInt32(to)
-                                    )
-                                }
+                                onReorder: onReorder
                             ))
                         }
                         // Insertion line at the very end
-                        if dropInsertIndex == appService.queueItems.count {
+                        if dropInsertIndex == items.count {
                             insertionLine
                         }
                     }
@@ -79,10 +91,10 @@ struct QueueView: View {
             Text("Queue")
                 .font(.headline)
             Spacer()
-            Button("Clear") { appService.clearQueue() }
+            Button("Clear") { onClear() }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .disabled(appService.queueItems.isEmpty)
+                .disabled(items.isEmpty)
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .foregroundStyle(.secondary)
@@ -104,11 +116,11 @@ struct QueueView: View {
                 Text("Now Playing")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
-                Text(appService.trackTitle ?? "")
+                Text(nowPlayingTitle ?? "")
                     .font(.callout)
                     .fontWeight(.medium)
                     .lineLimit(1)
-                Text(appService.artistNames ?? "")
+                Text(nowPlayingArtist ?? "")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -122,9 +134,7 @@ struct QueueView: View {
 
     @ViewBuilder
     private var nowPlayingArt: some View {
-        if let coverImageId = appService.coverImageId,
-           let urlString = appService.appHandle.getImageUrl(imageId: coverImageId),
-           let url = URL(string: urlString) {
+        if let url = nowPlayingArtURL {
             AsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
@@ -140,10 +150,10 @@ struct QueueView: View {
 
     // MARK: - Queue Items
 
-    private func queueItemRow(_ item: BridgeQueueItem, index: Int) -> some View {
+    private func queueItemRow(_ item: QueueItemViewModel, index: Int) -> some View {
         HStack(spacing: 10) {
             ZStack {
-                queueItemArt(coverImageId: item.coverImageId)
+                queueItemArt(url: item.coverArtURL)
                     .frame(width: 40, height: 40)
                     .clipShape(RoundedRectangle(cornerRadius: 3))
 
@@ -151,7 +161,7 @@ struct QueueView: View {
                     RoundedRectangle(cornerRadius: 3)
                         .fill(.black.opacity(0.5))
                         .frame(width: 40, height: 40)
-                    Button(action: { appService.skipToQueueIndex(index: UInt32(index)) }) {
+                    Button(action: { onSkipTo(index) }) {
                         Image(systemName: "play.fill")
                             .font(.caption)
                             .foregroundColor(.white)
@@ -173,7 +183,7 @@ struct QueueView: View {
             Spacer()
 
             if hoveredIndex == index {
-                Button(action: { appService.removeFromQueue(index: UInt32(index)) }) {
+                Button(action: { onRemove(index) }) {
                     Image(systemName: "xmark")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -191,24 +201,22 @@ struct QueueView: View {
             hoveredIndex = isHovered ? index : nil
         }
         .onDrag {
-            draggedTrackId = item.trackId
-            return NSItemProvider(object: item.trackId as NSString)
+            draggedTrackId = item.id
+            return NSItemProvider(object: item.id as NSString)
         }
         .onTapGesture(count: 2) {
-            appService.skipToQueueIndex(index: UInt32(index))
+            onSkipTo(index)
         }
         .contextMenu {
             Button("Remove from Queue") {
-                appService.removeFromQueue(index: UInt32(index))
+                onRemove(index)
             }
         }
     }
 
     @ViewBuilder
-    private func queueItemArt(coverImageId: String?) -> some View {
-        if let coverImageId,
-           let urlString = appService.appHandle.getImageUrl(imageId: coverImageId),
-           let url = URL(string: urlString) {
+    private func queueItemArt(url: URL?) -> some View {
+        if let url {
             AsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
@@ -245,14 +253,14 @@ struct QueueView: View {
 
 private struct QueueDropDelegate: DropDelegate {
     let targetIndex: Int
-    let items: [BridgeQueueItem]
+    let items: [QueueItemViewModel]
     @Binding var draggedTrackId: String?
     @Binding var dropInsertIndex: Int?
     let onReorder: (Int, Int) -> Void
 
     func dropEntered(info: DropInfo) {
         guard let draggedId = draggedTrackId,
-              let fromIndex = items.firstIndex(where: { $0.trackId == draggedId }) else { return }
+              let fromIndex = items.firstIndex(where: { $0.id == draggedId }) else { return }
 
         // Show insertion line: above targetIndex when dragging up, below when dragging down
         if targetIndex > fromIndex {
@@ -270,7 +278,7 @@ private struct QueueDropDelegate: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         guard let draggedId = draggedTrackId,
-              let fromIndex = items.firstIndex(where: { $0.trackId == draggedId }) else { return false }
+              let fromIndex = items.firstIndex(where: { $0.id == draggedId }) else { return false }
 
         // When dragging down, pass targetIndex + 1 because PlaybackQueue.reorder()
         // does insert(to - 1) after remove(from) to compensate for the index shift.
@@ -291,4 +299,42 @@ private struct QueueDropDelegate: DropDelegate {
     func validateDrop(info: DropInfo) -> Bool {
         draggedTrackId != nil
     }
+}
+
+// MARK: - Previews
+
+#Preview("With items") {
+    QueueView(
+        isActive: true,
+        nowPlayingTitle: "Track Title",
+        nowPlayingArtist: "Artist Name",
+        nowPlayingArtURL: nil,
+        items: [
+            QueueItemViewModel(id: "t-1", title: "First Track", artistNames: "Artist A", albumTitle: "Album One", durationMs: 234000, coverArtURL: nil),
+            QueueItemViewModel(id: "t-2", title: "Second Track", artistNames: "Artist B", albumTitle: "Album Two", durationMs: 180000, coverArtURL: nil),
+            QueueItemViewModel(id: "t-3", title: "Third Track", artistNames: "Artist A", albumTitle: "Album One", durationMs: 312000, coverArtURL: nil),
+        ],
+        onClose: {},
+        onClear: {},
+        onSkipTo: { _ in },
+        onRemove: { _ in },
+        onReorder: { _, _ in }
+    )
+    .frame(width: 450, height: 500)
+}
+
+#Preview("Empty") {
+    QueueView(
+        isActive: false,
+        nowPlayingTitle: nil,
+        nowPlayingArtist: nil,
+        nowPlayingArtURL: nil,
+        items: [],
+        onClose: {},
+        onClear: {},
+        onSkipTo: { _ in },
+        onRemove: { _ in },
+        onReorder: { _, _ in }
+    )
+    .frame(width: 450, height: 400)
 }

@@ -367,6 +367,15 @@ class AppService: AppEventHandler, @unchecked Sendable {
         }
     }
 
+    // MARK: - Image URL helper
+
+    func imageURL(for imageId: String?) -> URL? {
+        guard let id = imageId,
+              let str = appHandle.getImageUrl(imageId: id),
+              let url = URL(string: str) else { return nil }
+        return url
+    }
+
     // MARK: - Settings
 
     func getConfig() -> BridgeConfig {

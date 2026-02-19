@@ -1,14 +1,17 @@
 import SwiftUI
 
 struct SearchView: View {
-    let appService: AppService
+    let results: BridgeSearchResults?
+    let searchQuery: String
+    let resolveImageURL: (String?) -> URL?
     let onSelectArtist: (String) -> Void
     let onSelectAlbum: (String) -> Void
+    let onPlayTrack: (String) -> Void
 
     var body: some View {
-        if let results = appService.searchResults {
+        if let results {
             if results.artists.isEmpty && results.albums.isEmpty && results.tracks.isEmpty {
-                ContentUnavailableView.search(text: appService.searchQuery)
+                ContentUnavailableView.search(text: searchQuery)
             } else {
                 searchResultsList(results)
             }
@@ -97,7 +100,7 @@ struct SearchView: View {
 
     private func trackRow(_ track: BridgeTrackSearchResult) -> some View {
         Button(action: {
-            appService.playTracks(trackIds: [track.id])
+            onPlayTrack(track.id)
         }) {
             HStack(spacing: 12) {
                 Image(systemName: "waveform")
@@ -129,9 +132,7 @@ struct SearchView: View {
 
     @ViewBuilder
     private func albumArt(_ album: BridgeAlbumSearchResult) -> some View {
-        if let coverReleaseId = album.coverReleaseId,
-           let urlString = appService.appHandle.getImageUrl(imageId: coverReleaseId),
-           let url = URL(string: urlString) {
+        if let url = resolveImageURL(album.coverReleaseId) {
             AsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
@@ -164,4 +165,41 @@ struct SearchView: View {
         let seconds = totalSeconds % 60
         return "\(minutes):\(String(format: "%02d", seconds))"
     }
+}
+
+// MARK: - Previews
+
+#Preview("With results") {
+    SearchView(
+        results: BridgeSearchResults(
+            artists: [
+                BridgeArtistSearchResult(id: "ar-1", name: "Artist Name", albumCount: 3),
+            ],
+            albums: [
+                BridgeAlbumSearchResult(id: "al-1", title: "Album Title", year: 2024, coverReleaseId: nil, artistName: "Artist Name"),
+                BridgeAlbumSearchResult(id: "al-2", title: "Another Album", year: nil, coverReleaseId: nil, artistName: "Another Artist"),
+            ],
+            tracks: [
+                BridgeTrackSearchResult(id: "t-1", title: "Track Title", durationMs: 234000, albumId: "al-1", albumTitle: "Album Title", artistName: "Artist Name"),
+            ]
+        ),
+        searchQuery: "artist",
+        resolveImageURL: { _ in nil },
+        onSelectArtist: { _ in },
+        onSelectAlbum: { _ in },
+        onPlayTrack: { _ in }
+    )
+    .frame(width: 600, height: 500)
+}
+
+#Preview("No results") {
+    SearchView(
+        results: BridgeSearchResults(artists: [], albums: [], tracks: []),
+        searchQuery: "nonexistent",
+        resolveImageURL: { _ in nil },
+        onSelectArtist: { _ in },
+        onSelectAlbum: { _ in },
+        onPlayTrack: { _ in }
+    )
+    .frame(width: 600, height: 400)
 }

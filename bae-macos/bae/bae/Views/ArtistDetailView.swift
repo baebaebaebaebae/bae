@@ -24,9 +24,17 @@ struct ArtistDetailView: View {
                 )
             } else {
                 AlbumGridView(
-                    albums: albums,
-                    appService: appService,
-                    selectedAlbumId: $selectedAlbumId
+                    albums: albums.map { album in
+                        AlbumCardViewModel(
+                            id: album.id,
+                            title: album.title,
+                            artistNames: album.artistNames,
+                            year: album.year,
+                            coverArtURL: appService.imageURL(for: album.coverReleaseId)
+                        )
+                    },
+                    selectedAlbumId: $selectedAlbumId,
+                    onPlayAlbum: { appService.playAlbum(albumId: $0) }
                 )
             }
         }

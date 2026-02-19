@@ -29,7 +29,23 @@ struct MainAppView: View {
 
                 if appService.isActive {
                     Divider()
-                    NowPlayingBar(appService: appService, showQueue: $showQueue)
+                    NowPlayingBar(
+                        trackTitle: appService.trackTitle,
+                        artistNames: appService.artistNames,
+                        coverArtURL: appService.imageURL(for: appService.coverImageId),
+                        isPlaying: appService.isPlaying,
+                        currentPositionMs: appService.currentPositionMs,
+                        currentDurationMs: appService.currentDurationMs,
+                        volume: appService.volume,
+                        repeatMode: appService.repeatMode,
+                        showQueue: $showQueue,
+                        onPlayPause: { appService.togglePlayPause() },
+                        onNext: { appService.nextTrack() },
+                        onPrevious: { appService.previousTrack() },
+                        onSeek: { appService.seek(positionMs: $0) },
+                        onVolumeChange: { appService.setVolume($0) },
+                        onCycleRepeat: { appService.cycleRepeatMode() }
+                    )
                 }
             }
             .toolbar {
