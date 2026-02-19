@@ -32,6 +32,9 @@ pub struct BridgeRelease {
     pub label: Option<String>,
     pub catalog_number: Option<String>,
     pub country: Option<String>,
+    pub managed_locally: bool,
+    pub managed_in_cloud: bool,
+    pub unmanaged_path: Option<String>,
     pub tracks: Vec<BridgeTrack>,
     pub files: Vec<BridgeFile>,
 }

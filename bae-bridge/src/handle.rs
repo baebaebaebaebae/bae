@@ -708,6 +708,9 @@ impl AppHandle {
                     label: rel.label.clone(),
                     catalog_number: rel.catalog_number.clone(),
                     country: rel.country.clone(),
+                    managed_locally: rel.managed_locally,
+                    managed_in_cloud: rel.managed_in_cloud,
+                    unmanaged_path: rel.unmanaged_path.clone(),
                     tracks,
                     files,
                 });
@@ -1567,6 +1570,95 @@ impl AppHandle {
             // Build URL
             let key_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(per_share_key);
             Ok(format!("{base_url}/share/{share_id}#{key_b64}"))
+        })
+    }
+
+    // =========================================================================
+    // Storage transfer
+    // =========================================================================
+
+    /// Transfer an unmanaged release to managed local storage.
+    /// Copies files into the library's managed storage directory.
+    pub fn transfer_release_to_managed(&self, release_id: String) -> Result<(), BridgeError> {
+        self.runtime.block_on(async {
+            let encryption_service = self.library_manager.get().encryption_service().cloned();
+            let library_dir = self.config.library_dir.clone();
+
+            let transfer_service = bae_core::storage::transfer::TransferService::new(
+                self.library_manager.clone(),
+                encryption_service,
+                library_dir,
+            );
+
+            let mut rx = transfer_service.transfer(
+                release_id.clone(),
+                bae_core::storage::transfer::TransferTarget::ManagedLocal,
+            );
+
+            while let Some(progress) = rx.recv().await {
+                match progress {
+                    bae_core::storage::transfer::TransferProgress::Complete { .. } => {
+                        return Ok(());
+                    }
+                    bae_core::storage::transfer::TransferProgress::Failed { error, .. } => {
+                        return Err(BridgeError::Internal { msg: error });
+                    }
+                    _ => {}
+                }
+            }
+
+            Err(BridgeError::Internal {
+                msg: "Transfer ended without completion or failure".to_string(),
+            })
+        })
+    }
+
+    /// Eject a release from managed storage to a local folder.
+    /// The caller (Swift) is responsible for presenting a folder picker
+    /// and passing the chosen path.
+    pub fn eject_release_storage(
+        &self,
+        release_id: String,
+        target_dir: String,
+    ) -> Result<(), BridgeError> {
+        let target_path = std::path::PathBuf::from(&target_dir);
+        if !target_path.exists() {
+            return Err(BridgeError::Config {
+                msg: format!("Target directory does not exist: {target_dir}"),
+            });
+        }
+
+        self.runtime.block_on(async {
+            let encryption_service = self.library_manager.get().encryption_service().cloned();
+            let library_dir = self.config.library_dir.clone();
+
+            let transfer_service = bae_core::storage::transfer::TransferService::new(
+                self.library_manager.clone(),
+                encryption_service,
+                library_dir.clone(),
+            );
+
+            let mut rx = transfer_service.transfer(
+                release_id.clone(),
+                bae_core::storage::transfer::TransferTarget::Eject(target_path),
+            );
+
+            while let Some(progress) = rx.recv().await {
+                match progress {
+                    bae_core::storage::transfer::TransferProgress::Complete { .. } => {
+                        bae_core::storage::cleanup::schedule_cleanup(&library_dir);
+                        return Ok(());
+                    }
+                    bae_core::storage::transfer::TransferProgress::Failed { error, .. } => {
+                        return Err(BridgeError::Internal { msg: error });
+                    }
+                    _ => {}
+                }
+            }
+
+            Err(BridgeError::Internal {
+                msg: "Transfer ended without completion or failure".to_string(),
+            })
         })
     }
 

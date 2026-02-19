@@ -14,6 +14,8 @@ struct AlbumDetailView: View {
     @State private var coverChangeError: String?
     @State private var shareError: String?
     @State private var showShareCopied: Bool = false
+    @State private var transferring: Bool = false
+    @State private var transferError: String?
 
     var body: some View {
         Group {
@@ -58,6 +60,16 @@ struct AlbumDetailView: View {
                 Text(err)
             }
         }
+        .alert("Transfer Failed", isPresented: .init(
+            get: { transferError != nil },
+            set: { if !$0 { transferError = nil } }
+        )) {
+            Button("OK") { transferError = nil }
+        } message: {
+            if let err = transferError {
+                Text(err)
+            }
+        }
         .overlay(alignment: .bottom) {
             if showShareCopied {
                 Text("Share link copied to clipboard")
@@ -87,6 +99,8 @@ struct AlbumDetailView: View {
                     if !release.files.isEmpty {
                         fileSection(release)
                     }
+
+                    storageSection(release)
                 }
             }
             .padding()
@@ -335,6 +349,125 @@ struct AlbumDetailView: View {
             }
         }
         .font(.headline)
+    }
+
+    // MARK: - Storage
+
+    private func storageSection(_ release: BridgeRelease) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Storage")
+                .font(.headline)
+
+            HStack(spacing: 8) {
+                storageStatusLabel(release)
+
+                Spacer()
+
+                if transferring {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Transferring...")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    storageActions(release)
+                }
+            }
+        }
+    }
+
+    private func storageStatusLabel(_ release: BridgeRelease) -> some View {
+        let isUnmanaged = !release.managedLocally && !release.managedInCloud && release.unmanagedPath != nil
+
+        return HStack(spacing: 6) {
+            if release.managedLocally && release.managedInCloud {
+                Image(systemName: "internaldrive")
+                Text("Local + Cloud")
+            } else if release.managedLocally {
+                Image(systemName: "internaldrive")
+                Text("Managed locally")
+            } else if release.managedInCloud {
+                Image(systemName: "cloud")
+                Text("Cloud storage")
+            } else if isUnmanaged {
+                Image(systemName: "folder")
+                Text("Unmanaged")
+            } else {
+                Image(systemName: "folder")
+                Text("No storage")
+            }
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private func storageActions(_ release: BridgeRelease) -> some View {
+        let isUnmanaged = !release.managedLocally && !release.managedInCloud && release.unmanagedPath != nil
+
+        if isUnmanaged {
+            Button(action: { transferToManaged(releaseId: release.id) }) {
+                Label("Copy to library", systemImage: "square.and.arrow.down")
+            }
+            .help("Copy files into managed local storage")
+        }
+
+        if release.managedLocally {
+            Button(action: { ejectRelease(releaseId: release.id) }) {
+                Label("Eject to folder", systemImage: "square.and.arrow.up.on.square")
+            }
+            .help("Export files to a local folder and remove from managed storage")
+        }
+    }
+
+    private func transferToManaged(releaseId: String) {
+        transferring = true
+        transferError = nil
+        Task.detached { [appHandle = appService.appHandle] in
+            do {
+                try appHandle.transferReleaseToManaged(releaseId: releaseId)
+                await MainActor.run {
+                    transferring = false
+                    Task { await loadDetail() }
+                }
+            } catch {
+                await MainActor.run {
+                    transferring = false
+                    transferError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func ejectRelease(releaseId: String) {
+        let panel = NSOpenPanel()
+        panel.title = "Select Eject Directory"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        transferring = true
+        transferError = nil
+        let targetDir = url.path
+        Task.detached { [appHandle = appService.appHandle] in
+            do {
+                try appHandle.ejectReleaseStorage(releaseId: releaseId, targetDir: targetDir)
+                await MainActor.run {
+                    transferring = false
+                    Task { await loadDetail() }
+                }
+            } catch {
+                await MainActor.run {
+                    transferring = false
+                    transferError = error.localizedDescription
+                }
+            }
+        }
     }
 
     // MARK: - Cover Sheet
