@@ -11,6 +11,7 @@ class AppService: AppEventHandler, @unchecked Sendable {
     var currentDurationMs: UInt64 = 0
     var currentTrackId: String?
     var queueTrackIds: [String] = []
+    var queueItems: [BridgeQueueItem] = []
     var volume: Float = 1.0
     var repeatMode: BridgeRepeatMode = .none
     var searchQuery: String = ""
@@ -71,6 +72,7 @@ class AppService: AppEventHandler, @unchecked Sendable {
     func onQueueUpdated(trackIds: [String]) {
         Task { @MainActor in
             self.queueTrackIds = trackIds
+            self.queueItems = self.appHandle.getQueueItems(trackIds: trackIds)
         }
     }
 
@@ -154,6 +156,32 @@ class AppService: AppEventHandler, @unchecked Sendable {
             repeatMode = .none
             appHandle.setRepeatMode(mode: .none)
         }
+    }
+
+    // MARK: - Queue
+
+    func addToQueue(trackIds: [String]) {
+        appHandle.addToQueue(trackIds: trackIds)
+    }
+
+    func addNext(trackIds: [String]) {
+        appHandle.addNext(trackIds: trackIds)
+    }
+
+    func removeFromQueue(index: UInt32) {
+        appHandle.removeFromQueue(index: index)
+    }
+
+    func reorderQueue(fromIndex: UInt32, toIndex: UInt32) {
+        appHandle.reorderQueue(fromIndex: fromIndex, toIndex: toIndex)
+    }
+
+    func clearQueue() {
+        appHandle.clearQueue()
+    }
+
+    func skipToQueueIndex(index: UInt32) {
+        appHandle.skipToQueueIndex(index: index)
     }
 
     // MARK: - Import

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct NowPlayingBar: View {
     let appService: AppService
+    @Binding var showQueue: Bool
 
     @State private var isSeeking = false
     @State private var seekPosition: Double = 0
@@ -161,6 +162,15 @@ struct NowPlayingBar: View {
     private var trailingControls: some View {
         HStack(spacing: 12) {
             repeatButton
+
+            Button(action: { showQueue.toggle() }) {
+                Image(systemName: "list.bullet")
+                    .foregroundColor(showQueue ? .accentColor : .secondary)
+            }
+            .buttonStyle(.plain)
+            .font(.caption)
+            .help("Queue")
+            .accessibilityLabel("Queue")
 
             Image(systemName: "speaker.fill")
                 .font(.caption)

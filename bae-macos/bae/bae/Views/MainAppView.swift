@@ -12,12 +12,13 @@ struct MainAppView: View {
     @State private var showingSettings = false
     @State private var showingSyncSettings = false
     @State private var searchText: String = ""
+    @State private var showQueue = false
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 ZStack {
-                    LibraryView(appService: appService, searchText: $searchText)
+                    LibraryView(appService: appService, searchText: $searchText, showQueue: $showQueue)
                         .opacity(activeSection == .library ? 1 : 0)
                         .allowsHitTesting(activeSection == .library)
 
@@ -28,7 +29,7 @@ struct MainAppView: View {
 
                 if appService.isActive {
                     Divider()
-                    NowPlayingBar(appService: appService)
+                    NowPlayingBar(appService: appService, showQueue: $showQueue)
                 }
             }
             .toolbar {

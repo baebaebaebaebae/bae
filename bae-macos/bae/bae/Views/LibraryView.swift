@@ -3,6 +3,7 @@ import SwiftUI
 struct LibraryView: View {
     let appService: AppService
     @Binding var searchText: String
+    @Binding var showQueue: Bool
 
     @State private var albums: [BridgeAlbum] = []
     @State private var selectedAlbumId: String?
@@ -45,7 +46,11 @@ struct LibraryView: View {
                         selectedAlbumId: $selectedAlbumId
                     )
                     .frame(maxWidth: .infinity)
-                    if let albumId = selectedAlbumId {
+                    if showQueue {
+                        Divider()
+                        QueueView(appService: appService, onClose: { showQueue = false })
+                            .frame(width: 450)
+                    } else if let albumId = selectedAlbumId {
                         Divider()
                         AlbumDetailView(
                             albumId: albumId,
@@ -58,6 +63,11 @@ struct LibraryView: View {
             }
         }
         .animation(nil, value: selectedAlbumId)
+        .onChange(of: selectedAlbumId) { _, newValue in
+            if newValue != nil {
+                showQueue = false
+            }
+        }
         .onChange(of: searchText) { _, newValue in
             searchDebounceTask?.cancel()
             searchDebounceTask = Task {

@@ -24,9 +24,9 @@ use crate::types::{
     BridgeArtistSearchResult, BridgeAudioContent, BridgeCandidateFiles, BridgeConfig,
     BridgeCoverSelection, BridgeCueFlacPair, BridgeError, BridgeFile, BridgeFileInfo,
     BridgeFollowedLibrary, BridgeImportCandidate, BridgeImportStatus, BridgeLibraryInfo,
-    BridgeMember, BridgeMetadataResult, BridgePlaybackState, BridgeRelease, BridgeRemoteCover,
-    BridgeRepeatMode, BridgeSaveSyncConfig, BridgeSearchResults, BridgeSyncConfig,
-    BridgeSyncStatus, BridgeTrack, BridgeTrackSearchResult,
+    BridgeMember, BridgeMetadataResult, BridgePlaybackState, BridgeQueueItem, BridgeRelease,
+    BridgeRemoteCover, BridgeRepeatMode, BridgeSaveSyncConfig, BridgeSearchResults,
+    BridgeSyncConfig, BridgeSyncStatus, BridgeTrack, BridgeTrackSearchResult,
 };
 
 /// Discover all libraries in ~/.bae/libraries/.
@@ -890,6 +890,77 @@ impl AppHandle {
             BridgeRepeatMode::Album => bae_core::playback::RepeatMode::Album,
         };
         self.playback_handle.set_repeat_mode(core_mode);
+    }
+
+    // MARK: - Queue
+
+    pub fn add_to_queue(&self, track_ids: Vec<String>) {
+        self.playback_handle.add_to_queue(track_ids);
+    }
+
+    pub fn add_next(&self, track_ids: Vec<String>) {
+        self.playback_handle.add_next(track_ids);
+    }
+
+    pub fn remove_from_queue(&self, index: u32) {
+        self.playback_handle.remove_from_queue(index as usize);
+    }
+
+    pub fn reorder_queue(&self, from_index: u32, to_index: u32) {
+        self.playback_handle
+            .reorder_queue(from_index as usize, to_index as usize);
+    }
+
+    pub fn clear_queue(&self) {
+        self.playback_handle.clear_queue();
+    }
+
+    pub fn skip_to_queue_index(&self, index: u32) {
+        self.playback_handle.skip_to(index as usize);
+    }
+
+    /// Enrich a list of track IDs with metadata for queue display.
+    /// The Swift side passes track IDs received from on_queue_updated.
+    pub fn get_queue_items(&self, track_ids: Vec<String>) -> Vec<BridgeQueueItem> {
+        self.runtime.block_on(async {
+            let lm = self.library_manager.get();
+            let mut items = Vec::new();
+
+            for track_id in &track_ids {
+                let track = match lm.get_track(track_id).await {
+                    Ok(Some(t)) => t,
+                    _ => continue,
+                };
+
+                let artists = lm.get_artists_for_track(track_id).await.unwrap_or_default();
+                let artist_names = artists
+                    .iter()
+                    .map(|a| a.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                let mut album_title = String::new();
+                let mut cover_image_id = None;
+
+                if let Ok(album_id) = lm.get_album_id_for_release(&track.release_id).await {
+                    if let Ok(Some(album)) = lm.get_album_by_id(&album_id).await {
+                        album_title = album.title;
+                        cover_image_id = album.cover_release_id;
+                    }
+                }
+
+                items.push(BridgeQueueItem {
+                    track_id: track_id.clone(),
+                    title: track.title,
+                    artist_names,
+                    duration_ms: track.duration_ms,
+                    album_title,
+                    cover_image_id,
+                });
+            }
+
+            items
+        })
     }
 
     // MARK: - Import

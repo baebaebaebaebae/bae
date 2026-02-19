@@ -268,6 +268,16 @@ pub struct BridgeFollowedLibrary {
     pub url: String,
 }
 
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeQueueItem {
+    pub track_id: String,
+    pub title: String,
+    pub artist_names: String,
+    pub duration_ms: Option<i64>,
+    pub album_title: String,
+    pub cover_image_id: Option<String>,
+}
+
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum BridgeError {
     #[error("Not found: {msg}")]
