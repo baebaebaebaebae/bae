@@ -1667,8 +1667,10 @@ impl AppHandle {
     // =========================================================================
 
     /// Get the current sync configuration status.
+    /// Re-reads from config.yaml to pick up changes made by sign-in/disconnect methods.
     pub fn get_sync_status(&self) -> BridgeSyncStatus {
-        let configured = self.config.sync_enabled(&self.key_service);
+        let config = Config::load();
+        let configured = config.sync_enabled(&self.key_service);
         BridgeSyncStatus {
             configured,
             syncing: false,
@@ -1679,22 +1681,20 @@ impl AppHandle {
     }
 
     /// Get the current sync bucket configuration.
+    /// Re-reads from config.yaml to pick up changes made by select/disconnect/sign-in methods.
     pub fn get_sync_config(&self) -> BridgeSyncConfig {
-        let cloud_provider = self.config.cloud_provider.as_ref().map(|p| match p {
-            bae_core::config::CloudProvider::S3 => "s3".to_string(),
-            bae_core::config::CloudProvider::ICloud => "icloud".to_string(),
-            bae_core::config::CloudProvider::GoogleDrive => "google_drive".to_string(),
-            bae_core::config::CloudProvider::Dropbox => "dropbox".to_string(),
-            bae_core::config::CloudProvider::OneDrive => "onedrive".to_string(),
-            bae_core::config::CloudProvider::BaeCloud => "bae_cloud".to_string(),
-        });
+        let config = Config::load();
+        let cloud_provider = config.cloud_provider.as_ref().map(cloud_provider_to_string);
+        let cloud_account_display = cloud_account_display_for(&config, &self.key_service);
         BridgeSyncConfig {
             cloud_provider,
-            s3_bucket: self.config.cloud_home_s3_bucket.clone(),
-            s3_region: self.config.cloud_home_s3_region.clone(),
-            s3_endpoint: self.config.cloud_home_s3_endpoint.clone(),
-            s3_key_prefix: self.config.cloud_home_s3_key_prefix.clone(),
-            share_base_url: self.config.share_base_url.clone(),
+            s3_bucket: config.cloud_home_s3_bucket.clone(),
+            s3_region: config.cloud_home_s3_region.clone(),
+            s3_endpoint: config.cloud_home_s3_endpoint.clone(),
+            s3_key_prefix: config.cloud_home_s3_key_prefix.clone(),
+            share_base_url: config.share_base_url.clone(),
+            cloud_account_display,
+            bae_cloud_url: config.cloud_home_bae_cloud_url.clone(),
         }
     }
 
@@ -1725,6 +1725,225 @@ impl AppHandle {
         })?;
 
         info!("Saved S3 sync configuration");
+        Ok(())
+    }
+
+    /// Disconnect the current cloud provider, clearing all sync credentials and config.
+    pub fn disconnect_cloud_provider(&self) -> Result<(), BridgeError> {
+        let mut config = Config::load();
+
+        // Best-effort logout for bae cloud
+        if matches!(
+            config.cloud_provider,
+            Some(bae_core::config::CloudProvider::BaeCloud)
+        ) {
+            if let Some(bae_core::keys::CloudHomeCredentials::BaeCloud { session_token }) =
+                self.key_service.get_cloud_home_credentials()
+            {
+                let _ = self
+                    .runtime
+                    .block_on(async { bae_core::bae_cloud_api::logout(&session_token).await });
+            }
+        }
+
+        // Clear all cloud home config fields
+        config.cloud_provider = None;
+        config.cloud_home_s3_bucket = None;
+        config.cloud_home_s3_region = None;
+        config.cloud_home_s3_endpoint = None;
+        config.cloud_home_s3_key_prefix = None;
+        config.cloud_home_google_drive_folder_id = None;
+        config.cloud_home_dropbox_folder_path = None;
+        config.cloud_home_onedrive_drive_id = None;
+        config.cloud_home_onedrive_folder_id = None;
+        config.cloud_home_icloud_container_path = None;
+        config.cloud_home_bae_cloud_url = None;
+        config.cloud_home_bae_cloud_username = None;
+
+        config.save().map_err(|e| BridgeError::Config {
+            msg: format!("Failed to save config: {e}"),
+        })?;
+
+        // Delete cloud home credentials from keyring (best-effort)
+        if let Err(e) = self.key_service.delete_cloud_home_credentials() {
+            warn!("Failed to delete cloud home credentials: {e}");
+        }
+
+        info!("Disconnected cloud provider");
+        Ok(())
+    }
+
+    /// Sign up for a new bae cloud account, provision the library, and configure sync.
+    /// Returns the library URL on success.
+    pub fn sign_up_bae_cloud(
+        &self,
+        email: String,
+        password: String,
+    ) -> Result<String, BridgeError> {
+        self.runtime.block_on(async {
+            // 1. Call signup API (username = email prefix)
+            let username = email.split('@').next().unwrap_or(&email).to_string();
+            let resp = bae_core::bae_cloud_api::signup(&email, &username, &password)
+                .await
+                .map_err(|e| BridgeError::Config {
+                    msg: format!("Signup failed: {e}"),
+                })?;
+
+            // 2. Get or create Ed25519 keypair for provisioning
+            let keypair =
+                self.key_service
+                    .get_or_create_user_keypair()
+                    .map_err(|e| BridgeError::Config {
+                        msg: format!("Keypair error: {e}"),
+                    })?;
+
+            // 3. Sign provision message
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                .to_string();
+            let message = format!("provision:{}:{timestamp}", resp.library_id);
+            let signature = keypair.sign(message.as_bytes());
+
+            let pubkey_hex = hex::encode(keypair.public_key);
+            let sig_hex = hex::encode(signature);
+
+            // 4. Call provision API
+            bae_core::bae_cloud_api::provision(
+                &resp.session_token,
+                &pubkey_hex,
+                &sig_hex,
+                &timestamp,
+            )
+            .await
+            .map_err(|e| BridgeError::Config {
+                msg: format!("Provision failed: {e}"),
+            })?;
+
+            // 5. Save credentials to keyring
+            self.key_service
+                .set_cloud_home_credentials(&bae_core::keys::CloudHomeCredentials::BaeCloud {
+                    session_token: resp.session_token,
+                })
+                .map_err(|e| BridgeError::Config {
+                    msg: format!("Keyring error: {e}"),
+                })?;
+
+            // 6. Update config
+            let mut config = Config::load();
+            config.cloud_provider = Some(bae_core::config::CloudProvider::BaeCloud);
+            config.cloud_home_bae_cloud_url = Some(resp.library_url.clone());
+            config.cloud_home_bae_cloud_username = Some(username);
+            config.save().map_err(|e| BridgeError::Config {
+                msg: format!("Config save error: {e}"),
+            })?;
+
+            info!("Signed up for bae cloud, library URL: {}", resp.library_url);
+            Ok(resp.library_url)
+        })
+    }
+
+    /// Log in to an existing bae cloud account and configure sync.
+    /// Returns the library URL on success.
+    pub fn log_in_bae_cloud(&self, email: String, password: String) -> Result<String, BridgeError> {
+        self.runtime.block_on(async {
+            // 1. Call login API
+            let resp = bae_core::bae_cloud_api::login(&email, &password)
+                .await
+                .map_err(|e| BridgeError::Config {
+                    msg: format!("Login failed: {e}"),
+                })?;
+
+            // 2. If not yet provisioned, provision now
+            if !resp.provisioned {
+                let keypair = self.key_service.get_or_create_user_keypair().map_err(|e| {
+                    BridgeError::Config {
+                        msg: format!("Keypair error: {e}"),
+                    }
+                })?;
+
+                let timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+                    .to_string();
+                let message = format!("provision:{}:{timestamp}", resp.library_id);
+                let signature = keypair.sign(message.as_bytes());
+
+                let pubkey_hex = hex::encode(keypair.public_key);
+                let sig_hex = hex::encode(signature);
+
+                bae_core::bae_cloud_api::provision(
+                    &resp.session_token,
+                    &pubkey_hex,
+                    &sig_hex,
+                    &timestamp,
+                )
+                .await
+                .map_err(|e| BridgeError::Config {
+                    msg: format!("Provision failed: {e}"),
+                })?;
+            }
+
+            // 3. Save credentials to keyring
+            self.key_service
+                .set_cloud_home_credentials(&bae_core::keys::CloudHomeCredentials::BaeCloud {
+                    session_token: resp.session_token,
+                })
+                .map_err(|e| BridgeError::Config {
+                    msg: format!("Keyring error: {e}"),
+                })?;
+
+            // 4. Update config
+            let mut config = Config::load();
+            config.cloud_provider = Some(bae_core::config::CloudProvider::BaeCloud);
+            config.cloud_home_bae_cloud_url = Some(resp.library_url.clone());
+            let display_name = email.split('@').next().unwrap_or(&email).to_string();
+            config.cloud_home_bae_cloud_username = Some(display_name);
+            config.save().map_err(|e| BridgeError::Config {
+                msg: format!("Config save error: {e}"),
+            })?;
+
+            info!("Logged in to bae cloud, library URL: {}", resp.library_url);
+            Ok(resp.library_url)
+        })
+    }
+
+    /// Start OAuth sign-in for a cloud provider (Google Drive, Dropbox, OneDrive).
+    /// Opens the system browser for authorization, waits for the callback, stores tokens,
+    /// creates provider folders, and saves config. Blocks until the flow completes or times out.
+    pub fn sign_in_cloud_provider(&self, provider: String) -> Result<(), BridgeError> {
+        self.runtime.block_on(async {
+            match provider.as_str() {
+                "google_drive" => sign_in_google_drive(&self.key_service, &self.config).await,
+                "dropbox" => sign_in_dropbox(&self.key_service, &self.config).await,
+                "onedrive" => sign_in_onedrive(&self.key_service, &self.config).await,
+                _ => Err(BridgeError::Config {
+                    msg: format!("Provider '{provider}' does not use OAuth sign-in"),
+                }),
+            }
+        })
+    }
+
+    /// Detect and configure iCloud Drive as the cloud home.
+    pub fn use_icloud(&self) -> Result<(), BridgeError> {
+        let container = detect_icloud_container().ok_or_else(|| BridgeError::Config {
+            msg: "iCloud Drive is not available. Sign in to iCloud in System Settings.".to_string(),
+        })?;
+
+        let mut config = Config::load();
+        let cloud_home_path = container.join(&config.library_id);
+
+        config.cloud_provider = Some(bae_core::config::CloudProvider::ICloud);
+        config.cloud_home_icloud_container_path =
+            Some(cloud_home_path.to_string_lossy().to_string());
+
+        config.save().map_err(|e| BridgeError::Config {
+            msg: format!("Failed to save iCloud config: {e}"),
+        })?;
+
+        info!("Configured iCloud Drive at {}", cloud_home_path.display());
         Ok(())
     }
 
@@ -3235,4 +3454,348 @@ async fn run_single_sync_cycle(
         },
         changesets_applied: sync_result.pull.changesets_applied,
     })
+}
+
+// =========================================================================
+// Cloud provider helpers
+// =========================================================================
+
+fn cloud_provider_to_string(p: &bae_core::config::CloudProvider) -> String {
+    match p {
+        bae_core::config::CloudProvider::S3 => "s3".to_string(),
+        bae_core::config::CloudProvider::ICloud => "icloud".to_string(),
+        bae_core::config::CloudProvider::GoogleDrive => "google_drive".to_string(),
+        bae_core::config::CloudProvider::Dropbox => "dropbox".to_string(),
+        bae_core::config::CloudProvider::OneDrive => "onedrive".to_string(),
+        bae_core::config::CloudProvider::BaeCloud => "bae_cloud".to_string(),
+    }
+}
+
+/// Derive a display string for the connected cloud account.
+fn cloud_account_display_for(config: &Config, key_service: &KeyService) -> Option<String> {
+    match config.cloud_provider.as_ref()? {
+        bae_core::config::CloudProvider::BaeCloud => config.cloud_home_bae_cloud_username.clone(),
+        bae_core::config::CloudProvider::ICloud => Some("iCloud Drive".to_string()),
+        bae_core::config::CloudProvider::S3 => config
+            .cloud_home_s3_bucket
+            .as_ref()
+            .map(|b| format!("s3://{b}")),
+        bae_core::config::CloudProvider::GoogleDrive
+        | bae_core::config::CloudProvider::Dropbox
+        | bae_core::config::CloudProvider::OneDrive => {
+            // For OAuth providers, we could extract the account from the token,
+            // but that requires network calls. Return the provider name for now.
+            match key_service.get_cloud_home_credentials() {
+                Some(bae_core::keys::CloudHomeCredentials::OAuth { .. }) => {
+                    Some("Connected".to_string())
+                }
+                _ => None,
+            }
+        }
+    }
+}
+
+/// Google Drive OAuth sign-in: authorize, create/find folder, save tokens + config.
+async fn sign_in_google_drive(
+    key_service: &KeyService,
+    app_config: &Config,
+) -> Result<(), BridgeError> {
+    let oauth_config = bae_core::cloud_home::google_drive::GoogleDriveCloudHome::oauth_config();
+    let tokens = bae_core::oauth::authorize(&oauth_config)
+        .await
+        .map_err(|e| BridgeError::Config {
+            msg: format!("Google Drive authorization failed: {e}"),
+        })?;
+
+    let client = reqwest::Client::new();
+
+    // Create or find the folder
+    let lib_name = app_config
+        .library_name
+        .clone()
+        .unwrap_or_else(|| app_config.library_id.clone());
+    let folder_name = format!("bae - {}", lib_name);
+
+    let search_query = format!(
+        "name = '{}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+        folder_name.replace('\'', "\\'")
+    );
+    let existing_folder_id = async {
+        let resp = client
+            .get("https://www.googleapis.com/drive/v3/files")
+            .bearer_auth(&tokens.access_token)
+            .query(&[("q", &search_query), ("fields", &"files(id)".to_string())])
+            .send()
+            .await
+            .ok()?;
+        let json: serde_json::Value = resp.json().await.ok()?;
+        json["files"][0]["id"].as_str().map(|s| s.to_string())
+    }
+    .await;
+
+    let folder_id = if let Some(id) = existing_folder_id {
+        id
+    } else {
+        let create_body = serde_json::json!({
+            "name": folder_name,
+            "mimeType": "application/vnd.google-apps.folder",
+        });
+        let resp = client
+            .post("https://www.googleapis.com/drive/v3/files")
+            .bearer_auth(&tokens.access_token)
+            .json(&create_body)
+            .send()
+            .await
+            .map_err(|e| BridgeError::Config {
+                msg: format!("Failed to create Google Drive folder: {e}"),
+            })?;
+
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(BridgeError::Config {
+                msg: format!("Failed to create Google Drive folder: {body}"),
+            });
+        }
+
+        let folder_resp: serde_json::Value =
+            resp.json().await.map_err(|e| BridgeError::Config {
+                msg: format!("Failed to parse folder response: {e}"),
+            })?;
+        folder_resp["id"]
+            .as_str()
+            .ok_or_else(|| BridgeError::Config {
+                msg: "Google Drive folder response missing 'id'".to_string(),
+            })?
+            .to_string()
+    };
+
+    // Save tokens to keyring
+    let token_json = serde_json::to_string(&tokens).map_err(|e| BridgeError::Config {
+        msg: format!("Failed to serialize tokens: {e}"),
+    })?;
+    key_service
+        .set_cloud_home_credentials(&bae_core::keys::CloudHomeCredentials::OAuth { token_json })
+        .map_err(|e| BridgeError::Config {
+            msg: format!("Failed to save OAuth token: {e}"),
+        })?;
+
+    // Save config
+    let mut config = Config::load();
+    config.cloud_provider = Some(bae_core::config::CloudProvider::GoogleDrive);
+    config.cloud_home_google_drive_folder_id = Some(folder_id);
+    config.save().map_err(|e| BridgeError::Config {
+        msg: format!("Failed to save config: {e}"),
+    })?;
+
+    info!("Configured Google Drive cloud provider");
+    Ok(())
+}
+
+/// Dropbox OAuth sign-in: authorize, create folder, save tokens + config.
+async fn sign_in_dropbox(key_service: &KeyService, app_config: &Config) -> Result<(), BridgeError> {
+    let oauth_config = bae_core::cloud_home::dropbox::DropboxCloudHome::oauth_config();
+    let tokens = bae_core::oauth::authorize(&oauth_config)
+        .await
+        .map_err(|e| BridgeError::Config {
+            msg: format!("Dropbox authorization failed: {e}"),
+        })?;
+
+    let client = reqwest::Client::new();
+
+    let lib_name = app_config
+        .library_name
+        .clone()
+        .unwrap_or_else(|| app_config.library_id.clone());
+    let folder_path = format!("/Apps/bae/{}", lib_name);
+
+    // Create the folder (ignore error if it already exists)
+    let create_body = serde_json::json!({
+        "path": folder_path,
+        "autorename": false,
+    });
+    let resp = client
+        .post("https://api.dropboxapi.com/2/files/create_folder_v2")
+        .bearer_auth(&tokens.access_token)
+        .json(&create_body)
+        .send()
+        .await
+        .map_err(|e| BridgeError::Config {
+            msg: format!("Failed to create Dropbox folder: {e}"),
+        })?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        // 409 with "path/conflict" means the folder already exists -- fine
+        if !(status == reqwest::StatusCode::CONFLICT && body.contains("conflict")) {
+            return Err(BridgeError::Config {
+                msg: format!("Failed to create Dropbox folder (HTTP {status}): {body}"),
+            });
+        }
+    }
+
+    // Save tokens to keyring
+    let token_json = serde_json::to_string(&tokens).map_err(|e| BridgeError::Config {
+        msg: format!("Failed to serialize tokens: {e}"),
+    })?;
+    key_service
+        .set_cloud_home_credentials(&bae_core::keys::CloudHomeCredentials::OAuth { token_json })
+        .map_err(|e| BridgeError::Config {
+            msg: format!("Failed to save OAuth token: {e}"),
+        })?;
+
+    // Save config
+    let mut config = Config::load();
+    config.cloud_provider = Some(bae_core::config::CloudProvider::Dropbox);
+    config.cloud_home_dropbox_folder_path = Some(folder_path);
+    config.save().map_err(|e| BridgeError::Config {
+        msg: format!("Failed to save config: {e}"),
+    })?;
+
+    info!("Configured Dropbox cloud provider");
+    Ok(())
+}
+
+/// OneDrive OAuth sign-in: authorize, get drive, create folder, save tokens + config.
+async fn sign_in_onedrive(
+    key_service: &KeyService,
+    _app_config: &Config,
+) -> Result<(), BridgeError> {
+    let oauth_config = bae_core::cloud_home::onedrive::OneDriveCloudHome::oauth_config();
+    let tokens = bae_core::oauth::authorize(&oauth_config)
+        .await
+        .map_err(|e| BridgeError::Config {
+            msg: format!("OneDrive authorization failed: {e}"),
+        })?;
+
+    let client = reqwest::Client::new();
+
+    // Get the user's default drive
+    let drive_resp = client
+        .get("https://graph.microsoft.com/v1.0/me/drive")
+        .bearer_auth(&tokens.access_token)
+        .send()
+        .await
+        .map_err(|e| BridgeError::Config {
+            msg: format!("Failed to get drive info: {e}"),
+        })?;
+
+    if !drive_resp.status().is_success() {
+        let body = drive_resp.text().await.unwrap_or_default();
+        return Err(BridgeError::Config {
+            msg: format!("Failed to get OneDrive info: {body}"),
+        });
+    }
+
+    let drive_json: serde_json::Value =
+        drive_resp.json().await.map_err(|e| BridgeError::Config {
+            msg: format!("Failed to parse drive response: {e}"),
+        })?;
+
+    let drive_id = drive_json["id"]
+        .as_str()
+        .ok_or_else(|| BridgeError::Config {
+            msg: "Drive response missing 'id' field".to_string(),
+        })?
+        .to_string();
+
+    // Create the app folder
+    let create_resp = client
+        .post(format!(
+            "https://graph.microsoft.com/v1.0/drives/{}/root/children",
+            drive_id
+        ))
+        .bearer_auth(&tokens.access_token)
+        .json(&serde_json::json!({
+            "name": "bae",
+            "folder": {},
+            "@microsoft.graph.conflictBehavior": "useExisting",
+        }))
+        .send()
+        .await
+        .map_err(|e| BridgeError::Config {
+            msg: format!("Failed to create OneDrive folder: {e}"),
+        })?;
+
+    if !create_resp.status().is_success() {
+        let body = create_resp.text().await.unwrap_or_default();
+        return Err(BridgeError::Config {
+            msg: format!("Failed to create OneDrive folder: {body}"),
+        });
+    }
+
+    let folder_json: serde_json::Value =
+        create_resp.json().await.map_err(|e| BridgeError::Config {
+            msg: format!("Failed to parse folder response: {e}"),
+        })?;
+
+    let folder_id = folder_json["id"]
+        .as_str()
+        .ok_or_else(|| BridgeError::Config {
+            msg: "Folder response missing 'id' field".to_string(),
+        })?
+        .to_string();
+
+    // Save tokens to keyring
+    let token_json = serde_json::to_string(&tokens).map_err(|e| BridgeError::Config {
+        msg: format!("Failed to serialize tokens: {e}"),
+    })?;
+    key_service
+        .set_cloud_home_credentials(&bae_core::keys::CloudHomeCredentials::OAuth { token_json })
+        .map_err(|e| BridgeError::Config {
+            msg: format!("Failed to save OAuth token: {e}"),
+        })?;
+
+    // Save config
+    let mut config = Config::load();
+    config.cloud_provider = Some(bae_core::config::CloudProvider::OneDrive);
+    config.cloud_home_onedrive_drive_id = Some(drive_id);
+    config.cloud_home_onedrive_folder_id = Some(folder_id);
+    config.save().map_err(|e| BridgeError::Config {
+        msg: format!("Failed to save config: {e}"),
+    })?;
+
+    info!("Configured OneDrive cloud provider");
+    Ok(())
+}
+
+/// Detect the iCloud Drive ubiquity container path using NSFileManager.
+fn detect_icloud_container() -> Option<std::path::PathBuf> {
+    use objc::runtime::{Class, Object};
+    use objc::{msg_send, sel, sel_impl};
+
+    unsafe {
+        let nsfilemanager_class = Class::get("NSFileManager")?;
+        let file_manager: *mut Object = msg_send![nsfilemanager_class, defaultManager];
+        if file_manager.is_null() {
+            return None;
+        }
+
+        let nsstring_class = Class::get("NSString")?;
+        let container_cstr = std::ffi::CString::new("iCloud.fm.bae.desktop").ok()?;
+        let container_nsstring: *mut Object = msg_send![
+            nsstring_class,
+            stringWithUTF8String: container_cstr.as_ptr()
+        ];
+
+        let url: *mut Object =
+            msg_send![file_manager, URLForUbiquityContainerIdentifier: container_nsstring];
+        if url.is_null() {
+            info!("iCloud Drive ubiquity container not available");
+            return None;
+        }
+
+        let path_nsstring: *mut Object = msg_send![url, path];
+        if path_nsstring.is_null() {
+            return None;
+        }
+
+        let path_cstr: *const std::ffi::c_char = msg_send![path_nsstring, UTF8String];
+        if path_cstr.is_null() {
+            return None;
+        }
+
+        let path_str = std::ffi::CStr::from_ptr(path_cstr).to_str().ok()?;
+        Some(std::path::PathBuf::from(path_str))
+    }
 }

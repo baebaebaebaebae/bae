@@ -17,12 +17,16 @@ struct SettingsView: View {
                 .tabItem {
                     Label("Subsonic", systemImage: "server.rack")
                 }
+            SyncSettingsView(appService: appService)
+                .tabItem {
+                    Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                }
             AboutSettingsTab()
                 .tabItem {
                     Label("About", systemImage: "info.circle")
                 }
         }
-        .frame(width: 450, height: 300)
+        .frame(width: 500, height: 400)
     }
 }
 

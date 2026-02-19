@@ -179,6 +179,10 @@ pub struct BridgeSyncConfig {
     pub s3_endpoint: Option<String>,
     pub s3_key_prefix: Option<String>,
     pub share_base_url: Option<String>,
+    /// Display name for the connected account (email, username, "iCloud Drive", etc.)
+    pub cloud_account_display: Option<String>,
+    /// bae cloud library URL, if provider is bae_cloud
+    pub bae_cloud_url: Option<String>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]

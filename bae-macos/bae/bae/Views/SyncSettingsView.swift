@@ -10,6 +10,7 @@ struct SyncSettingsView: View {
     @State private var error: String?
     @State private var copiedField: String?
     @State private var isSyncing = false
+    @State private var isSigningIn = false
 
     // Invite flow
     @State private var showingInviteSheet = false
@@ -22,6 +23,9 @@ struct SyncSettingsView: View {
     @State private var memberToRemove: BridgeMember?
     @State private var showingRemoveConfirmation = false
     @State private var isRemoving = false
+
+    // Provider selection
+    @State private var selectedProvider: String = "none"
 
     // Editable S3 config fields
     @State private var bucket = ""
@@ -37,6 +41,11 @@ struct SyncSettingsView: View {
     @State private var followCodeInput = ""
     @State private var followError: String?
 
+    // bae cloud fields
+    @State private var email = ""
+    @State private var password = ""
+    @State private var isSignUp = true
+
     /// Sync status comes from AppService (updated reactively by the background loop).
     /// Falls back to a direct query on first load.
     private var syncStatus: BridgeSyncStatus? {
@@ -45,10 +54,15 @@ struct SyncSettingsView: View {
 
     @State private var localSyncStatus: BridgeSyncStatus?
 
+    /// Whether a provider is currently connected.
+    private var isConnected: Bool {
+        syncConfig?.cloudProvider != nil
+    }
+
     var body: some View {
         Form {
             syncStatusSection
-            s3ConfigSection
+            cloudProviderSection
             identitySection
             followedLibrariesSection
             membershipSection
@@ -106,10 +120,111 @@ struct SyncSettingsView: View {
         }
     }
 
+    // MARK: - Cloud Provider
+
+    private var cloudProviderSection: some View {
+        Section("Cloud Provider") {
+            if isConnected, let config = syncConfig {
+                connectedView(config: config)
+            } else {
+                providerPicker
+                providerConfigView
+            }
+        }
+    }
+
+    private func connectedView(config: BridgeSyncConfig) -> some View {
+        Group {
+            LabeledContent("Provider") {
+                Text(displayName(for: config.cloudProvider ?? "unknown"))
+            }
+            if let account = config.cloudAccountDisplay {
+                LabeledContent("Account") {
+                    Text(account)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if let url = config.baeCloudUrl {
+                LabeledContent("URL") {
+                    Text(url)
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+
+            // Show S3 details when connected via S3
+            if config.cloudProvider == "s3" {
+                if let b = config.s3Bucket {
+                    LabeledContent("Bucket") {
+                        Text(b)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let r = config.s3Region {
+                    LabeledContent("Region") {
+                        Text(r)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let e = config.s3Endpoint, !e.isEmpty {
+                    LabeledContent("Endpoint") {
+                        Text(e)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if let shareUrl = config.shareBaseUrl, !shareUrl.isEmpty {
+                LabeledContent("Share URL") {
+                    Text(shareUrl)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Disconnect") {
+                    disconnect()
+                }
+                .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private var providerPicker: some View {
+        Picker("Provider", selection: $selectedProvider) {
+            Text("Select...").tag("none")
+            Text("bae Cloud").tag("bae_cloud")
+            Text("S3 / S3-compatible").tag("s3")
+            Text("Google Drive").tag("google_drive")
+            Text("Dropbox").tag("dropbox")
+            Text("OneDrive").tag("onedrive")
+            Text("iCloud Drive").tag("icloud")
+        }
+    }
+
+    @ViewBuilder
+    private var providerConfigView: some View {
+        switch selectedProvider {
+        case "s3":
+            s3ConfigFields
+        case "bae_cloud":
+            baeCloudFields
+        case "google_drive", "dropbox", "onedrive":
+            oauthConnectButton
+        case "icloud":
+            icloudButton
+        default:
+            EmptyView()
+        }
+    }
+
     // MARK: - S3 Configuration
 
-    private var s3ConfigSection: some View {
-        Section("S3 Bucket Configuration") {
+    private var s3ConfigFields: some View {
+        Group {
             TextField("Bucket", text: $bucket)
             TextField("Region", text: $region)
             TextField("Endpoint (optional)", text: $endpoint)
@@ -124,6 +239,60 @@ struct SyncSettingsView: View {
                     saveSyncConfig()
                 }
                 .disabled(bucket.isEmpty || region.isEmpty || accessKey.isEmpty || secretKey.isEmpty)
+            }
+        }
+    }
+
+    // MARK: - bae Cloud
+
+    private var baeCloudFields: some View {
+        Group {
+            TextField("Email", text: $email)
+                .textContentType(.emailAddress)
+            SecureField("Password", text: $password)
+
+            Picker("", selection: $isSignUp) {
+                Text("Sign Up").tag(true)
+                Text("Log In").tag(false)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            HStack {
+                Spacer()
+                Button(isSigningIn ? "Working..." : (isSignUp ? "Sign Up" : "Log In")) {
+                    baeCloudAuth()
+                }
+                .disabled(email.isEmpty || password.isEmpty || isSigningIn)
+            }
+        }
+    }
+
+    // MARK: - OAuth
+
+    private var oauthConnectButton: some View {
+        HStack {
+            Text("Opens your browser to authorize bae.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button(isSigningIn ? "Connecting..." : "Connect \(displayName(for: selectedProvider))") {
+                oauthSignIn()
+            }
+            .disabled(isSigningIn)
+        }
+    }
+
+    // MARK: - iCloud
+
+    private var icloudButton: some View {
+        HStack {
+            Text("Uses your iCloud Drive for sync. Requires iCloud to be enabled in System Settings.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button("Use iCloud Drive") {
+                configureICloud()
             }
         }
     }
@@ -329,6 +498,18 @@ struct SyncSettingsView: View {
 
     // MARK: - Helpers
 
+    private func displayName(for provider: String) -> String {
+        switch provider {
+        case "s3": return "S3"
+        case "bae_cloud": return "bae Cloud"
+        case "google_drive": return "Google Drive"
+        case "dropbox": return "Dropbox"
+        case "onedrive": return "OneDrive"
+        case "icloud": return "iCloud Drive"
+        default: return provider
+        }
+    }
+
     private func copyButton(value: String, field: String) -> some View {
         Button {
             NSPasteboard.general.clearContents()
@@ -353,6 +534,8 @@ struct SyncSettingsView: View {
         return "\(start)...\(end)"
     }
 
+    // MARK: - Actions
+
     private func loadSyncInfo() {
         localSyncStatus = appService.appHandle.getSyncStatus()
         syncConfig = appService.appHandle.getSyncConfig()
@@ -366,6 +549,11 @@ struct SyncSettingsView: View {
             endpoint = config.s3Endpoint ?? ""
             keyPrefix = config.s3KeyPrefix ?? ""
             shareBaseUrl = config.shareBaseUrl ?? ""
+
+            // Set selected provider to current if connected
+            if let provider = config.cloudProvider {
+                selectedProvider = provider
+            }
         }
 
         // Load members in background (requires network)
@@ -396,20 +584,86 @@ struct SyncSettingsView: View {
         do {
             try appService.appHandle.saveSyncConfig(configData: data)
             error = nil
-            // Reload status after saving
-            localSyncStatus = appService.appHandle.getSyncStatus()
-            syncConfig = appService.appHandle.getSyncConfig()
+            reloadAfterChange()
         } catch {
             self.error = "Failed to save: \(error.localizedDescription)"
         }
+    }
+
+    private func disconnect() {
+        do {
+            try appService.appHandle.disconnectCloudProvider()
+            error = nil
+            selectedProvider = "none"
+            reloadAfterChange()
+        } catch {
+            self.error = "Failed to disconnect: \(error.localizedDescription)"
+        }
+    }
+
+    private func baeCloudAuth() {
+        isSigningIn = true
+        error = nil
+
+        Task.detached { [appService, email, password, isSignUp] in
+            do {
+                if isSignUp {
+                    _ = try appService.appHandle.signUpBaeCloud(email: email, password: password)
+                } else {
+                    _ = try appService.appHandle.logInBaeCloud(email: email, password: password)
+                }
+                await MainActor.run {
+                    isSigningIn = false
+                    reloadAfterChange()
+                }
+            } catch {
+                await MainActor.run {
+                    isSigningIn = false
+                    self.error = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func oauthSignIn() {
+        isSigningIn = true
+        error = nil
+
+        Task.detached { [appService, selectedProvider] in
+            do {
+                try appService.appHandle.signInCloudProvider(provider: selectedProvider)
+                await MainActor.run {
+                    isSigningIn = false
+                    reloadAfterChange()
+                }
+            } catch {
+                await MainActor.run {
+                    isSigningIn = false
+                    self.error = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func configureICloud() {
+        do {
+            try appService.appHandle.useIcloud()
+            error = nil
+            reloadAfterChange()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func reloadAfterChange() {
+        localSyncStatus = appService.appHandle.getSyncStatus()
+        syncConfig = appService.appHandle.getSyncConfig()
     }
 
     private func syncNow() {
         isSyncing = true
         error = nil
         appService.triggerSync()
-        // The status update arrives via onSyncStatusChanged callback.
-        // Reset the spinner after a short delay (the callback will update the real status).
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             isSyncing = false
         }

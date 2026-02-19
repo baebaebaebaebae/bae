@@ -890,6 +890,8 @@ dependencies = [
  "dirs 5.0.1",
  "hex",
  "libsqlite3-sys",
+ "objc",
+ "reqwest",
  "serde_json",
  "serde_yaml",
  "thiserror 2.0.18",
