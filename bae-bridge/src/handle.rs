@@ -10,8 +10,9 @@ use bae_core::playback::{PlaybackHandle, PlaybackProgress, PlaybackService, Play
 use tracing::{info, warn};
 
 use crate::types::{
-    BridgeAlbum, BridgeAlbumDetail, BridgeArtist, BridgeError, BridgeFile, BridgeLibraryInfo,
-    BridgePlaybackState, BridgeRelease, BridgeRepeatMode, BridgeTrack,
+    BridgeAlbum, BridgeAlbumDetail, BridgeAlbumSearchResult, BridgeArtist,
+    BridgeArtistSearchResult, BridgeError, BridgeFile, BridgeLibraryInfo, BridgePlaybackState,
+    BridgeRelease, BridgeRepeatMode, BridgeSearchResults, BridgeTrack, BridgeTrackSearchResult,
 };
 
 /// Discover all libraries in ~/.bae/libraries/.
@@ -286,6 +287,55 @@ impl AppHandle {
                 album: bridge_album,
                 artists: bridge_artists,
                 releases,
+            })
+        })
+    }
+
+    /// Search across artists, albums, and tracks.
+    pub fn search(&self, query: String) -> Result<BridgeSearchResults, BridgeError> {
+        self.runtime.block_on(async {
+            let results = self
+                .library_manager
+                .get()
+                .search_library(&query, 20)
+                .await
+                .map_err(|e| BridgeError::Database {
+                    msg: format!("{e}"),
+                })?;
+
+            Ok(BridgeSearchResults {
+                artists: results
+                    .artists
+                    .into_iter()
+                    .map(|a| BridgeArtistSearchResult {
+                        id: a.id,
+                        name: a.name,
+                        album_count: a.album_count,
+                    })
+                    .collect(),
+                albums: results
+                    .albums
+                    .into_iter()
+                    .map(|a| BridgeAlbumSearchResult {
+                        id: a.id,
+                        title: a.title,
+                        year: a.year,
+                        cover_release_id: a.cover_release_id,
+                        artist_name: a.artist_name,
+                    })
+                    .collect(),
+                tracks: results
+                    .tracks
+                    .into_iter()
+                    .map(|t| BridgeTrackSearchResult {
+                        id: t.id,
+                        title: t.title,
+                        duration_ms: t.duration_ms,
+                        album_id: t.album_id,
+                        album_title: t.album_title,
+                        artist_name: t.artist_name,
+                    })
+                    .collect(),
             })
         })
     }
