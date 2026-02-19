@@ -20,6 +20,7 @@ struct ImportView: View {
     @State private var searchTab: SearchTab = .general
     @State private var searchCatalog = ""
     @State private var searchBarcode = ""
+    @State private var galleryIndex: Int?
 
     var body: some View {
         if appService.scanResults.isEmpty {
@@ -257,10 +258,20 @@ struct ImportView: View {
                 if !files.artwork.isEmpty {
                     fileSection("Images (\(files.artwork.count))") {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 8)], spacing: 8) {
-                            ForEach(Array(files.artwork.enumerated()), id: \.offset) { _, file in
+                            ForEach(Array(files.artwork.enumerated()), id: \.offset) { index, file in
                                 imageThumb(file)
+                                    .onTapGesture { galleryIndex = index }
                             }
                         }
+                    }
+                    .sheet(isPresented: Binding(
+                        get: { galleryIndex != nil },
+                        set: { if !$0 { galleryIndex = nil } }
+                    )) {
+                        ImageGalleryView(
+                            images: files.artwork,
+                            currentIndex: $galleryIndex
+                        )
                     }
                 }
                 if !files.documents.isEmpty {
@@ -588,6 +599,119 @@ private struct CandidateRow: View {
         } else {
             Image(systemName: "folder")
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: - Image Gallery
+
+private struct ImageGalleryView: View {
+    let images: [BridgeFileInfo]
+    @Binding var currentIndex: Int?
+
+    private var safeIndex: Int {
+        guard let idx = currentIndex, idx >= 0, idx < images.count else { return 0 }
+        return idx
+    }
+
+    private var currentFile: BridgeFileInfo {
+        images[safeIndex]
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            toolbar
+            Divider()
+            ZStack {
+                Color(nsColor: .controlBackgroundColor)
+                imageContent
+            }
+            Divider()
+            caption
+        }
+        .frame(minWidth: 600, minHeight: 500)
+        .onKeyPress(.leftArrow) {
+            navigatePrevious()
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            navigateNext()
+            return .handled
+        }
+    }
+
+    private var toolbar: some View {
+        HStack {
+            Text("\(safeIndex + 1) of \(images.count)")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button("Done") {
+                currentIndex = nil
+            }
+            .keyboardShortcut(.cancelAction)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    private var imageContent: some View {
+        HStack(spacing: 0) {
+            Button(action: navigatePrevious) {
+                Image(systemName: "chevron.left")
+                    .font(.title2)
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .disabled(safeIndex == 0)
+            .opacity(safeIndex == 0 ? 0.3 : 1.0)
+
+            Spacer()
+
+            if let nsImage = NSImage(contentsOf: URL(fileURLWithPath: currentFile.path)) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .padding(16)
+            } else {
+                ContentUnavailableView(
+                    "Cannot load image",
+                    systemImage: "photo",
+                    description: Text(currentFile.name)
+                )
+            }
+
+            Spacer()
+
+            Button(action: navigateNext) {
+                Image(systemName: "chevron.right")
+                    .font(.title2)
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .disabled(safeIndex >= images.count - 1)
+            .opacity(safeIndex >= images.count - 1 ? 0.3 : 1.0)
+        }
+        .padding(.horizontal, 8)
+    }
+
+    private var caption: some View {
+        Text(currentFile.name)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .padding(.vertical, 8)
+    }
+
+    private func navigatePrevious() {
+        if safeIndex > 0 {
+            currentIndex = safeIndex - 1
+        }
+    }
+
+    private func navigateNext() {
+        if safeIndex < images.count - 1 {
+            currentIndex = safeIndex + 1
         }
     }
 }

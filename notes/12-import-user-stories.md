@@ -72,6 +72,17 @@ When a candidate is selected, the main content area shows the folder's files gro
 
 Each section header shows the section name. Sections are collapsible. Audio is expanded by default.
 
+### US-5a: Image gallery lightbox
+
+Clicking an image thumbnail in the file pane opens a full-size gallery view. The gallery:
+- Shows the image at full resolution, centered
+- Has left/right navigation arrows (or keyboard arrows) to cycle through all images
+- Shows the filename below the image
+- Has a close button or Escape key to dismiss
+- Overlays the content area (modal/sheet)
+
+This matches bae-desktop's `GalleryLightbox` component. The gallery helps users identify releases by examining scans of spines, disc art, label logos, and barcodes.
+
 ### US-6: Empty file display
 
 If no files are found in a category, that section is hidden (not shown as empty).
