@@ -187,10 +187,10 @@ struct NowPlayingBar: View {
                     .foregroundStyle(.secondary)
             case .album:
                 Image(systemName: "repeat")
-                    .foregroundStyle(.accentColor)
+                    .foregroundColor(.accentColor)
             case .track:
                 Image(systemName: "repeat.1")
-                    .foregroundStyle(.accentColor)
+                    .foregroundColor(.accentColor)
             }
         }
         .buttonStyle(.plain)
