@@ -38,24 +38,26 @@ struct LibraryView: View {
                     description: Text("Import some music to get started")
                 )
             } else {
-                HSplitView {
+                HStack(spacing: 0) {
                     AlbumGridView(
                         albums: albums,
                         appService: appService,
                         selectedAlbumId: $selectedAlbumId
                     )
-                    .frame(minWidth: 300)
+                    .frame(maxWidth: .infinity)
                     if let albumId = selectedAlbumId {
+                        Divider()
                         AlbumDetailView(
                             albumId: albumId,
                             appService: appService,
                             onClose: { selectedAlbumId = nil }
                         )
-                        .frame(minWidth: 350, idealWidth: 450)
+                        .frame(width: 450)
                     }
                 }
             }
         }
+        .animation(nil, value: selectedAlbumId)
         .onChange(of: searchText) { _, newValue in
             searchDebounceTask?.cancel()
             searchDebounceTask = Task {
