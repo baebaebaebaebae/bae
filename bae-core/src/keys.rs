@@ -1,7 +1,17 @@
-use crate::sodium_ffi;
+use ed25519_dalek::{Signer, Verifier};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{info, warn};
+
+// Size constants matching libsodium conventions. Exported so callers (sync modules,
+// envelope.rs, etc.) can use them for array sizes and length checks.
+pub const SIGN_PUBLICKEYBYTES: usize = 32;
+pub const SIGN_SECRETKEYBYTES: usize = 64;
+pub const SIGN_BYTES: usize = 64;
+pub const CURVE25519_PUBLICKEYBYTES: usize = 32;
+pub const CURVE25519_SECRETKEYBYTES: usize = 32;
+pub const SEALBYTES: usize = 48; // crypto_box PUBLICKEYBYTES + MACBYTES = 32 + 16
 
 #[derive(Error, Debug)]
 pub enum KeyError {
@@ -36,137 +46,110 @@ pub enum CloudHomeCredentials {
 /// under one pubkey across all libraries.
 #[derive(Clone)]
 pub struct UserKeypair {
-    pub signing_key: [u8; sodium_ffi::SIGN_SECRETKEYBYTES], // Ed25519 secret key (64 bytes)
-    pub public_key: [u8; sodium_ffi::SIGN_PUBLICKEYBYTES],  // Ed25519 public key (32 bytes)
+    pub signing_key: [u8; SIGN_SECRETKEYBYTES], // Ed25519 secret key (64 bytes: seed + public)
+    pub public_key: [u8; SIGN_PUBLICKEYBYTES],  // Ed25519 public key (32 bytes)
 }
 
 impl UserKeypair {
     /// Generate a new random Ed25519 keypair.
-    fn generate() -> Self {
-        crate::encryption::ensure_sodium_init();
-        let mut pk = [0u8; sodium_ffi::SIGN_PUBLICKEYBYTES];
-        let mut sk = [0u8; sodium_ffi::SIGN_SECRETKEYBYTES];
-        let ret =
-            unsafe { sodium_ffi::crypto_sign_ed25519_keypair(pk.as_mut_ptr(), sk.as_mut_ptr()) };
-        assert_eq!(ret, 0, "crypto_sign_ed25519_keypair failed");
+    pub(crate) fn generate() -> Self {
+        let mut seed = [0u8; 32];
+        rand::rng().fill_bytes(&mut seed);
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
+        let public_key = signing_key.verifying_key();
         Self {
-            signing_key: sk,
-            public_key: pk,
+            signing_key: signing_key.to_keypair_bytes(),
+            public_key: public_key.to_bytes(),
         }
     }
 
     /// Sign a message, returning a 64-byte detached signature.
-    pub fn sign(&self, message: &[u8]) -> [u8; sodium_ffi::SIGN_BYTES] {
-        crate::encryption::ensure_sodium_init();
-        let mut sig = [0u8; sodium_ffi::SIGN_BYTES];
-        let mut sig_len: u64 = 0;
-        let ret = unsafe {
-            sodium_ffi::crypto_sign_ed25519_detached(
-                sig.as_mut_ptr(),
-                &mut sig_len,
-                message.as_ptr(),
-                message.len() as u64,
-                self.signing_key.as_ptr(),
-            )
-        };
-        assert_eq!(ret, 0, "crypto_sign_ed25519_detached failed");
-        sig
+    pub fn sign(&self, message: &[u8]) -> [u8; SIGN_BYTES] {
+        let sk = ed25519_dalek::SigningKey::from_keypair_bytes(&self.signing_key)
+            .expect("valid keypair bytes");
+        sk.sign(message).to_bytes()
     }
 
     /// Derive the X25519 secret key from this Ed25519 signing key.
-    pub fn to_x25519_secret_key(&self) -> [u8; sodium_ffi::CURVE25519_SECRETKEYBYTES] {
-        crate::encryption::ensure_sodium_init();
-        let mut curve_sk = [0u8; sodium_ffi::CURVE25519_SECRETKEYBYTES];
-        let ret = unsafe {
-            sodium_ffi::crypto_sign_ed25519_sk_to_curve25519(
-                curve_sk.as_mut_ptr(),
-                self.signing_key.as_ptr(),
-            )
-        };
-        assert_eq!(ret, 0, "crypto_sign_ed25519_sk_to_curve25519 failed");
-        curve_sk
+    pub fn to_x25519_secret_key(&self) -> [u8; CURVE25519_SECRETKEYBYTES] {
+        let sk = ed25519_dalek::SigningKey::from_keypair_bytes(&self.signing_key)
+            .expect("valid keypair bytes");
+        sk.to_scalar_bytes()
     }
 
     /// Derive the X25519 public key from this Ed25519 public key.
-    pub fn to_x25519_public_key(&self) -> [u8; sodium_ffi::CURVE25519_PUBLICKEYBYTES] {
-        crate::encryption::ensure_sodium_init();
-        let mut curve_pk = [0u8; sodium_ffi::CURVE25519_PUBLICKEYBYTES];
-        let ret = unsafe {
-            sodium_ffi::crypto_sign_ed25519_pk_to_curve25519(
-                curve_pk.as_mut_ptr(),
-                self.public_key.as_ptr(),
-            )
-        };
-        assert_eq!(ret, 0, "crypto_sign_ed25519_pk_to_curve25519 failed");
-        curve_pk
+    pub fn to_x25519_public_key(&self) -> [u8; CURVE25519_PUBLICKEYBYTES] {
+        let vk = ed25519_dalek::VerifyingKey::from_bytes(&self.public_key)
+            .expect("valid public key bytes");
+        vk.to_montgomery().to_bytes()
     }
 }
 
 /// Verify a detached Ed25519 signature against a public key.
 pub fn verify_signature(
-    signature: &[u8; sodium_ffi::SIGN_BYTES],
+    signature: &[u8; SIGN_BYTES],
     message: &[u8],
-    public_key: &[u8; sodium_ffi::SIGN_PUBLICKEYBYTES],
+    public_key: &[u8; SIGN_PUBLICKEYBYTES],
 ) -> bool {
-    crate::encryption::ensure_sodium_init();
-    let ret = unsafe {
-        sodium_ffi::crypto_sign_ed25519_verify_detached(
-            signature.as_ptr(),
-            message.as_ptr(),
-            message.len() as u64,
-            public_key.as_ptr(),
-        )
+    let Ok(vk) = ed25519_dalek::VerifyingKey::from_bytes(public_key) else {
+        return false;
     };
-    ret == 0
+    let sig = ed25519_dalek::Signature::from_bytes(signature);
+    vk.verify(message, &sig).is_ok()
 }
 
 /// Encrypt a message to a recipient's X25519 public key using a sealed box.
 /// The sender is anonymous -- only the recipient can decrypt.
+///
+/// Reimplements crypto_box::PublicKey::seal() to avoid rand_core version
+/// mismatch (crypto_box uses rand_core 0.6, we use rand 0.9).
 pub fn seal_box_encrypt(
     message: &[u8],
-    recipient_x25519_pk: &[u8; sodium_ffi::CURVE25519_PUBLICKEYBYTES],
+    recipient_x25519_pk: &[u8; CURVE25519_PUBLICKEYBYTES],
 ) -> Vec<u8> {
-    crate::encryption::ensure_sodium_init();
-    let mut ciphertext = vec![0u8; message.len() + sodium_ffi::SEALBYTES];
-    let ret = unsafe {
-        sodium_ffi::crypto_box_seal(
-            ciphertext.as_mut_ptr(),
-            message.as_ptr(),
-            message.len() as u64,
-            recipient_x25519_pk.as_ptr(),
-        )
-    };
-    assert_eq!(ret, 0, "crypto_box_seal failed");
-    ciphertext
+    use blake2::{digest::typenum::U24, Blake2b, Digest};
+    use crypto_box::aead::Aead;
+
+    let recipient_pk = crypto_box::PublicKey::from(*recipient_x25519_pk);
+
+    // Generate ephemeral X25519 keypair
+    let mut ephemeral_bytes = [0u8; 32];
+    rand::rng().fill_bytes(&mut ephemeral_bytes);
+    let ephemeral_sk = crypto_box::SecretKey::from(ephemeral_bytes);
+    let ephemeral_pk = ephemeral_sk.public_key();
+
+    // Nonce = Blake2b-192(ephemeral_pk || recipient_pk) -- matches libsodium sealed box spec
+    let mut hasher = Blake2b::<U24>::new();
+    hasher.update(ephemeral_pk.as_bytes());
+    hasher.update(recipient_pk.as_bytes());
+    let nonce = hasher.finalize();
+
+    // Encrypt with XSalsa20-Poly1305
+    let salsa_box = crypto_box::SalsaBox::new(&recipient_pk, &ephemeral_sk);
+    let encrypted = salsa_box
+        .encrypt(&nonce, message)
+        .expect("sealed box encryption should not fail");
+
+    // Output: ephemeral_pk || ciphertext (matches libsodium format)
+    let mut out = Vec::with_capacity(32 + encrypted.len());
+    out.extend_from_slice(ephemeral_pk.as_bytes());
+    out.extend_from_slice(&encrypted);
+    out
 }
 
 /// Decrypt a sealed box using the recipient's X25519 keypair.
 pub fn seal_box_decrypt(
     ciphertext: &[u8],
-    recipient_x25519_pk: &[u8; sodium_ffi::CURVE25519_PUBLICKEYBYTES],
-    recipient_x25519_sk: &[u8; sodium_ffi::CURVE25519_SECRETKEYBYTES],
+    _recipient_x25519_pk: &[u8; CURVE25519_PUBLICKEYBYTES],
+    recipient_x25519_sk: &[u8; CURVE25519_SECRETKEYBYTES],
 ) -> Result<Vec<u8>, KeyError> {
-    crate::encryption::ensure_sodium_init();
-    if ciphertext.len() < sodium_ffi::SEALBYTES {
+    if ciphertext.len() < SEALBYTES {
         return Err(KeyError::Crypto("Ciphertext too short".to_string()));
     }
-    let plaintext_len = ciphertext.len() - sodium_ffi::SEALBYTES;
-    let mut plaintext = vec![0u8; plaintext_len];
-    let ret = unsafe {
-        sodium_ffi::crypto_box_seal_open(
-            plaintext.as_mut_ptr(),
-            ciphertext.as_ptr(),
-            ciphertext.len() as u64,
-            recipient_x25519_pk.as_ptr(),
-            recipient_x25519_sk.as_ptr(),
-        )
-    };
-    if ret != 0 {
-        return Err(KeyError::Crypto(
-            "Sealed box decryption failed (wrong key or tampered)".to_string(),
-        ));
-    }
-    Ok(plaintext)
+    let sk = crypto_box::SecretKey::from(*recipient_x25519_sk);
+    sk.unseal(ciphertext).map_err(|_| {
+        KeyError::Crypto("Sealed box decryption failed (wrong key or tampered)".to_string())
+    })
 }
 
 /// Convert an Ed25519 public key to an X25519 public key.
@@ -175,15 +158,11 @@ pub fn seal_box_decrypt(
 /// and need to encrypt something to them via sealed box. The `UserKeypair` methods
 /// handle the local case; this handles the remote case.
 pub fn ed25519_to_x25519_public_key(
-    ed25519_pk: &[u8; sodium_ffi::SIGN_PUBLICKEYBYTES],
-) -> [u8; sodium_ffi::CURVE25519_PUBLICKEYBYTES] {
-    crate::encryption::ensure_sodium_init();
-    let mut curve_pk = [0u8; sodium_ffi::CURVE25519_PUBLICKEYBYTES];
-    let ret = unsafe {
-        sodium_ffi::crypto_sign_ed25519_pk_to_curve25519(curve_pk.as_mut_ptr(), ed25519_pk.as_ptr())
-    };
-    assert_eq!(ret, 0, "crypto_sign_ed25519_pk_to_curve25519 failed");
-    curve_pk
+    ed25519_pk: &[u8; SIGN_PUBLICKEYBYTES],
+) -> [u8; CURVE25519_PUBLICKEYBYTES] {
+    let vk = ed25519_dalek::VerifyingKey::from_bytes(ed25519_pk)
+        .expect("valid Ed25519 public key bytes");
+    vk.to_montgomery().to_bytes()
 }
 
 /// Manages secret keys (Discogs API key, encryption key) with lazy reads.
@@ -192,7 +171,7 @@ pub fn ed25519_to_x25519_public_key(
 /// In prod mode, reads from the OS keyring. Each library_id gets its own
 /// namespaced keyring entries so multiple libraries can have independent keys.
 ///
-/// `new()` does no I/O — keyring reads happen lazily in `get_*` methods,
+/// `new()` does no I/O -- keyring reads happen lazily in `get_*` methods,
 /// because the macOS protected keyring triggers a system password prompt.
 #[derive(Clone)]
 pub struct KeyService {
@@ -654,7 +633,7 @@ impl KeyService {
     }
 
     /// Return just the user's Ed25519 public key, or None if no keypair exists.
-    pub fn get_user_public_key(&self) -> Option<[u8; sodium_ffi::SIGN_PUBLICKEYBYTES]> {
+    pub fn get_user_public_key(&self) -> Option<[u8; SIGN_PUBLICKEYBYTES]> {
         let pk_hex = if self.dev_mode {
             std::env::var("BAE_USER_PUBLIC_KEY")
                 .ok()
@@ -699,12 +678,12 @@ impl KeyService {
             }
         };
 
-        let sk_bytes: [u8; sodium_ffi::SIGN_SECRETKEYBYTES] = hex::decode(&sk_hex)
+        let sk_bytes: [u8; SIGN_SECRETKEYBYTES] = hex::decode(&sk_hex)
             .map_err(|e| KeyError::Crypto(format!("Invalid signing key hex: {e}")))?
             .try_into()
             .map_err(|_| KeyError::Crypto("Signing key wrong length".to_string()))?;
 
-        let pk_bytes: [u8; sodium_ffi::SIGN_PUBLICKEYBYTES] = hex::decode(&pk_hex)
+        let pk_bytes: [u8; SIGN_PUBLICKEYBYTES] = hex::decode(&pk_hex)
             .map_err(|e| KeyError::Crypto(format!("Invalid public key hex: {e}")))?
             .try_into()
             .map_err(|_| KeyError::Crypto("Public key wrong length".to_string()))?;
@@ -844,7 +823,7 @@ mod tests {
         let plaintext = b"library encryption key material";
         let ciphertext = seal_box_encrypt(plaintext, &x_pk);
 
-        assert_eq!(ciphertext.len(), plaintext.len() + sodium_ffi::SEALBYTES);
+        assert_eq!(ciphertext.len(), plaintext.len() + SEALBYTES);
 
         let decrypted = seal_box_decrypt(&ciphertext, &x_pk, &x_sk).unwrap();
         assert_eq!(decrypted, plaintext);

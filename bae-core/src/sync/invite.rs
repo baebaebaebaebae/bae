@@ -6,7 +6,6 @@
 use crate::cloud_home::{CloudHome, CloudHomeError, JoinInfo};
 use crate::encryption;
 use crate::keys::{self, KeyError, UserKeypair};
-use crate::sodium_ffi;
 
 use super::bucket::{BucketError, SyncBucketClient};
 use super::membership::{
@@ -49,8 +48,8 @@ async fn next_membership_seq(
 /// Decode and convert an Ed25519 hex pubkey to X25519 for sealed box encryption.
 fn ed25519_hex_to_x25519(
     ed25519_pubkey_hex: &str,
-) -> Result<[u8; sodium_ffi::CURVE25519_PUBLICKEYBYTES], InviteError> {
-    let pk_bytes: [u8; sodium_ffi::SIGN_PUBLICKEYBYTES] = hex::decode(ed25519_pubkey_hex)
+) -> Result<[u8; keys::CURVE25519_PUBLICKEYBYTES], InviteError> {
+    let pk_bytes: [u8; keys::SIGN_PUBLICKEYBYTES] = hex::decode(ed25519_pubkey_hex)
         .map_err(|e| InviteError::Crypto(format!("invalid pubkey hex: {e}")))?
         .try_into()
         .map_err(|_| InviteError::Crypto("pubkey wrong length".to_string()))?;
@@ -272,18 +271,8 @@ mod tests {
         }
     }
 
-    /// Generate a keypair directly (bypasses KeyService env-var issues).
     fn gen_keypair() -> UserKeypair {
-        crate::encryption::ensure_sodium_init();
-        let mut pk = [0u8; sodium_ffi::SIGN_PUBLICKEYBYTES];
-        let mut sk = [0u8; sodium_ffi::SIGN_SECRETKEYBYTES];
-        let ret =
-            unsafe { sodium_ffi::crypto_sign_ed25519_keypair(pk.as_mut_ptr(), sk.as_mut_ptr()) };
-        assert_eq!(ret, 0);
-        UserKeypair {
-            signing_key: sk,
-            public_key: pk,
-        }
+        UserKeypair::generate()
     }
 
     fn pubkey_hex(kp: &UserKeypair) -> String {

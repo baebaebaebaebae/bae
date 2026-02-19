@@ -7,7 +7,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::keys::{self, UserKeypair};
-use crate::sodium_ffi;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChangesetEnvelope {
@@ -60,10 +59,10 @@ pub fn verify_changeset_signature(env: &ChangesetEnvelope, changeset_bytes: &[u8
         return false;
     };
 
-    let Ok(pk): Result<[u8; sodium_ffi::SIGN_PUBLICKEYBYTES], _> = pk_bytes.try_into() else {
+    let Ok(pk): Result<[u8; keys::SIGN_PUBLICKEYBYTES], _> = pk_bytes.try_into() else {
         return false;
     };
-    let Ok(sig): Result<[u8; sodium_ffi::SIGN_BYTES], _> = sig_bytes.try_into() else {
+    let Ok(sig): Result<[u8; keys::SIGN_BYTES], _> = sig_bytes.try_into() else {
         return false;
     };
 

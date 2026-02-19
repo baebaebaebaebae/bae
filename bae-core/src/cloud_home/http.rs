@@ -251,19 +251,8 @@ mod tests {
     use super::*;
     use crate::keys::{verify_signature, UserKeypair};
 
-    /// Helper to create a keypair for testing without going through KeyService.
     fn test_keypair() -> UserKeypair {
-        crate::encryption::ensure_sodium_init();
-        let mut pk = [0u8; crate::sodium_ffi::SIGN_PUBLICKEYBYTES];
-        let mut sk = [0u8; crate::sodium_ffi::SIGN_SECRETKEYBYTES];
-        let ret = unsafe {
-            crate::sodium_ffi::crypto_sign_ed25519_keypair(pk.as_mut_ptr(), sk.as_mut_ptr())
-        };
-        assert_eq!(ret, 0);
-        UserKeypair {
-            signing_key: sk,
-            public_key: pk,
-        }
+        UserKeypair::generate()
     }
 
     #[test]
@@ -298,7 +287,7 @@ mod tests {
         let headers = cloud_home.sign_request("GET", "/cloud/some/key");
 
         let message = format!("GET\n/cloud/some/key\n{}", headers[1].1);
-        let sig_bytes: [u8; crate::sodium_ffi::SIGN_BYTES] =
+        let sig_bytes: [u8; crate::keys::SIGN_BYTES] =
             hex::decode(&headers[2].1).unwrap().try_into().unwrap();
 
         assert!(verify_signature(

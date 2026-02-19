@@ -1,34 +1,27 @@
-use crate::sodium_ffi;
+use chacha20poly1305::aead::generic_array::GenericArray;
+use chacha20poly1305::{aead::Aead, KeyInit, XChaCha20Poly1305};
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
+use rand::RngCore;
 use sha2::{Digest, Sha256};
-use std::ptr;
-use std::sync::Once;
 use thiserror::Error;
 use tracing::info;
+
+/// XChaCha20-Poly1305 nonce size (24 bytes).
+pub const NONCE_SIZE: usize = 24;
+
+/// Poly1305 auth tag size (16 bytes).
+pub const TAG_SIZE: usize = 16;
 
 /// 64KB plaintext chunks
 pub const CHUNK_SIZE: usize = 65536;
 /// Each encrypted chunk: plaintext + 16-byte auth tag
-pub const ENCRYPTED_CHUNK_SIZE: usize = CHUNK_SIZE + sodium_ffi::ABYTES;
+pub const ENCRYPTED_CHUNK_SIZE: usize = CHUNK_SIZE + TAG_SIZE;
 
-static SODIUM_INIT: Once = Once::new();
-
-/// Ensure libsodium is initialized. Safe to call multiple times.
-pub fn ensure_sodium_init() {
-    SODIUM_INIT.call_once(|| {
-        let result = unsafe { sodium_ffi::sodium_init() };
-        if result < 0 {
-            panic!("Failed to initialize libsodium");
-        }
-    });
-}
-
-/// Generate a random 32-byte key using libsodium's secure random.
+/// Generate a random 32-byte key.
 pub fn generate_random_key() -> [u8; 32] {
-    ensure_sodium_init();
     let mut key = [0u8; 32];
-    unsafe { sodium_ffi::randombytes_buf(key.as_mut_ptr(), 32) };
+    rand::rng().fill_bytes(&mut key);
     key
 }
 
@@ -131,60 +124,32 @@ impl EncryptionService {
     /// Returns: [base_nonce: 24 bytes][chunk_0][chunk_1]...
     /// Each chunk is independently encrypted, enabling random-access decryption.
     pub fn encrypt_chunked(&self, plaintext: &[u8]) -> Vec<u8> {
-        ensure_sodium_init();
+        let cipher = XChaCha20Poly1305::new(GenericArray::from_slice(&self.key));
 
         // Generate random base nonce
-        let mut base_nonce = [0u8; sodium_ffi::NPUBBYTES];
-        unsafe {
-            sodium_ffi::randombytes_buf(base_nonce.as_mut_ptr(), sodium_ffi::NPUBBYTES);
-        }
+        let mut base_nonce = [0u8; NONCE_SIZE];
+        rand::rng().fill_bytes(&mut base_nonce);
 
         let mut output = base_nonce.to_vec();
 
         // Handle empty plaintext - still produce one chunk with just auth tag
         if plaintext.is_empty() {
             let nonce = chunk_nonce(&base_nonce, 0);
-            let mut ciphertext = vec![0u8; sodium_ffi::ABYTES];
-            let mut ciphertext_len: u64 = 0;
-
-            unsafe {
-                sodium_ffi::crypto_aead_xchacha20poly1305_ietf_encrypt(
-                    ciphertext.as_mut_ptr(),
-                    &mut ciphertext_len,
-                    ptr::null(),
-                    0,
-                    ptr::null(),
-                    0,
-                    ptr::null(),
-                    nonce.as_ptr(),
-                    self.key.as_ptr(),
-                );
-            }
-
-            output.extend(&ciphertext[..ciphertext_len as usize]);
+            let nonce_arr = GenericArray::from_slice(&nonce);
+            let ct = cipher
+                .encrypt(nonce_arr, &[][..])
+                .expect("encryption should not fail");
+            output.extend(ct);
             return output;
         }
 
         for (i, chunk) in plaintext.chunks(CHUNK_SIZE).enumerate() {
             let nonce = chunk_nonce(&base_nonce, i as u64);
-            let mut ciphertext = vec![0u8; chunk.len() + sodium_ffi::ABYTES];
-            let mut ciphertext_len: u64 = 0;
-
-            unsafe {
-                sodium_ffi::crypto_aead_xchacha20poly1305_ietf_encrypt(
-                    ciphertext.as_mut_ptr(),
-                    &mut ciphertext_len,
-                    chunk.as_ptr(),
-                    chunk.len() as u64,
-                    ptr::null(),
-                    0,
-                    ptr::null(),
-                    nonce.as_ptr(),
-                    self.key.as_ptr(),
-                );
-            }
-
-            output.extend(&ciphertext[..ciphertext_len as usize]);
+            let nonce_arr = GenericArray::from_slice(&nonce);
+            let ct = cipher
+                .encrypt(nonce_arr, chunk)
+                .expect("encryption should not fail");
+            output.extend(ct);
         }
 
         output
@@ -197,19 +162,17 @@ impl EncryptionService {
         ciphertext: &[u8],
         chunk_index: usize,
     ) -> Result<Vec<u8>, EncryptionError> {
-        ensure_sodium_init();
-
-        if ciphertext.len() < sodium_ffi::NPUBBYTES {
+        if ciphertext.len() < NONCE_SIZE {
             return Err(EncryptionError::Decryption(
                 "Ciphertext too short for nonce".to_string(),
             ));
         }
 
-        let base_nonce: [u8; sodium_ffi::NPUBBYTES] = ciphertext[..sodium_ffi::NPUBBYTES]
+        let base_nonce: [u8; NONCE_SIZE] = ciphertext[..NONCE_SIZE]
             .try_into()
             .map_err(|_| EncryptionError::Decryption("Invalid nonce".to_string()))?;
 
-        let data_start = sodium_ffi::NPUBBYTES;
+        let data_start = NONCE_SIZE;
         let total_data_len = ciphertext.len() - data_start;
 
         // Calculate chunk boundaries
@@ -233,45 +196,23 @@ impl EncryptionService {
 
         let chunk_data = &ciphertext[chunk_start..chunk_end];
         let nonce = chunk_nonce(&base_nonce, chunk_index as u64);
+        let nonce_arr = GenericArray::from_slice(&nonce);
 
-        let mut plaintext = vec![0u8; chunk_data.len() - sodium_ffi::ABYTES];
-        let mut plaintext_len: u64 = 0;
-
-        let result = unsafe {
-            sodium_ffi::crypto_aead_xchacha20poly1305_ietf_decrypt(
-                plaintext.as_mut_ptr(),
-                &mut plaintext_len,
-                ptr::null_mut(),
-                chunk_data.as_ptr(),
-                chunk_data.len() as u64,
-                ptr::null(),
-                0,
-                nonce.as_ptr(),
-                self.key.as_ptr(),
-            )
-        };
-
-        if result != 0 {
-            return Err(EncryptionError::Decryption(
-                "Authentication failed".to_string(),
-            ));
-        }
-
-        plaintext.truncate(plaintext_len as usize);
-        Ok(plaintext)
+        let cipher = XChaCha20Poly1305::new(GenericArray::from_slice(&self.key));
+        cipher
+            .decrypt(nonce_arr, chunk_data)
+            .map_err(|_| EncryptionError::Decryption("Authentication failed".to_string()))
     }
 
     /// Decrypt all chunks from chunked encrypted data.
     pub fn decrypt_chunked(&self, ciphertext: &[u8]) -> Result<Vec<u8>, EncryptionError> {
-        ensure_sodium_init();
-
-        if ciphertext.len() < sodium_ffi::NPUBBYTES {
+        if ciphertext.len() < NONCE_SIZE {
             return Err(EncryptionError::Decryption(
                 "Ciphertext too short for nonce".to_string(),
             ));
         }
 
-        let data_start = sodium_ffi::NPUBBYTES;
+        let data_start = NONCE_SIZE;
         let total_data_len = ciphertext.len() - data_start;
 
         let num_full_chunks = total_data_len / ENCRYPTED_CHUNK_SIZE;
@@ -299,8 +240,6 @@ impl EncryptionService {
         plaintext_start: u64,
         plaintext_end: u64,
     ) -> Result<Vec<u8>, EncryptionError> {
-        ensure_sodium_init();
-
         if plaintext_start >= plaintext_end {
             return Err(EncryptionError::Decryption(format!(
                 "Invalid range: start ({}) >= end ({})",
@@ -342,7 +281,7 @@ impl EncryptionService {
     /// - `plaintext_start`, `plaintext_end`: Absolute byte positions in original file
     ///
     /// Example: To read plaintext bytes 500,000-600,000:
-    /// 1. Calculate needed chunks: `encrypted_chunk_range(500000, 600000)` → chunks 7-9
+    /// 1. Calculate needed chunks: `encrypted_chunk_range(500000, 600000)` -> chunks 7-9
     /// 2. Fetch encrypted bytes from cloud at those positions
     /// 3. Call `decrypt_range_with_offset(nonce, chunks, 7, 500000, 600000)`
     pub fn decrypt_range_with_offset(
@@ -353,12 +292,10 @@ impl EncryptionService {
         plaintext_start: u64,
         plaintext_end: u64,
     ) -> Result<Vec<u8>, EncryptionError> {
-        ensure_sodium_init();
-
-        if nonce.len() != sodium_ffi::NPUBBYTES {
+        if nonce.len() != NONCE_SIZE {
             return Err(EncryptionError::Decryption(format!(
                 "Invalid nonce length: expected {}, got {}",
-                sodium_ffi::NPUBBYTES,
+                NONCE_SIZE,
                 nonce.len()
             )));
         }
@@ -370,9 +307,11 @@ impl EncryptionService {
             )));
         }
 
-        let base_nonce: [u8; sodium_ffi::NPUBBYTES] = nonce
+        let base_nonce: [u8; NONCE_SIZE] = nonce
             .try_into()
             .map_err(|_| EncryptionError::Decryption("Invalid nonce".to_string()))?;
+
+        let cipher = XChaCha20Poly1305::new(GenericArray::from_slice(&self.key));
 
         let start_chunk = plaintext_start / CHUNK_SIZE as u64;
         let end_chunk = (plaintext_end.saturating_sub(1)) / CHUNK_SIZE as u64;
@@ -400,32 +339,15 @@ impl EncryptionService {
 
             let chunk_data = &encrypted_chunks[chunk_start..chunk_end];
             let nonce = chunk_nonce(&base_nonce, absolute_chunk_idx);
+            let nonce_arr = GenericArray::from_slice(&nonce);
 
-            let mut decrypted = vec![0u8; chunk_data.len() - sodium_ffi::ABYTES];
-            let mut decrypted_len: u64 = 0;
-
-            let result = unsafe {
-                sodium_ffi::crypto_aead_xchacha20poly1305_ietf_decrypt(
-                    decrypted.as_mut_ptr(),
-                    &mut decrypted_len,
-                    ptr::null_mut(),
-                    chunk_data.as_ptr(),
-                    chunk_data.len() as u64,
-                    ptr::null(),
-                    0,
-                    nonce.as_ptr(),
-                    self.key.as_ptr(),
-                )
-            };
-
-            if result != 0 {
-                return Err(EncryptionError::Decryption(format!(
+            let decrypted = cipher.decrypt(nonce_arr, chunk_data).map_err(|_| {
+                EncryptionError::Decryption(format!(
                     "Authentication failed for chunk {}",
                     absolute_chunk_idx
-                )));
-            }
+                ))
+            })?;
 
-            decrypted.truncate(decrypted_len as usize);
             plaintext.extend(decrypted);
         }
 
@@ -464,7 +386,7 @@ impl EncryptionService {
     /// - Info: caller-provided label
     pub fn derive_key(&self, info: &str) -> [u8; 32] {
         let mut mac =
-            Hmac::<Sha256>::new_from_slice(&self.key).expect("HMAC accepts any key length");
+            <Hmac<Sha256> as Mac>::new_from_slice(&self.key).expect("HMAC accepts any key length");
         mac.update(b"bae-hkdf-salt-v1");
         let salt = mac.finalize().into_bytes();
 
@@ -477,10 +399,7 @@ impl EncryptionService {
 }
 
 /// Derive nonce for chunk i: base_nonce XOR i (little-endian)
-fn chunk_nonce(
-    base_nonce: &[u8; sodium_ffi::NPUBBYTES],
-    chunk_index: u64,
-) -> [u8; sodium_ffi::NPUBBYTES] {
+fn chunk_nonce(base_nonce: &[u8; NONCE_SIZE], chunk_index: u64) -> [u8; NONCE_SIZE] {
     let mut nonce = *base_nonce;
     let index_bytes = chunk_index.to_le_bytes();
     for i in 0..8 {
@@ -500,8 +419,8 @@ pub fn encrypted_chunk_range(plaintext_start: u64, plaintext_end: u64) -> (u64, 
     let start_chunk = plaintext_start / CHUNK_SIZE as u64;
     let end_chunk = (plaintext_end.saturating_sub(1)) / CHUNK_SIZE as u64;
 
-    let chunk_start = sodium_ffi::NPUBBYTES as u64 + start_chunk * ENCRYPTED_CHUNK_SIZE as u64;
-    let chunk_end = sodium_ffi::NPUBBYTES as u64 + (end_chunk + 1) * ENCRYPTED_CHUNK_SIZE as u64;
+    let chunk_start = NONCE_SIZE as u64 + start_chunk * ENCRYPTED_CHUNK_SIZE as u64;
+    let chunk_end = NONCE_SIZE as u64 + (end_chunk + 1) * ENCRYPTED_CHUNK_SIZE as u64;
 
     (chunk_start, chunk_end)
 }
@@ -516,8 +435,8 @@ mod tests {
         let start_chunk = start / CHUNK_SIZE as u64;
         let end_chunk = (end.saturating_sub(1)) / CHUNK_SIZE as u64;
 
-        let enc_start = sodium_ffi::NPUBBYTES as u64 + start_chunk * ENCRYPTED_CHUNK_SIZE as u64;
-        let enc_end = sodium_ffi::NPUBBYTES as u64 + (end_chunk + 1) * ENCRYPTED_CHUNK_SIZE as u64;
+        let enc_start = NONCE_SIZE as u64 + start_chunk * ENCRYPTED_CHUNK_SIZE as u64;
+        let enc_end = NONCE_SIZE as u64 + (end_chunk + 1) * ENCRYPTED_CHUNK_SIZE as u64;
 
         // Always need the nonce header
         (0, enc_end.max(enc_start))
@@ -619,7 +538,7 @@ mod tests {
         let mut ciphertext = service.encrypt(plaintext);
 
         // Tamper with the ciphertext (after nonce)
-        let tamper_pos = sodium_ffi::NPUBBYTES + 5;
+        let tamper_pos = NONCE_SIZE + 5;
         ciphertext[tamper_pos] ^= 0xFF;
 
         let result = service.decrypt(&ciphertext);
@@ -634,7 +553,7 @@ mod tests {
         let ciphertext = service.encrypt(plaintext);
 
         // Should just be nonce + auth tag
-        assert_eq!(ciphertext.len(), sodium_ffi::NPUBBYTES + sodium_ffi::ABYTES);
+        assert_eq!(ciphertext.len(), NONCE_SIZE + TAG_SIZE);
 
         let decrypted = service.decrypt(&ciphertext).unwrap();
         assert_eq!(decrypted, plaintext);
@@ -657,10 +576,7 @@ mod tests {
         let (start, end) = encrypted_range_for_plaintext(0, 100);
 
         assert_eq!(start, 0); // Always need nonce
-        assert_eq!(
-            end,
-            sodium_ffi::NPUBBYTES as u64 + ENCRYPTED_CHUNK_SIZE as u64
-        );
+        assert_eq!(end, NONCE_SIZE as u64 + ENCRYPTED_CHUNK_SIZE as u64);
     }
 
     #[test]
@@ -670,10 +586,7 @@ mod tests {
             encrypted_range_for_plaintext(CHUNK_SIZE as u64 - 10, CHUNK_SIZE as u64 + 10);
 
         assert_eq!(start, 0); // Always need nonce
-        assert_eq!(
-            end,
-            sodium_ffi::NPUBBYTES as u64 + 2 * ENCRYPTED_CHUNK_SIZE as u64
-        );
+        assert_eq!(end, NONCE_SIZE as u64 + 2 * ENCRYPTED_CHUNK_SIZE as u64);
     }
 
     #[test]
@@ -683,10 +596,7 @@ mod tests {
         let (start, end) = encrypted_range_for_plaintext(chunk2_start + 10, chunk2_start + 100);
 
         assert_eq!(start, 0); // Always need nonce
-        assert_eq!(
-            end,
-            sodium_ffi::NPUBBYTES as u64 + 3 * ENCRYPTED_CHUNK_SIZE as u64
-        );
+        assert_eq!(end, NONCE_SIZE as u64 + 3 * ENCRYPTED_CHUNK_SIZE as u64);
     }
 
     #[test]
@@ -806,8 +716,8 @@ mod tests {
         let (enc_start, enc_end) = encrypted_chunk_range(chunk5_start, chunk5_end);
 
         // Should start at chunk 5's position, not 0
-        let expected_start = sodium_ffi::NPUBBYTES as u64 + 5 * ENCRYPTED_CHUNK_SIZE as u64;
-        let expected_end = sodium_ffi::NPUBBYTES as u64 + 6 * ENCRYPTED_CHUNK_SIZE as u64;
+        let expected_start = NONCE_SIZE as u64 + 5 * ENCRYPTED_CHUNK_SIZE as u64;
+        let expected_end = NONCE_SIZE as u64 + 6 * ENCRYPTED_CHUNK_SIZE as u64;
 
         assert_eq!(
             enc_start, expected_start,
@@ -824,8 +734,8 @@ mod tests {
 
         let (enc_start, enc_end) = encrypted_chunk_range(start, end);
 
-        let expected_start = sodium_ffi::NPUBBYTES as u64 + 3 * ENCRYPTED_CHUNK_SIZE as u64;
-        let expected_end = sodium_ffi::NPUBBYTES as u64 + 6 * ENCRYPTED_CHUNK_SIZE as u64;
+        let expected_start = NONCE_SIZE as u64 + 3 * ENCRYPTED_CHUNK_SIZE as u64;
+        let expected_end = NONCE_SIZE as u64 + 6 * ENCRYPTED_CHUNK_SIZE as u64;
 
         assert_eq!(enc_start, expected_start);
         assert_eq!(enc_end, expected_end);
@@ -841,7 +751,7 @@ mod tests {
         let full_ciphertext = service.encrypt(&plaintext);
 
         // Extract nonce (this would come from DB in production)
-        let nonce = &full_ciphertext[..sodium_ffi::NPUBBYTES];
+        let nonce = &full_ciphertext[..NONCE_SIZE];
 
         // We want plaintext bytes in chunk 7
         let plaintext_start = CHUNK_SIZE as u64 * 7 + 100;
@@ -881,7 +791,7 @@ mod tests {
 
         let plaintext: Vec<u8> = (0..CHUNK_SIZE * 10).map(|i| (i % 256) as u8).collect();
         let full_ciphertext = service.encrypt(&plaintext);
-        let nonce = &full_ciphertext[..sodium_ffi::NPUBBYTES];
+        let nonce = &full_ciphertext[..NONCE_SIZE];
 
         // Range spanning chunks 3, 4, 5
         let plaintext_start = CHUNK_SIZE as u64 * 3 + 1000;
