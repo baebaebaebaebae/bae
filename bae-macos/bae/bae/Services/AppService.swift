@@ -5,6 +5,7 @@ import SwiftUI
 @Observable
 class AppService: AppEventHandler, @unchecked Sendable {
     let appHandle: AppHandle
+    let mediaControlService = MediaControlService()
 
     var playbackState: BridgePlaybackState = .stopped
     var currentPositionMs: UInt64 = 0
@@ -28,6 +29,7 @@ class AppService: AppEventHandler, @unchecked Sendable {
     init(appHandle: AppHandle) {
         self.appHandle = appHandle
         appHandle.setEventHandler(handler: self)
+        mediaControlService.setupRemoteCommands(appService: self)
 
         // Start background sync loop if sync is configured
         if appHandle.isSyncReady() {
@@ -41,11 +43,11 @@ class AppService: AppEventHandler, @unchecked Sendable {
         Task { @MainActor in
             self.playbackState = state
             switch state {
-            case let .playing(trackId, _, _, _, _, positionMs, durationMs):
+            case let .playing(trackId, _, _, _, _, _, positionMs, durationMs):
                 self.currentTrackId = trackId
                 self.currentPositionMs = positionMs
                 self.currentDurationMs = durationMs
-            case let .paused(trackId, _, _, _, _, positionMs, durationMs):
+            case let .paused(trackId, _, _, _, _, _, positionMs, durationMs):
                 self.currentTrackId = trackId
                 self.currentPositionMs = positionMs
                 self.currentDurationMs = durationMs
@@ -56,6 +58,7 @@ class AppService: AppEventHandler, @unchecked Sendable {
                 self.currentPositionMs = 0
                 self.currentDurationMs = 0
             }
+            self.mediaControlService.updateNowPlaying(state: state, appHandle: self.appHandle)
         }
     }
 
@@ -66,6 +69,7 @@ class AppService: AppEventHandler, @unchecked Sendable {
                 self.currentDurationMs = durationMs
             }
             self.currentTrackId = trackId
+            self.mediaControlService.updatePosition(positionMs: positionMs, durationMs: self.currentDurationMs)
         }
     }
 
@@ -319,9 +323,9 @@ class AppService: AppEventHandler, @unchecked Sendable {
     /// Current track title, or nil if nothing is active.
     var trackTitle: String? {
         switch playbackState {
-        case let .playing(_, trackTitle, _, _, _, _, _):
+        case let .playing(_, trackTitle, _, _, _, _, _, _):
             return trackTitle
-        case let .paused(_, trackTitle, _, _, _, _, _):
+        case let .paused(_, trackTitle, _, _, _, _, _, _):
             return trackTitle
         default:
             return nil
@@ -331,9 +335,9 @@ class AppService: AppEventHandler, @unchecked Sendable {
     /// Current artist names, or nil if nothing is active.
     var artistNames: String? {
         switch playbackState {
-        case let .playing(_, _, artistNames, _, _, _, _):
+        case let .playing(_, _, artistNames, _, _, _, _, _):
             return artistNames
-        case let .paused(_, _, artistNames, _, _, _, _):
+        case let .paused(_, _, artistNames, _, _, _, _, _):
             return artistNames
         default:
             return nil
@@ -343,9 +347,9 @@ class AppService: AppEventHandler, @unchecked Sendable {
     /// Cover image ID for the currently playing track's album.
     var coverImageId: String? {
         switch playbackState {
-        case let .playing(_, _, _, _, coverImageId, _, _):
+        case let .playing(_, _, _, _, _, coverImageId, _, _):
             return coverImageId
-        case let .paused(_, _, _, _, coverImageId, _, _):
+        case let .paused(_, _, _, _, _, coverImageId, _, _):
             return coverImageId
         default:
             return nil

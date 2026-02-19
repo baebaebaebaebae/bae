@@ -32,6 +32,7 @@ targets:
       - package: Sparkle
       - sdk: CoreAudio.framework
       - sdk: AudioToolbox.framework
+      - sdk: MediaPlayer.framework
       - sdk: SystemConfiguration.framework
     settings:
       base:
