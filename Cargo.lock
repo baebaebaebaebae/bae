@@ -884,13 +884,17 @@ name = "bae-bridge"
 version = "0.1.0"
 dependencies = [
  "bae-core",
+ "base64",
+ "chrono",
  "dirs 5.0.1",
  "hex",
+ "serde_json",
  "serde_yaml",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
  "uniffi",
+ "uuid",
 ]
 
 [[package]]

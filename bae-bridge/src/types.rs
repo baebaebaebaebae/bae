@@ -96,6 +96,20 @@ pub enum BridgePlaybackState {
     },
 }
 
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeRemoteCover {
+    pub url: String,
+    pub thumbnail_url: String,
+    pub label: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum BridgeCoverSelection {
+    ReleaseImage { file_id: String },
+    RemoteCover { url: String, source: String },
+}
+
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum BridgeError {
     #[error("Not found: {msg}")]

@@ -1,8 +1,10 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use bae_core::cloud_home::CloudHome;
 use bae_core::config::Config;
 use bae_core::db::Database;
+use bae_core::encryption::EncryptionService;
 use bae_core::image_server::{self, ImageServerHandle};
 use bae_core::keys::KeyService;
 use bae_core::library::SharedLibraryManager;
@@ -10,8 +12,9 @@ use bae_core::playback::{PlaybackHandle, PlaybackProgress, PlaybackService, Play
 use tracing::{info, warn};
 
 use crate::types::{
-    BridgeAlbum, BridgeAlbumDetail, BridgeArtist, BridgeError, BridgeFile, BridgeLibraryInfo,
-    BridgePlaybackState, BridgeRelease, BridgeRepeatMode, BridgeTrack,
+    BridgeAlbum, BridgeAlbumDetail, BridgeArtist, BridgeCoverSelection, BridgeError, BridgeFile,
+    BridgeLibraryInfo, BridgePlaybackState, BridgeRelease, BridgeRemoteCover, BridgeRepeatMode,
+    BridgeTrack,
 };
 
 /// Discover all libraries in ~/.bae/libraries/.
@@ -135,6 +138,8 @@ pub struct AppHandle {
     config: Config,
     library_manager: SharedLibraryManager,
     key_service: KeyService,
+    encryption_service: Option<EncryptionService>,
+    cloud_home: Option<Arc<dyn CloudHome>>,
     image_server: ImageServerHandle,
     playback_handle: PlaybackHandle,
     event_handler: Mutex<Option<Arc<dyn AppEventHandler>>>,
@@ -509,6 +514,350 @@ impl AppHandle {
 
         self.runtime.spawn(dispatch_events(rx, handler, lm));
     }
+
+    /// Fetch available remote cover art options for a release.
+    /// Checks MusicBrainz Cover Art Archive and Discogs.
+    pub fn fetch_remote_covers(
+        &self,
+        release_id: String,
+    ) -> Result<Vec<BridgeRemoteCover>, BridgeError> {
+        self.runtime.block_on(async {
+            let lm = self.library_manager.get();
+
+            // Get the release to find its album
+            let release = lm
+                .database()
+                .get_release_by_id(&release_id)
+                .await
+                .map_err(|e| BridgeError::Database {
+                    msg: format!("{e}"),
+                })?
+                .ok_or_else(|| BridgeError::NotFound {
+                    msg: format!("Release '{release_id}' not found"),
+                })?;
+
+            // Get the album to access MusicBrainz/Discogs IDs
+            let album = lm
+                .get_album_by_id(&release.album_id)
+                .await
+                .map_err(|e| BridgeError::Database {
+                    msg: format!("{e}"),
+                })?
+                .ok_or_else(|| BridgeError::NotFound {
+                    msg: format!("Album '{}' not found", release.album_id),
+                })?;
+
+            // Check current cover source to skip duplicates
+            let current_source = lm
+                .get_library_image(&release_id, &bae_core::db::LibraryImageType::Cover)
+                .await
+                .ok()
+                .flatten()
+                .map(|img| img.source);
+
+            let mut covers = Vec::new();
+
+            // Try MusicBrainz Cover Art Archive
+            if let Some(ref mb) = album.musicbrainz_release {
+                if current_source.as_deref() != Some("musicbrainz") {
+                    if let Some(url) =
+                        bae_core::import::cover_art::fetch_cover_art_from_archive(&mb.release_id)
+                            .await
+                    {
+                        covers.push(BridgeRemoteCover {
+                            url: url.clone(),
+                            thumbnail_url: url,
+                            label: "MusicBrainz".to_string(),
+                            source: "musicbrainz".to_string(),
+                        });
+                    }
+                }
+            }
+
+            // Try Discogs
+            if let Some(ref discogs_id) = release.discogs_release_id {
+                if current_source.as_deref() != Some("discogs") {
+                    if let Some(token) = self.key_service.get_discogs_key() {
+                        let client = bae_core::discogs::client::DiscogsClient::new(token);
+                        if let Ok(discogs_release) = client.get_release(discogs_id).await {
+                            if let Some(cover_url) = discogs_release
+                                .cover_image
+                                .or(discogs_release.thumb.clone())
+                            {
+                                let thumb =
+                                    discogs_release.thumb.unwrap_or_else(|| cover_url.clone());
+                                covers.push(BridgeRemoteCover {
+                                    url: cover_url,
+                                    thumbnail_url: thumb,
+                                    label: "Discogs".to_string(),
+                                    source: "discogs".to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            Ok(covers)
+        })
+    }
+
+    /// Change the cover art for an album's release.
+    pub fn change_cover(
+        &self,
+        album_id: String,
+        release_id: String,
+        selection: BridgeCoverSelection,
+    ) -> Result<(), BridgeError> {
+        self.runtime.block_on(async {
+            let lm = self.library_manager.get();
+            let library_dir = &self.config.library_dir;
+
+            match selection {
+                BridgeCoverSelection::ReleaseImage { file_id } => {
+                    let file = lm
+                        .get_file_by_id(&file_id)
+                        .await
+                        .map_err(|e| BridgeError::Database {
+                            msg: format!("{e}"),
+                        })?
+                        .ok_or_else(|| BridgeError::NotFound {
+                            msg: format!("File '{file_id}' not found"),
+                        })?;
+
+                    let release = lm
+                        .database()
+                        .get_release_by_id(&file.release_id)
+                        .await
+                        .map_err(|e| BridgeError::Database {
+                            msg: format!("{e}"),
+                        })?
+                        .ok_or_else(|| BridgeError::NotFound {
+                            msg: format!("Release '{}' not found", file.release_id),
+                        })?;
+
+                    let source_path = if release.managed_locally {
+                        file.local_storage_path(library_dir)
+                    } else if let Some(ref unmanaged) = release.unmanaged_path {
+                        std::path::PathBuf::from(unmanaged).join(&file.original_filename)
+                    } else {
+                        return Err(BridgeError::Internal {
+                            msg: "Release has no local file storage".to_string(),
+                        });
+                    };
+
+                    let bytes = std::fs::read(&source_path).map_err(|e| BridgeError::Internal {
+                        msg: format!("Failed to read file: {e}"),
+                    })?;
+
+                    let content_type = file.content_type.clone();
+                    write_cover_and_update_db(
+                        lm,
+                        library_dir,
+                        &album_id,
+                        &release_id,
+                        &bytes,
+                        content_type,
+                        "local",
+                        Some(format!("release://{}", file.original_filename)),
+                    )
+                    .await?;
+                }
+                BridgeCoverSelection::RemoteCover { url, source } => {
+                    let (bytes, content_type) =
+                        bae_core::import::cover_art::download_cover_art_bytes(&url)
+                            .await
+                            .map_err(|e| BridgeError::Internal {
+                                msg: format!("Failed to download cover: {e}"),
+                            })?;
+
+                    write_cover_and_update_db(
+                        lm,
+                        library_dir,
+                        &album_id,
+                        &release_id,
+                        &bytes,
+                        content_type,
+                        &source,
+                        Some(url),
+                    )
+                    .await?;
+                }
+            }
+
+            Ok(())
+        })
+    }
+
+    /// Create a share link for a release. Requires cloud home and encryption.
+    /// Returns the share URL on success.
+    pub fn create_share_link(&self, release_id: String) -> Result<String, BridgeError> {
+        self.runtime.block_on(async {
+            let cloud_home = self
+                .cloud_home
+                .as_ref()
+                .ok_or_else(|| BridgeError::Config {
+                    msg: "Cloud storage not configured".to_string(),
+                })?;
+            let encryption =
+                self.encryption_service
+                    .as_ref()
+                    .ok_or_else(|| BridgeError::Config {
+                        msg: "Encryption not configured".to_string(),
+                    })?;
+            let base_url =
+                self.config
+                    .share_base_url
+                    .as_deref()
+                    .ok_or_else(|| BridgeError::Config {
+                        msg: "Share base URL not configured".to_string(),
+                    })?;
+
+            let db = self.library_manager.get().database().clone();
+
+            // Verify release exists and is in the cloud
+            let release = db
+                .get_release_by_id(&release_id)
+                .await
+                .map_err(|e| BridgeError::Database {
+                    msg: format!("{e}"),
+                })?
+                .ok_or_else(|| BridgeError::NotFound {
+                    msg: "Release not found".to_string(),
+                })?;
+            if !release.managed_in_cloud {
+                return Err(BridgeError::Config {
+                    msg: "Release must be managed in the cloud to share".to_string(),
+                });
+            }
+
+            // Get album metadata
+            let album = db
+                .get_album_by_id(&release.album_id)
+                .await
+                .map_err(|e| BridgeError::Database {
+                    msg: format!("{e}"),
+                })?
+                .ok_or_else(|| BridgeError::NotFound {
+                    msg: "Album not found".to_string(),
+                })?;
+            let artists = db
+                .get_artists_for_album(&release.album_id)
+                .await
+                .map_err(|e| BridgeError::Database {
+                    msg: format!("{e}"),
+                })?;
+            let artist_name = artists
+                .first()
+                .map(|a| a.name.clone())
+                .unwrap_or_else(|| "Unknown Artist".to_string());
+
+            // Get tracks and files
+            let tracks = db.get_tracks_for_release(&release_id).await.map_err(|e| {
+                BridgeError::Database {
+                    msg: format!("{e}"),
+                }
+            })?;
+            let files =
+                db.get_files_for_release(&release_id)
+                    .await
+                    .map_err(|e| BridgeError::Database {
+                        msg: format!("{e}"),
+                    })?;
+
+            // Build track list with file keys
+            use bae_core::sync::share_format;
+
+            let mut share_tracks = Vec::new();
+            let mut manifest_files = Vec::new();
+
+            for track in &tracks {
+                let audio_format =
+                    db.get_audio_format_by_track_id(&track.id)
+                        .await
+                        .map_err(|e| BridgeError::Database {
+                            msg: format!("{e}"),
+                        })?;
+                if let Some(af) = audio_format {
+                    let file = files
+                        .iter()
+                        .find(|f| af.file_id.as_deref() == Some(f.id.as_str()));
+                    if let Some(file) = file {
+                        let file_key = bae_core::storage::storage_path(&file.id);
+                        let format = share_format::format_for_content_type(&af.content_type);
+                        share_tracks.push(share_format::ShareMetaTrack {
+                            number: track.track_number,
+                            title: track.title.clone(),
+                            duration_secs: track.duration_ms.map(|ms| ms / 1000),
+                            file_key: file_key.clone(),
+                            format: format.to_string(),
+                        });
+                        manifest_files.push(file_key);
+                    }
+                }
+            }
+
+            // Cover image key
+            let cover_release_id = album.cover_release_id.as_deref().unwrap_or(&release_id);
+            let cover_image_key = find_cover_image_key(&db, cover_release_id).await;
+            if let Some(ref key) = cover_image_key {
+                manifest_files.push(key.clone());
+            }
+
+            // Per-release encryption key
+            use base64::Engine;
+
+            let release_enc = encryption.derive_release_encryption(&release_id);
+            let release_key_b64 =
+                base64::engine::general_purpose::STANDARD.encode(release_enc.key_bytes());
+
+            // Build ShareMeta
+            let meta = share_format::ShareMeta {
+                album_name: album.title,
+                artist: artist_name,
+                year: album.year,
+                cover_image_key,
+                tracks: share_tracks,
+                release_key_b64,
+            };
+            let meta_json = serde_json::to_vec(&meta).map_err(|e| BridgeError::Internal {
+                msg: format!("Serialize error: {e}"),
+            })?;
+
+            // Generate per-share key and encrypt
+            let per_share_key = bae_core::encryption::generate_random_key();
+            let per_share_enc = EncryptionService::from_key(per_share_key);
+            let meta_encrypted = per_share_enc.encrypt_chunked(&meta_json);
+
+            // Build manifest
+            let manifest = share_format::ShareManifest {
+                files: manifest_files,
+            };
+            let manifest_json =
+                serde_json::to_vec(&manifest).map_err(|e| BridgeError::Internal {
+                    msg: format!("Serialize error: {e}"),
+                })?;
+
+            // Upload to cloud home
+            let share_id = uuid::Uuid::new_v4().to_string();
+            cloud_home
+                .write(&format!("shares/{share_id}/meta.enc"), meta_encrypted)
+                .await
+                .map_err(|e| BridgeError::Internal {
+                    msg: format!("Upload error: {e}"),
+                })?;
+            cloud_home
+                .write(&format!("shares/{share_id}/manifest.json"), manifest_json)
+                .await
+                .map_err(|e| BridgeError::Internal {
+                    msg: format!("Upload error: {e}"),
+                })?;
+
+            // Build URL
+            let key_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(per_share_key);
+            Ok(format!("{base_url}/share/{share_id}#{key_b64}"))
+        })
+    }
 }
 
 /// Background task that reads PlaybackProgress events and dispatches them
@@ -634,6 +983,65 @@ async fn resolve_track_info(
     (artist_names, album_id, cover_image_id)
 }
 
+/// Write cover image bytes to disk and update the database.
+#[allow(clippy::too_many_arguments)]
+async fn write_cover_and_update_db(
+    lm: &bae_core::library::LibraryManager,
+    library_dir: &bae_core::library_dir::LibraryDir,
+    album_id: &str,
+    release_id: &str,
+    bytes: &[u8],
+    content_type: bae_core::content_type::ContentType,
+    source: &str,
+    source_url: Option<String>,
+) -> Result<(), BridgeError> {
+    let cover_path = library_dir.image_path(release_id);
+    if let Some(parent) = cover_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| BridgeError::Internal {
+            msg: format!("Failed to create images dir: {e}"),
+        })?;
+    }
+    std::fs::write(&cover_path, bytes).map_err(|e| BridgeError::Internal {
+        msg: format!("Failed to write cover: {e}"),
+    })?;
+
+    let library_image = bae_core::db::DbLibraryImage {
+        id: release_id.to_string(),
+        image_type: bae_core::db::LibraryImageType::Cover,
+        content_type,
+        file_size: bytes.len() as i64,
+        width: None,
+        height: None,
+        source: source.to_string(),
+        source_url,
+        updated_at: chrono::Utc::now(),
+        created_at: chrono::Utc::now(),
+    };
+    lm.upsert_library_image(&library_image)
+        .await
+        .map_err(|e| BridgeError::Database {
+            msg: format!("{e}"),
+        })?;
+
+    lm.set_album_cover_release(album_id, release_id)
+        .await
+        .map_err(|e| BridgeError::Database {
+            msg: format!("{e}"),
+        })?;
+
+    Ok(())
+}
+
+/// Find the S3 key for a release's cover image.
+async fn find_cover_image_key(db: &Database, release_id: &str) -> Option<String> {
+    let image = db
+        .get_library_image(release_id, &bae_core::db::LibraryImageType::Cover)
+        .await
+        .ok()??;
+    let hex = image.id.replace('-', "");
+    Some(format!("images/{}/{}/{}", &hex[..2], &hex[2..4], &image.id))
+}
+
 /// Initialize the app with a specific library.
 /// Call discover_libraries() first to find available libraries.
 #[uniffi::export]
@@ -713,9 +1121,20 @@ pub fn init_app(library_id: String) -> Result<Arc<AppHandle>, BridgeError> {
     let image_server = runtime.block_on(image_server::start_image_server(
         shared_library.clone(),
         config.library_dir.clone(),
-        encryption_service,
+        encryption_service.clone(),
         "127.0.0.1",
     ));
+
+    // Try to create cloud home (non-fatal if not configured)
+    let cloud_home: Option<Arc<dyn CloudHome>> = match runtime.block_on(
+        bae_core::cloud_home::create_cloud_home(&config, &key_service),
+    ) {
+        Ok(ch) => Some(Arc::from(ch)),
+        Err(e) => {
+            info!("Cloud home not available: {e}");
+            None
+        }
+    };
 
     info!("AppHandle initialized for library '{library_id}'");
 
@@ -724,6 +1143,8 @@ pub fn init_app(library_id: String) -> Result<Arc<AppHandle>, BridgeError> {
         config,
         library_manager: shared_library,
         key_service,
+        encryption_service,
+        cloud_home,
         image_server,
         playback_handle,
         event_handler: Mutex::new(None),
