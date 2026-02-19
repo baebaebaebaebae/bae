@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use bae_core::cloud_home::CloudHome;
@@ -8,10 +8,15 @@ use bae_core::db::Database;
 use bae_core::encryption::EncryptionService;
 use bae_core::image_server::{self, ImageServerHandle};
 use bae_core::import::{ImportProgress, ImportService, ImportServiceHandle, ScanEvent};
-use bae_core::keys::KeyService;
+use bae_core::keys::{KeyService, UserKeypair};
 use bae_core::library::SharedLibraryManager;
+use bae_core::library_dir::LibraryDir;
 use bae_core::playback::{PlaybackHandle, PlaybackProgress, PlaybackService, PlaybackState};
 use bae_core::sync::bucket::SyncBucketClient;
+use bae_core::sync::cloud_home_bucket::CloudHomeSyncBucket;
+use bae_core::sync::hlc::Hlc;
+use bae_core::sync::service::SyncService;
+use bae_core::sync::session::SyncSession;
 use tracing::{info, warn};
 
 use crate::types::{
@@ -63,6 +68,303 @@ pub fn create_library(name: Option<String>) -> Result<BridgeLibraryInfo, BridgeE
         id: config.library_id,
         name: config.library_name,
         path: config.library_dir.to_string_lossy().to_string(),
+    })
+}
+
+/// Restore a library from a cloud S3 backup.
+///
+/// Downloads and decrypts the manifest, database, and images from the given
+/// S3 bucket using the provided encryption key. Creates the local library
+/// directory, writes config.yaml, saves credentials to the keyring, and
+/// sets this library as the active one.
+#[uniffi::export]
+pub fn restore_from_cloud(
+    library_id: String,
+    bucket: String,
+    region: String,
+    endpoint: String,
+    access_key: String,
+    secret_key: String,
+    encryption_key_hex: String,
+) -> Result<BridgeLibraryInfo, BridgeError> {
+    // Validate required fields
+    if library_id.is_empty()
+        || bucket.is_empty()
+        || region.is_empty()
+        || access_key.is_empty()
+        || secret_key.is_empty()
+        || encryption_key_hex.is_empty()
+    {
+        return Err(BridgeError::Config {
+            msg: "All fields except endpoint are required".to_string(),
+        });
+    }
+
+    // Validate hex key
+    if encryption_key_hex.len() != 64 {
+        return Err(BridgeError::Config {
+            msg: "Encryption key must be 64 hex characters (32 bytes)".to_string(),
+        });
+    }
+    if hex::decode(&encryption_key_hex).is_err() {
+        return Err(BridgeError::Config {
+            msg: "Invalid hex encoding in encryption key".to_string(),
+        });
+    }
+
+    let runtime = tokio::runtime::Runtime::new().map_err(|e| BridgeError::Internal {
+        msg: format!("Failed to create runtime: {e}"),
+    })?;
+
+    runtime.block_on(async {
+        use bae_core::cloud_storage::{CloudStorage, S3CloudStorage, S3Config};
+
+        let encryption_service =
+            EncryptionService::new(&encryption_key_hex).map_err(|e| BridgeError::Config {
+                msg: format!("Invalid encryption key: {e}"),
+            })?;
+        let fingerprint = encryption_service.fingerprint();
+
+        let endpoint_opt = if endpoint.is_empty() {
+            None
+        } else {
+            Some(endpoint.clone())
+        };
+
+        let s3_config = S3Config {
+            bucket_name: bucket.clone(),
+            region: region.clone(),
+            access_key_id: access_key.clone(),
+            secret_access_key: secret_key.clone(),
+            endpoint_url: endpoint_opt.clone(),
+        };
+        let storage = S3CloudStorage::new_with_bucket_creation(s3_config, false)
+            .await
+            .map_err(|e| BridgeError::Internal {
+                msg: format!("Failed to connect to S3: {e}"),
+            })?;
+
+        // Download and decrypt manifest to validate the key
+        info!("Downloading manifest from cloud...");
+        let encrypted_manifest = storage
+            .download(&format!("s3://{}/manifest.json.enc", bucket))
+            .await
+            .map_err(|e| BridgeError::Internal {
+                msg: format!("Failed to download manifest: {e}"),
+            })?;
+        let manifest_bytes = encryption_service
+            .decrypt(&encrypted_manifest)
+            .map_err(|e| BridgeError::Config {
+                msg: format!("Failed to decrypt manifest (wrong key?): {e}"),
+            })?;
+        let manifest: bae_core::library_dir::Manifest = serde_json::from_slice(&manifest_bytes)
+            .map_err(|e| BridgeError::Internal {
+                msg: format!("Failed to parse manifest: {e}"),
+            })?;
+
+        // Validate fingerprint
+        if let Some(ref expected_fp) = manifest.encryption_key_fingerprint {
+            if *expected_fp != fingerprint {
+                return Err(BridgeError::Config {
+                    msg: format!(
+                        "Encryption key fingerprint mismatch: expected {}, got {}",
+                        expected_fp, fingerprint
+                    ),
+                });
+            }
+        }
+
+        info!("Key validated, downloading library...");
+
+        // Set up local library directory
+        let home_dir = dirs::home_dir().ok_or_else(|| BridgeError::Config {
+            msg: "Failed to get home directory".to_string(),
+        })?;
+        let bae_dir = home_dir.join(".bae");
+        let library_dir =
+            bae_core::library_dir::LibraryDir::new(bae_dir.join("libraries").join(&library_id));
+        std::fs::create_dir_all(&*library_dir).map_err(|e| BridgeError::Internal {
+            msg: format!("Failed to create library directory: {e}"),
+        })?;
+
+        // Download and decrypt DB
+        let encrypted_db = storage
+            .download(&format!("s3://{}/library.db.enc", bucket))
+            .await
+            .map_err(|e| BridgeError::Internal {
+                msg: format!("Failed to download database: {e}"),
+            })?;
+        let decrypted_db =
+            encryption_service
+                .decrypt(&encrypted_db)
+                .map_err(|e| BridgeError::Internal {
+                    msg: format!("Failed to decrypt database: {e}"),
+                })?;
+        let db_path = library_dir.db_path();
+        tokio::fs::write(&db_path, &decrypted_db)
+            .await
+            .map_err(|e| BridgeError::Internal {
+                msg: format!("Failed to write database: {e}"),
+            })?;
+
+        info!("Restored DB ({} bytes)", decrypted_db.len());
+
+        // Download and decrypt images
+        let images_dir = library_dir.images_dir();
+        tokio::fs::create_dir_all(&images_dir)
+            .await
+            .map_err(|e| BridgeError::Internal {
+                msg: format!("Failed to create images directory: {e}"),
+            })?;
+
+        let image_keys = storage
+            .list_keys("images/")
+            .await
+            .map_err(|e| BridgeError::Internal {
+                msg: format!("Failed to list images: {e}"),
+            })?;
+
+        info!("Found {} image(s) to download", image_keys.len());
+
+        for key in &image_keys {
+            let rel = key.strip_prefix("images/").unwrap_or(key);
+            let target_path = images_dir.join(rel);
+
+            if let Some(parent) = target_path.parent() {
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| BridgeError::Internal {
+                        msg: format!("Failed to create image directory: {e}"),
+                    })?;
+            }
+
+            let location = format!("s3://{}/{}", bucket, key);
+            let encrypted_data =
+                storage
+                    .download(&location)
+                    .await
+                    .map_err(|e| BridgeError::Internal {
+                        msg: format!("Failed to download image {key}: {e}"),
+                    })?;
+            let decrypted_data =
+                encryption_service
+                    .decrypt(&encrypted_data)
+                    .map_err(|e| BridgeError::Internal {
+                        msg: format!("Failed to decrypt image {key}: {e}"),
+                    })?;
+            tokio::fs::write(&target_path, &decrypted_data)
+                .await
+                .map_err(|e| BridgeError::Internal {
+                    msg: format!("Failed to write image: {e}"),
+                })?;
+        }
+
+        info!(
+            "Downloaded {} image(s) to {}",
+            image_keys.len(),
+            images_dir.display()
+        );
+
+        // Write local manifest.json
+        let home_manifest = bae_core::library_dir::Manifest {
+            library_id: library_id.clone(),
+            library_name: manifest.library_name.clone(),
+            encryption_key_fingerprint: Some(fingerprint.clone()),
+        };
+        let manifest_json =
+            serde_json::to_string_pretty(&home_manifest).map_err(|e| BridgeError::Internal {
+                msg: format!("Failed to serialize manifest: {e}"),
+            })?;
+        tokio::fs::write(library_dir.manifest_path(), manifest_json)
+            .await
+            .map_err(|e| BridgeError::Internal {
+                msg: format!("Failed to write manifest: {e}"),
+            })?;
+
+        // Write config.yaml
+        let config = Config {
+            library_id: library_id.clone(),
+            device_id: uuid::Uuid::new_v4().to_string(),
+            library_dir: library_dir.clone(),
+            library_name: manifest.library_name.clone(),
+            keys_migrated: true,
+            discogs_key_stored: false,
+            encryption_key_stored: true,
+            encryption_key_fingerprint: Some(fingerprint.clone()),
+            torrent_bind_interface: None,
+            torrent_listen_port: None,
+            torrent_enable_upnp: false,
+            torrent_enable_natpmp: false,
+            torrent_enable_dht: false,
+            torrent_max_connections: None,
+            torrent_max_connections_per_torrent: None,
+            torrent_max_uploads: None,
+            torrent_max_uploads_per_torrent: None,
+            network_participation: bae_core::sync::participation::ParticipationMode::Off,
+            server_enabled: false,
+            server_port: 4533,
+            server_bind_address: "127.0.0.1".to_string(),
+            server_auth_enabled: false,
+            server_username: None,
+            cloud_provider: None,
+            cloud_home_s3_bucket: None,
+            cloud_home_s3_region: None,
+            cloud_home_s3_endpoint: None,
+            cloud_home_s3_key_prefix: None,
+            cloud_home_google_drive_folder_id: None,
+            cloud_home_dropbox_folder_path: None,
+            cloud_home_onedrive_drive_id: None,
+            cloud_home_onedrive_folder_id: None,
+            cloud_home_icloud_container_path: None,
+            cloud_home_bae_cloud_url: None,
+            cloud_home_bae_cloud_username: None,
+            share_base_url: None,
+            followed_libraries: vec![],
+        };
+        config
+            .save_to_config_yaml()
+            .map_err(|e| BridgeError::Config {
+                msg: format!("Failed to write config: {e}"),
+            })?;
+
+        // Save secrets to keyring
+        let dev_mode = Config::is_dev_mode();
+        let key_service = KeyService::new(dev_mode, library_id.clone());
+        key_service
+            .set_encryption_key(&encryption_key_hex)
+            .map_err(|e| BridgeError::Config {
+                msg: format!("Failed to save encryption key: {e}"),
+            })?;
+
+        let creds = bae_core::keys::CloudHomeCredentials::S3 {
+            access_key,
+            secret_key,
+        };
+        key_service
+            .set_cloud_home_credentials(&creds)
+            .map_err(|e| BridgeError::Config {
+                msg: format!("Failed to save S3 credentials: {e}"),
+            })?;
+
+        info!("Saved credentials to keyring");
+
+        // Write pointer file last (makes this idempotent on failure)
+        config
+            .save_active_library()
+            .map_err(|e| BridgeError::Config {
+                msg: format!("Failed to write active library pointer: {e}"),
+            })?;
+
+        info!(
+            "Cloud restore complete: library at {}",
+            library_dir.display()
+        );
+
+        Ok(BridgeLibraryInfo {
+            id: library_id,
+            name: manifest.library_name,
+            path: library_dir.to_string_lossy().to_string(),
+        })
     })
 }
 
@@ -137,8 +439,30 @@ pub trait AppEventHandler: Send + Sync {
     fn on_scan_result(&self, candidate: BridgeImportCandidate);
     fn on_import_progress(&self, folder_path: String, status: BridgeImportStatus);
     fn on_library_changed(&self);
+    fn on_sync_status_changed(&self, status: BridgeSyncStatus);
     fn on_error(&self, message: String);
 }
+
+/// Sync infrastructure handle for the bridge.
+///
+/// Mirrors bae-desktop's SyncHandle but without Dioxus store dependencies.
+/// Holds everything needed to run sync cycles: bucket client, HLC, raw sqlite3
+/// pointer, active sync session, and a user keypair for signing changesets.
+struct BridgeSyncHandle {
+    bucket_client: Arc<CloudHomeSyncBucket>,
+    hlc: Arc<Hlc>,
+    device_id: String,
+    encryption: Arc<RwLock<EncryptionService>>,
+    raw_db: *mut libsqlite3_sys::sqlite3,
+    session: tokio::sync::Mutex<Option<SyncSession>>,
+    user_keypair: UserKeypair,
+}
+
+// SAFETY: The raw sqlite3 pointer is only used for session extension operations
+// which are serialized through the sync loop. The pointer itself is stable
+// (heap-allocated write connection inside Arc<DatabaseInner>).
+unsafe impl Send for BridgeSyncHandle {}
+unsafe impl Sync for BridgeSyncHandle {}
 
 /// The central handle to the bae backend. Owns the tokio runtime and all services.
 #[derive(uniffi::Object)]
@@ -154,6 +478,8 @@ pub struct AppHandle {
     import_handle: ImportServiceHandle,
     event_handler: Mutex<Option<Arc<dyn AppEventHandler>>>,
     subsonic_server_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    sync_handle: Option<Arc<BridgeSyncHandle>>,
+    sync_loop_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 #[uniffi::export]

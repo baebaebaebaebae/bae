@@ -154,6 +154,9 @@ struct LibraryView: View {
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             handleDrop(providers)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .importFolder)) { _ in
+            openFolderAndScan()
+        }
     }
 
     private var navigationTitle: String {
