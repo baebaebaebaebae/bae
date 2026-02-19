@@ -222,10 +222,10 @@ struct ImportView: View {
 
     private func filePane(_ files: BridgeCandidateFiles) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 switch files.audio {
                 case .cueFlacPairs(let pairs):
-                    DisclosureGroup("Audio (\(pairs.count) disc\(pairs.count == 1 ? "" : "s"))") {
+                    fileSection("Audio (\(pairs.count) disc\(pairs.count == 1 ? "" : "s"))") {
                         ForEach(Array(pairs.enumerated()), id: \.offset) { _, pair in
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(pair.cueName)
@@ -237,11 +237,10 @@ struct ImportView: View {
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
                             }
-                            .padding(.leading, 4)
                         }
                     }
                 case .trackFiles(let tracks):
-                    DisclosureGroup("Audio (\(tracks.count) tracks)") {
+                    fileSection("Audio (\(tracks.count) tracks)") {
                         ForEach(Array(tracks.enumerated()), id: \.offset) { _, file in
                             HStack {
                                 Text(file.name)
@@ -252,30 +251,25 @@ struct ImportView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
-                            .padding(.leading, 4)
                         }
                     }
                 }
                 if !files.artwork.isEmpty {
-                    DisclosureGroup("Images (\(files.artwork.count))") {
-                        ForEach(Array(files.artwork.enumerated()), id: \.offset) { _, file in
-                            HStack {
-                                Text(file.name)
-                                    .font(.caption)
-                                    .lineLimit(1)
-                                Spacer()
-                                Text(formatBytes(file.size))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                    fileSection("Images (\(files.artwork.count))") {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 8)], spacing: 8) {
+                            ForEach(Array(files.artwork.enumerated()), id: \.offset) { _, file in
+                                imageThumb(file)
                             }
-                            .padding(.leading, 4)
                         }
                     }
                 }
                 if !files.documents.isEmpty {
-                    DisclosureGroup("Documents (\(files.documents.count))") {
+                    fileSection("Documents (\(files.documents.count))") {
                         ForEach(Array(files.documents.enumerated()), id: \.offset) { _, file in
                             HStack {
+                                Image(systemName: "doc.text")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                                 Text(file.name)
                                     .font(.caption)
                                     .lineLimit(1)
@@ -284,7 +278,6 @@ struct ImportView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
-                            .padding(.leading, 4)
                         }
                     }
                 }
@@ -292,7 +285,44 @@ struct ImportView: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
         }
-        .frame(maxHeight: 200)
+        .frame(maxHeight: 250)
+    }
+
+    private func fileSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+            content()
+        }
+    }
+
+    private func imageThumb(_ file: BridgeFileInfo) -> some View {
+        VStack(spacing: 2) {
+            if let url = URL(string: "file://\(file.path)"),
+               let nsImage = NSImage(contentsOf: url) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 72, height: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            } else {
+                ZStack {
+                    Theme.placeholder
+                    Image(systemName: "photo")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(width: 72, height: 72)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            Text(file.name)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(width: 72)
+        }
     }
 
     // MARK: - Search form
