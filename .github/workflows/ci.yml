@@ -107,6 +107,20 @@ jobs:
         # Check integration tests with test-utils feature
         cargo clippy -p bae-core --tests --features bae-core/test-utils -- -D warnings
 
+    - name: Clippy bae-bridge
+      if: runner.os != 'Windows'
+      run: cargo clippy -p bae-bridge -- -D warnings
+
+    - name: Build macOS app
+      if: runner.os == 'macOS'
+      run: |
+        brew install xcodegen
+        ./bae-bridge/build-macos.sh
+        ln -sf ../bae-bridge/BaeBridgeFFI.xcframework bae-macos/BaeBridgeFFI.xcframework
+        cd bae-macos/bae && xcodegen
+        xcodebuild -project bae.xcodeproj -scheme bae -configuration Debug \
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+
     - name: Run Clippy (Windows)
       if: runner.os == 'Windows'
       shell: cmd
