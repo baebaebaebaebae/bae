@@ -110,6 +110,37 @@ pub enum BridgeCoverSelection {
     RemoteCover { url: String, source: String },
 }
 
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeImportCandidate {
+    pub folder_path: String,
+    pub artist_name: String,
+    pub album_title: String,
+    pub track_count: u32,
+    pub format: String,
+    pub total_size_bytes: u64,
+}
+
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum BridgeImportStatus {
+    Scanning,
+    ReadyToImport,
+    Importing { progress_percent: u32 },
+    Complete,
+    Error { message: String },
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeMetadataResult {
+    pub source: String,
+    pub release_id: String,
+    pub title: String,
+    pub artist: String,
+    pub year: Option<i32>,
+    pub format: Option<String>,
+    pub label: Option<String>,
+    pub track_count: u32,
+}
+
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum BridgeError {
     #[error("Not found: {msg}")]
@@ -120,4 +151,6 @@ pub enum BridgeError {
     Database { msg: String },
     #[error("Internal error: {msg}")]
     Internal { msg: String },
+    #[error("Import error: {msg}")]
+    Import { msg: String },
 }

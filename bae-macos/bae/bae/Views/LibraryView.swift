@@ -9,8 +9,7 @@ struct LibraryView: View {
     @State private var selection: ArtistSelection = .all
     @State private var selectedAlbumId: String?
     @State private var error: String?
-    @State private var importFolderURL: URL?
-    @State private var showingImportPicker = false
+    @State private var showingImport = false
     @State private var showingSettings = false
 
     var body: some View {
@@ -56,6 +55,21 @@ struct LibraryView: View {
                     )
                 }
             }
+            .toolbar {
+                ToolbarItemGroup {
+                    Button(action: { openFolderAndScan() }) {
+                        Label("Import", systemImage: "plus")
+                    }
+                    .help("Import a folder of music")
+                    .accessibilityLabel("Import folder")
+
+                    Button(action: { showingSettings = true }) {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                    .help("Open settings")
+                    .accessibilityLabel("Settings")
+                }
+            }
 
             if appService.isActive {
                 Divider()
@@ -71,45 +85,25 @@ struct LibraryView: View {
             selectedAlbumId = nil
             loadAlbums()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .importFolder)) { _ in
-            showingImportPicker = true
+        .onChange(of: appService.libraryVersion) { _, _ in
+            loadArtists()
+            loadAlbums()
         }
-        .fileImporter(
-            isPresented: $showingImportPicker,
-            allowedContentTypes: [.folder],
-            allowsMultipleSelection: false
-        ) { result in
-            if case let .success(urls) = result, let url = urls.first {
-                importFolderURL = url
-            }
-        }
-        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-            handleDrop(providers)
-        }
-        .sheet(item: $importFolderURL) { url in
-            ImportView(folderURL: url, appService: appService) {
-                importFolderURL = nil
-                loadArtists()
-                loadAlbums()
-            }
+        .sheet(isPresented: $showingImport) {
+            ImportView(
+                appService: appService,
+                isPresented: $showingImport
+            )
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView(appService: appService)
         }
-        .toolbar {
-            ToolbarItemGroup {
-                Button(action: { showingImportPicker = true }) {
-                    Label("Import", systemImage: "plus")
-                }
-                .help("Import a folder of music")
-                .accessibilityLabel("Import folder")
-
-                Button(action: { showingSettings = true }) {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .help("Open settings")
-                .accessibilityLabel("Settings")
-            }
+        .onKeyPress(.space) {
+            appService.togglePlayPause()
+            return .handled
+        }
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            handleDrop(providers)
         }
     }
 
@@ -123,6 +117,20 @@ struct LibraryView: View {
             }
             return "Albums"
         }
+    }
+
+    private func openFolderAndScan() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Select a folder containing music to import"
+        panel.prompt = "Scan"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        appService.scanFolder(path: url.path)
+        showingImport = true
     }
 
     private func loadArtists() {
@@ -164,14 +172,10 @@ struct LibraryView: View {
                 return
             }
             DispatchQueue.main.async {
-                importFolderURL = url
+                appService.scanFolder(path: url.path)
+                showingImport = true
             }
         }
         return true
     }
-}
-
-// Make URL identifiable for .sheet(item:)
-extension URL: @retroactive Identifiable {
-    public var id: String { absoluteString }
 }
