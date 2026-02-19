@@ -21,7 +21,8 @@ use tracing::{info, warn};
 
 use crate::types::{
     BridgeAlbum, BridgeAlbumDetail, BridgeAlbumSearchResult, BridgeArtist,
-    BridgeArtistSearchResult, BridgeConfig, BridgeCoverSelection, BridgeError, BridgeFile,
+    BridgeArtistSearchResult, BridgeAudioContent, BridgeCandidateFiles, BridgeConfig,
+    BridgeCoverSelection, BridgeCueFlacPair, BridgeError, BridgeFile, BridgeFileInfo,
     BridgeFollowedLibrary, BridgeImportCandidate, BridgeImportStatus, BridgeLibraryInfo,
     BridgeMember, BridgeMetadataResult, BridgePlaybackState, BridgeRelease, BridgeRemoteCover,
     BridgeRepeatMode, BridgeSaveSyncConfig, BridgeSearchResults, BridgeSyncConfig,
@@ -986,6 +987,236 @@ impl AppHandle {
                     }
                 })
                 .collect())
+        })
+    }
+
+    /// Search by catalog number on MusicBrainz or Discogs.
+    pub fn search_by_catalog_number(
+        &self,
+        catalog_number: String,
+        source: String,
+    ) -> Result<Vec<BridgeMetadataResult>, BridgeError> {
+        if source == "musicbrainz" {
+            self.runtime.block_on(async {
+                let params = bae_core::musicbrainz::ReleaseSearchParams {
+                    catalog_number: Some(catalog_number),
+                    ..Default::default()
+                };
+                let releases = bae_core::musicbrainz::search_releases_with_params(&params)
+                    .await
+                    .map_err(|e| BridgeError::Import {
+                        msg: format!("MusicBrainz search failed: {e}"),
+                    })?;
+
+                Ok(releases
+                    .into_iter()
+                    .map(|r| {
+                        let year = r
+                            .date
+                            .as_ref()
+                            .and_then(|d| d.split('-').next())
+                            .and_then(|y| y.parse::<i32>().ok());
+                        BridgeMetadataResult {
+                            source: "musicbrainz".to_string(),
+                            release_id: r.release_id,
+                            title: r.title,
+                            artist: r.artist,
+                            year,
+                            format: r.format,
+                            label: r.label,
+                            track_count: 0,
+                        }
+                    })
+                    .collect())
+            })
+        } else {
+            self.runtime.block_on(async {
+                let api_key =
+                    self.key_service
+                        .get_discogs_key()
+                        .ok_or_else(|| BridgeError::Import {
+                            msg: "Discogs API key not configured".to_string(),
+                        })?;
+                let client = bae_core::discogs::DiscogsClient::new(api_key);
+                let params = bae_core::discogs::client::DiscogsSearchParams {
+                    catno: Some(catalog_number),
+                    ..Default::default()
+                };
+                let results =
+                    client
+                        .search_with_params(&params)
+                        .await
+                        .map_err(|e| BridgeError::Import {
+                            msg: format!("Discogs search failed: {e}"),
+                        })?;
+
+                Ok(results
+                    .into_iter()
+                    .map(|r| {
+                        let year = r.year.as_ref().and_then(|y| y.parse::<i32>().ok());
+                        let format = r.format.as_ref().map(|f| f.join(", "));
+                        let label = r.label.as_ref().and_then(|l| l.first().cloned());
+                        BridgeMetadataResult {
+                            source: "discogs".to_string(),
+                            release_id: r.id.to_string(),
+                            title: r.title,
+                            artist: String::new(),
+                            year,
+                            format,
+                            label,
+                            track_count: 0,
+                        }
+                    })
+                    .collect())
+            })
+        }
+    }
+
+    /// Search by barcode on MusicBrainz or Discogs.
+    pub fn search_by_barcode(
+        &self,
+        barcode: String,
+        source: String,
+    ) -> Result<Vec<BridgeMetadataResult>, BridgeError> {
+        if source == "musicbrainz" {
+            self.runtime.block_on(async {
+                let params = bae_core::musicbrainz::ReleaseSearchParams {
+                    barcode: Some(barcode),
+                    ..Default::default()
+                };
+                let releases = bae_core::musicbrainz::search_releases_with_params(&params)
+                    .await
+                    .map_err(|e| BridgeError::Import {
+                        msg: format!("MusicBrainz search failed: {e}"),
+                    })?;
+
+                Ok(releases
+                    .into_iter()
+                    .map(|r| {
+                        let year = r
+                            .date
+                            .as_ref()
+                            .and_then(|d| d.split('-').next())
+                            .and_then(|y| y.parse::<i32>().ok());
+                        BridgeMetadataResult {
+                            source: "musicbrainz".to_string(),
+                            release_id: r.release_id,
+                            title: r.title,
+                            artist: r.artist,
+                            year,
+                            format: r.format,
+                            label: r.label,
+                            track_count: 0,
+                        }
+                    })
+                    .collect())
+            })
+        } else {
+            self.runtime.block_on(async {
+                let api_key =
+                    self.key_service
+                        .get_discogs_key()
+                        .ok_or_else(|| BridgeError::Import {
+                            msg: "Discogs API key not configured".to_string(),
+                        })?;
+                let client = bae_core::discogs::DiscogsClient::new(api_key);
+                let params = bae_core::discogs::client::DiscogsSearchParams {
+                    barcode: Some(barcode),
+                    ..Default::default()
+                };
+                let results =
+                    client
+                        .search_with_params(&params)
+                        .await
+                        .map_err(|e| BridgeError::Import {
+                            msg: format!("Discogs search failed: {e}"),
+                        })?;
+
+                Ok(results
+                    .into_iter()
+                    .map(|r| {
+                        let year = r.year.as_ref().and_then(|y| y.parse::<i32>().ok());
+                        let format = r.format.as_ref().map(|f| f.join(", "));
+                        let label = r.label.as_ref().and_then(|l| l.first().cloned());
+                        BridgeMetadataResult {
+                            source: "discogs".to_string(),
+                            release_id: r.id.to_string(),
+                            title: r.title,
+                            artist: String::new(),
+                            year,
+                            format,
+                            label,
+                            track_count: 0,
+                        }
+                    })
+                    .collect())
+            })
+        }
+    }
+
+    /// Get categorized files for a candidate folder.
+    pub fn get_candidate_files(
+        &self,
+        folder_path: String,
+    ) -> Result<BridgeCandidateFiles, BridgeError> {
+        use bae_core::import::folder_scanner::{collect_release_files, AudioContent};
+        use std::path::Path;
+
+        let files =
+            collect_release_files(Path::new(&folder_path)).map_err(|e| BridgeError::Import {
+                msg: format!("Failed to scan folder: {e}"),
+            })?;
+
+        let audio = match files.audio {
+            AudioContent::CueFlacPairs(pairs) => BridgeAudioContent::CueFlacPairs {
+                pairs: pairs
+                    .into_iter()
+                    .map(|p| BridgeCueFlacPair {
+                        cue_name: p.cue_file.relative_path,
+                        flac_name: p.audio_file.relative_path,
+                        total_size: p.cue_file.size + p.audio_file.size,
+                        track_count: p.track_count as u32,
+                    })
+                    .collect(),
+            },
+            AudioContent::TrackFiles(tracks) => BridgeAudioContent::TrackFiles {
+                files: tracks
+                    .into_iter()
+                    .map(|f| BridgeFileInfo {
+                        name: f.relative_path.clone(),
+                        path: f.path.to_string_lossy().to_string(),
+                        size: f.size,
+                    })
+                    .collect(),
+            },
+        };
+
+        let artwork = files
+            .artwork
+            .into_iter()
+            .map(|f| BridgeFileInfo {
+                name: f.relative_path.clone(),
+                path: f.path.to_string_lossy().to_string(),
+                size: f.size,
+            })
+            .collect();
+
+        let documents = files
+            .documents
+            .into_iter()
+            .map(|f| BridgeFileInfo {
+                name: f.relative_path.clone(),
+                path: f.path.to_string_lossy().to_string(),
+                size: f.size,
+            })
+            .collect();
+
+        Ok(BridgeCandidateFiles {
+            audio,
+            artwork,
+            documents,
+            bad_audio_count: files.bad_audio_count as u32,
+            bad_image_count: files.bad_image_count as u32,
         })
     }
 
@@ -2603,6 +2834,8 @@ async fn dispatch_scan_events(
                     track_count,
                     format,
                     total_size_bytes,
+                    bad_audio_count: candidate.files.bad_audio_count as u32,
+                    bad_image_count: candidate.files.bad_image_count as u32,
                 });
             }
             ScanEvent::Error(msg) => {

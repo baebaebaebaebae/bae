@@ -187,6 +187,22 @@ class AppService: AppEventHandler, @unchecked Sendable {
         }
     }
 
+    func searchByCatalogNumber(catalog: String, source: String) async -> [BridgeMetadataResult] {
+        return await Task.detached { [appHandle] in
+            (try? appHandle.searchByCatalogNumber(catalogNumber: catalog, source: source)) ?? []
+        }.value
+    }
+
+    func searchByBarcode(barcode: String, source: String) async -> [BridgeMetadataResult] {
+        return await Task.detached { [appHandle] in
+            (try? appHandle.searchByBarcode(barcode: barcode, source: source)) ?? []
+        }.value
+    }
+
+    func getCandidateFiles(folderPath: String) -> BridgeCandidateFiles? {
+        try? appHandle.getCandidateFiles(folderPath: folderPath)
+    }
+
     // MARK: - Search
 
     func search(query: String) {

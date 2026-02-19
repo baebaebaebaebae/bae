@@ -121,6 +121,38 @@ pub struct BridgeImportCandidate {
     pub track_count: u32,
     pub format: String,
     pub total_size_bytes: u64,
+    pub bad_audio_count: u32,
+    pub bad_image_count: u32,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeFileInfo {
+    pub name: String,
+    pub path: String,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeCueFlacPair {
+    pub cue_name: String,
+    pub flac_name: String,
+    pub total_size: u64,
+    pub track_count: u32,
+}
+
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum BridgeAudioContent {
+    CueFlacPairs { pairs: Vec<BridgeCueFlacPair> },
+    TrackFiles { files: Vec<BridgeFileInfo> },
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeCandidateFiles {
+    pub audio: BridgeAudioContent,
+    pub artwork: Vec<BridgeFileInfo>,
+    pub documents: Vec<BridgeFileInfo>,
+    pub bad_audio_count: u32,
+    pub bad_image_count: u32,
 }
 
 #[derive(Debug, Clone, uniffi::Enum)]

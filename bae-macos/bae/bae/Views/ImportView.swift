@@ -8,6 +8,18 @@ struct ImportView: View {
     @State private var isSearching = false
     @State private var searchArtist = ""
     @State private var searchAlbum = ""
+    @State private var candidateFiles: BridgeCandidateFiles?
+
+    // Search tabs
+    enum SearchTab {
+        case general
+        case catalogNumber
+        case barcode
+    }
+
+    @State private var searchTab: SearchTab = .general
+    @State private var searchCatalog = ""
+    @State private var searchBarcode = ""
 
     var body: some View {
         if appService.scanResults.isEmpty {
@@ -16,7 +28,6 @@ struct ImportView: View {
             HSplitView {
                 candidateList
                     .frame(minWidth: 200, idealWidth: 250, maxWidth: 350)
-
                 if let candidate = selectedCandidate {
                     metadataSearchView(for: candidate)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -43,7 +54,6 @@ struct ImportView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-
             Text("Scan a folder to import music")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -58,7 +68,6 @@ struct ImportView: View {
         panel.allowsMultipleSelection = false
         panel.message = "Select a folder containing music to import"
         panel.prompt = "Scan"
-
         guard panel.runModal() == .OK, let url = panel.url else { return }
         appService.scanFolder(path: url.path)
     }
@@ -77,11 +86,13 @@ struct ImportView: View {
                         searchArtist = candidate.artistName
                         searchAlbum = candidate.albumTitle
                         searchResults = []
+                        candidateFiles = appService.getCandidateFiles(folderPath: candidate.folderPath)
                     }
                 }
             )
         ) { candidate in
             CandidateRow(candidate: candidate, status: appService.importStatuses[candidate.folderPath])
+                .disabled(candidate.badAudioCount > 0 || candidate.badImageCount > 0)
         }
         .scrollContentBackground(.hidden)
         .background(Theme.surface)
@@ -92,13 +103,13 @@ struct ImportView: View {
     private func metadataSearchView(for candidate: BridgeImportCandidate) -> some View {
         VStack(spacing: 0) {
             candidateHeader(candidate)
-
             Divider()
-
+            if let files = candidateFiles {
+                filePane(files)
+                Divider()
+            }
             searchForm
-
             Divider()
-
             if isSearching {
                 ProgressView("Searching...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -152,20 +163,129 @@ struct ImportView: View {
         }
     }
 
+    // MARK: - File pane
+
+    private func filePane(_ files: BridgeCandidateFiles) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                switch files.audio {
+                case .cueFlacPairs(let pairs):
+                    DisclosureGroup("Audio (\(pairs.count) disc\(pairs.count == 1 ? "" : "s"))") {
+                        ForEach(Array(pairs.enumerated()), id: \.offset) { _, pair in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(pair.cueName)
+                                    .font(.caption)
+                                Text("\(pair.flacName) (\(formatBytes(pair.totalSize)))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("\(pair.trackCount) tracks")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .padding(.leading, 4)
+                        }
+                    }
+                case .trackFiles(let tracks):
+                    DisclosureGroup("Audio (\(tracks.count) tracks)") {
+                        ForEach(Array(tracks.enumerated()), id: \.offset) { _, file in
+                            HStack {
+                                Text(file.name)
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text(formatBytes(file.size))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.leading, 4)
+                        }
+                    }
+                }
+                if !files.artwork.isEmpty {
+                    DisclosureGroup("Images (\(files.artwork.count))") {
+                        ForEach(Array(files.artwork.enumerated()), id: \.offset) { _, file in
+                            HStack {
+                                Text(file.name)
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text(formatBytes(file.size))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.leading, 4)
+                        }
+                    }
+                }
+                if !files.documents.isEmpty {
+                    DisclosureGroup("Documents (\(files.documents.count))") {
+                        ForEach(Array(files.documents.enumerated()), id: \.offset) { _, file in
+                            HStack {
+                                Text(file.name)
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text(formatBytes(file.size))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.leading, 4)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+        }
+        .frame(maxHeight: 200)
+    }
+
+    // MARK: - Search form
+
     private var searchForm: some View {
-        HStack {
-            TextField("Artist", text: $searchArtist)
-                .textFieldStyle(.roundedBorder)
-            TextField("Album", text: $searchAlbum)
-                .textFieldStyle(.roundedBorder)
-            Button("MusicBrainz") {
-                searchMusicbrainz()
+        VStack(spacing: 8) {
+            Picker("", selection: $searchTab) {
+                Text("General").tag(SearchTab.general)
+                Text("Catalog #").tag(SearchTab.catalogNumber)
+                Text("Barcode").tag(SearchTab.barcode)
             }
-            .disabled(searchArtist.isEmpty && searchAlbum.isEmpty)
-            Button("Discogs") {
-                searchDiscogs()
+            .pickerStyle(.segmented)
+            .controlSize(.small)
+            switch searchTab {
+            case .general:
+                HStack {
+                    TextField("Artist", text: $searchArtist)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("Album", text: $searchAlbum)
+                        .textFieldStyle(.roundedBorder)
+                    Button("MusicBrainz") {
+                        searchMusicbrainz()
+                    }
+                    .disabled(searchArtist.isEmpty && searchAlbum.isEmpty)
+                    Button("Discogs") {
+                        searchDiscogs()
+                    }
+                    .disabled(searchArtist.isEmpty && searchAlbum.isEmpty)
+                }
+            case .catalogNumber:
+                HStack {
+                    TextField("e.g. WPCR-80001", text: $searchCatalog)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Search") {
+                        searchByCatalogNumber()
+                    }
+                    .disabled(searchCatalog.isEmpty)
+                }
+            case .barcode:
+                HStack {
+                    TextField("e.g. 4943674251780", text: $searchBarcode)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Search") {
+                        searchByBarcode()
+                    }
+                    .disabled(searchBarcode.isEmpty)
+                }
             }
-            .disabled(searchArtist.isEmpty && searchAlbum.isEmpty)
         }
         .padding()
     }
@@ -244,6 +364,56 @@ struct ImportView: View {
         }
     }
 
+    private func searchByCatalogNumber() {
+        isSearching = true
+        searchResults = []
+        Task {
+            var results = await appService.searchByCatalogNumber(
+                catalog: searchCatalog,
+                source: "musicbrainz"
+            )
+
+            let config = appService.getConfig()
+            if config.hasDiscogsToken {
+                let discogsResults = await appService.searchByCatalogNumber(
+                    catalog: searchCatalog,
+                    source: "discogs"
+                )
+                results.append(contentsOf: discogsResults)
+            }
+
+            await MainActor.run {
+                searchResults = results
+                isSearching = false
+            }
+        }
+    }
+
+    private func searchByBarcode() {
+        isSearching = true
+        searchResults = []
+        Task {
+            var results = await appService.searchByBarcode(
+                barcode: searchBarcode,
+                source: "musicbrainz"
+            )
+
+            let config = appService.getConfig()
+            if config.hasDiscogsToken {
+                let discogsResults = await appService.searchByBarcode(
+                    barcode: searchBarcode,
+                    source: "discogs"
+                )
+                results.append(contentsOf: discogsResults)
+            }
+
+            await MainActor.run {
+                searchResults = results
+                isSearching = false
+            }
+        }
+    }
+
     private func commitImport(candidate: BridgeImportCandidate, result: BridgeMetadataResult) {
         appService.commitImport(
             folderPath: candidate.folderPath,
@@ -279,37 +449,60 @@ private struct CandidateRow: View {
     let candidate: BridgeImportCandidate
     let status: BridgeImportStatus?
 
+    private var isIncomplete: Bool {
+        candidate.badAudioCount > 0 || candidate.badImageCount > 0
+    }
+
+    private var incompleteMessage: String? {
+        let badAudio = candidate.badAudioCount
+        let badImages = candidate.badImageCount
+        let totalAudio = candidate.trackCount + badAudio
+        if badAudio > 0 && badImages > 0 {
+            return "\(badAudio) of \(totalAudio) tracks incomplete, \(badImages) corrupt image(s)"
+        } else if badAudio > 0 {
+            return "\(badAudio) of \(totalAudio) tracks incomplete"
+        } else if badImages > 0 {
+            return "\(badImages) corrupt image(s)"
+        }
+        return nil
+    }
+
     var body: some View {
-        HStack {
+        HStack(spacing: 8) {
+            statusIcon
+                .frame(width: 16)
             VStack(alignment: .leading, spacing: 2) {
                 Text(candidate.albumTitle)
                     .font(.body)
                     .lineLimit(1)
-                Text("\(candidate.trackCount) tracks - \(candidate.format)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let message = incompleteMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                }
             }
-            Spacer()
-            if let status {
-                statusIndicator(status)
-            }
+            .opacity(isIncomplete ? 0.5 : 1.0)
         }
     }
 
     @ViewBuilder
-    private func statusIndicator(_ status: BridgeImportStatus) -> some View {
-        switch status {
-        case .importing(let percent):
-            ProgressView(value: Double(percent), total: 100)
-                .frame(width: 40)
-        case .complete:
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-        case .error:
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.red)
-        default:
-            EmptyView()
+    private var statusIcon: some View {
+        if let status {
+            switch status {
+            case .importing:
+                ProgressView()
+                    .controlSize(.small)
+            case .complete:
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            case .error:
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+            }
+        } else {
+            Image(systemName: "folder")
+                .foregroundStyle(.secondary)
         }
     }
 }
