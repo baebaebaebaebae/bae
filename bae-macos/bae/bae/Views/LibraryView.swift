@@ -8,6 +8,7 @@ struct LibraryView: View {
     @State private var selection: ArtistSelection = .all
     @State private var selectedAlbumId: String?
     @State private var error: String?
+    @State private var showingSyncSettings = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -77,6 +78,29 @@ struct LibraryView: View {
         .onKeyPress(.leftArrow, modifiers: .command) {
             appService.previousTrack()
             return .handled
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showingSyncSettings = true
+                } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                }
+                .help("Sync Settings")
+            }
+        }
+        .sheet(isPresented: $showingSyncSettings) {
+            NavigationStack {
+                SyncSettingsView(appService: appService)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") {
+                                showingSyncSettings = false
+                            }
+                        }
+                    }
+            }
+            .frame(minWidth: 500, minHeight: 400)
         }
     }
 
