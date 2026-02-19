@@ -7,6 +7,8 @@ struct ArtistDetailView: View {
 
     @State private var albums: [BridgeAlbum] = []
     @State private var error: String?
+    @State private var sortField: LibrarySortField = .title
+    @State private var sortDirection: SortDirection = .ascending
 
     var body: some View {
         Group {
@@ -34,7 +36,29 @@ struct ArtistDetailView: View {
                         )
                     },
                     selectedAlbumId: $selectedAlbumId,
-                    onPlayAlbum: { appService.playAlbum(albumId: $0) }
+                    sortField: $sortField,
+                    sortDirection: $sortDirection,
+                    onPlayAlbum: { appService.playAlbum(albumId: $0) },
+                    onAddToQueue: { albumId in
+                        Task.detached {
+                            if let detail = try? appService.appHandle.getAlbumDetail(albumId: albumId) {
+                                let trackIds = detail.releases.first?.tracks.map(\.id) ?? []
+                                if !trackIds.isEmpty {
+                                    await MainActor.run { appService.addToQueue(trackIds: trackIds) }
+                                }
+                            }
+                        }
+                    },
+                    onAddNext: { albumId in
+                        Task.detached {
+                            if let detail = try? appService.appHandle.getAlbumDetail(albumId: albumId) {
+                                let trackIds = detail.releases.first?.tracks.map(\.id) ?? []
+                                if !trackIds.isEmpty {
+                                    await MainActor.run { appService.addNext(trackIds: trackIds) }
+                                }
+                            }
+                        }
+                    }
                 )
             }
         }

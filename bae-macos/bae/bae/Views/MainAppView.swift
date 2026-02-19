@@ -38,12 +38,32 @@ struct MainAppView: View {
                         volume: appService.volume,
                         repeatMode: appService.repeatMode,
                         showQueue: $showQueue,
+                        queueIsActive: appService.isActive,
+                        queueNowPlayingTitle: appService.trackTitle,
+                        queueNowPlayingArtist: appService.artistNames,
+                        queueNowPlayingArtURL: appService.imageURL(for: appService.coverImageId),
+                        queueItems: appService.queueItems.map { item in
+                            QueueItemViewModel(
+                                id: item.trackId,
+                                title: item.title,
+                                artistNames: item.artistNames,
+                                albumTitle: item.albumTitle,
+                                durationMs: item.durationMs,
+                                coverArtURL: appService.imageURL(for: item.coverImageId)
+                            )
+                        },
                         onPlayPause: { appService.togglePlayPause() },
                         onNext: { appService.nextTrack() },
                         onPrevious: { appService.previousTrack() },
                         onSeek: { appService.seek(positionMs: $0) },
                         onVolumeChange: { appService.setVolume($0) },
-                        onCycleRepeat: { appService.cycleRepeatMode() }
+                        onCycleRepeat: { appService.cycleRepeatMode() },
+                        onQueueClear: { appService.clearQueue() },
+                        onQueueSkipTo: { appService.skipToQueueIndex(index: UInt32($0)) },
+                        onQueueRemove: { appService.removeFromQueue(index: UInt32($0)) },
+                        onQueueReorder: { from, to in
+                            appService.reorderQueue(fromIndex: UInt32(from), toIndex: UInt32(to))
+                        }
                     )
                 }
             }

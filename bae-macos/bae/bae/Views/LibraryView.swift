@@ -15,7 +15,6 @@ enum SortDirection {
 struct LibraryView: View {
     let appService: AppService
     @Binding var searchText: String
-    @Binding var showQueue: Bool
 
     @State private var albums: [BridgeAlbum] = []
     @State private var selectedAlbumId: String?
@@ -101,33 +100,7 @@ struct LibraryView: View {
                         onAddNext: { albumId in addAlbumNext(albumId: albumId) }
                     )
                     .frame(maxWidth: .infinity)
-                    if showQueue {
-                        Divider()
-                        QueueView(
-                            isActive: appService.isActive,
-                            nowPlayingTitle: appService.trackTitle,
-                            nowPlayingArtist: appService.artistNames,
-                            nowPlayingArtURL: appService.imageURL(for: appService.coverImageId),
-                            items: appService.queueItems.map { item in
-                                QueueItemViewModel(
-                                    id: item.trackId,
-                                    title: item.title,
-                                    artistNames: item.artistNames,
-                                    albumTitle: item.albumTitle,
-                                    durationMs: item.durationMs,
-                                    coverArtURL: appService.imageURL(for: item.coverImageId)
-                                )
-                            },
-                            onClose: { showQueue = false },
-                            onClear: { appService.clearQueue() },
-                            onSkipTo: { appService.skipToQueueIndex(index: UInt32($0)) },
-                            onRemove: { appService.removeFromQueue(index: UInt32($0)) },
-                            onReorder: { from, to in
-                                appService.reorderQueue(fromIndex: UInt32(from), toIndex: UInt32(to))
-                            }
-                        )
-                        .frame(width: 450)
-                    } else if let albumId = selectedAlbumId {
+                    if let albumId = selectedAlbumId {
                         Divider()
                         AlbumDetailView(
                             albumId: albumId,
@@ -140,11 +113,6 @@ struct LibraryView: View {
             }
         }
         .animation(nil, value: selectedAlbumId)
-        .onChange(of: selectedAlbumId) { _, newValue in
-            if newValue != nil {
-                showQueue = false
-            }
-        }
         .onChange(of: searchText) { _, newValue in
             searchDebounceTask?.cancel()
             searchDebounceTask = Task {

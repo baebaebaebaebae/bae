@@ -10,12 +10,21 @@ struct NowPlayingBar: View {
     let volume: Float
     let repeatMode: BridgeRepeatMode
     @Binding var showQueue: Bool
+    let queueIsActive: Bool
+    let queueNowPlayingTitle: String?
+    let queueNowPlayingArtist: String?
+    let queueNowPlayingArtURL: URL?
+    let queueItems: [QueueItemViewModel]
     let onPlayPause: () -> Void
     let onNext: () -> Void
     let onPrevious: () -> Void
     let onSeek: (UInt64) -> Void
     let onVolumeChange: (Float) -> Void
     let onCycleRepeat: () -> Void
+    let onQueueClear: () -> Void
+    let onQueueSkipTo: (Int) -> Void
+    let onQueueRemove: (Int) -> Void
+    let onQueueReorder: (Int, Int) -> Void
 
     @State private var isSeeking = false
     @State private var seekPosition: Double = 0
@@ -183,8 +192,19 @@ struct NowPlayingBar: View {
             .help("Queue")
             .accessibilityLabel("Queue")
             .popover(isPresented: $showQueue, arrowEdge: .top) {
-                QueueView(appService: appService, onClose: { showQueue = false })
-                    .frame(width: 350, height: 500)
+                QueueView(
+                    isActive: queueIsActive,
+                    nowPlayingTitle: queueNowPlayingTitle,
+                    nowPlayingArtist: queueNowPlayingArtist,
+                    nowPlayingArtURL: queueNowPlayingArtURL,
+                    items: queueItems,
+                    onClose: { showQueue = false },
+                    onClear: onQueueClear,
+                    onSkipTo: onQueueSkipTo,
+                    onRemove: onQueueRemove,
+                    onReorder: onQueueReorder
+                )
+                .frame(width: 350, height: 500)
             }
 
             Image(systemName: "speaker.fill")
@@ -258,12 +278,21 @@ struct NowPlayingBar: View {
         volume: 0.75,
         repeatMode: .none,
         showQueue: .constant(false),
+        queueIsActive: true,
+        queueNowPlayingTitle: "Track Title",
+        queueNowPlayingArtist: "Artist Name",
+        queueNowPlayingArtURL: nil,
+        queueItems: [],
         onPlayPause: {},
         onNext: {},
         onPrevious: {},
         onSeek: { _ in },
         onVolumeChange: { _ in },
-        onCycleRepeat: {}
+        onCycleRepeat: {},
+        onQueueClear: {},
+        onQueueSkipTo: { _ in },
+        onQueueRemove: { _ in },
+        onQueueReorder: { _, _ in }
     )
 }
 
@@ -278,11 +307,20 @@ struct NowPlayingBar: View {
         volume: 0.5,
         repeatMode: .album,
         showQueue: .constant(true),
+        queueIsActive: false,
+        queueNowPlayingTitle: nil,
+        queueNowPlayingArtist: nil,
+        queueNowPlayingArtURL: nil,
+        queueItems: [],
         onPlayPause: {},
         onNext: {},
         onPrevious: {},
         onSeek: { _ in },
         onVolumeChange: { _ in },
-        onCycleRepeat: {}
+        onCycleRepeat: {},
+        onQueueClear: {},
+        onQueueSkipTo: { _ in },
+        onQueueRemove: { _ in },
+        onQueueReorder: { _, _ in }
     )
 }
