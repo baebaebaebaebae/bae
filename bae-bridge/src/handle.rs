@@ -3008,13 +3008,15 @@ async fn convert_playback_state(
             decoded_duration,
             ..
         } => {
-            let (artist_names, album_id, cover_image_id) = resolve_track_info(lm, &track.id).await;
+            let (artist_names, album_id, album_title, cover_image_id) =
+                resolve_track_info(lm, &track.id).await;
             let dur = duration.unwrap_or(*decoded_duration).as_millis() as u64;
             BridgePlaybackState::Playing {
                 track_id: track.id.clone(),
                 track_title: track.title.clone(),
                 artist_names,
                 album_id,
+                album_title,
                 cover_image_id,
                 position_ms: position.as_millis() as u64,
                 duration_ms: dur,
@@ -3027,13 +3029,15 @@ async fn convert_playback_state(
             decoded_duration,
             ..
         } => {
-            let (artist_names, album_id, cover_image_id) = resolve_track_info(lm, &track.id).await;
+            let (artist_names, album_id, album_title, cover_image_id) =
+                resolve_track_info(lm, &track.id).await;
             let dur = duration.unwrap_or(*decoded_duration).as_millis() as u64;
             BridgePlaybackState::Paused {
                 track_id: track.id.clone(),
                 track_title: track.title.clone(),
                 artist_names,
                 album_id,
+                album_title,
                 cover_image_id,
                 position_ms: position.as_millis() as u64,
                 duration_ms: dur,
@@ -3042,11 +3046,11 @@ async fn convert_playback_state(
     }
 }
 
-/// Look up artist names, album_id, and cover_image_id for a track.
+/// Look up artist names, album_id, album_title, and cover_image_id for a track.
 async fn resolve_track_info(
     lm: &SharedLibraryManager,
     track_id: &str,
-) -> (String, String, Option<String>) {
+) -> (String, String, String, Option<String>) {
     let mgr = lm.get();
 
     let artist_names = match mgr.get_artists_for_track(track_id).await {
@@ -3061,21 +3065,21 @@ async fn resolve_track_info(
         }
     };
 
-    let (album_id, cover_image_id) = match mgr.get_album_id_for_track(track_id).await {
+    let (album_id, album_title, cover_image_id) = match mgr.get_album_id_for_track(track_id).await {
         Ok(id) => {
-            let cover = match mgr.get_album_by_id(&id).await {
-                Ok(Some(album)) => album.cover_release_id,
-                _ => None,
+            let (title, cover) = match mgr.get_album_by_id(&id).await {
+                Ok(Some(album)) => (album.title, album.cover_release_id),
+                _ => (String::new(), None),
             };
-            (id, cover)
+            (id, title, cover)
         }
         Err(e) => {
             warn!("Failed to get album_id for track {track_id}: {e}");
-            (String::new(), None)
+            (String::new(), String::new(), None)
         }
     };
 
-    (artist_names, album_id, cover_image_id)
+    (artist_names, album_id, album_title, cover_image_id)
 }
 
 /// Write cover image bytes to disk and update the database.

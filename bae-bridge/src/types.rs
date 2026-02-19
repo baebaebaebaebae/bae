@@ -83,6 +83,7 @@ pub enum BridgePlaybackState {
         track_title: String,
         artist_names: String,
         album_id: String,
+        album_title: String,
         /// The image ID for album art (cover_release_id), if available.
         cover_image_id: Option<String>,
         position_ms: u64,
@@ -93,6 +94,7 @@ pub enum BridgePlaybackState {
         track_title: String,
         artist_names: String,
         album_id: String,
+        album_title: String,
         cover_image_id: Option<String>,
         position_ms: u64,
         duration_ms: u64,
