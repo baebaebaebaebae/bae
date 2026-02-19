@@ -1,81 +1,85 @@
 import SwiftUI
 
+enum AppScreen {
+    case loading
+    case welcome
+    case unlock(libraryId: String, libraryName: String?, fingerprint: String?)
+    case library(AppService)
+}
+
 struct ContentView: View {
-    @State private var libraries: [BridgeLibraryInfo] = []
-    @State private var selectedLibraryId: String?
-    @State private var appService: AppService?
+    @State private var screen: AppScreen = .loading
     @State private var error: String?
 
     var body: some View {
-        Group {
-            if let service = appService {
+        VStack(spacing: 0) {
+            switch screen {
+            case .loading:
+                Spacer()
+                ProgressView("Loading...")
+                Spacer()
+            case .welcome:
+                WelcomeView(onLibraryReady: openLibrary)
+            case let .unlock(libraryId, libraryName, fingerprint):
+                UnlockView(
+                    libraryId: libraryId,
+                    libraryName: libraryName,
+                    fingerprint: fingerprint,
+                    onUnlocked: { openLibrary(libraryId) }
+                )
+            case let .library(service):
                 LibraryView(appService: service)
-            } else {
-                libraryPicker
+            }
+            if let error {
+                Text(error)
+                    .foregroundStyle(.red)
+                    .padding()
             }
         }
         .frame(minWidth: 900, minHeight: 600)
         .task {
-            loadLibraries()
+            loadInitialState()
         }
     }
 
-    private var libraryPicker: some View {
-        NavigationSplitView {
-            List(libraries, id: \.id, selection: $selectedLibraryId) { library in
-                VStack(alignment: .leading) {
-                    Text(library.name ?? library.id)
-                        .font(.headline)
-                    Text(library.path)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("Libraries")
-        } detail: {
-            if let error {
-                ContentUnavailableView(
-                    "Error",
-                    systemImage: "exclamationmark.triangle",
-                    description: Text(error)
-                )
-            } else if selectedLibraryId != nil {
-                ProgressView("Loading...")
-            } else {
-                ContentUnavailableView(
-                    "Select a library",
-                    systemImage: "books.vertical",
-                    description: Text("Choose a library from the sidebar")
-                )
-            }
-        }
-        .onChange(of: selectedLibraryId) { _, newValue in
-            if let id = newValue {
-                openLibrary(id)
-            }
-        }
-    }
-
-    private func loadLibraries() {
+    private func loadInitialState() {
         do {
-            libraries = try discoverLibraries()
-            if libraries.count == 1 {
-                selectedLibraryId = libraries.first?.id
+            let libraries = try discoverLibraries()
+            if libraries.isEmpty {
+                screen = .welcome
+                return
             }
+            let lib = libraries[0]
+            openLibrary(lib.id)
         } catch {
             self.error = error.localizedDescription
         }
     }
 
-    private func openLibrary(_ id: String) {
-        appService = nil
+    private func openLibrary(_ libraryId: String) {
         error = nil
+        screen = .loading
         Task.detached {
             do {
-                let handle = try initApp(libraryId: id)
+                let handle = try initApp(libraryId: libraryId)
+
+                // Check if encryption is configured but key is missing from keyring
+                if handle.isEncrypted() && !handle.checkEncryptionKeyAvailable() {
+                    let name = handle.libraryName()
+                    let fp = handle.getEncryptionFingerprint()
+                    await MainActor.run {
+                        screen = .unlock(
+                            libraryId: libraryId,
+                            libraryName: name,
+                            fingerprint: fp
+                        )
+                    }
+                    return
+                }
+
                 let service = AppService(appHandle: handle)
                 await MainActor.run {
-                    appService = service
+                    screen = .library(service)
                 }
             } catch {
                 await MainActor.run {

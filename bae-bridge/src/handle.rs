@@ -28,6 +28,97 @@ pub fn discover_libraries() -> Result<Vec<BridgeLibraryInfo>, BridgeError> {
         .collect())
 }
 
+/// Create a new library with an optional name.
+/// Returns the new library's info. The library is set as the active library.
+#[uniffi::export]
+pub fn create_library(name: Option<String>) -> Result<BridgeLibraryInfo, BridgeError> {
+    let dev_mode = Config::is_dev_mode();
+    let mut config = Config::create_new_library(dev_mode).map_err(|e| BridgeError::Config {
+        msg: format!("{e}"),
+    })?;
+
+    if let Some(ref n) = name {
+        config.library_name = Some(n.clone());
+        config.save().map_err(|e| BridgeError::Config {
+            msg: format!("{e}"),
+        })?;
+    }
+
+    config
+        .save_active_library()
+        .map_err(|e| BridgeError::Config {
+            msg: format!("{e}"),
+        })?;
+
+    Ok(BridgeLibraryInfo {
+        id: config.library_id,
+        name: config.library_name,
+        path: config.library_dir.to_string_lossy().to_string(),
+    })
+}
+
+/// Unlock a library by providing the encryption key hex.
+/// Validates the key against the stored fingerprint, then saves it to the keyring.
+#[uniffi::export]
+pub fn unlock_library(library_id: String, key_hex: String) -> Result<(), BridgeError> {
+    // Validate hex encoding: must be 64 hex chars = 32 bytes
+    if key_hex.len() != 64 {
+        return Err(BridgeError::Config {
+            msg: "Encryption key must be 64 hex characters (32 bytes)".to_string(),
+        });
+    }
+    if hex::decode(&key_hex).is_err() {
+        return Err(BridgeError::Config {
+            msg: "Invalid hex encoding".to_string(),
+        });
+    }
+
+    // Compute fingerprint and compare to stored one
+    let fingerprint = bae_core::encryption::compute_key_fingerprint(&key_hex).ok_or_else(|| {
+        BridgeError::Config {
+            msg: "Failed to compute key fingerprint".to_string(),
+        }
+    })?;
+
+    // Load config for this library to get the stored fingerprint
+    let libraries = Config::discover_libraries();
+    let lib_info = libraries
+        .into_iter()
+        .find(|lib| lib.id == library_id)
+        .ok_or_else(|| BridgeError::NotFound {
+            msg: format!("Library '{library_id}' not found"),
+        })?;
+
+    // Read and parse config.yaml to get the stored fingerprint
+    let config_path = lib_info.path.join("config.yaml");
+    let config_str = std::fs::read_to_string(&config_path).map_err(|e| BridgeError::Config {
+        msg: format!("Failed to read config: {e}"),
+    })?;
+    let yaml_config: bae_core::config::ConfigYaml =
+        serde_yaml::from_str(&config_str).map_err(|e| BridgeError::Config {
+            msg: format!("Failed to parse config: {e}"),
+        })?;
+
+    if let Some(ref stored_fp) = yaml_config.encryption_key_fingerprint {
+        if *stored_fp != fingerprint {
+            return Err(BridgeError::Config {
+                msg: "Encryption key fingerprint mismatch".to_string(),
+            });
+        }
+    }
+
+    // Save key to keyring
+    let dev_mode = Config::is_dev_mode();
+    let key_service = KeyService::new(dev_mode, library_id);
+    key_service
+        .set_encryption_key(&key_hex)
+        .map_err(|e| BridgeError::Config {
+            msg: format!("Failed to save encryption key: {e}"),
+        })?;
+
+    Ok(())
+}
+
 /// Callback interface for playback events. Implemented by Swift.
 #[uniffi::export(callback_interface)]
 pub trait AppEventHandler: Send + Sync {
@@ -43,7 +134,6 @@ pub struct AppHandle {
     runtime: tokio::runtime::Runtime,
     config: Config,
     library_manager: SharedLibraryManager,
-    #[allow(dead_code)]
     key_service: KeyService,
     image_server: ImageServerHandle,
     playback_handle: PlaybackHandle,
@@ -65,6 +155,22 @@ impl AppHandle {
     /// Get the library path.
     pub fn library_path(&self) -> String {
         self.config.library_dir.to_string_lossy().to_string()
+    }
+
+    /// Whether this library has encryption configured.
+    pub fn is_encrypted(&self) -> bool {
+        self.config.encryption_key_stored
+    }
+
+    /// Get the encryption key fingerprint, if available.
+    pub fn get_encryption_fingerprint(&self) -> Option<String> {
+        self.config.encryption_key_fingerprint.clone()
+    }
+
+    /// Check if the encryption key is available in the keyring.
+    /// Returns false if the key is configured but not present (needs unlock).
+    pub fn check_encryption_key_available(&self) -> bool {
+        self.key_service.get_encryption_key().is_some()
     }
 
     /// Get all albums with their artist names.

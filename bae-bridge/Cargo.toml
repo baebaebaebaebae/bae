@@ -19,3 +19,4 @@ tracing = { workspace = true }
 thiserror = "2"
 hex = "0.4"
 dirs = "5.0"
+serde_yaml = "0.9"
