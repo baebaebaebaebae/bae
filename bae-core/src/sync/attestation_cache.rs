@@ -175,23 +175,12 @@ fn from_db_attestation(row: DbAttestation) -> Attestation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::encryption::ensure_sodium_init;
     use crate::keys::UserKeypair;
-    use crate::sodium_ffi;
     use crate::sync::attestation::create_attestation;
     use tempfile::TempDir;
 
     fn gen_keypair() -> UserKeypair {
-        ensure_sodium_init();
-        let mut pk = [0u8; sodium_ffi::SIGN_PUBLICKEYBYTES];
-        let mut sk = [0u8; sodium_ffi::SIGN_SECRETKEYBYTES];
-        let ret =
-            unsafe { sodium_ffi::crypto_sign_ed25519_keypair(pk.as_mut_ptr(), sk.as_mut_ptr()) };
-        assert_eq!(ret, 0);
-        UserKeypair {
-            signing_key: sk,
-            public_key: pk,
-        }
+        UserKeypair::generate()
     }
 
     fn make_attestation(kp: &UserKeypair, mbid: &str, infohash: &str) -> Attestation {

@@ -725,22 +725,12 @@ async fn sync_service_outgoing_has_correct_envelope() {
 
 // ---- Membership validation on pull (Phase 2e) ----
 
-use crate::sodium_ffi;
 use crate::sync::membership::{
     sign_membership_entry, MemberRole, MembershipAction, MembershipChain, MembershipEntry,
 };
 
-/// Generate a keypair directly (bypasses KeyService env-var issues).
 fn gen_keypair() -> crate::keys::UserKeypair {
-    crate::encryption::ensure_sodium_init();
-    let mut pk = [0u8; sodium_ffi::SIGN_PUBLICKEYBYTES];
-    let mut sk = [0u8; sodium_ffi::SIGN_SECRETKEYBYTES];
-    let ret = unsafe { sodium_ffi::crypto_sign_ed25519_keypair(pk.as_mut_ptr(), sk.as_mut_ptr()) };
-    assert_eq!(ret, 0);
-    crate::keys::UserKeypair {
-        signing_key: sk,
-        public_key: pk,
-    }
+    crate::keys::UserKeypair::generate()
 }
 
 fn pubkey_hex(kp: &crate::keys::UserKeypair) -> String {

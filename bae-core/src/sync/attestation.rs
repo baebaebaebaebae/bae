@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::keys::{self, UserKeypair};
-use crate::sodium_ffi;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AttestationError {
@@ -84,12 +83,12 @@ pub fn create_attestation(
 
 /// Verify the signature on an attestation.
 pub fn verify_attestation(attestation: &Attestation) -> Result<(), AttestationError> {
-    let pk_bytes: [u8; sodium_ffi::SIGN_PUBLICKEYBYTES] = hex::decode(&attestation.author_pubkey)
+    let pk_bytes: [u8; keys::SIGN_PUBLICKEYBYTES] = hex::decode(&attestation.author_pubkey)
         .map_err(|e| AttestationError::InvalidPubkey(e.to_string()))?
         .try_into()
         .map_err(|_| AttestationError::InvalidPubkey("wrong length".to_string()))?;
 
-    let sig_bytes: [u8; sodium_ffi::SIGN_BYTES] = hex::decode(&attestation.signature)
+    let sig_bytes: [u8; keys::SIGN_BYTES] = hex::decode(&attestation.signature)
         .map_err(|e| AttestationError::InvalidSignature(e.to_string()))?
         .try_into()
         .map_err(|_| AttestationError::InvalidSignature("wrong length".to_string()))?;
@@ -120,20 +119,8 @@ pub fn compute_content_hash(file_hashes: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::encryption::ensure_sodium_init;
-    use crate::sodium_ffi;
-
     fn gen_keypair() -> UserKeypair {
-        ensure_sodium_init();
-        let mut pk = [0u8; sodium_ffi::SIGN_PUBLICKEYBYTES];
-        let mut sk = [0u8; sodium_ffi::SIGN_SECRETKEYBYTES];
-        let ret =
-            unsafe { sodium_ffi::crypto_sign_ed25519_keypair(pk.as_mut_ptr(), sk.as_mut_ptr()) };
-        assert_eq!(ret, 0);
-        UserKeypair {
-            signing_key: sk,
-            public_key: pk,
-        }
+        UserKeypair::generate()
     }
 
     #[test]

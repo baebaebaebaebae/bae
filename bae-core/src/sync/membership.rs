@@ -13,7 +13,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::keys::{self, UserKeypair};
-use crate::sodium_ffi;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MembershipAction {
@@ -83,10 +82,10 @@ pub fn verify_membership_entry(entry: &MembershipEntry) -> bool {
         return false;
     };
 
-    let Ok(pk): Result<[u8; sodium_ffi::SIGN_PUBLICKEYBYTES], _> = pk_bytes.try_into() else {
+    let Ok(pk): Result<[u8; keys::SIGN_PUBLICKEYBYTES], _> = pk_bytes.try_into() else {
         return false;
     };
-    let Ok(sig): Result<[u8; sodium_ffi::SIGN_BYTES], _> = sig_bytes.try_into() else {
+    let Ok(sig): Result<[u8; keys::SIGN_BYTES], _> = sig_bytes.try_into() else {
         return false;
     };
 
@@ -266,18 +265,8 @@ mod tests {
     use super::*;
     use crate::keys::UserKeypair;
 
-    /// Helper: generate a keypair (bypasses KeyService env-var issues).
     fn gen_keypair() -> UserKeypair {
-        crate::encryption::ensure_sodium_init();
-        let mut pk = [0u8; sodium_ffi::SIGN_PUBLICKEYBYTES];
-        let mut sk = [0u8; sodium_ffi::SIGN_SECRETKEYBYTES];
-        let ret =
-            unsafe { sodium_ffi::crypto_sign_ed25519_keypair(pk.as_mut_ptr(), sk.as_mut_ptr()) };
-        assert_eq!(ret, 0);
-        UserKeypair {
-            signing_key: sk,
-            public_key: pk,
-        }
+        UserKeypair::generate()
     }
 
     fn pubkey_hex(kp: &UserKeypair) -> String {

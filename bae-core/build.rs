@@ -7,13 +7,6 @@ fn main() {
     set_version_env();
     #[cfg(feature = "torrent")]
     compile_cpp_storage();
-    link_libsodium();
-}
-
-fn link_libsodium() {
-    println!("cargo:rustc-link-search=native=/opt/homebrew/lib");
-    println!("cargo:rustc-link-search=native=/usr/local/lib");
-    println!("cargo:rustc-link-lib=sodium");
 }
 
 fn set_version_env() {
