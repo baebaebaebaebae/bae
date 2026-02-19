@@ -1,8 +1,8 @@
-# Import Section — User Stories
+# User Stories
 
-Cross-platform reference for implementing the import flow. These stories describe what the user sees and does, not how to implement it. Each platform (macOS, Linux, Windows) implements using native patterns.
+Cross-platform reference for implementing the app UX. These stories describe what the user sees and does, not how to implement it. Each platform (macOS, Linux, Windows) implements using native patterns.
 
-See also: [06-import-ux-goals.md](06-import-ux-goals.md) for the design rationale, [07-import-state-machine.md](07-import-state-machine.md) for the state machine.
+See also: [06-import-ux-goals.md](06-import-ux-goals.md) for the design rationale, [07-import-state-machine.md](07-import-state-machine.md) for the state machine, [11-app-layout.md](11-app-layout.md) for the top-level layout.
 
 ---
 
@@ -60,28 +60,42 @@ This could be a context menu, a dropdown button, or individual clear options. Th
 
 ### US-5: File pane shows categorized release contents
 
-When a candidate is selected, the main content area shows the folder's files grouped into collapsible sections:
+When a candidate is selected, the main content area shows the folder's files grouped into sections:
 
-**Audio** — either:
+**Audio** — collapsed by default (disclosure group). Either:
 - CUE+FLAC pairs: shows each pair (cue name + flac name + combined size + track count)
 - Track files: shows each audio file (name + size)
 
-**Images** — artwork files (name + size). These help identify the release — users look at scans for catalog numbers, spine text, disc art.
+Audio is collapsed because it's rarely needed for identification — images and documents are more useful.
 
-**Documents** — text/log/nfo files (name + size). Rip logs and NFO files often contain release information.
+**Images** — always visible. Artwork files shown as a thumbnail grid (120px). These help identify the release — users look at scans for catalog numbers, spine text, disc art.
 
-Each section header shows the section name. Sections are collapsible. Audio is expanded by default.
+**Documents** — always visible. Text/log/nfo files (name + size). Clickable (see US-5b). Rip logs and NFO files often contain release information.
+
+Each section header shows the section name and count. Empty sections are hidden.
 
 ### US-5a: Image gallery lightbox
 
-Clicking an image thumbnail in the file pane opens a full-size gallery view. The gallery:
+Clicking an image thumbnail in the file pane opens a full-size gallery view as a centered overlay with a dark backdrop. The gallery:
 - Shows the image at full resolution, centered
 - Has left/right navigation arrows (or keyboard arrows) to cycle through all images
 - Shows the filename below the image
-- Has a close button or Escape key to dismiss
-- Overlays the content area (modal/sheet)
+- Has a "Done" button or Escape key to dismiss
+- Clicking the dark backdrop also dismisses it
 
-This matches bae-desktop's `GalleryLightbox` component. The gallery helps users identify releases by examining scans of spines, disc art, label logos, and barcodes.
+The gallery helps users identify releases by examining scans of spines, disc art, label logos, and barcodes.
+
+### US-5b: Document viewer
+
+Clicking a document file (log, nfo, m3u, cue, txt) in the file pane opens a viewer as a centered overlay with a dark backdrop. The viewer:
+- Shows the file content in a monospaced font
+- Text is selectable
+- Shows the filename in the header
+- Has a "Done" button and Escape key to close
+- Clicking the dark backdrop also dismisses it
+- Tries UTF-8 first, falls back to Shift-JIS (common for Japanese rip logs)
+
+NFO and log files often contain release info (catalog numbers, edition notes, rip details) that help with identification.
 
 ### US-6: Empty file display
 
@@ -129,6 +143,31 @@ Clicking "Import" on a search result starts the import process. The candidate's 
 
 ---
 
+## Layout
+
+### US-11: Resizable file/search split
+
+The file pane (top) and search area (bottom) in the import main content are separated by a draggable divider. Users can drag the divider to give more space to either the file display or the search results, depending on what they're focused on.
+
+### US-12: Overlays dismiss on click-outside
+
+All overlay panels (image gallery, document viewer, cover picker) dismiss when the user clicks on the dark backdrop area outside the panel. No need to find and click a close button — just click away. Escape key also works.
+
+### US-13: No modal sheets
+
+Content viewers (image gallery, document viewer, cover picker) are presented as centered overlays with a dark backdrop, not as platform modal sheets. This avoids:
+- Sheet size jumping/animation on open
+- Modal blocking (sheets prevent interaction with the parent window)
+- Inconsistent dismiss behavior
+
+### US-14: Inline album detail
+
+Clicking an album in the library grid shows its detail in a right-side panel (fixed width). The album grid stays visible on the left so the user can quickly switch between albums. An X button in the detail header closes the panel and returns to the full-width grid.
+
+The grid keeps its column layout stable — it just narrows when the detail panel opens, reflowing columns as needed.
+
+---
+
 ## Bridge API
 
 These are the bridge methods that all platforms call. The bridge wraps bae-core and exposes a platform-agnostic interface via UniFFI.
@@ -169,47 +208,6 @@ BridgeImportCandidate:
   bad_audio_count: u32      — corrupt/incomplete audio files
   bad_image_count: u32      — corrupt image files
 ```
-
-### US-5b: Document viewer
-
-Clicking a document file (log, nfo, m3u, cue, txt) in the file pane opens a viewer overlay. The viewer:
-- Shows the file content in a monospaced font
-- Text is selectable
-- Shows the filename in the header
-- Has a "Done" button and Escape key to close
-- Clicking outside the viewer (on the dark backdrop) also closes it
-- Tries UTF-8 first, falls back to Shift-JIS (common for Japanese rip logs)
-
-NFO and log files often contain release info (catalog numbers, edition notes, rip details) that help with identification.
-
-### US-5c: Audio section collapsed by default
-
-The Audio section in the file pane is collapsed by default (a disclosure group). Users can expand it to see track files, but it's usually not needed for identification — images and documents are more useful for that. This saves vertical space for the more important sections.
-
----
-
-## Layout
-
-### US-11: Resizable file/search split
-
-The file pane (top) and search area (bottom) in the import main content are separated by a draggable divider. Users can drag the divider to give more space to either the file display or the search results, depending on what they're focused on.
-
-### US-12: Overlays dismiss on click-outside
-
-All overlay panels (image gallery, document viewer, cover picker) dismiss when the user clicks on the dark backdrop area outside the panel. No need to find and click a close button — just click away. Escape key also works.
-
-### US-13: No modal sheets
-
-Content viewers (image gallery, document viewer, cover picker) are presented as centered overlays with a dark backdrop, not as macOS sheet modals. This avoids:
-- Sheet size jumping/animation on open
-- Modal blocking (sheets prevent interaction with the parent window)
-- Inconsistent dismiss behavior
-
-### US-14: Inline album detail
-
-Clicking an album in the library grid shows its detail in the bottom portion of the view (a vertical split), not in a modal sheet. The album grid stays visible above so the user can quickly switch between albums. A close (X) button in the detail header returns to the full grid view.
-
-This matches the iTunes/Music.app pattern where album detail is part of the main flow, not a separate window.
 
 ---
 
