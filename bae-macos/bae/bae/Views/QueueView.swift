@@ -39,7 +39,6 @@ struct QueueView: View {
                         )
                     }
                 }
-                .environment(\.editMode, .constant(.active))
                 .scrollContentBackground(.hidden)
                 .background(Theme.background)
             }
