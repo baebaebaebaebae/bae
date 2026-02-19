@@ -24,7 +24,7 @@ struct LibraryView: View {
             .tabItem {
                 Label("Search", systemImage: "magnifyingglass")
             }
-            SettingsPlaceholderView(credentials: credentials, onUnlink: onUnlink)
+            SettingsView(credentials: credentials, syncService: syncService, onUnlink: onUnlink)
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }
@@ -36,27 +36,5 @@ struct LibraryView: View {
         }
         .onAppear { syncService?.startPeriodicSync() }
         .onDisappear { syncService?.stopPeriodicSync() }
-    }
-}
-
-struct SettingsPlaceholderView: View {
-    let credentials: LibraryCredentials
-    let onUnlink: () -> Void
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section("Library") {
-                    LabeledContent("Library ID", value: credentials.libraryId)
-                    LabeledContent("Server", value: credentials.proxyUrl)
-                }
-                Section {
-                    Button("Unlink Library", role: .destructive) {
-                        onUnlink()
-                    }
-                }
-            }
-            .navigationTitle("Settings")
-        }
     }
 }
