@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import MediaPlayer
 
 @Observable
 class PlaybackService {
@@ -38,6 +39,7 @@ class PlaybackService {
         self.encryptionKey = encryptionKey
         self.databaseService = databaseService
         configureAudioSession()
+        setupRemoteCommands()
     }
 
     // MARK: - Playback Controls
@@ -112,6 +114,7 @@ class PlaybackService {
             isPlaying = true
             isLoading = false
             startProgressTimer()
+            updateNowPlayingInfo()
         } catch {
             self.error = error.localizedDescription
             isLoading = false
@@ -122,12 +125,14 @@ class PlaybackService {
         player?.pause()
         isPlaying = false
         stopProgressTimer()
+        updateNowPlayingElapsedTime()
     }
 
     func resume() {
         player?.play()
         isPlaying = true
         startProgressTimer()
+        updateNowPlayingElapsedTime()
     }
 
     func togglePlayPause() {
@@ -147,11 +152,13 @@ class PlaybackService {
         progress = 0
         duration = 0
         cleanupTempFile()
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
     func seek(to time: TimeInterval) {
         player?.currentTime = time
         progress = time
+        updateNowPlayingElapsedTime()
     }
 
     func playNext() async {
@@ -189,6 +196,15 @@ class PlaybackService {
         await play(track: queue[prevIndex], albumArtId: albumArtId, allTracks: queue)
     }
 
+    // MARK: - Now Playing Info
+
+    func updateNowPlayingArtwork(_ image: UIImage) {
+        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+        info[MPMediaItemPropertyArtwork] = artwork
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+
     // MARK: - Storage Path
 
     static func storagePath(for fileId: String) -> String {
@@ -207,6 +223,72 @@ class PlaybackService {
         } catch {
             // Non-fatal: playback may still work
         }
+    }
+
+    private func setupRemoteCommands() {
+        let center = MPRemoteCommandCenter.shared()
+
+        center.playCommand.addTarget { [weak self] _ in
+            self?.resume()
+            return .success
+        }
+
+        center.pauseCommand.addTarget { [weak self] _ in
+            self?.pause()
+            return .success
+        }
+
+        center.togglePlayPauseCommand.addTarget { [weak self] _ in
+            self?.togglePlayPause()
+            return .success
+        }
+
+        center.nextTrackCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            Task { await self.playNext() }
+            return .success
+        }
+
+        center.previousTrackCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            Task { await self.playPrevious() }
+            return .success
+        }
+
+        center.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard let self,
+                let posEvent = event as? MPChangePlaybackPositionCommandEvent
+            else {
+                return .commandFailed
+            }
+            self.seek(to: posEvent.positionTime)
+            return .success
+        }
+    }
+
+    private func updateNowPlayingInfo() {
+        guard let track = currentTrack else { return }
+
+        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        info[MPMediaItemPropertyTitle] = track.title
+        info[MPMediaItemPropertyArtist] = track.artistNames ?? ""
+        if let ms = track.durationMs {
+            info[MPMediaItemPropertyPlaybackDuration] = Double(ms) / 1000.0
+        } else {
+            info[MPMediaItemPropertyPlaybackDuration] = duration
+        }
+        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = progress
+        info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+
+    private func updateNowPlayingElapsedTime() {
+        guard MPNowPlayingInfoCenter.default().nowPlayingInfo != nil else { return }
+
+        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo!
+        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = progress
+        info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
     private func startProgressTimer() {

@@ -3,6 +3,7 @@ import SwiftUI
 struct MiniPlayerView: View {
     let playbackService: PlaybackService
     let imageService: ImageService?
+    @State private var showNowPlaying = false
 
     var body: some View {
         if let track = playbackService.currentTrack {
@@ -18,7 +19,6 @@ struct MiniPlayerView: View {
                         )
                 }
                 .frame(height: 2)
-
                 HStack(spacing: 12) {
                     // Album art
                     if let imageService {
@@ -26,7 +26,6 @@ struct MiniPlayerView: View {
                             imageId: playbackService.currentAlbumArtId,
                             imageService: imageService, size: 40)
                     }
-
                     // Track info
                     VStack(alignment: .leading, spacing: 2) {
                         Text(track.title)
@@ -40,9 +39,7 @@ struct MiniPlayerView: View {
                                 .lineLimit(1)
                         }
                     }
-
                     Spacer()
-
                     // Loading indicator or play/pause
                     if playbackService.isLoading {
                         ProgressView()
@@ -62,6 +59,16 @@ struct MiniPlayerView: View {
                 .padding(.vertical, 8)
             }
             .background(.ultraThinMaterial)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                showNowPlaying = true
+            }
+            .sheet(isPresented: $showNowPlaying) {
+                NowPlayingView(
+                    playbackService: playbackService,
+                    imageService: imageService
+                )
+            }
         }
     }
 }
