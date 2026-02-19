@@ -72,6 +72,7 @@ struct baeApp: App {
             ContentView(appService: $appService)
                 .environmentObject(checkForUpdatesViewModel)
         }
+        .windowStyle(.hiddenTitleBar)
         Settings {
             if let appService {
                 SettingsView(appService: appService)

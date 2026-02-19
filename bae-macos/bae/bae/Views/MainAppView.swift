@@ -8,9 +8,8 @@ enum MainSection {
 
 struct MainAppView: View {
     let appService: AppService
+    @Environment(\.openSettings) private var openSettings
     @State private var activeSection: MainSection = .library
-    @State private var showingSettings = false
-    @State private var showingSyncSettings = false
     @State private var searchText: String = ""
     @State private var showQueue = false
 
@@ -18,7 +17,7 @@ struct MainAppView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 ZStack {
-                    LibraryView(appService: appService, searchText: $searchText, showQueue: $showQueue)
+                    LibraryView(appService: appService, searchText: $searchText)
                         .opacity(activeSection == .library ? 1 : 0)
                         .allowsHitTesting(activeSection == .library)
 
@@ -59,12 +58,7 @@ struct MainAppView: View {
                     .frame(width: 200)
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
-                    Button(action: { showingSyncSettings = true }) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                    }
-                    .help("Sync Settings")
-
-                    Button(action: { showingSettings = true }) {
+                    Button(action: { openSettings() }) {
                         Image(systemName: "gearshape")
                     }
                     .help("Settings")
@@ -83,20 +77,6 @@ struct MainAppView: View {
             openFolderAndScan()
         }
         .focusedSceneValue(\.appService, appService)
-        .sheet(isPresented: $showingSettings) {
-            SettingsView(appService: appService)
-        }
-        .sheet(isPresented: $showingSyncSettings) {
-            NavigationStack {
-                SyncSettingsView(appService: appService)
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") { showingSyncSettings = false }
-                        }
-                    }
-            }
-            .frame(minWidth: 500, minHeight: 400)
-        }
     }
 
     // MARK: - Scan + Drop

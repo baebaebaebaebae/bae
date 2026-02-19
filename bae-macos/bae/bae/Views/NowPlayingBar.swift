@@ -182,6 +182,10 @@ struct NowPlayingBar: View {
             .font(.caption)
             .help("Queue")
             .accessibilityLabel("Queue")
+            .popover(isPresented: $showQueue, arrowEdge: .top) {
+                QueueView(appService: appService, onClose: { showQueue = false })
+                    .frame(width: 350, height: 500)
+            }
 
             Image(systemName: "speaker.fill")
                 .font(.caption)

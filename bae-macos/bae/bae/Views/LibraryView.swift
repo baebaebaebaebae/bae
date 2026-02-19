@@ -1,5 +1,17 @@
 import SwiftUI
 
+enum LibrarySortField: String, CaseIterable {
+    case title = "Title"
+    case artist = "Artist"
+    case year = "Year"
+    case dateAdded = "Date Added"
+}
+
+enum SortDirection {
+    case ascending
+    case descending
+}
+
 struct LibraryView: View {
     let appService: AppService
     @Binding var searchText: String
@@ -9,9 +21,32 @@ struct LibraryView: View {
     @State private var selectedAlbumId: String?
     @State private var error: String?
     @State private var searchDebounceTask: Task<Void, Never>?
+    @State private var sortField: LibrarySortField = .dateAdded
+    @State private var sortDirection: SortDirection = .descending
 
     private var isSearching: Bool {
         !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private var sortedAlbums: [BridgeAlbum] {
+        albums.sorted { a, b in
+            let result: Bool
+            switch sortField {
+            case .title:
+                result = a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
+            case .artist:
+                result = a.artistNames.localizedCaseInsensitiveCompare(b.artistNames) == .orderedAscending
+            case .year:
+                let yearA = a.year ?? 0
+                let yearB = b.year ?? 0
+                result = yearA < yearB
+            case .dateAdded:
+                // BridgeAlbum doesn't have a dateAdded field, so preserve original order
+                // (getAlbums returns newest first from the DB)
+                return sortDirection == .descending
+            }
+            return sortDirection == .ascending ? result : !result
+        }
     }
 
     var body: some View {
@@ -44,7 +79,7 @@ struct LibraryView: View {
             } else {
                 HStack(spacing: 0) {
                     AlbumGridView(
-                        albums: albums.map { album in
+                        albums: sortedAlbums.map { album in
                             AlbumCardViewModel(
                                 id: album.id,
                                 title: album.title,
@@ -54,7 +89,11 @@ struct LibraryView: View {
                             )
                         },
                         selectedAlbumId: $selectedAlbumId,
-                        onPlayAlbum: { appService.playAlbum(albumId: $0) }
+                        sortField: $sortField,
+                        sortDirection: $sortDirection,
+                        onPlayAlbum: { appService.playAlbum(albumId: $0) },
+                        onAddToQueue: { albumId in addAlbumToQueue(albumId: albumId) },
+                        onAddNext: { albumId in addAlbumNext(albumId: albumId) }
                     )
                     .frame(maxWidth: .infinity)
                     if showQueue {
@@ -119,6 +158,32 @@ struct LibraryView: View {
             error = nil
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+
+    private func addAlbumToQueue(albumId: String) {
+        Task.detached {
+            if let detail = try? appService.appHandle.getAlbumDetail(albumId: albumId) {
+                let trackIds = detail.releases.first?.tracks.map(\.id) ?? []
+                if !trackIds.isEmpty {
+                    await MainActor.run {
+                        appService.addToQueue(trackIds: trackIds)
+                    }
+                }
+            }
+        }
+    }
+
+    private func addAlbumNext(albumId: String) {
+        Task.detached {
+            if let detail = try? appService.appHandle.getAlbumDetail(albumId: albumId) {
+                let trackIds = detail.releases.first?.tracks.map(\.id) ?? []
+                if !trackIds.isEmpty {
+                    await MainActor.run {
+                        appService.addNext(trackIds: trackIds)
+                    }
+                }
+            }
         }
     }
 }
