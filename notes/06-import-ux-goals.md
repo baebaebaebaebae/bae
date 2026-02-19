@@ -29,9 +29,9 @@ This is where folders become releases. Three paths:
 
 1. **Disc ID lookup** - Automatic match via CUE file fingerprint
 2. **Multiple matches** - Disc ID matched several editions; user picks the right one
-3. **Manual search** - User searches by artist, album, catalog number
+3. **Manual search** - User searches by artist/album, catalog number, or barcode
 
-The media column shows artwork and scans—these help users identify the release (catalog numbers on spines, label logos, disc art).
+The file display shows artwork and scans—these help users identify the release (catalog numbers on spines, label logos, disc art).
 
 ### Stage 3: Curation
 
@@ -49,33 +49,41 @@ The folder is now a proper library entry with accurate metadata, chosen artwork,
 
 ## UI Serves the Journey
 
-### Three-Column Layout
+### Layout
 
-Maps to the user's mental context at each moment:
+Two essential areas:
 
-| Column | Question | Content |
-|--------|----------|---------|
-| Sidebar | "What folders do I have?" | Detected candidates |
-| Middle | "What's in this one?" | Media assets (for identification) |
-| Main | "What do I do with it?" | Current workflow step |
+| Area | Question | Content |
+|------|----------|---------|
+| Sidebar | "What folders do I have?" | Detected candidates (folder icon + name) |
+| Main pane | "What's in this one, and what do I do with it?" | File display + search + results |
 
-### Detail Header
+bae-desktop uses a three-column variant where files get their own middle column. Other platforms (macOS, Linux, Windows) use two columns with files displayed inline in the main pane above the search form. Either layout works — the key is that the file display is visible alongside the search workflow.
 
-Shows the selected folder name and current stage (Identifying/Confirming). Users always know:
-- Which folder they're working on
-- Where they are in the journey
+### Candidate Sidebar
 
-### Media Assets Column
+Shows detected folders as simple folder items. No track counts or format strings — just the folder name and a status icon (pending/importing/done/incomplete). Incomplete candidates are dimmed and not selectable.
 
-Not a file browser—it's identification context. Grouped by type:
+### File Display
 
-- **Artwork** - Scans often show catalog numbers, barcodes, edition info
-- **Audio** - Confirms track count and format
-- **Documents** - Rip logs, NFO files with release info
+Not a file browser — it's identification context. Grouped by type:
+
+- **Audio** — CUE+FLAC pairs or track files. Confirms track count and format.
+- **Images** — Scans often show catalog numbers, barcodes, edition info on spines and disc art.
+- **Documents** — Rip logs, NFO files with release info.
+
+### Search Form
+
+Three search modes (tabs):
+- **General** — artist + album fields
+- **Catalog Number** — single field (e.g., "WPCR-80001")
+- **Barcode** — single field (e.g., "4943674251780")
+
+Catalog number and barcode searches are how users identify Japanese pressings, limited editions, and other releases where artist/album text search returns too many or too few results.
 
 ### Visual Grouping
 
-The detail pane (header + files + workflow) shares a background because it's all "about the selected folder." The sidebar is navigation; the detail pane is the workspace.
+The main pane (header + files + search + results) shares a background because it's all "about the selected folder." The sidebar is navigation; the main pane is the workspace.
 
 ## Core Principle
 

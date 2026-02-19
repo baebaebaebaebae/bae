@@ -8,7 +8,7 @@ The app has two top-level sections: **Library** and **Import**. These are not ro
 
 ```
 +----------------------------------------------+
-| [Library] [Import]           [+] [sync] [gear]|
+|  [Library | Import]       [sync] [gear] [🔍] |
 +----------------------------------------------+
 |                                              |
 |          (active section content)            |
@@ -20,7 +20,7 @@ The app has two top-level sections: **Library** and **Import**. These are not ro
 
 ### Why both stay alive
 
-Import is a multi-step workflow: scan folder, search metadata, pick a match, import. If switching to Library destroyed the import view, the user would lose their search results and selection. Both sections share the same backing state (AppService / AppState), but each section also has local view state (selected artist, selected candidate, search results) that must survive section switches.
+Import is a multi-step workflow: scan folder, search metadata, pick a match, import. If switching to Library destroyed the import view, the user would lose their search results and selection. Both sections share the same backing state (AppService / AppState), but each section also has local view state (selected candidate, search results) that must survive section switches.
 
 ### Implementation pattern
 
@@ -30,37 +30,56 @@ Use whatever the platform's equivalent of "keep both views mounted but show one"
 - **SwiftUI (macOS):** ZStack with opacity + allowsHitTesting. Both views exist simultaneously; the inactive one is invisible and non-interactive.
 - **Future platforms:** Same idea — don't destroy/recreate views on section switch.
 
-## Section Bar
+## Window Toolbar
 
-The section bar sits at the top of the window, above the content area. It contains:
+The section switcher and action buttons live in the window's native toolbar (title bar area), not in a custom bar below it.
 
-**Left side:**
-- Library button (highlighted when active)
-- Import button (highlighted when active, shows badge with count of in-progress imports)
+**Center:**
+- Segmented control: Library / Import
 
-**Right side:**
-- Import folder button (opens file picker, scans folder, switches to Import)
-- Sync button (opens sync settings)
-- Settings button (opens settings)
+**Trailing:**
+- Sync button (opens sync settings sheet)
+- Settings button (opens settings sheet)
+- Search field (platform search, filters library content)
 
-The buttons are simple clickable labels, not a tab bar or sidebar. They look like small pill-shaped buttons with an active/inactive state.
+No "Import Folder" button in the toolbar. Importing is done via:
+- Cmd+I menu shortcut
+- Drag-and-drop folders onto the window
+- The "+" button shown in the Import section's empty state
 
 ## Library Section
 
-Three-column layout:
-1. **Artist sidebar** — list of artists, "All" at the top
-2. **Album grid** — filtered by selected artist, with cover art thumbnails
-3. **Album detail** — tracks, metadata, cover, storage info, share link
+Flat album grid. No artist sidebar — search handles filtering.
 
-Search is available via a search field (either in the section bar or native to the platform's navigation pattern). Search shows results across artists, albums, and tracks.
+- **Album grid** — all albums, with cover art thumbnails. Click to open detail, double-click to play.
+- **Album detail** — opens as a sheet/modal. Shows tracks, metadata, cover art, storage info, share link.
+- **Search** — filters across artists, albums, and tracks. Results replace the grid while typing.
+
+### Platform variations
+
+- **bae-desktop (Dioxus):** Three-column layout with artist sidebar, album grid, album detail. This works well with Dioxus's layout system.
+- **macOS (SwiftUI):** Flat grid + sheet detail. NavigationSplitView was rejected — it wastes space and has poor UX for this use case.
+- **Future platforms:** Choose whichever pattern works best natively. The artist sidebar is optional — search covers the same use case.
 
 ## Import Section
 
-Two-column layout:
-1. **Candidate list** — scanned folders with status indicators (pending, importing, done, error)
-2. **Metadata search** — search MusicBrainz/Discogs for the selected candidate, pick a match, import
+### Empty state
 
-The import section starts empty. Scanning a folder (via the "+" button, Cmd+I, or drag-and-drop) populates the candidate list and auto-switches to the Import section.
+When no folders have been scanned, show a centered "+" button with prompt text. No panes.
+
+### Active state (folders scanned)
+
+Two-column layout:
+
+1. **Candidate sidebar** — scanned folders presented as folder items (folder icon + folder basename). Status indicators: pending (folder icon), importing (spinner), done (checkmark), incomplete (dimmed + warning text). Incomplete folders are not selectable.
+
+2. **Main content area** — for the selected candidate:
+   - **Header** — folder name
+   - **File display** — categorized files grouped as Audio, Images, Documents (collapsible sections). Shows file names and sizes. Images help identify the release (catalog numbers on spines, label logos, disc art).
+   - **Search form** — tabbed: General (artist + album), Catalog Number, Barcode. Each tab has the appropriate fields and a search button.
+   - **Search results** — list of metadata matches from MusicBrainz/Discogs. Each result shows title, artist, year, format, label. "Import" button per result.
+
+The import section starts empty. Scanning a folder (via Cmd+I, drag-and-drop, or the empty state button) populates the candidate list and auto-switches to the Import section.
 
 ## Now Playing Bar
 
@@ -76,13 +95,13 @@ These live at the top level (above both sections):
 
 ## State Ownership
 
-All persistent state lives in the shared service layer (AppService in Swift, AppState store in Dioxus). The section bar and global handlers live in the top-level container view. Each section reads from the shared state but also maintains its own local view state (selection, scroll position, search text).
+All persistent state lives in the shared service layer (AppService in Swift, AppState store in Dioxus). The section switcher and global handlers live in the top-level container view. Each section reads from the shared state but also maintains its own local view state.
 
 | State | Owner | Persists across switches? |
 |-------|-------|--------------------------|
 | Albums, artists | Shared service | Yes |
 | Scan results, import statuses | Shared service | Yes |
 | Playback state | Shared service | Yes |
-| Selected artist, selected album | Library view local | Yes (view stays alive) |
-| Selected candidate, search results | Import view local | Yes (view stays alive) |
+| Selected album, search text | Library view local | Yes (view stays alive) |
+| Selected candidate, search results, search tab | Import view local | Yes (view stays alive) |
 | Active section | Top-level container | Yes |
