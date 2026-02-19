@@ -1,9 +1,10 @@
 import SwiftUI
 
 struct ContentView: View {
+    @Binding var appService: AppService?
+
     @State private var libraries: [BridgeLibraryInfo] = []
     @State private var selectedLibraryId: String?
-    @State private var appService: AppService?
     @State private var error: String?
 
     var body: some View {

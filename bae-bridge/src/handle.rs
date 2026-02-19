@@ -10,8 +10,8 @@ use bae_core::playback::{PlaybackHandle, PlaybackProgress, PlaybackService, Play
 use tracing::{info, warn};
 
 use crate::types::{
-    BridgeAlbum, BridgeAlbumDetail, BridgeArtist, BridgeError, BridgeFile, BridgeLibraryInfo,
-    BridgePlaybackState, BridgeRelease, BridgeRepeatMode, BridgeTrack,
+    BridgeAlbum, BridgeAlbumDetail, BridgeArtist, BridgeConfig, BridgeError, BridgeFile,
+    BridgeLibraryInfo, BridgePlaybackState, BridgeRelease, BridgeRepeatMode, BridgeTrack,
 };
 
 /// Discover all libraries in ~/.bae/libraries/.
@@ -43,7 +43,6 @@ pub struct AppHandle {
     runtime: tokio::runtime::Runtime,
     config: Config,
     library_manager: SharedLibraryManager,
-    #[allow(dead_code)]
     key_service: KeyService,
     image_server: ImageServerHandle,
     playback_handle: PlaybackHandle,
@@ -389,6 +388,56 @@ impl AppHandle {
             BridgeRepeatMode::Album => bae_core::playback::RepeatMode::Album,
         };
         self.playback_handle.set_repeat_mode(core_mode);
+    }
+
+    // MARK: - Settings
+
+    /// Get current configuration.
+    pub fn get_config(&self) -> BridgeConfig {
+        BridgeConfig {
+            library_id: self.config.library_id.clone(),
+            library_name: self.config.library_name.clone(),
+            library_path: self.config.library_dir.to_string_lossy().to_string(),
+            has_discogs_token: self.key_service.get_discogs_key().is_some(),
+            subsonic_port: self.config.server_port,
+            subsonic_bind_address: self.config.server_bind_address.clone(),
+            subsonic_username: self.config.server_username.clone(),
+        }
+    }
+
+    /// Rename the library.
+    pub fn rename_library(&self, name: String) -> Result<(), BridgeError> {
+        Config::rename_library(&self.config.library_dir, &name).map_err(|e| BridgeError::Config {
+            msg: format!("{e}"),
+        })
+    }
+
+    /// Save Discogs API token to the OS keyring.
+    pub fn save_discogs_token(&self, token: String) -> Result<(), BridgeError> {
+        self.key_service
+            .set_discogs_key(&token)
+            .map_err(|e| BridgeError::Config {
+                msg: format!("{e}"),
+            })
+    }
+
+    /// Check if a Discogs API token is configured.
+    pub fn has_discogs_token(&self) -> bool {
+        self.key_service.get_discogs_key().is_some()
+    }
+
+    /// Get the Discogs API token (for display in settings).
+    pub fn get_discogs_token(&self) -> Option<String> {
+        self.key_service.get_discogs_key()
+    }
+
+    /// Remove the Discogs API token from the OS keyring.
+    pub fn remove_discogs_token(&self) -> Result<(), BridgeError> {
+        self.key_service
+            .delete_discogs_key()
+            .map_err(|e| BridgeError::Config {
+                msg: format!("{e}"),
+            })
     }
 
     /// Register a callback handler for playback events.

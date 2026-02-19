@@ -96,6 +96,17 @@ pub enum BridgePlaybackState {
     },
 }
 
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeConfig {
+    pub library_id: String,
+    pub library_name: Option<String>,
+    pub library_path: String,
+    pub has_discogs_token: bool,
+    pub subsonic_port: u16,
+    pub subsonic_bind_address: String,
+    pub subsonic_username: Option<String>,
+}
+
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum BridgeError {
     #[error("Not found: {msg}")]

@@ -1,0 +1,276 @@
+import SwiftUI
+
+struct SettingsView: View {
+    let appService: AppService
+
+    var body: some View {
+        TabView {
+            LibrarySettingsTab(appService: appService)
+                .tabItem {
+                    Label("Library", systemImage: "books.vertical")
+                }
+            DiscogsSettingsTab(appService: appService)
+                .tabItem {
+                    Label("Discogs", systemImage: "network")
+                }
+            SubsonicSettingsTab(appService: appService)
+                .tabItem {
+                    Label("Subsonic", systemImage: "server.rack")
+                }
+            AboutSettingsTab()
+                .tabItem {
+                    Label("About", systemImage: "info.circle")
+                }
+        }
+        .frame(width: 450, height: 300)
+    }
+}
+
+// MARK: - Library Tab
+
+private struct LibrarySettingsTab: View {
+    let appService: AppService
+
+    @State private var libraryName: String = ""
+    @State private var config: BridgeConfig?
+    @State private var saved = false
+
+    var body: some View {
+        Form {
+            if let config {
+                Section {
+                    TextField("Library name", text: $libraryName)
+                        .onSubmit { saveName() }
+                    if saved {
+                        Text("Saved")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section {
+                    LabeledContent("Library ID") {
+                        HStack {
+                            Text(config.libraryId)
+                                .textSelection(.enabled)
+                                .foregroundStyle(.secondary)
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(config.libraryId, forType: .string)
+                            } label: {
+                                Image(systemName: "doc.on.doc")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Copy library ID")
+                        }
+                    }
+                    LabeledContent("Path") {
+                        Text(config.libraryPath)
+                            .textSelection(.enabled)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                ProgressView()
+            }
+        }
+        .formStyle(.grouped)
+        .task {
+            loadConfig()
+        }
+    }
+
+    private func loadConfig() {
+        let c = appService.getConfig()
+        config = c
+        libraryName = c.libraryName ?? ""
+    }
+
+    private func saveName() {
+        do {
+            try appService.renameLibrary(name: libraryName)
+            saved = true
+
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                saved = false
+            }
+        } catch {
+            print("Failed to rename library: \(error)")
+        }
+    }
+}
+
+// MARK: - Discogs Tab
+
+private struct DiscogsSettingsTab: View {
+    let appService: AppService
+
+    @State private var token: String = ""
+    @State private var hasToken: Bool = false
+    @State private var showToken: Bool = false
+    @State private var statusMessage: String?
+
+    var body: some View {
+        Form {
+            Section {
+                if hasToken {
+                    LabeledContent("API token") {
+                        HStack {
+                            if showToken {
+                                Text(token)
+                                    .textSelection(.enabled)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text(String(repeating: "*", count: 12))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Button(showToken ? "Hide" : "Show") {
+                                if !showToken {
+                                    if let t = appService.getDiscogsToken() {
+                                        token = t
+                                    }
+                                }
+                                showToken.toggle()
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    Button("Remove token") {
+                        removeToken()
+                    }
+                } else {
+                    HStack {
+                        if showToken {
+                            TextField("API token", text: $token)
+                        } else {
+                            SecureField("API token", text: $token)
+                        }
+                        Button(showToken ? "Hide" : "Show") {
+                            showToken.toggle()
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    Button("Save") {
+                        saveToken()
+                    }
+                    .disabled(token.isEmpty)
+                }
+                if let statusMessage {
+                    Text(statusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Text("A Discogs API token allows bae to look up album metadata from Discogs. You can create a personal access token in your Discogs account settings.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .task {
+            hasToken = appService.appHandle.hasDiscogsToken()
+        }
+    }
+
+    private func saveToken() {
+        do {
+            try appService.saveDiscogsToken(token: token)
+            hasToken = true
+            showToken = false
+            statusMessage = "Token saved"
+            clearStatus()
+        } catch {
+            statusMessage = "Failed to save: \(error.localizedDescription)"
+        }
+    }
+
+    private func removeToken() {
+        do {
+            try appService.removeDiscogsToken()
+            hasToken = false
+            token = ""
+            showToken = false
+            statusMessage = "Token removed"
+            clearStatus()
+        } catch {
+            statusMessage = "Failed to remove: \(error.localizedDescription)"
+        }
+    }
+
+    private func clearStatus() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            statusMessage = nil
+        }
+    }
+}
+
+// MARK: - Subsonic Tab
+
+private struct SubsonicSettingsTab: View {
+    let appService: AppService
+
+    @State private var config: BridgeConfig?
+
+    var body: some View {
+        Form {
+            if let config {
+                Section {
+                    LabeledContent("Port") {
+                        Text("\(config.subsonicPort)")
+                            .foregroundStyle(.secondary)
+                    }
+                    LabeledContent("Bind address") {
+                        Text(config.subsonicBindAddress)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let username = config.subsonicUsername {
+                        LabeledContent("Username") {
+                            Text(username)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                Section {
+                    Text("The Subsonic-compatible server lets you stream your library to apps like Plexamp, play:Sub, and Symfonium. Configuration is managed in config.yaml.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                ProgressView()
+            }
+        }
+        .formStyle(.grouped)
+        .task {
+            config = appService.getConfig()
+        }
+    }
+}
+
+// MARK: - About Tab
+
+private struct AboutSettingsTab: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            Spacer()
+            Text("bae")
+                .font(.largeTitle)
+                .fontWeight(.bold)
+            if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
+                Text("Version \(version)")
+                    .foregroundStyle(.secondary)
+            }
+            if let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
+                Text("Build \(build)")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
