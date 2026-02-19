@@ -100,6 +100,7 @@ struct AlbumDetailView: View {
                         Label("Share", systemImage: "square.and.arrow.up")
                     }
                     .help("Create share link")
+                    .accessibilityLabel("Create share link")
                 }
             }
         }

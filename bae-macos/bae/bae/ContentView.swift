@@ -37,8 +37,18 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 600)
+        .navigationTitle(windowTitle)
         .task {
             loadInitialState()
+        }
+    }
+
+    private var windowTitle: String {
+        switch screen {
+        case .library(let service):
+            return service.appHandle.libraryName() ?? "bae"
+        default:
+            return "bae"
         }
     }
 

@@ -143,6 +143,7 @@ pub struct AppHandle {
     image_server: ImageServerHandle,
     playback_handle: PlaybackHandle,
     event_handler: Mutex<Option<Arc<dyn AppEventHandler>>>,
+    subsonic_server_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 #[uniffi::export]
@@ -689,6 +690,101 @@ impl AppHandle {
         })
     }
 
+    /// Get the configured Subsonic server port.
+    pub fn server_port(&self) -> u16 {
+        self.config.server_port
+    }
+
+    /// Get the configured Subsonic server bind address.
+    pub fn server_bind_address(&self) -> String {
+        self.config.server_bind_address.clone()
+    }
+
+    /// Whether the Subsonic server is currently running.
+    pub fn is_subsonic_running(&self) -> bool {
+        let guard = self.subsonic_server_handle.lock().unwrap();
+        match &*guard {
+            Some(handle) => !handle.is_finished(),
+            None => false,
+        }
+    }
+
+    /// Start the Subsonic server. No-op if already running.
+    pub fn start_subsonic_server(&self) -> Result<(), BridgeError> {
+        {
+            let guard = self.subsonic_server_handle.lock().unwrap();
+            if let Some(handle) = &*guard {
+                if !handle.is_finished() {
+                    return Ok(());
+                }
+            }
+        }
+
+        let auth = if self.config.server_auth_enabled {
+            let password = self.key_service.get_server_password();
+            bae_core::subsonic::SubsonicAuth {
+                enabled: self.config.server_username.is_some() && password.is_some(),
+                username: self.config.server_username.clone(),
+                password,
+            }
+        } else {
+            bae_core::subsonic::SubsonicAuth {
+                enabled: false,
+                username: None,
+                password: None,
+            }
+        };
+
+        let mut app = bae_core::subsonic::create_router(
+            self.library_manager.clone(),
+            self.encryption_service.clone(),
+            self.config.library_dir.clone(),
+            self.key_service.clone(),
+            auth,
+        );
+
+        if let Some(ref ch) = self.cloud_home {
+            let cloud_state = Arc::new(bae_core::cloud_routes::CloudRouteState {
+                cloud_home: ch.clone(),
+            });
+            let cloud_router = bae_core::cloud_routes::create_cloud_router(cloud_state);
+            app = app.merge(cloud_router);
+        }
+
+        let addr = format!(
+            "{}:{}",
+            self.config.server_bind_address, self.config.server_port
+        );
+        let handle = self.runtime.spawn(async move {
+            let listener = match tokio::net::TcpListener::bind(&addr).await {
+                Ok(l) => {
+                    info!("Subsonic server listening on http://{}", addr);
+                    l
+                }
+                Err(e) => {
+                    warn!("Failed to bind Subsonic server to {}: {}", addr, e);
+                    return;
+                }
+            };
+            if let Err(e) = axum::serve(listener, app).await {
+                warn!("Subsonic server error: {}", e);
+            }
+        });
+
+        let mut guard = self.subsonic_server_handle.lock().unwrap();
+        *guard = Some(handle);
+
+        Ok(())
+    }
+
+    /// Stop the Subsonic server if running.
+    pub fn stop_subsonic_server(&self) {
+        let mut guard = self.subsonic_server_handle.lock().unwrap();
+        if let Some(handle) = guard.take() {
+            handle.abort();
+        }
+    }
+
     /// Create a share link for a release. Requires cloud home and encryption.
     /// Returns the share URL on success.
     pub fn create_share_link(&self, release_id: String) -> Result<String, BridgeError> {
@@ -1148,5 +1244,6 @@ pub fn init_app(library_id: String) -> Result<Arc<AppHandle>, BridgeError> {
         image_server,
         playback_handle,
         event_handler: Mutex::new(None),
+        subsonic_server_handle: Mutex::new(None),
     }))
 }

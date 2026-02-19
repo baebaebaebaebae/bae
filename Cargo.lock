@@ -883,6 +883,7 @@ dependencies = [
 name = "bae-bridge"
 version = "0.1.0"
 dependencies = [
+ "axum 0.7.9",
  "bae-core",
  "base64",
  "chrono",

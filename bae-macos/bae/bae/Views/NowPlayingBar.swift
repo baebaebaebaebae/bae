@@ -32,6 +32,7 @@ struct NowPlayingBar: View {
             albumArt
                 .frame(width: 48, height: 48)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityLabel("Album art")
 
             VStack(alignment: .leading, spacing: 2) {
                 if let title = appService.trackTitle {
@@ -92,18 +93,24 @@ struct NowPlayingBar: View {
                         .font(.body)
                 }
                 .buttonStyle(.plain)
+                .help("Previous track")
+                .accessibilityLabel("Previous track")
 
                 Button(action: { appService.togglePlayPause() }) {
                     Image(systemName: appService.isPlaying ? "pause.fill" : "play.fill")
                         .font(.title2)
                 }
                 .buttonStyle(.plain)
+                .help(appService.isPlaying ? "Pause" : "Play")
+                .accessibilityLabel(appService.isPlaying ? "Pause" : "Play")
 
                 Button(action: { appService.nextTrack() }) {
                     Image(systemName: "forward.fill")
                         .font(.body)
                 }
                 .buttonStyle(.plain)
+                .help("Next track")
+                .accessibilityLabel("Next track")
             }
 
             progressBar
@@ -136,6 +143,7 @@ struct NowPlayingBar: View {
                 }
             )
             .frame(width: 300)
+            .accessibilityLabel("Playback position")
 
             Text(formatTime(appService.currentDurationMs))
                 .font(.caption2.monospacedDigit())
@@ -157,6 +165,7 @@ struct NowPlayingBar: View {
             Image(systemName: "speaker.fill")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
 
             Slider(
                 value: Binding(
@@ -166,6 +175,7 @@ struct NowPlayingBar: View {
                 in: 0...1
             )
             .frame(width: 80)
+            .accessibilityLabel("Volume")
         }
     }
 
@@ -185,6 +195,19 @@ struct NowPlayingBar: View {
         }
         .buttonStyle(.plain)
         .font(.caption)
+        .help(repeatHelp)
+        .accessibilityLabel(repeatHelp)
+    }
+
+    private var repeatHelp: String {
+        switch appService.repeatMode {
+        case .none:
+            return "Repeat: off"
+        case .album:
+            return "Repeat: album"
+        case .track:
+            return "Repeat: track"
+        }
     }
 
     // MARK: - Formatting

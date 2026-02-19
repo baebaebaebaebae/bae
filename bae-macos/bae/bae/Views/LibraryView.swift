@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct LibraryView: View {
     let appService: AppService
@@ -8,6 +9,9 @@ struct LibraryView: View {
     @State private var selection: ArtistSelection = .all
     @State private var selectedAlbumId: String?
     @State private var error: String?
+    @State private var importFolderURL: URL?
+    @State private var showingImportPicker = false
+    @State private var showingSettings = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -58,6 +62,7 @@ struct LibraryView: View {
                 NowPlayingBar(appService: appService)
             }
         }
+        .focusedSceneValue(\.appService, appService)
         .task {
             loadArtists()
             loadAlbums()
@@ -66,17 +71,45 @@ struct LibraryView: View {
             selectedAlbumId = nil
             loadAlbums()
         }
-        .onKeyPress(.space) {
-            appService.togglePlayPause()
-            return .handled
+        .onReceive(NotificationCenter.default.publisher(for: .importFolder)) { _ in
+            showingImportPicker = true
         }
-        .onKeyPress(.rightArrow, modifiers: .command) {
-            appService.nextTrack()
-            return .handled
+        .fileImporter(
+            isPresented: $showingImportPicker,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            if case let .success(urls) = result, let url = urls.first {
+                importFolderURL = url
+            }
         }
-        .onKeyPress(.leftArrow, modifiers: .command) {
-            appService.previousTrack()
-            return .handled
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            handleDrop(providers)
+        }
+        .sheet(item: $importFolderURL) { url in
+            ImportView(folderURL: url, appService: appService) {
+                importFolderURL = nil
+                loadArtists()
+                loadAlbums()
+            }
+        }
+        .sheet(isPresented: $showingSettings) {
+            SettingsView(appService: appService)
+        }
+        .toolbar {
+            ToolbarItemGroup {
+                Button(action: { showingImportPicker = true }) {
+                    Label("Import", systemImage: "plus")
+                }
+                .help("Import a folder of music")
+                .accessibilityLabel("Import folder")
+
+                Button(action: { showingSettings = true }) {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .help("Open settings")
+                .accessibilityLabel("Settings")
+            }
         }
     }
 
@@ -113,4 +146,32 @@ struct LibraryView: View {
             self.error = error.localizedDescription
         }
     }
+
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+        guard provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) else {
+            return false
+        }
+
+        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+            guard let data = item as? Data,
+                  let url = URL(dataRepresentation: data, relativeTo: nil) else {
+                return
+            }
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir),
+                  isDir.boolValue else {
+                return
+            }
+            DispatchQueue.main.async {
+                importFolderURL = url
+            }
+        }
+        return true
+    }
+}
+
+// Make URL identifiable for .sheet(item:)
+extension URL: @retroactive Identifiable {
+    public var id: String { absoluteString }
 }
