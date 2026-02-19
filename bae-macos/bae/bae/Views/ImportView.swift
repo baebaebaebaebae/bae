@@ -10,10 +10,10 @@ struct ImportView: View {
     @State private var searchAlbum = ""
 
     var body: some View {
-        NavigationSplitView {
+        HSplitView {
             candidateList
-                .navigationTitle("Scanned Folders")
-        } detail: {
+                .frame(minWidth: 200, idealWidth: 250, maxWidth: 350)
+
             if let candidate = selectedCandidate {
                 metadataSearchView(for: candidate)
             } else {
@@ -22,14 +22,6 @@ struct ImportView: View {
                     systemImage: "folder",
                     description: Text("Choose a scanned folder to search for metadata")
                 )
-            }
-        }
-        .toolbar {
-            ToolbarItem {
-                Button(action: { openFolderAndScan() }) {
-                    Label("Scan Folder", systemImage: "folder.badge.plus")
-                }
-                .help("Scan a folder for music to import")
             }
         }
     }
@@ -189,17 +181,6 @@ struct ImportView: View {
     }
 
     // MARK: - Actions
-
-    private func openFolderAndScan() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.message = "Select a folder containing music to import"
-        panel.prompt = "Scan"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        appService.scanFolder(path: url.path)
-    }
 
     private func searchMusicbrainz() {
         isSearching = true

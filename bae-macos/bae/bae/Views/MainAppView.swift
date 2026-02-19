@@ -63,8 +63,14 @@ struct MainAppView: View {
 
     private var sectionBar: some View {
         HStack(spacing: 4) {
-            sectionButton("Library", section: .library)
-            sectionButton("Import", section: .importing, badge: activeImportCount)
+            Picker("Section", selection: $activeSection) {
+                Text("Library").tag(MainSection.library)
+                Text("Import").tag(MainSection.importing)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 200)
+
             Spacer()
 
             Button(action: { openFolderAndScan() }) {
@@ -85,33 +91,6 @@ struct MainAppView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(.bar)
-    }
-
-    private func sectionButton(_ label: String, section: MainSection, badge: Int = 0) -> some View {
-        Button(action: { activeSection = section }) {
-            HStack(spacing: 4) {
-                Text(label)
-                if badge > 0 {
-                    Text("\(badge)")
-                        .font(.caption2.bold())
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Color.accentColor)
-                        .foregroundStyle(.white)
-                        .clipShape(Capsule())
-                }
-            }
-        }
-        .buttonStyle(.bordered)
-        .tint(activeSection == section ? .accentColor : .secondary)
-        .controlSize(.small)
-    }
-
-    private var activeImportCount: Int {
-        appService.importStatuses.values.filter {
-            if case .importing = $0 { return true }
-            return false
-        }.count
     }
 
     // MARK: - Scan + Drop
