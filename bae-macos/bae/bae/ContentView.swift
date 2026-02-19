@@ -7,6 +7,20 @@ struct ContentView: View {
     @State private var error: String?
 
     var body: some View {
+        Group {
+            if let handle = appHandle {
+                LibraryView(appHandle: handle)
+            } else {
+                libraryPicker
+            }
+        }
+        .frame(minWidth: 900, minHeight: 600)
+        .task {
+            loadLibraries()
+        }
+    }
+
+    private var libraryPicker: some View {
         NavigationSplitView {
             List(libraries, id: \.id, selection: $selectedLibraryId) { library in
                 VStack(alignment: .leading) {
@@ -19,9 +33,12 @@ struct ContentView: View {
             }
             .navigationTitle("Libraries")
         } detail: {
-            if let handle = appHandle {
-                Text("Library loaded: \(handle.libraryId())")
-                    .font(.title2)
+            if let error {
+                ContentUnavailableView(
+                    "Error",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(error)
+                )
             } else if selectedLibraryId != nil {
                 ProgressView("Loading...")
             } else {
@@ -31,10 +48,6 @@ struct ContentView: View {
                     description: Text("Choose a library from the sidebar")
                 )
             }
-        }
-        .frame(minWidth: 700, minHeight: 500)
-        .task {
-            loadLibraries()
         }
         .onChange(of: selectedLibraryId) { _, newValue in
             if let id = newValue {

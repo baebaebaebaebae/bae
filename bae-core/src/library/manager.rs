@@ -362,6 +362,11 @@ impl LibraryManager {
         Ok(self.database.search_library(query, limit).await?)
     }
 
+    /// Get all artists that have at least one album
+    pub async fn get_artists_with_albums(&self) -> Result<Vec<DbArtist>, LibraryError> {
+        Ok(self.database.get_artists_with_albums().await?)
+    }
+
     /// Get albums for an artist
     pub async fn get_albums_for_artist(
         &self,

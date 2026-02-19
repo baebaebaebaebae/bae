@@ -413,6 +413,21 @@ impl Database {
             .await?;
         Ok(row.as_ref().map(Self::row_to_artist))
     }
+    /// Get all artists that have at least one album, sorted by sort_name/name.
+    pub async fn get_artists_with_albums(&self) -> Result<Vec<DbArtist>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT a.* FROM artists a
+            JOIN album_artists aa ON a.id = aa.artist_id
+            GROUP BY a.id
+            ORDER BY COALESCE(a.sort_name, a.name) COLLATE NOCASE
+            "#,
+        )
+        .fetch_all(&self.inner.read_pool)
+        .await?;
+        Ok(rows.iter().map(Self::row_to_artist).collect())
+    }
+
     /// Get albums for an artist (via album_artists join table)
     pub async fn get_albums_for_artist(
         &self,
