@@ -14,6 +14,11 @@ class AppService: AppEventHandler, @unchecked Sendable {
     var volume: Float = 1.0
     var repeatMode: BridgeRepeatMode = .none
 
+    // Import state
+    var scanResults: [BridgeImportCandidate] = []
+    var importStatuses: [String: BridgeImportStatus] = [:]
+    var libraryVersion: Int = 0
+
     init(appHandle: AppHandle) {
         self.appHandle = appHandle
         appHandle.setEventHandler(handler: self)
@@ -59,8 +64,26 @@ class AppService: AppEventHandler, @unchecked Sendable {
         }
     }
 
+    func onScanResult(candidate: BridgeImportCandidate) {
+        Task { @MainActor in
+            self.scanResults.append(candidate)
+        }
+    }
+
+    func onImportProgress(folderPath: String, status: BridgeImportStatus) {
+        Task { @MainActor in
+            self.importStatuses[folderPath] = status
+        }
+    }
+
+    func onLibraryChanged() {
+        Task { @MainActor in
+            self.libraryVersion += 1
+        }
+    }
+
     func onError(message: String) {
-        print("Playback error: \(message)")
+        print("Error: \(message)")
     }
 
     // MARK: - Playback controls
@@ -116,6 +139,39 @@ class AppService: AppEventHandler, @unchecked Sendable {
             appHandle.setRepeatMode(mode: .none)
         }
     }
+
+    // MARK: - Import
+
+    func scanFolder(path: String) {
+        scanResults = []
+        Task.detached { [appHandle] in
+            try? appHandle.scanFolder(path: path)
+        }
+    }
+
+    func searchMusicbrainz(artist: String, album: String) async -> [BridgeMetadataResult] {
+        return await Task.detached { [appHandle] in
+            (try? appHandle.searchMusicbrainz(artist: artist, album: album)) ?? []
+        }.value
+    }
+
+    func searchDiscogs(artist: String, album: String) async -> [BridgeMetadataResult] {
+        return await Task.detached { [appHandle] in
+            (try? appHandle.searchDiscogs(artist: artist, album: album)) ?? []
+        }.value
+    }
+
+    func commitImport(folderPath: String, releaseId: String, source: String) {
+        Task.detached { [appHandle] in
+            try? appHandle.commitImport(
+                folderPath: folderPath,
+                releaseId: releaseId,
+                source: source
+            )
+        }
+    }
+
+    // MARK: - Computed properties
 
     /// Whether there is an active track (playing, paused, or loading).
     var isActive: Bool {

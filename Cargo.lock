@@ -890,6 +890,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uniffi",
+ "uuid",
 ]
 
 [[package]]

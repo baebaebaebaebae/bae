@@ -8,6 +8,7 @@ struct LibraryView: View {
     @State private var selection: ArtistSelection = .all
     @State private var selectedAlbumId: String?
     @State private var error: String?
+    @State private var showingImport = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,6 +53,15 @@ struct LibraryView: View {
                     )
                 }
             }
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        openFolderAndScan()
+                    } label: {
+                        Label("Import", systemImage: "plus")
+                    }
+                }
+            }
 
             if appService.isActive {
                 Divider()
@@ -65,6 +75,16 @@ struct LibraryView: View {
         .onChange(of: selection) { _, _ in
             selectedAlbumId = nil
             loadAlbums()
+        }
+        .onChange(of: appService.libraryVersion) { _, _ in
+            loadArtists()
+            loadAlbums()
+        }
+        .sheet(isPresented: $showingImport) {
+            ImportView(
+                appService: appService,
+                isPresented: $showingImport
+            )
         }
         .onKeyPress(.space) {
             appService.togglePlayPause()
@@ -90,6 +110,20 @@ struct LibraryView: View {
             }
             return "Albums"
         }
+    }
+
+    private func openFolderAndScan() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Select a folder containing music to import"
+        panel.prompt = "Scan"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        appService.scanFolder(path: url.path)
+        showingImport = true
     }
 
     private func loadArtists() {

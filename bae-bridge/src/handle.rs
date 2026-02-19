@@ -1,17 +1,20 @@
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bae_core::config::Config;
 use bae_core::db::Database;
 use bae_core::image_server::{self, ImageServerHandle};
+use bae_core::import::{ImportProgress, ImportService, ImportServiceHandle, ScanEvent};
 use bae_core::keys::KeyService;
 use bae_core::library::SharedLibraryManager;
 use bae_core::playback::{PlaybackHandle, PlaybackProgress, PlaybackService, PlaybackState};
 use tracing::{info, warn};
 
 use crate::types::{
-    BridgeAlbum, BridgeAlbumDetail, BridgeArtist, BridgeError, BridgeFile, BridgeLibraryInfo,
-    BridgePlaybackState, BridgeRelease, BridgeRepeatMode, BridgeTrack,
+    BridgeAlbum, BridgeAlbumDetail, BridgeArtist, BridgeError, BridgeFile, BridgeImportCandidate,
+    BridgeImportStatus, BridgeLibraryInfo, BridgeMetadataResult, BridgePlaybackState,
+    BridgeRelease, BridgeRepeatMode, BridgeTrack,
 };
 
 /// Discover all libraries in ~/.bae/libraries/.
@@ -28,12 +31,15 @@ pub fn discover_libraries() -> Result<Vec<BridgeLibraryInfo>, BridgeError> {
         .collect())
 }
 
-/// Callback interface for playback events. Implemented by Swift.
+/// Callback interface for playback and import events. Implemented by Swift.
 #[uniffi::export(callback_interface)]
 pub trait AppEventHandler: Send + Sync {
     fn on_playback_state_changed(&self, state: BridgePlaybackState);
     fn on_playback_progress(&self, position_ms: u64, duration_ms: u64, track_id: String);
     fn on_queue_updated(&self, track_ids: Vec<String>);
+    fn on_scan_result(&self, candidate: BridgeImportCandidate);
+    fn on_import_progress(&self, folder_path: String, status: BridgeImportStatus);
+    fn on_library_changed(&self);
     fn on_error(&self, message: String);
 }
 
@@ -43,10 +49,10 @@ pub struct AppHandle {
     runtime: tokio::runtime::Runtime,
     config: Config,
     library_manager: SharedLibraryManager,
-    #[allow(dead_code)]
     key_service: KeyService,
     image_server: ImageServerHandle,
     playback_handle: PlaybackHandle,
+    import_handle: ImportServiceHandle,
     event_handler: Mutex<Option<Arc<dyn AppEventHandler>>>,
 }
 
@@ -391,23 +397,203 @@ impl AppHandle {
         self.playback_handle.set_repeat_mode(core_mode);
     }
 
-    /// Register a callback handler for playback events.
-    /// Spawns a background task that forwards PlaybackProgress events to the handler.
+    // MARK: - Import
+
+    /// Scan a folder for importable music. Results arrive via on_scan_result callbacks.
+    pub fn scan_folder(&self, path: String) -> Result<(), BridgeError> {
+        self.import_handle
+            .enqueue_folder_scan(PathBuf::from(path))
+            .map_err(|e| BridgeError::Import { msg: e })
+    }
+
+    /// Search MusicBrainz for metadata matching a candidate.
+    pub fn search_musicbrainz(
+        &self,
+        artist: String,
+        album: String,
+    ) -> Result<Vec<BridgeMetadataResult>, BridgeError> {
+        self.runtime.block_on(async {
+            let params = bae_core::musicbrainz::ReleaseSearchParams {
+                artist: Some(artist),
+                album: Some(album),
+                ..Default::default()
+            };
+            let releases = bae_core::musicbrainz::search_releases_with_params(&params)
+                .await
+                .map_err(|e| BridgeError::Import {
+                    msg: format!("MusicBrainz search failed: {e}"),
+                })?;
+
+            Ok(releases
+                .into_iter()
+                .map(|r| {
+                    let year = r
+                        .date
+                        .as_ref()
+                        .and_then(|d| d.split('-').next())
+                        .and_then(|y| y.parse::<i32>().ok());
+                    BridgeMetadataResult {
+                        source: "musicbrainz".to_string(),
+                        release_id: r.release_id,
+                        title: r.title,
+                        artist: r.artist,
+                        year,
+                        format: r.format,
+                        label: r.label,
+                        track_count: 0,
+                    }
+                })
+                .collect())
+        })
+    }
+
+    /// Search Discogs for metadata matching a candidate.
+    pub fn search_discogs(
+        &self,
+        artist: String,
+        album: String,
+    ) -> Result<Vec<BridgeMetadataResult>, BridgeError> {
+        self.runtime.block_on(async {
+            let api_key =
+                self.key_service
+                    .get_discogs_key()
+                    .ok_or_else(|| BridgeError::Import {
+                        msg: "Discogs API key not configured".to_string(),
+                    })?;
+            let client = bae_core::discogs::DiscogsClient::new(api_key);
+            let params = bae_core::discogs::client::DiscogsSearchParams {
+                artist: Some(artist),
+                release_title: Some(album),
+                ..Default::default()
+            };
+            let results =
+                client
+                    .search_with_params(&params)
+                    .await
+                    .map_err(|e| BridgeError::Import {
+                        msg: format!("Discogs search failed: {e}"),
+                    })?;
+
+            Ok(results
+                .into_iter()
+                .map(|r| {
+                    let year = r.year.as_ref().and_then(|y| y.parse::<i32>().ok());
+                    let format = r.format.as_ref().map(|f| f.join(", "));
+                    let label = r.label.as_ref().and_then(|l| l.first().cloned());
+                    BridgeMetadataResult {
+                        source: "discogs".to_string(),
+                        release_id: r.id.to_string(),
+                        title: r.title,
+                        artist: String::new(),
+                        year,
+                        format,
+                        label,
+                        track_count: 0,
+                    }
+                })
+                .collect())
+        })
+    }
+
+    /// Start importing a folder with the selected metadata release.
+    pub fn commit_import(
+        &self,
+        folder_path: String,
+        release_id: String,
+        source: String,
+    ) -> Result<(), BridgeError> {
+        self.runtime.block_on(async {
+            let import_id = uuid::Uuid::new_v4().to_string();
+            let folder = PathBuf::from(&folder_path);
+
+            let request = if source == "musicbrainz" {
+                bae_core::import::ImportRequest::Folder {
+                    import_id,
+                    discogs_release: None,
+                    mb_release: Some(bae_core::musicbrainz::MbRelease {
+                        release_id,
+                        release_group_id: String::new(),
+                        title: String::new(),
+                        artist: String::new(),
+                        date: None,
+                        first_release_date: None,
+                        format: None,
+                        country: None,
+                        label: None,
+                        catalog_number: None,
+                        barcode: None,
+                        is_compilation: false,
+                    }),
+                    folder,
+                    master_year: 0,
+                    managed: true,
+                    selected_cover: None,
+                }
+            } else {
+                // Discogs: need to fetch the full release first
+                let api_key =
+                    self.key_service
+                        .get_discogs_key()
+                        .ok_or_else(|| BridgeError::Import {
+                            msg: "Discogs API key not configured".to_string(),
+                        })?;
+                let client = bae_core::discogs::DiscogsClient::new(api_key);
+                let discogs_release =
+                    client
+                        .get_release(&release_id)
+                        .await
+                        .map_err(|e| BridgeError::Import {
+                            msg: format!("Failed to fetch Discogs release: {e}"),
+                        })?;
+                bae_core::import::ImportRequest::Folder {
+                    import_id,
+                    discogs_release: Some(discogs_release),
+                    mb_release: None,
+                    folder,
+                    master_year: 0,
+                    managed: true,
+                    selected_cover: None,
+                }
+            };
+
+            self.import_handle
+                .send_request(request)
+                .await
+                .map_err(|e| BridgeError::Import { msg: e })?;
+            Ok(())
+        })
+    }
+
+    // MARK: - Events
+
+    /// Register a callback handler for playback and import events.
+    /// Spawns background tasks that forward events to the handler.
     pub fn set_event_handler(&self, handler: Box<dyn AppEventHandler>) {
         let handler: Arc<dyn AppEventHandler> = Arc::from(handler);
         let prev = self.event_handler.lock().unwrap().replace(handler.clone());
         drop(prev);
 
+        // Playback events
         let rx = self.playback_handle.subscribe_progress();
         let lm = self.library_manager.clone();
+        self.runtime
+            .spawn(dispatch_playback_events(rx, handler.clone(), lm));
 
-        self.runtime.spawn(dispatch_events(rx, handler, lm));
+        // Scan events
+        let scan_rx = self.import_handle.subscribe_folder_scan_events();
+        self.runtime
+            .spawn(dispatch_scan_events(scan_rx, handler.clone()));
+
+        // Import progress events
+        let import_rx = self.import_handle.subscribe_all_imports();
+        self.runtime
+            .spawn(dispatch_import_events(import_rx, handler));
     }
 }
 
 /// Background task that reads PlaybackProgress events and dispatches them
 /// to the Swift event handler callback.
-async fn dispatch_events(
+async fn dispatch_playback_events(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<PlaybackProgress>,
     handler: Arc<dyn AppEventHandler>,
     library_manager: SharedLibraryManager,
@@ -435,6 +621,122 @@ async fn dispatch_events(
             }
             // Other events (Seeked, SeekError, TrackCompleted, etc.) don't need
             // separate handling -- state changes cover the UI updates.
+            _ => {}
+        }
+    }
+}
+
+/// Background task that reads folder scan events and forwards candidates to Swift.
+async fn dispatch_scan_events(
+    mut rx: tokio::sync::broadcast::Receiver<ScanEvent>,
+    handler: Arc<dyn AppEventHandler>,
+) {
+    use bae_core::import::folder_scanner::AudioContent;
+
+    while let Ok(event) = rx.recv().await {
+        match event {
+            ScanEvent::Candidate(candidate) => {
+                let (track_count, format) = match &candidate.files.audio {
+                    AudioContent::CueFlacPairs(pairs) => {
+                        let count: usize = pairs.iter().map(|p| p.track_count).sum();
+                        (count as u32, "CUE+FLAC".to_string())
+                    }
+                    AudioContent::TrackFiles(tracks) => (tracks.len() as u32, "FLAC".to_string()),
+                };
+
+                let total_size_bytes = match &candidate.files.audio {
+                    AudioContent::CueFlacPairs(pairs) => pairs
+                        .iter()
+                        .map(|p| p.audio_file.size + p.cue_file.size)
+                        .sum(),
+                    AudioContent::TrackFiles(tracks) => tracks.iter().map(|t| t.size).sum(),
+                };
+
+                handler.on_scan_result(BridgeImportCandidate {
+                    folder_path: candidate.path.to_string_lossy().to_string(),
+                    artist_name: String::new(),
+                    album_title: candidate.name,
+                    track_count,
+                    format,
+                    total_size_bytes,
+                });
+            }
+            ScanEvent::Error(msg) => {
+                handler.on_error(msg);
+            }
+            ScanEvent::Finished => {
+                // No specific callback for scan finished; UI can track this
+                // via the absence of new candidates.
+            }
+        }
+    }
+}
+
+/// Background task that reads import progress events and forwards them to Swift.
+async fn dispatch_import_events(
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<ImportProgress>,
+    handler: Arc<dyn AppEventHandler>,
+) {
+    while let Some(event) = rx.recv().await {
+        match event {
+            ImportProgress::Preparing {
+                import_id,
+                step,
+                album_title,
+                ..
+            } => {
+                handler.on_import_progress(
+                    import_id,
+                    BridgeImportStatus::Importing {
+                        progress_percent: 0,
+                    },
+                );
+
+                info!(
+                    "Import preparing: {} - {}",
+                    album_title,
+                    step.display_text()
+                );
+            }
+            ImportProgress::Started { id, .. } => {
+                handler.on_import_progress(
+                    id,
+                    BridgeImportStatus::Importing {
+                        progress_percent: 0,
+                    },
+                );
+            }
+            ImportProgress::Progress {
+                id,
+                percent,
+                import_id: Some(iid),
+                ..
+            } => {
+                // Only forward release-level progress, not per-track
+                if id != iid {
+                    handler.on_import_progress(
+                        iid,
+                        BridgeImportStatus::Importing {
+                            progress_percent: percent as u32,
+                        },
+                    );
+                }
+            }
+            ImportProgress::Complete {
+                release_id: None,
+                import_id: Some(iid),
+                ..
+            } => {
+                handler.on_import_progress(iid, BridgeImportStatus::Complete);
+                handler.on_library_changed();
+            }
+            ImportProgress::Failed {
+                error,
+                import_id: Some(iid),
+                ..
+            } => {
+                handler.on_import_progress(iid, BridgeImportStatus::Error { message: error });
+            }
             _ => {}
         }
     }
@@ -592,8 +894,18 @@ pub fn init_app(library_id: String) -> Result<Arc<AppHandle>, BridgeError> {
 
     // Create library manager
     let library_manager =
-        bae_core::library::LibraryManager::new(database, encryption_service.clone());
+        bae_core::library::LibraryManager::new(database.clone(), encryption_service.clone());
     let shared_library = SharedLibraryManager::new(library_manager);
+
+    // Start import service
+    let import_handle = ImportService::start(
+        runtime.handle().clone(),
+        shared_library.clone(),
+        encryption_service.clone(),
+        Arc::new(database),
+        key_service.clone(),
+        config.library_dir.clone(),
+    );
 
     // Start playback service (needs an owned LibraryManager clone)
     let playback_handle = PlaybackService::start(
@@ -620,6 +932,7 @@ pub fn init_app(library_id: String) -> Result<Arc<AppHandle>, BridgeError> {
         key_service,
         image_server,
         playback_handle,
+        import_handle,
         event_handler: Mutex::new(None),
     }))
 }
