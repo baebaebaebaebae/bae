@@ -72,8 +72,9 @@ impl PlaybackQueue {
     }
 
     /// Reorder: move track from `from` index to `to` index.
+    /// `to` may equal `queue.len()` to move an item to the end.
     pub fn reorder(&mut self, from: usize, to: usize) {
-        if from < self.queue.len() && to < self.queue.len() && from != to {
+        if from < self.queue.len() && to <= self.queue.len() && from != to {
             if let Some(track_id) = self.queue.remove(from) {
                 if to > from {
                     self.queue.insert(to - 1, track_id);
@@ -236,6 +237,14 @@ mod tests {
         q.add_to_queue(vec!["a".into(), "b".into(), "c".into(), "d".into()]);
         q.reorder(0, 2);
         assert_eq!(q.tracks(), vec!["b", "a", "c", "d"]);
+    }
+
+    #[test]
+    fn test_reorder_forward_to_end() {
+        let mut q = PlaybackQueue::new();
+        q.add_to_queue(vec!["a".into(), "b".into(), "c".into(), "d".into()]);
+        q.reorder(0, 4);
+        assert_eq!(q.tracks(), vec!["b", "c", "d", "a"]);
     }
 
     #[test]

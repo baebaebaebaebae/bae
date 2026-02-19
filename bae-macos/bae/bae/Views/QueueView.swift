@@ -1,9 +1,12 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct QueueView: View {
     let appService: AppService
     let onClose: () -> Void
     @State private var hoveredIndex: Int?
+    @State private var draggedTrackId: String?
+    @State private var dropInsertIndex: Int?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,27 +26,50 @@ struct QueueView: View {
                 )
                 .frame(maxHeight: .infinity)
             } else {
-                List {
-                    ForEach(Array(appService.queueItems.enumerated()), id: \.element.trackId) { index, item in
-                        queueItemRow(item, index: index)
-                            .draggable(item.trackId) {
-                                Text(item.title)
-                                    .padding(4)
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(Array(appService.queueItems.enumerated()), id: \.element.trackId) { index, item in
+                            VStack(spacing: 0) {
+                                // Insertion line above this row
+                                if dropInsertIndex == index {
+                                    insertionLine
+                                }
+                                queueItemRow(item, index: index)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 4)
+                                    .opacity(draggedTrackId == item.trackId ? 0.3 : 1.0)
+                                Divider().padding(.leading, 62)
                             }
-                    }
-                    .onMove { from, to in
-                        guard let fromIndex = from.first else { return }
-                        appService.reorderQueue(
-                            fromIndex: UInt32(fromIndex),
-                            toIndex: UInt32(to > fromIndex ? to - 1 : to)
-                        )
+                            .onDrop(of: [UTType.plainText], delegate: QueueDropDelegate(
+                                targetIndex: index,
+                                items: appService.queueItems,
+                                draggedTrackId: $draggedTrackId,
+                                dropInsertIndex: $dropInsertIndex,
+                                onReorder: { from, to in
+                                    appService.reorderQueue(
+                                        fromIndex: UInt32(from),
+                                        toIndex: UInt32(to)
+                                    )
+                                }
+                            ))
+                        }
+                        // Insertion line at the very end
+                        if dropInsertIndex == appService.queueItems.count {
+                            insertionLine
+                        }
                     }
                 }
-                .scrollContentBackground(.hidden)
                 .background(Theme.background)
             }
         }
         .background(Theme.surface)
+    }
+
+    private var insertionLine: some View {
+        Rectangle()
+            .fill(Color.accentColor)
+            .frame(height: 2)
+            .padding(.horizontal, 8)
     }
 
     // MARK: - Header
@@ -164,6 +190,10 @@ struct QueueView: View {
         .onHover { isHovered in
             hoveredIndex = isHovered ? index : nil
         }
+        .onDrag {
+            draggedTrackId = item.trackId
+            return NSItemProvider(object: item.trackId as NSString)
+        }
         .onTapGesture(count: 2) {
             appService.skipToQueueIndex(index: UInt32(index))
         }
@@ -208,5 +238,57 @@ struct QueueView: View {
         let minutes = totalSeconds / 60
         let seconds = totalSeconds % 60
         return "\(minutes):\(String(format: "%02d", seconds))"
+    }
+}
+
+// MARK: - Drop Delegate
+
+private struct QueueDropDelegate: DropDelegate {
+    let targetIndex: Int
+    let items: [BridgeQueueItem]
+    @Binding var draggedTrackId: String?
+    @Binding var dropInsertIndex: Int?
+    let onReorder: (Int, Int) -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard let draggedId = draggedTrackId,
+              let fromIndex = items.firstIndex(where: { $0.trackId == draggedId }) else { return }
+
+        // Show insertion line: above targetIndex when dragging up, below when dragging down
+        if targetIndex > fromIndex {
+            dropInsertIndex = targetIndex + 1
+        } else if targetIndex < fromIndex {
+            dropInsertIndex = targetIndex
+        } else {
+            dropInsertIndex = nil
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let draggedId = draggedTrackId,
+              let fromIndex = items.firstIndex(where: { $0.trackId == draggedId }) else { return false }
+
+        // When dragging down, pass targetIndex + 1 because PlaybackQueue.reorder()
+        // does insert(to - 1) after remove(from) to compensate for the index shift.
+        let toIndex = targetIndex > fromIndex ? targetIndex + 1 : targetIndex
+        if toIndex != fromIndex {
+            onReorder(fromIndex, toIndex)
+        }
+
+        draggedTrackId = nil
+        dropInsertIndex = nil
+        return true
+    }
+
+    func dropExited(info: DropInfo) {
+        dropInsertIndex = nil
+    }
+
+    func validateDrop(info: DropInfo) -> Bool {
+        draggedTrackId != nil
     }
 }

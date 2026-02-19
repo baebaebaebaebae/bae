@@ -177,6 +177,17 @@ class AppService: AppEventHandler, @unchecked Sendable {
     }
 
     func reorderQueue(fromIndex: UInt32, toIndex: UInt32) {
+        // Optimistic local reorder for instant UI feedback (mirrors PlaybackQueue.reorder logic)
+        let from = Int(fromIndex)
+        let to = Int(toIndex)
+        if from < queueItems.count && to <= queueItems.count && from != to {
+            let item = queueItems.remove(at: from)
+            if to > from {
+                queueItems.insert(item, at: to - 1)
+            } else {
+                queueItems.insert(item, at: to)
+            }
+        }
         appHandle.reorderQueue(fromIndex: fromIndex, toIndex: toIndex)
     }
 
