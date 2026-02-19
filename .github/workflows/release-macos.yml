@@ -98,8 +98,10 @@ jobs:
 
     - name: Set version in Info.plist
       run: |
+        SHORT_SHA=$(git rev-parse --short HEAD)
         /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $BAE_VERSION" bae-macos/bae/bae/Info.plist
         /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BAE_VERSION" bae-macos/bae/bae/Info.plist
+        /usr/libexec/PlistBuddy -c "Add :BAEGitCommit string $SHORT_SHA" bae-macos/bae/bae/Info.plist
 
     - name: Build app
       run: |

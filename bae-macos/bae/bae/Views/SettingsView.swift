@@ -324,9 +324,9 @@ private struct AboutSettingsTab: View {
                 Text("Version \(version)")
                     .foregroundStyle(.secondary)
             }
-            if let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
-                Text("Build \(build)")
-                    .font(.caption)
+            if let commit = Bundle.main.infoDictionary?["BAEGitCommit"] as? String {
+                Text(commit)
+                    .font(.caption.monospaced())
                     .foregroundStyle(.tertiary)
             }
             Button("Check for Updates...") {
