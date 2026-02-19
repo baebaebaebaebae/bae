@@ -20,6 +20,11 @@ struct SyncSettingsView: View {
     @State private var secretKey = ""
     @State private var shareBaseUrl = ""
 
+    // Followed libraries
+    @State private var followedLibraries: [BridgeFollowedLibrary] = []
+    @State private var followCodeInput = ""
+    @State private var followError: String?
+
     /// Sync status comes from AppService (updated reactively by the background loop).
     /// Falls back to a direct query on first load.
     private var syncStatus: BridgeSyncStatus? {
@@ -33,6 +38,7 @@ struct SyncSettingsView: View {
             syncStatusSection
             s3ConfigSection
             identitySection
+            followedLibrariesSection
             membershipSection
         }
         .formStyle(.grouped)
@@ -148,6 +154,49 @@ struct SyncSettingsView: View {
         }
     }
 
+    // MARK: - Followed Libraries
+
+    private var followedLibrariesSection: some View {
+        Section("Followed Libraries") {
+            HStack {
+                TextField("Paste a follow code", text: $followCodeInput)
+                    .onSubmit { followLibrary() }
+                Button("Follow") {
+                    followLibrary()
+                }
+                .disabled(followCodeInput.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+
+            if let followError {
+                Text(followError)
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            }
+
+            if followedLibraries.isEmpty {
+                Text("No followed libraries")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(followedLibraries, id: \.id) { library in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(library.name)
+                                .font(.headline)
+                            Text(library.url)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Unfollow") {
+                            unfollowLibrary(id: library.id)
+                        }
+                        .foregroundStyle(.red)
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Membership
 
     private var membershipSection: some View {
@@ -215,6 +264,7 @@ struct SyncSettingsView: View {
         localSyncStatus = appService.appHandle.getSyncStatus()
         syncConfig = appService.appHandle.getSyncConfig()
         userPubkey = appService.appHandle.getUserPubkey()
+        followedLibraries = appService.appHandle.getFollowedLibraries()
 
         // Populate editable fields from current config
         if let config = syncConfig {
@@ -277,6 +327,30 @@ struct SyncSettingsView: View {
             followCode = try appService.appHandle.generateFollowCode()
         } catch {
             self.error = "Failed to generate follow code: \(error.localizedDescription)"
+        }
+    }
+
+    private func followLibrary() {
+        let code = followCodeInput.trimmingCharacters(in: .whitespaces)
+        guard !code.isEmpty else { return }
+
+        do {
+            let library = try appService.appHandle.followLibrary(followCode: code)
+            followedLibraries.append(library)
+            followCodeInput = ""
+            followError = nil
+        } catch {
+            followError = error.localizedDescription
+        }
+    }
+
+    private func unfollowLibrary(id: String) {
+        do {
+            try appService.appHandle.unfollowLibrary(libraryId: id)
+            followedLibraries.removeAll { $0.id == id }
+            followError = nil
+        } catch {
+            followError = "Failed to unfollow: \(error.localizedDescription)"
         }
     }
 }

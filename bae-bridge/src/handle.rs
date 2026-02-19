@@ -22,10 +22,10 @@ use tracing::{info, warn};
 use crate::types::{
     BridgeAlbum, BridgeAlbumDetail, BridgeAlbumSearchResult, BridgeArtist,
     BridgeArtistSearchResult, BridgeConfig, BridgeCoverSelection, BridgeError, BridgeFile,
-    BridgeImportCandidate, BridgeImportStatus, BridgeLibraryInfo, BridgeMember,
-    BridgeMetadataResult, BridgePlaybackState, BridgeRelease, BridgeRemoteCover, BridgeRepeatMode,
-    BridgeSaveSyncConfig, BridgeSearchResults, BridgeSyncConfig, BridgeSyncStatus, BridgeTrack,
-    BridgeTrackSearchResult,
+    BridgeFollowedLibrary, BridgeImportCandidate, BridgeImportStatus, BridgeLibraryInfo,
+    BridgeMember, BridgeMetadataResult, BridgePlaybackState, BridgeRelease, BridgeRemoteCover,
+    BridgeRepeatMode, BridgeSaveSyncConfig, BridgeSearchResults, BridgeSyncConfig,
+    BridgeSyncStatus, BridgeTrack, BridgeTrackSearchResult,
 };
 
 /// Discover all libraries in ~/.bae/libraries/.
@@ -1670,6 +1670,100 @@ impl AppHandle {
             &encryption_key,
             library_name,
         ))
+    }
+
+    /// Follow a remote library using a follow code string.
+    ///
+    /// Decodes the follow code, generates a UUID for the followed library, saves
+    /// the encryption key to the keyring, and adds the library to config.yaml.
+    pub fn follow_library(
+        &self,
+        follow_code: String,
+    ) -> Result<BridgeFollowedLibrary, BridgeError> {
+        let (proxy_url, encryption_key, name) = bae_core::follow_code::decode(&follow_code)
+            .map_err(|e| BridgeError::Config {
+                msg: format!("Invalid follow code: {e}"),
+            })?;
+
+        let id = uuid::Uuid::new_v4().to_string();
+        let display_name = name.unwrap_or_else(|| proxy_url.clone());
+
+        // Save encryption key to keyring
+        self.key_service
+            .set_followed_encryption_key(&id, &encryption_key)
+            .map_err(|e| BridgeError::Internal {
+                msg: format!("Failed to save encryption key: {e}"),
+            })?;
+
+        // Add to config and persist
+        let mut config = self.config.clone();
+        let followed = bae_core::config::FollowedLibrary {
+            id: id.clone(),
+            name: display_name.clone(),
+            proxy_url: proxy_url.clone(),
+        };
+        config
+            .add_followed_library(followed)
+            .map_err(|e| BridgeError::Config {
+                msg: format!("Failed to save followed library: {e}"),
+            })?;
+
+        info!("Followed library '{}' at {}", display_name, proxy_url);
+
+        Ok(BridgeFollowedLibrary {
+            id,
+            name: display_name,
+            url: proxy_url,
+        })
+    }
+
+    /// Unfollow a library by its ID.
+    ///
+    /// Removes the encryption key from the keyring, removes the library from
+    /// config.yaml, and deletes any local data (snapshot DB, etc.).
+    pub fn unfollow_library(&self, library_id: String) -> Result<(), BridgeError> {
+        // Delete encryption key from keyring (non-fatal if missing)
+        if let Err(e) = self.key_service.delete_followed_encryption_key(&library_id) {
+            warn!("Failed to delete followed library encryption key: {e}");
+        }
+
+        // Remove from config and persist
+        let mut config = self.config.clone();
+        config
+            .remove_followed_library(&library_id)
+            .map_err(|e| BridgeError::Config {
+                msg: format!("Failed to remove followed library: {e}"),
+            })?;
+
+        // Remove local data directory
+        let dir = Config::followed_library_dir(&library_id);
+        if dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&dir) {
+                warn!(
+                    "Failed to remove followed library data at {}: {e}",
+                    dir.display()
+                );
+            }
+        }
+
+        info!("Unfollowed library {library_id}");
+        Ok(())
+    }
+
+    /// Get the list of followed libraries.
+    ///
+    /// Reloads config from disk to pick up any changes made during this session.
+    pub fn get_followed_libraries(&self) -> Vec<BridgeFollowedLibrary> {
+        let config = Config::load();
+        config
+            .followed_libraries
+            .iter()
+            .map(|fl| BridgeFollowedLibrary {
+                id: fl.id.clone(),
+                name: fl.name.clone(),
+                url: fl.proxy_url.clone(),
+            })
+            .collect()
     }
 
     /// Read the membership chain from the sync bucket and return the current members.

@@ -222,6 +222,13 @@ pub struct BridgeTrackSearchResult {
     pub artist_name: String,
 }
 
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeFollowedLibrary {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+}
+
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum BridgeError {
     #[error("Not found: {msg}")]
