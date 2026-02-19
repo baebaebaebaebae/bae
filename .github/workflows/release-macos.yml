@@ -96,6 +96,11 @@ jobs:
       working-directory: ./bae-macos/bae
       run: xcodegen
 
+    - name: Set version in Info.plist
+      run: |
+        /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $BAE_VERSION" bae-macos/bae/bae/Info.plist
+        /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BAE_VERSION" bae-macos/bae/bae/Info.plist
+
     - name: Build app
       run: |
         xcodebuild -project bae-macos/bae/bae.xcodeproj \
