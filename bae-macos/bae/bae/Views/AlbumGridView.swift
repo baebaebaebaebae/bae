@@ -3,6 +3,7 @@ import SwiftUI
 struct AlbumGridView: View {
     let albums: [BridgeAlbum]
     let appHandle: AppHandle
+    @Binding var selectedAlbumId: String?
 
     private let columns = [
         GridItem(.adaptive(minimum: 160), spacing: 16)
@@ -12,7 +13,14 @@ struct AlbumGridView: View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 20) {
                 ForEach(albums, id: \.id) { album in
-                    AlbumCardView(album: album, appHandle: appHandle)
+                    AlbumCardView(
+                        album: album,
+                        appHandle: appHandle,
+                        isSelected: selectedAlbumId == album.id
+                    )
+                    .onTapGesture {
+                        selectedAlbumId = album.id
+                    }
                 }
             }
             .padding()
@@ -23,12 +31,20 @@ struct AlbumGridView: View {
 struct AlbumCardView: View {
     let album: BridgeAlbum
     let appHandle: AppHandle
+    let isSelected: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             albumArt
                 .frame(width: 160, height: 160)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(
+                            Color.accentColor,
+                            lineWidth: isSelected ? 3 : 0
+                        )
+                )
 
             Text(album.title)
                 .font(.callout)

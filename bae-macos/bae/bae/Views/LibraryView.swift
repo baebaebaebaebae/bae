@@ -6,6 +6,7 @@ struct LibraryView: View {
     @State private var artists: [BridgeArtist] = []
     @State private var albums: [BridgeAlbum] = []
     @State private var selection: ArtistSelection = .all
+    @State private var selectedAlbumId: String?
     @State private var error: String?
 
     var body: some View {
@@ -29,21 +30,33 @@ struct LibraryView: View {
                     description: Text("Import some music to get started")
                 )
             } else {
-                AlbumGridView(albums: albums, appHandle: appHandle)
-                    .navigationTitle(navigationTitle)
+                AlbumGridView(
+                    albums: albums,
+                    appHandle: appHandle,
+                    selectedAlbumId: $selectedAlbumId
+                )
+                .navigationTitle(navigationTitle)
             }
         } detail: {
-            ContentUnavailableView(
-                "Select an album",
-                systemImage: "square.stack",
-                description: Text("Choose an album to see its details")
-            )
+            if let selectedAlbumId {
+                AlbumDetailView(
+                    albumId: selectedAlbumId,
+                    appHandle: appHandle
+                )
+            } else {
+                ContentUnavailableView(
+                    "Select an album",
+                    systemImage: "square.stack",
+                    description: Text("Choose an album to see its details")
+                )
+            }
         }
         .task {
             loadArtists()
             loadAlbums()
         }
         .onChange(of: selection) { _, _ in
+            selectedAlbumId = nil
             loadAlbums()
         }
     }

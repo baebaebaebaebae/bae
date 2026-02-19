@@ -7,7 +7,10 @@ use bae_core::keys::KeyService;
 use bae_core::library::SharedLibraryManager;
 use tracing::info;
 
-use crate::types::{BridgeAlbum, BridgeArtist, BridgeError, BridgeLibraryInfo};
+use crate::types::{
+    BridgeAlbum, BridgeAlbumDetail, BridgeArtist, BridgeError, BridgeFile, BridgeLibraryInfo,
+    BridgeRelease, BridgeTrack,
+};
 
 /// Discover all libraries in ~/.bae/libraries/.
 #[uniffi::export]
@@ -144,6 +147,134 @@ impl AppHandle {
     /// Returns nil if no image file is present.
     pub fn get_image_url(&self, image_id: String) -> Option<String> {
         self.image_server.image_url_if_exists(&image_id)
+    }
+
+    /// Get full album detail including releases, tracks, files, and artists.
+    pub fn get_album_detail(&self, album_id: String) -> Result<BridgeAlbumDetail, BridgeError> {
+        self.runtime.block_on(async {
+            let lm = self.library_manager.get();
+
+            let album = lm
+                .get_album_by_id(&album_id)
+                .await
+                .map_err(|e| BridgeError::Database {
+                    msg: format!("{e}"),
+                })?
+                .ok_or_else(|| BridgeError::NotFound {
+                    msg: format!("Album '{album_id}' not found"),
+                })?;
+
+            let artists =
+                lm.get_artists_for_album(&album_id)
+                    .await
+                    .map_err(|e| BridgeError::Database {
+                        msg: format!("{e}"),
+                    })?;
+
+            let album_artist_names = artists
+                .iter()
+                .map(|a| a.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            let db_releases =
+                lm.get_releases_for_album(&album_id)
+                    .await
+                    .map_err(|e| BridgeError::Database {
+                        msg: format!("{e}"),
+                    })?;
+
+            let mut releases = Vec::with_capacity(db_releases.len());
+            for rel in &db_releases {
+                let db_tracks =
+                    lm.get_tracks(&rel.id)
+                        .await
+                        .map_err(|e| BridgeError::Database {
+                            msg: format!("{e}"),
+                        })?;
+
+                let mut tracks = Vec::with_capacity(db_tracks.len());
+                for t in &db_tracks {
+                    let track_artists = lm.get_artists_for_track(&t.id).await.map_err(|e| {
+                        BridgeError::Database {
+                            msg: format!("{e}"),
+                        }
+                    })?;
+
+                    let artist_names = if track_artists.is_empty() {
+                        album_artist_names.clone()
+                    } else {
+                        track_artists
+                            .iter()
+                            .map(|a| a.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    };
+
+                    tracks.push(BridgeTrack {
+                        id: t.id.clone(),
+                        title: t.title.clone(),
+                        disc_number: t.disc_number,
+                        track_number: t.track_number,
+                        duration_ms: t.duration_ms,
+                        artist_names,
+                    });
+                }
+
+                let db_files =
+                    lm.get_files_for_release(&rel.id)
+                        .await
+                        .map_err(|e| BridgeError::Database {
+                            msg: format!("{e}"),
+                        })?;
+
+                let files = db_files
+                    .into_iter()
+                    .map(|f| BridgeFile {
+                        id: f.id,
+                        original_filename: f.original_filename,
+                        file_size: f.file_size,
+                        content_type: f.content_type.to_string(),
+                    })
+                    .collect();
+
+                releases.push(BridgeRelease {
+                    id: rel.id.clone(),
+                    album_id: rel.album_id.clone(),
+                    release_name: rel.release_name.clone(),
+                    year: rel.year,
+                    format: rel.format.clone(),
+                    label: rel.label.clone(),
+                    catalog_number: rel.catalog_number.clone(),
+                    country: rel.country.clone(),
+                    tracks,
+                    files,
+                });
+            }
+
+            let bridge_album = BridgeAlbum {
+                id: album.id,
+                title: album.title,
+                year: album.year,
+                is_compilation: album.is_compilation,
+                cover_release_id: album.cover_release_id,
+                artist_names: album_artist_names,
+            };
+
+            let bridge_artists = artists
+                .into_iter()
+                .map(|a| BridgeArtist {
+                    id: a.id,
+                    name: a.name,
+                })
+                .collect();
+
+            Ok(BridgeAlbumDetail {
+                album: bridge_album,
+                artists: bridge_artists,
+                releases,
+            })
+        })
     }
 }
 
