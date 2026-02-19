@@ -3,6 +3,7 @@ import SwiftUI
 struct ArtistAlbumsView: View {
     let databaseService: DatabaseService
     let imageService: ImageService?
+    let playbackService: PlaybackService?
     let artist: Artist
     @State private var albums: [Album] = []
 
@@ -29,7 +30,8 @@ struct ArtistAlbumsView: View {
         .navigationTitle(artist.name)
         .navigationDestination(for: Album.self) { album in
             AlbumDetailView(
-                databaseService: databaseService, imageService: imageService, album: album)
+                databaseService: databaseService, imageService: imageService,
+                playbackService: playbackService, album: album)
         }
         .task {
             albums = (try? databaseService.albumsByArtist(artistId: artist.id)) ?? []

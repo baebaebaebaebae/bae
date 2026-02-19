@@ -46,33 +46,45 @@ struct ContentView: View {
                 }
             }
         case .library(let creds):
-            if let dbService = try? DatabaseService(path: BootstrapService.databasePath()) {
-                LibraryView(
-                    databaseService: dbService, imageService: appState.imageService,
-                    credentials: creds
-                ) {
-                    do {
-                        try keychainService.deleteCredentials()
-                        try? FileManager.default.removeItem(at: BootstrapService.databasePath())
-                        try? FileManager.default.removeItem(at: BootstrapService.syncCursorsPath())
-                        try? FileManager.default.removeItem(at: BootstrapService.imageCachePath())
-                        appState.cloudClient = nil
-                        appState.imageService = nil
-                        appState.bootstrapResult = nil
-                        appState.screen = .onboarding
-                    } catch {
-                        // Delete failed; user stays on library view
-                    }
+            libraryScreen(creds: creds)
+        }
+    }
+
+    @ViewBuilder
+    private func libraryScreen(creds: LibraryCredentials) -> some View {
+        if let dbService = try? DatabaseService(path: BootstrapService.databasePath()) {
+            let playback = appState.cloudClient.map { client in
+                PlaybackService(
+                    cloudClient: client, crypto: PlaceholderCryptoService(),
+                    encryptionKey: creds.encryptionKey, databaseService: dbService)
+            }
+
+            LibraryView(
+                databaseService: dbService, imageService: appState.imageService,
+                playbackService: playback, credentials: creds
+            ) {
+                do {
+                    playback?.stop()
+                    try keychainService.deleteCredentials()
+                    try? FileManager.default.removeItem(at: BootstrapService.databasePath())
+                    try? FileManager.default.removeItem(at: BootstrapService.syncCursorsPath())
+                    try? FileManager.default.removeItem(at: BootstrapService.imageCachePath())
+                    appState.cloudClient = nil
+                    appState.imageService = nil
+                    appState.bootstrapResult = nil
+                    appState.screen = .onboarding
+                } catch {
+                    // Delete failed; user stays on library view
                 }
-            } else {
-                ContentUnavailableView {
-                    Label("Database Error", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text("Could not open the library database.")
-                } actions: {
-                    Button("Re-sync") {
-                        appState.screen = .bootstrapping(creds)
-                    }
+            }
+        } else {
+            ContentUnavailableView {
+                Label("Database Error", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text("Could not open the library database.")
+            } actions: {
+                Button("Re-sync") {
+                    appState.screen = .bootstrapping(creds)
                 }
             }
         }

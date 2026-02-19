@@ -200,6 +200,36 @@ class DatabaseService {
             }
     }
 
+    func audioFormatForTrack(trackId: String) throws -> AudioFormat? {
+        let results: [AudioFormat] = try query(
+            sql: """
+                SELECT af.id, af.track_id, af.content_type, af.flac_headers, af.needs_headers,
+                       af.start_byte_offset, af.end_byte_offset, af.audio_data_start, af.file_id,
+                       af.sample_rate, af.bits_per_sample
+                FROM audio_formats af
+                WHERE af.track_id = ?1
+                """,
+            bind: { [self] stmt in
+                bindText(stmt, index: 1, value: trackId)
+            }
+        ) { stmt in
+            AudioFormat(
+                id: columnText(stmt, index: 0),
+                trackId: columnText(stmt, index: 1),
+                contentType: columnText(stmt, index: 2),
+                flacHeaders: columnOptionalBlob(stmt, index: 3),
+                needsHeaders: sqlite3_column_int(stmt, 4) != 0,
+                startByteOffset: columnOptionalInt(stmt, index: 5),
+                endByteOffset: columnOptionalInt(stmt, index: 6),
+                audioDataStart: Int(sqlite3_column_int64(stmt, 7)),
+                fileId: columnOptionalText(stmt, index: 8),
+                sampleRate: Int(sqlite3_column_int64(stmt, 9)),
+                bitsPerSample: Int(sqlite3_column_int64(stmt, 10))
+            )
+        }
+        return results.first
+    }
+
     // MARK: - Private Helpers
 
     private func query<T>(
@@ -247,5 +277,12 @@ class DatabaseService {
     private func columnOptionalInt(_ stmt: OpaquePointer?, index: Int32) -> Int? {
         guard sqlite3_column_type(stmt, index) != SQLITE_NULL else { return nil }
         return Int(sqlite3_column_int64(stmt, index))
+    }
+
+    private func columnOptionalBlob(_ stmt: OpaquePointer?, index: Int32) -> Data? {
+        guard sqlite3_column_type(stmt, index) != SQLITE_NULL else { return nil }
+        guard let bytes = sqlite3_column_blob(stmt, index) else { return nil }
+        let count = Int(sqlite3_column_bytes(stmt, index))
+        return Data(bytes: bytes, count: count)
     }
 }

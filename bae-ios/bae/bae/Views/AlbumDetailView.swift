@@ -3,6 +3,7 @@ import SwiftUI
 struct AlbumDetailView: View {
     let databaseService: DatabaseService
     let imageService: ImageService?
+    let playbackService: PlaybackService?
     let album: Album
     @State private var detail: AlbumDetail?
 
@@ -46,28 +47,7 @@ struct AlbumDetailView: View {
                 ForEach(detail.releases) { release in
                     Section(release.releaseName ?? "Tracks") {
                         ForEach(release.tracks) { track in
-                            HStack {
-                                if let num = track.trackNumber {
-                                    Text("\(num)")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 28, alignment: .trailing)
-                                }
-                                VStack(alignment: .leading) {
-                                    Text(track.title)
-                                    if let artists = track.artistNames {
-                                        Text(artists)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                Spacer()
-                                if let ms = track.durationMs {
-                                    Text(formatDuration(ms))
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
+                            trackRow(track: track, allTracks: release.tracks)
                         }
                     }
                 }
@@ -79,6 +59,55 @@ struct AlbumDetailView: View {
         .task {
             detail = try? databaseService.albumDetail(albumId: album.id)
         }
+    }
+
+    @ViewBuilder
+    private func trackRow(track: Track, allTracks: [Track]) -> some View {
+        let isCurrentTrack = playbackService?.currentTrack?.id == track.id
+
+        Button {
+            if let playbackService {
+                Task {
+                    await playbackService.play(
+                        track: track, albumArtId: album.coverReleaseId, allTracks: allTracks)
+                }
+            }
+        } label: {
+            HStack {
+                if let num = track.trackNumber {
+                    Text("\(num)")
+                        .font(.subheadline)
+                        .foregroundStyle(isCurrentTrack ? Color.accentColor : .secondary)
+                        .frame(width: 28, alignment: .trailing)
+                }
+                VStack(alignment: .leading) {
+                    Text(track.title)
+                        .foregroundStyle(isCurrentTrack ? Color.accentColor : .primary)
+                    if let artists = track.artistNames {
+                        Text(artists)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if isCurrentTrack, let playbackService {
+                    if playbackService.isLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else if playbackService.isPlaying {
+                        Image(systemName: "speaker.wave.2.fill")
+                            .font(.caption)
+                            .foregroundStyle(Color.accentColor)
+                    }
+                }
+                if let ms = track.durationMs {
+                    Text(formatDuration(ms))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private func formatDuration(_ ms: Int) -> String {

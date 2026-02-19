@@ -3,15 +3,19 @@ import SwiftUI
 struct LibraryView: View {
     let databaseService: DatabaseService
     let imageService: ImageService?
+    let playbackService: PlaybackService?
     let credentials: LibraryCredentials
     let onUnlink: () -> Void
 
     var body: some View {
         TabView {
-            ArtistListView(databaseService: databaseService, imageService: imageService)
-                .tabItem {
-                    Label("Library", systemImage: "books.vertical")
-                }
+            ArtistListView(
+                databaseService: databaseService, imageService: imageService,
+                playbackService: playbackService
+            )
+            .tabItem {
+                Label("Library", systemImage: "books.vertical")
+            }
             Text("Search coming soon")
                 .foregroundStyle(.secondary)
                 .tabItem {
@@ -21,6 +25,11 @@ struct LibraryView: View {
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if let playbackService, playbackService.currentTrack != nil {
+                MiniPlayerView(playbackService: playbackService, imageService: imageService)
+            }
         }
     }
 }

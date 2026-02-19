@@ -3,6 +3,7 @@ import SwiftUI
 struct ArtistListView: View {
     let databaseService: DatabaseService
     let imageService: ImageService?
+    let playbackService: PlaybackService?
     @State private var artists: [Artist] = []
     @State private var error: String?
 
@@ -30,7 +31,7 @@ struct ArtistListView: View {
                     .navigationDestination(for: Artist.self) { artist in
                         ArtistAlbumsView(
                             databaseService: databaseService, imageService: imageService,
-                            artist: artist)
+                            playbackService: playbackService, artist: artist)
                     }
                 }
             }
