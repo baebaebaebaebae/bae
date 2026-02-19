@@ -11,6 +11,7 @@ struct LibraryView: View {
     @State private var error: String?
     @State private var showingImport = false
     @State private var showingSettings = false
+    @State private var showingSyncSettings = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -63,6 +64,11 @@ struct LibraryView: View {
                     .help("Import a folder of music")
                     .accessibilityLabel("Import folder")
 
+                    Button(action: { showingSyncSettings = true }) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                    .help("Sync Settings")
+
                     Button(action: { showingSettings = true }) {
                         Label("Settings", systemImage: "gearshape")
                     }
@@ -97,6 +103,19 @@ struct LibraryView: View {
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView(appService: appService)
+        }
+        .sheet(isPresented: $showingSyncSettings) {
+            NavigationStack {
+                SyncSettingsView(appService: appService)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") {
+                                showingSyncSettings = false
+                            }
+                        }
+                    }
+            }
+            .frame(minWidth: 500, minHeight: 400)
         }
         .onKeyPress(.space) {
             appService.togglePlayPause()

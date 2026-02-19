@@ -152,6 +152,45 @@ pub struct BridgeConfig {
     pub subsonic_username: Option<String>,
 }
 
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeSyncStatus {
+    pub configured: bool,
+    pub syncing: bool,
+    pub last_sync_time: Option<String>,
+    pub error: Option<String>,
+    pub device_count: u32,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeMember {
+    pub pubkey: String,
+    /// "owner" or "member"
+    pub role: String,
+    pub added_by: Option<String>,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeSyncConfig {
+    pub cloud_provider: Option<String>,
+    pub s3_bucket: Option<String>,
+    pub s3_region: Option<String>,
+    pub s3_endpoint: Option<String>,
+    pub s3_key_prefix: Option<String>,
+    pub share_base_url: Option<String>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeSaveSyncConfig {
+    pub bucket: String,
+    pub region: String,
+    pub endpoint: Option<String>,
+    pub key_prefix: Option<String>,
+    pub access_key: String,
+    pub secret_key: String,
+    pub share_base_url: Option<String>,
+}
+
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum BridgeError {
     #[error("Not found: {msg}")]

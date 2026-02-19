@@ -11,12 +11,14 @@ use bae_core::import::{ImportProgress, ImportService, ImportServiceHandle, ScanE
 use bae_core::keys::KeyService;
 use bae_core::library::SharedLibraryManager;
 use bae_core::playback::{PlaybackHandle, PlaybackProgress, PlaybackService, PlaybackState};
+use bae_core::sync::bucket::SyncBucketClient;
 use tracing::{info, warn};
 
 use crate::types::{
     BridgeAlbum, BridgeAlbumDetail, BridgeArtist, BridgeConfig, BridgeCoverSelection, BridgeError,
-    BridgeFile, BridgeImportCandidate, BridgeImportStatus, BridgeLibraryInfo, BridgeMetadataResult,
-    BridgePlaybackState, BridgeRelease, BridgeRemoteCover, BridgeRepeatMode, BridgeTrack,
+    BridgeFile, BridgeImportCandidate, BridgeImportStatus, BridgeLibraryInfo, BridgeMember,
+    BridgeMetadataResult, BridgePlaybackState, BridgeRelease, BridgeRemoteCover, BridgeRepeatMode,
+    BridgeSaveSyncConfig, BridgeSyncConfig, BridgeSyncStatus, BridgeTrack,
 };
 
 /// Discover all libraries in ~/.bae/libraries/.
@@ -1190,6 +1192,185 @@ impl AppHandle {
             Ok(format!("{base_url}/share/{share_id}#{key_b64}"))
         })
     }
+
+    // =========================================================================
+    // Sync / membership
+    // =========================================================================
+
+    /// Get the current sync configuration status.
+    pub fn get_sync_status(&self) -> BridgeSyncStatus {
+        let configured = self.config.sync_enabled(&self.key_service);
+        BridgeSyncStatus {
+            configured,
+            syncing: false,
+            last_sync_time: None,
+            error: None,
+            device_count: if configured { 1 } else { 0 },
+        }
+    }
+
+    /// Get the current sync bucket configuration.
+    pub fn get_sync_config(&self) -> BridgeSyncConfig {
+        let cloud_provider = self.config.cloud_provider.as_ref().map(|p| match p {
+            bae_core::config::CloudProvider::S3 => "s3".to_string(),
+            bae_core::config::CloudProvider::ICloud => "icloud".to_string(),
+            bae_core::config::CloudProvider::GoogleDrive => "google_drive".to_string(),
+            bae_core::config::CloudProvider::Dropbox => "dropbox".to_string(),
+            bae_core::config::CloudProvider::OneDrive => "onedrive".to_string(),
+            bae_core::config::CloudProvider::BaeCloud => "bae_cloud".to_string(),
+        });
+        BridgeSyncConfig {
+            cloud_provider,
+            s3_bucket: self.config.cloud_home_s3_bucket.clone(),
+            s3_region: self.config.cloud_home_s3_region.clone(),
+            s3_endpoint: self.config.cloud_home_s3_endpoint.clone(),
+            s3_key_prefix: self.config.cloud_home_s3_key_prefix.clone(),
+            share_base_url: self.config.share_base_url.clone(),
+        }
+    }
+
+    /// Save S3 sync configuration. Sets cloud_provider to S3 and persists
+    /// bucket/region/endpoint/key_prefix to config.yaml and credentials to keyring.
+    pub fn save_sync_config(&self, config_data: BridgeSaveSyncConfig) -> Result<(), BridgeError> {
+        // Save credentials to keyring
+        let creds = bae_core::keys::CloudHomeCredentials::S3 {
+            access_key: config_data.access_key,
+            secret_key: config_data.secret_key,
+        };
+        self.key_service
+            .set_cloud_home_credentials(&creds)
+            .map_err(|e| BridgeError::Config {
+                msg: format!("Failed to save credentials: {e}"),
+            })?;
+
+        // Update config and persist
+        let mut config = self.config.clone();
+        config.cloud_provider = Some(bae_core::config::CloudProvider::S3);
+        config.cloud_home_s3_bucket = Some(config_data.bucket);
+        config.cloud_home_s3_region = Some(config_data.region);
+        config.cloud_home_s3_endpoint = config_data.endpoint.filter(|s| !s.is_empty());
+        config.cloud_home_s3_key_prefix = config_data.key_prefix.filter(|s| !s.is_empty());
+        config.share_base_url = config_data.share_base_url.filter(|s| !s.is_empty());
+        config.save().map_err(|e| BridgeError::Config {
+            msg: format!("Failed to save config: {e}"),
+        })?;
+
+        info!("Saved S3 sync configuration");
+        Ok(())
+    }
+
+    /// Get the user's Ed25519 public key (hex-encoded), or nil if no keypair exists.
+    pub fn get_user_pubkey(&self) -> Option<String> {
+        self.key_service.get_user_public_key().map(hex::encode)
+    }
+
+    /// Generate a follow code for this library.
+    /// Requires a share_base_url and encryption key to be configured.
+    pub fn generate_follow_code(&self) -> Result<String, BridgeError> {
+        let proxy_url = self
+            .config
+            .share_base_url
+            .as_ref()
+            .ok_or_else(|| BridgeError::Config {
+                msg: "No share base URL configured. Set it in sync settings.".to_string(),
+            })?;
+
+        let encryption_key_hex =
+            self.key_service
+                .get_encryption_key()
+                .ok_or_else(|| BridgeError::Config {
+                    msg: "No encryption key found".to_string(),
+                })?;
+
+        let encryption_key =
+            hex::decode(&encryption_key_hex).map_err(|e| BridgeError::Internal {
+                msg: format!("Invalid encryption key: {e}"),
+            })?;
+
+        let library_name = self.config.library_name.as_deref();
+        Ok(bae_core::follow_code::encode(
+            proxy_url,
+            &encryption_key,
+            library_name,
+        ))
+    }
+
+    /// Read the membership chain from the sync bucket and return the current members.
+    /// Returns an empty list if sync is not configured or no membership chain exists.
+    pub fn get_members(&self) -> Result<Vec<BridgeMember>, BridgeError> {
+        // Membership requires a sync bucket. Without one, there are no members to show.
+        if !self.config.sync_enabled(&self.key_service) {
+            return Ok(Vec::new());
+        }
+
+        self.runtime.block_on(async {
+            let bucket =
+                create_bucket_client(&self.config, &self.key_service, &self.encryption_service)
+                    .await
+                    .map_err(|e| BridgeError::Config {
+                        msg: format!("Failed to create bucket client: {e}"),
+                    })?;
+
+            let entry_keys =
+                bucket
+                    .list_membership_entries()
+                    .await
+                    .map_err(|e| BridgeError::Internal {
+                        msg: format!("Failed to list membership entries: {e}"),
+                    })?;
+
+            if entry_keys.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            let mut raw_entries = Vec::new();
+            for (author, seq) in &entry_keys {
+                let data = bucket
+                    .get_membership_entry(author, *seq)
+                    .await
+                    .map_err(|e| BridgeError::Internal {
+                        msg: format!("Failed to get membership entry {author}/{seq}: {e}"),
+                    })?;
+
+                let entry: bae_core::sync::membership::MembershipEntry =
+                    serde_json::from_slice(&data).map_err(|e| BridgeError::Internal {
+                        msg: format!("Failed to parse membership entry: {e}"),
+                    })?;
+                raw_entries.push(entry);
+            }
+
+            let chain = bae_core::sync::membership::MembershipChain::from_entries(raw_entries)
+                .map_err(|e| BridgeError::Internal {
+                    msg: format!("Invalid membership chain: {e}"),
+                })?;
+
+            let user_pubkey = self.key_service.get_user_public_key().map(hex::encode);
+
+            let current = chain.current_members();
+            let members = current
+                .into_iter()
+                .map(|(pubkey, role)| {
+                    let role_str = match role {
+                        bae_core::sync::membership::MemberRole::Owner => "owner".to_string(),
+                        bae_core::sync::membership::MemberRole::Member => "member".to_string(),
+                    };
+                    let name = if user_pubkey.as_deref() == Some(&pubkey) {
+                        Some("You".to_string())
+                    } else {
+                        None
+                    };
+                    BridgeMember {
+                        pubkey,
+                        role: role_str,
+                        added_by: None,
+                        name,
+                    }
+                })
+                .collect();
+
+            Ok(members)
+        })
+    }
 }
 
 /// Background task that reads PlaybackProgress events and dispatches them
@@ -1609,4 +1790,60 @@ pub fn init_app(library_id: String) -> Result<Arc<AppHandle>, BridgeError> {
         event_handler: Mutex::new(None),
         subsonic_server_handle: Mutex::new(None),
     }))
+}
+
+/// Create a temporary bucket client for reading membership data.
+///
+/// This constructs a CloudHomeSyncBucket from the current config and keyring
+/// credentials. Used by get_members() which only needs read access.
+async fn create_bucket_client(
+    config: &Config,
+    key_service: &KeyService,
+    encryption_service: &Option<EncryptionService>,
+) -> Result<impl SyncBucketClient, String> {
+    use bae_core::cloud_home::s3::S3CloudHome;
+    use bae_core::sync::cloud_home_bucket::CloudHomeSyncBucket;
+
+    let bucket = config
+        .cloud_home_s3_bucket
+        .as_ref()
+        .ok_or("No S3 bucket configured")?;
+    let region = config
+        .cloud_home_s3_region
+        .as_ref()
+        .ok_or("No S3 region configured")?;
+    let endpoint = config.cloud_home_s3_endpoint.clone();
+
+    let (access_key, secret_key) = match key_service.get_cloud_home_credentials() {
+        Some(bae_core::keys::CloudHomeCredentials::S3 {
+            access_key,
+            secret_key,
+        }) => (access_key, secret_key),
+        _ => return Err("No S3 credentials found in keyring".to_string()),
+    };
+
+    let encryption = match encryption_service {
+        Some(enc) => enc.clone(),
+        None => {
+            let key = key_service
+                .get_encryption_key()
+                .ok_or("No encryption key found")?;
+            EncryptionService::new(&key)
+                .map_err(|e| format!("Failed to create encryption service: {e}"))?
+        }
+    };
+
+    let key_prefix = config.cloud_home_s3_key_prefix.clone();
+    let cloud_home = S3CloudHome::new(
+        bucket.clone(),
+        region.clone(),
+        endpoint,
+        access_key,
+        secret_key,
+        key_prefix,
+    )
+    .await
+    .map_err(|e| format!("Failed to create S3 cloud home: {e}"))?;
+
+    Ok(CloudHomeSyncBucket::new(Box::new(cloud_home), encryption))
 }
