@@ -200,7 +200,6 @@ struct ImportView: View {
                             searchCatalog: $searchCatalog,
                             searchBarcode: $searchBarcode,
                             isSearching: isSearching,
-                            hasDiscogsToken: appService.getConfig().hasDiscogsToken,
                             onSearchMusicbrainz: { searchMusicbrainz() },
                             onSearchDiscogs: { searchDiscogs() },
                             onSearchCatalog: { searchByCatalogNumber() },
@@ -231,7 +230,6 @@ struct ImportView: View {
                     searchCatalog: $searchCatalog,
                     searchBarcode: $searchBarcode,
                     isSearching: isSearching,
-                    hasDiscogsToken: appService.getConfig().hasDiscogsToken,
                     onSearchMusicbrainz: { searchMusicbrainz() },
                     onSearchDiscogs: { searchDiscogs() },
                     onSearchCatalog: { searchByCatalogNumber() },
@@ -555,7 +553,6 @@ struct ImportSearchForm: View {
     @Binding var searchCatalog: String
     @Binding var searchBarcode: String
     let isSearching: Bool
-    let hasDiscogsToken: Bool
     let onSearchMusicbrainz: () -> Void
     let onSearchDiscogs: () -> Void
     let onSearchCatalog: () -> Void
@@ -580,11 +577,11 @@ struct ImportSearchForm: View {
                     Button("MusicBrainz") {
                         onSearchMusicbrainz()
                     }
-                    .disabled(searchArtist.isEmpty && searchAlbum.isEmpty || isSearching)
+                    .disabled(searchArtist.isEmpty && searchAlbum.isEmpty)
                     Button("Discogs") {
                         onSearchDiscogs()
                     }
-                    .disabled(searchArtist.isEmpty && searchAlbum.isEmpty || isSearching)
+                    .disabled(searchArtist.isEmpty && searchAlbum.isEmpty)
                 }
             case .catalogNumber:
                 HStack {
@@ -593,7 +590,7 @@ struct ImportSearchForm: View {
                     Button("Search") {
                         onSearchCatalog()
                     }
-                    .disabled(searchCatalog.isEmpty || isSearching)
+                    .disabled(searchCatalog.isEmpty)
                 }
             case .barcode:
                 HStack {
@@ -602,7 +599,7 @@ struct ImportSearchForm: View {
                     Button("Search") {
                         onSearchBarcode()
                     }
-                    .disabled(searchBarcode.isEmpty || isSearching)
+                    .disabled(searchBarcode.isEmpty)
                 }
             }
         }
@@ -944,7 +941,6 @@ struct DocumentViewerView: View {
         searchCatalog: .constant(""),
         searchBarcode: .constant(""),
         isSearching: false,
-        hasDiscogsToken: true,
         onSearchMusicbrainz: {},
         onSearchDiscogs: {},
         onSearchCatalog: {},

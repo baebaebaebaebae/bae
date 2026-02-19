@@ -35,7 +35,6 @@ struct AlbumDetailView: View {
                     selectedReleaseIndex: $selectedReleaseIndex,
                     showShareCopied: showShareCopied,
                     transferring: transferring,
-                    resolveImageURL: { appService.imageURL(for: $0) },
                     onClose: onClose,
                     onPlay: { appService.playAlbum(albumId: albumId) },
                     onPlayFromTrack: { index in
@@ -68,7 +67,7 @@ struct AlbumDetailView: View {
                 CoverSheetView(
                     remoteCovers: remoteCovers,
                     releaseImages: collectImageFiles(detail).map { item in
-                        (name: item.file.originalFilename, url: nil as URL?)
+                        (id: item.file.id, name: item.file.originalFilename, url: nil as URL?)
                     },
                     loading: loadingRemoteCovers,
                     onSelectRemote: { cover in
@@ -296,7 +295,6 @@ struct AlbumDetailContent: View {
     @Binding var selectedReleaseIndex: Int
     let showShareCopied: Bool
     let transferring: Bool
-    let resolveImageURL: (String?) -> URL?
     let onClose: (() -> Void)?
     let onPlay: () -> Void
     let onPlayFromTrack: (Int) -> Void
@@ -656,7 +654,7 @@ struct AlbumDetailContent: View {
 
 struct CoverSheetView: View {
     let remoteCovers: [BridgeRemoteCover]
-    let releaseImages: [(name: String, url: URL?)]
+    let releaseImages: [(id: String, name: String, url: URL?)]
     let loading: Bool
     let onSelectRemote: (BridgeRemoteCover) -> Void
     let onSelectReleaseImage: (String) -> Void
@@ -716,7 +714,7 @@ struct CoverSheetView: View {
 
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 120))], spacing: 12) {
                             ForEach(Array(releaseImages.enumerated()), id: \.offset) { _, item in
-                                Button(action: { onSelectReleaseImage(item.name) }) {
+                                Button(action: { onSelectReleaseImage(item.id) }) {
                                     VStack(spacing: 4) {
                                         coverOptionPlaceholder
                                             .frame(width: 120, height: 120)
@@ -814,7 +812,6 @@ struct CoverSheetView: View {
         selectedReleaseIndex: .constant(0),
         showShareCopied: false,
         transferring: false,
-        resolveImageURL: { _ in nil },
         onClose: {},
         onPlay: {},
         onPlayFromTrack: { _ in },
@@ -833,8 +830,8 @@ struct CoverSheetView: View {
             BridgeRemoteCover(url: "https://example.com/cover2.jpg", thumbnailUrl: "https://example.com/thumb2.jpg", label: "Back", source: "musicbrainz"),
         ],
         releaseImages: [
-            (name: "cover.jpg", url: nil),
-            (name: "back.jpg", url: nil),
+            (id: "file-1", name: "cover.jpg", url: nil),
+            (id: "file-2", name: "back.jpg", url: nil),
         ],
         loading: false,
         onSelectRemote: { _ in },
