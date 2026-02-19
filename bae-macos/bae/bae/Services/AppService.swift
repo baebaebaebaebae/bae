@@ -223,4 +223,26 @@ class AppService: AppEventHandler, @unchecked Sendable {
             return nil
         }
     }
+
+    // MARK: - Settings
+
+    func getConfig() -> BridgeConfig {
+        appHandle.getConfig()
+    }
+
+    func renameLibrary(name: String) throws {
+        try appHandle.renameLibrary(name: name)
+    }
+
+    func saveDiscogsToken(token: String) throws {
+        try appHandle.saveDiscogsToken(token: token)
+    }
+
+    func getDiscogsToken() -> String? {
+        appHandle.getDiscogsToken()
+    }
+
+    func removeDiscogsToken() throws {
+        try appHandle.removeDiscogsToken()
+    }
 }

@@ -8,6 +8,8 @@ enum AppScreen {
 }
 
 struct ContentView: View {
+    @Binding var appService: AppService?
+
     @State private var screen: AppScreen = .loading
     @State private var error: String?
 
@@ -89,6 +91,7 @@ struct ContentView: View {
 
                 let service = AppService(appHandle: handle)
                 await MainActor.run {
+                    appService = service
                     screen = .library(service)
                 }
             } catch {
