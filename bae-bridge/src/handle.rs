@@ -1843,6 +1843,267 @@ impl AppHandle {
         })
     }
 
+    /// Invite a member to the shared library.
+    ///
+    /// Downloads the membership chain (bootstrapping a founder entry if needed),
+    /// creates a signed Add entry, wraps the encryption key to the invitee's
+    /// public key, and uploads everything to the sync bucket.
+    ///
+    /// Returns the invite code string that should be shared with the invitee.
+    pub fn invite_member(
+        &self,
+        public_key_hex: String,
+        role: String,
+    ) -> Result<String, BridgeError> {
+        use bae_core::sync::membership::{
+            sign_membership_entry, MemberRole as CoreMemberRole, MembershipAction, MembershipChain,
+            MembershipEntry,
+        };
+
+        let sync_handle = self
+            .sync_handle
+            .as_ref()
+            .ok_or_else(|| BridgeError::Config {
+                msg: "Sync is not configured".to_string(),
+            })?;
+
+        let user_pubkey_hex = hex::encode(sync_handle.user_keypair.public_key);
+
+        if public_key_hex == user_pubkey_hex {
+            return Err(BridgeError::Config {
+                msg: "Cannot invite yourself".to_string(),
+            });
+        }
+
+        let encryption_key_hex =
+            self.key_service
+                .get_encryption_key()
+                .ok_or_else(|| BridgeError::Config {
+                    msg: "Encryption key not configured".to_string(),
+                })?;
+
+        let core_role = match role.as_str() {
+            "owner" => CoreMemberRole::Owner,
+            _ => CoreMemberRole::Member,
+        };
+
+        self.runtime.block_on(async {
+            let bucket: &dyn SyncBucketClient = &*sync_handle.bucket_client;
+            let cloud_home = sync_handle.bucket_client.cloud_home();
+
+            // Parse the encryption key from hex.
+            let key_bytes: [u8; 32] = hex::decode(&encryption_key_hex)
+                .map_err(|e| BridgeError::Internal {
+                    msg: format!("Invalid encryption key hex: {e}"),
+                })?
+                .try_into()
+                .map_err(|_| BridgeError::Internal {
+                    msg: "Encryption key wrong length".to_string(),
+                })?;
+
+            // Download existing membership entries.
+            let entry_keys =
+                bucket
+                    .list_membership_entries()
+                    .await
+                    .map_err(|e| BridgeError::Internal {
+                        msg: format!("Failed to list membership entries: {e}"),
+                    })?;
+
+            let mut chain = if entry_keys.is_empty() {
+                // No membership chain yet -- bootstrap with a founder entry.
+                let mut founder = MembershipEntry {
+                    action: MembershipAction::Add,
+                    user_pubkey: user_pubkey_hex.clone(),
+                    role: CoreMemberRole::Owner,
+                    timestamp: sync_handle.hlc.now().to_string(),
+                    author_pubkey: String::new(),
+                    signature: String::new(),
+                };
+
+                sign_membership_entry(&mut founder, &sync_handle.user_keypair);
+
+                let mut chain = MembershipChain::new();
+                chain
+                    .add_entry(founder.clone())
+                    .map_err(|e| BridgeError::Internal {
+                        msg: format!("Failed to create founder entry: {e}"),
+                    })?;
+
+                // Upload the founder entry to the bucket.
+                let founder_bytes =
+                    serde_json::to_vec(&founder).map_err(|e| BridgeError::Internal {
+                        msg: format!("Failed to serialize founder entry: {e}"),
+                    })?;
+                bucket
+                    .put_membership_entry(&user_pubkey_hex, 1, founder_bytes)
+                    .await
+                    .map_err(|e| BridgeError::Internal {
+                        msg: format!("Failed to upload founder entry: {e}"),
+                    })?;
+
+                info!("Bootstrapped membership chain with founder entry");
+
+                chain
+            } else {
+                // Build chain from existing entries.
+                let mut raw_entries = Vec::new();
+                for (author, seq) in &entry_keys {
+                    let data = bucket
+                        .get_membership_entry(author, *seq)
+                        .await
+                        .map_err(|e| BridgeError::Internal {
+                            msg: format!("Failed to get membership entry {author}/{seq}: {e}"),
+                        })?;
+                    let entry: MembershipEntry =
+                        serde_json::from_slice(&data).map_err(|e| BridgeError::Internal {
+                            msg: format!("Failed to parse membership entry {author}/{seq}: {e}"),
+                        })?;
+                    raw_entries.push(entry);
+                }
+
+                MembershipChain::from_entries(raw_entries).map_err(|e| BridgeError::Internal {
+                    msg: format!("Invalid membership chain: {e}"),
+                })?
+            };
+
+            // Create the invitation.
+            let invite_ts = sync_handle.hlc.now().to_string();
+            let join_info = bae_core::sync::invite::create_invitation(
+                bucket,
+                cloud_home,
+                &mut chain,
+                &sync_handle.user_keypair,
+                &public_key_hex,
+                core_role,
+                &key_bytes,
+                &invite_ts,
+            )
+            .await
+            .map_err(|e| BridgeError::Internal {
+                msg: format!("Failed to create invitation: {e}"),
+            })?;
+
+            info!(
+                "Invited member {}...",
+                &public_key_hex[..public_key_hex.len().min(16)]
+            );
+
+            // Encode the invite code.
+            let invite_code = bae_core::join_code::InviteCode {
+                library_id: self.config.library_id.clone(),
+                library_name: self.config.library_name.clone().unwrap_or_default(),
+                join_info,
+                owner_pubkey: user_pubkey_hex,
+            };
+
+            Ok(bae_core::join_code::encode(&invite_code))
+        })
+    }
+
+    /// Remove a member from the shared library.
+    ///
+    /// Downloads the membership chain, creates a signed Remove entry, rotates
+    /// the encryption key, re-wraps it for remaining members, and persists the
+    /// new key to the keyring and config.
+    pub fn remove_member(&self, public_key_hex: String) -> Result<(), BridgeError> {
+        use bae_core::sync::membership::{MembershipChain, MembershipEntry};
+
+        let sync_handle = self
+            .sync_handle
+            .as_ref()
+            .ok_or_else(|| BridgeError::Config {
+                msg: "Sync is not configured".to_string(),
+            })?;
+
+        self.runtime.block_on(async {
+            let bucket: &dyn SyncBucketClient = &*sync_handle.bucket_client;
+            let cloud_home = sync_handle.bucket_client.cloud_home();
+
+            // Download existing membership entries and build the chain.
+            let entry_keys =
+                bucket
+                    .list_membership_entries()
+                    .await
+                    .map_err(|e| BridgeError::Internal {
+                        msg: format!("Failed to list membership entries: {e}"),
+                    })?;
+
+            if entry_keys.is_empty() {
+                return Err(BridgeError::Internal {
+                    msg: "No membership chain exists".to_string(),
+                });
+            }
+
+            let mut raw_entries = Vec::new();
+            for (author, seq) in &entry_keys {
+                let data = bucket
+                    .get_membership_entry(author, *seq)
+                    .await
+                    .map_err(|e| BridgeError::Internal {
+                        msg: format!("Failed to get membership entry {author}/{seq}: {e}"),
+                    })?;
+                let entry: MembershipEntry =
+                    serde_json::from_slice(&data).map_err(|e| BridgeError::Internal {
+                        msg: format!("Failed to parse membership entry {author}/{seq}: {e}"),
+                    })?;
+                raw_entries.push(entry);
+            }
+
+            let mut chain =
+                MembershipChain::from_entries(raw_entries).map_err(|e| BridgeError::Internal {
+                    msg: format!("Invalid membership chain: {e}"),
+                })?;
+
+            // Revoke the member.
+            let revoke_ts = sync_handle.hlc.now().to_string();
+            let new_key = bae_core::sync::invite::revoke_member(
+                bucket,
+                cloud_home,
+                &mut chain,
+                &sync_handle.user_keypair,
+                &public_key_hex,
+                &revoke_ts,
+            )
+            .await
+            .map_err(|e| BridgeError::Internal {
+                msg: format!("Failed to revoke member: {e}"),
+            })?;
+
+            // Persist the new encryption key to keyring.
+            let new_key_hex = hex::encode(new_key);
+            self.key_service
+                .set_encryption_key(&new_key_hex)
+                .map_err(|e| BridgeError::Internal {
+                    msg: format!("Failed to persist new encryption key: {e}"),
+                })?;
+
+            // Update the shared encryption service.
+            {
+                let mut enc = sync_handle.encryption.write().unwrap();
+                *enc = EncryptionService::from_key(new_key);
+            }
+
+            // Update config fingerprint and persist.
+            let new_fingerprint = {
+                let enc = sync_handle.encryption.read().unwrap();
+                enc.fingerprint()
+            };
+            let mut updated_config = self.config.clone();
+            updated_config.encryption_key_fingerprint = Some(new_fingerprint);
+            if let Err(e) = updated_config.save_to_config_yaml() {
+                warn!("Failed to save config after key rotation: {e}");
+            }
+
+            info!(
+                "Revoked member {}... and rotated encryption key",
+                &public_key_hex[..public_key_hex.len().min(16)]
+            );
+
+            Ok(())
+        })
+    }
+
     // =========================================================================
     // Sync trigger / loop
     // =========================================================================

@@ -11,6 +11,18 @@ struct SyncSettingsView: View {
     @State private var copiedField: String?
     @State private var isSyncing = false
 
+    // Invite flow
+    @State private var showingInviteSheet = false
+    @State private var invitePublicKey = ""
+    @State private var inviteRole = "member"
+    @State private var isInviting = false
+    @State private var inviteCode: String?
+
+    // Remove flow
+    @State private var memberToRemove: BridgeMember?
+    @State private var showingRemoveConfirmation = false
+    @State private var isRemoving = false
+
     // Editable S3 config fields
     @State private var bucket = ""
     @State private var region = ""
@@ -228,10 +240,91 @@ struct SyncSettingsView: View {
                         }
                         Spacer()
                         copyButton(value: member.pubkey, field: member.pubkey)
+                        if member.name != "You" {
+                            Button(role: .destructive) {
+                                memberToRemove = member
+                                showingRemoveConfirmation = true
+                            } label: {
+                                Image(systemName: "person.badge.minus")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Remove member")
+                            .disabled(isRemoving)
+                        }
+                    }
+                }
+            }
+
+            if syncStatus?.configured == true {
+                HStack {
+                    Spacer()
+                    Button("Invite Member") {
+                        invitePublicKey = ""
+                        inviteRole = "member"
+                        inviteCode = nil
+                        showingInviteSheet = true
                     }
                 }
             }
         }
+        .sheet(isPresented: $showingInviteSheet) {
+            inviteSheet
+        }
+        .confirmationDialog(
+            "Remove member?",
+            isPresented: $showingRemoveConfirmation,
+            presenting: memberToRemove
+        ) { member in
+            Button("Remove", role: .destructive) {
+                removeMember(member.pubkey)
+            }
+        } message: { member in
+            Text("Remove \(truncateKey(member.pubkey)) from this library? This will rotate the encryption key.")
+        }
+    }
+
+    private var inviteSheet: some View {
+        VStack(spacing: 16) {
+            Text("Invite Member")
+                .font(.headline)
+
+            TextField("Public key (hex)", text: $invitePublicKey)
+                .font(.system(.body, design: .monospaced))
+
+            Picker("Role", selection: $inviteRole) {
+                Text("Member").tag("member")
+                Text("Owner").tag("owner")
+            }
+            .pickerStyle(.segmented)
+
+            if let code = inviteCode {
+                GroupBox("Invite Code") {
+                    HStack {
+                        Text(truncateKey(code))
+                            .font(.system(.caption, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                        copyButton(value: code, field: "inviteCode")
+                    }
+                }
+            }
+
+            HStack {
+                Button("Cancel") {
+                    showingInviteSheet = false
+                }
+                .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button(isInviting ? "Inviting..." : "Invite") {
+                    performInvite()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(invitePublicKey.isEmpty || isInviting)
+            }
+        }
+        .padding()
+        .frame(minWidth: 400)
     }
 
     // MARK: - Helpers
@@ -351,6 +444,52 @@ struct SyncSettingsView: View {
             followError = nil
         } catch {
             followError = "Failed to unfollow: \(error.localizedDescription)"
+        }
+    }
+
+    private func performInvite() {
+        isInviting = true
+        error = nil
+
+        Task.detached { [appService, invitePublicKey, inviteRole] in
+            do {
+                let code = try appService.appHandle.inviteMember(
+                    publicKeyHex: invitePublicKey,
+                    role: inviteRole
+                )
+                let updatedMembers = try appService.appHandle.getMembers()
+                await MainActor.run {
+                    inviteCode = code
+                    members = updatedMembers
+                    isInviting = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.error = "Failed to invite: \(error.localizedDescription)"
+                    isInviting = false
+                }
+            }
+        }
+    }
+
+    private func removeMember(_ pubkey: String) {
+        isRemoving = true
+        error = nil
+
+        Task.detached { [appService] in
+            do {
+                try appService.appHandle.removeMember(publicKeyHex: pubkey)
+                let updatedMembers = try appService.appHandle.getMembers()
+                await MainActor.run {
+                    members = updatedMembers
+                    isRemoving = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.error = "Failed to remove member: \(error.localizedDescription)"
+                    isRemoving = false
+                }
+            }
         }
     }
 }
