@@ -7,6 +7,8 @@ set -e
 #   bae-ui: no local deps
 #   bae-desktop: depends on bae-core, bae-ui
 #   bae-mocks: depends on bae-ui
+#   bae-macos: depends on bae-bridge (Swift native app)
+#   bae-bridge: depends on bae-core, bae-common
 
 TMPFILE=$(mktemp)
 
@@ -140,6 +142,33 @@ if has_changes_in "bae-mocks" || has_changes_in "bae-ui"; then
     }
 
     cd ..
+fi
+
+# bae-macos checks (depends on bae-bridge)
+if has_changes_in "bae-macos" || has_changes_in "bae-bridge"; then
+    run_check "build bridge (bae-macos)" ./bae-bridge/build-macos.sh || {
+        echo "Bridge build failed"
+        exit 1
+    }
+
+    ln -sf ../bae-bridge/BaeBridgeFFI.xcframework bae-macos/BaeBridgeFFI.xcframework
+    cp bae-bridge/swift-bindings/bae_bridge.swift bae-macos/bae/bae/bae_bridge.swift
+
+    if ! command -v xcodegen &> /dev/null; then
+        echo "⚠️  xcodegen not installed, skipping macOS build check"
+    else
+        cd bae-macos/bae
+        run_check "xcodegen (bae-macos)" xcodegen || {
+            echo "xcodegen failed"
+            exit 1
+        }
+        run_check "xcodebuild (bae-macos)" xcodebuild -project bae.xcodeproj -scheme bae -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build || {
+            echo "macOS app build failed"
+            exit 1
+        }
+        cd ../..
+    fi
 fi
 
 echo "✅ All checks passed"
