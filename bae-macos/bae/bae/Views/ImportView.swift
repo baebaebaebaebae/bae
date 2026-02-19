@@ -16,14 +16,17 @@ struct ImportView: View {
 
             if let candidate = selectedCandidate {
                 metadataSearchView(for: candidate)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ContentUnavailableView(
                     "Select a folder",
                     systemImage: "folder",
                     description: Text("Choose a scanned folder to search for metadata")
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Candidate list
@@ -81,6 +84,7 @@ struct ImportView: View {
                     systemImage: "magnifyingglass",
                     description: Text("Search MusicBrainz or Discogs to find metadata")
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 resultsList(for: candidate)
             }

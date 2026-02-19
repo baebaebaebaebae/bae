@@ -11,26 +11,49 @@ struct MainAppView: View {
     @State private var activeSection: MainSection = .library
     @State private var showingSettings = false
     @State private var showingSyncSettings = false
+    @State private var searchText: String = ""
 
     var body: some View {
-        VStack(spacing: 0) {
-            sectionBar
-            Divider()
+        NavigationStack {
+            VStack(spacing: 0) {
+                ZStack {
+                    LibraryView(appService: appService, searchText: $searchText)
+                        .opacity(activeSection == .library ? 1 : 0)
+                        .allowsHitTesting(activeSection == .library)
 
-            ZStack {
-                LibraryView(appService: appService)
-                    .opacity(activeSection == .library ? 1 : 0)
-                    .allowsHitTesting(activeSection == .library)
+                    ImportView(appService: appService)
+                        .opacity(activeSection == .importing ? 1 : 0)
+                        .allowsHitTesting(activeSection == .importing)
+                }
 
-                ImportView(appService: appService)
-                    .opacity(activeSection == .importing ? 1 : 0)
-                    .allowsHitTesting(activeSection == .importing)
+                if appService.isActive {
+                    Divider()
+                    NowPlayingBar(appService: appService)
+                }
             }
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Picker("Section", selection: $activeSection) {
+                        Text("Library").tag(MainSection.library)
+                        Text("Import").tag(MainSection.importing)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 200)
+                }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button(action: { showingSyncSettings = true }) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                    .help("Sync Settings")
 
-            if appService.isActive {
-                Divider()
-                NowPlayingBar(appService: appService)
+                    Button(action: { showingSettings = true }) {
+                        Image(systemName: "gearshape")
+                    }
+                    .help("Settings")
+                }
             }
+            .searchable(text: $searchText, prompt: "Artists, albums, tracks")
         }
         .onKeyPress(.space) {
             appService.togglePlayPause()
@@ -57,40 +80,6 @@ struct MainAppView: View {
             }
             .frame(minWidth: 500, minHeight: 400)
         }
-    }
-
-    // MARK: - Section Bar
-
-    private var sectionBar: some View {
-        HStack(spacing: 4) {
-            Picker("Section", selection: $activeSection) {
-                Text("Library").tag(MainSection.library)
-                Text("Import").tag(MainSection.importing)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 200)
-
-            Spacer()
-
-            Button(action: { openFolderAndScan() }) {
-                Label("Import Folder", systemImage: "plus")
-            }
-            .help("Import a folder of music")
-
-            Button(action: { showingSyncSettings = true }) {
-                Image(systemName: "arrow.triangle.2.circlepath")
-            }
-            .help("Sync Settings")
-
-            Button(action: { showingSettings = true }) {
-                Label("Settings", systemImage: "gearshape")
-            }
-            .help("Open settings")
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Theme.surface)
     }
 
     // MARK: - Scan + Drop
