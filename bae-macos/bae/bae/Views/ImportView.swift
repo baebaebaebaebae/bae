@@ -2,7 +2,6 @@ import SwiftUI
 
 struct ImportView: View {
     let appService: AppService
-    @Binding var isPresented: Bool
 
     @State private var selectedCandidate: BridgeImportCandidate?
     @State private var searchResults: [BridgeMetadataResult] = []
@@ -25,12 +24,12 @@ struct ImportView: View {
                 )
             }
         }
-        .frame(minWidth: 700, minHeight: 450)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Close") {
-                    isPresented = false
+            ToolbarItem {
+                Button(action: { openFolderAndScan() }) {
+                    Label("Scan Folder", systemImage: "folder.badge.plus")
                 }
+                .help("Scan a folder for music to import")
             }
         }
     }
@@ -190,6 +189,17 @@ struct ImportView: View {
     }
 
     // MARK: - Actions
+
+    private func openFolderAndScan() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Select a folder containing music to import"
+        panel.prompt = "Scan"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        appService.scanFolder(path: url.path)
+    }
 
     private func searchMusicbrainz() {
         isSearching = true

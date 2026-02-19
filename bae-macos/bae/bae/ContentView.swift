@@ -30,7 +30,7 @@ struct ContentView: View {
                     onUnlocked: { openLibrary(libraryId) }
                 )
             case let .library(service):
-                LibraryView(appService: service)
+                MainAppView(appService: service)
             }
             if let error {
                 Text(error)
