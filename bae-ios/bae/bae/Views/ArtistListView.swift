@@ -4,6 +4,7 @@ struct ArtistListView: View {
     let databaseService: DatabaseService
     let imageService: ImageService?
     let playbackService: PlaybackService?
+    let syncService: SyncService?
     @State private var artists: [Artist] = []
     @State private var error: String?
 
@@ -32,6 +33,11 @@ struct ArtistListView: View {
                         ArtistAlbumsView(
                             databaseService: databaseService, imageService: imageService,
                             playbackService: playbackService, artist: artist)
+                    }
+                    .refreshable {
+                        await syncService?.sync()
+                        try? databaseService.reopen()
+                        artists = (try? databaseService.allArtists()) ?? []
                     }
                 }
             }

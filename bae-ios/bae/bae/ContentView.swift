@@ -58,13 +58,19 @@ struct ContentView: View {
                     cloudClient: client, crypto: PlaceholderCryptoService(),
                     encryptionKey: creds.encryptionKey, databaseService: dbService)
             }
+            let syncService = appState.cloudClient.map { client in
+                SyncService(
+                    cloudClient: client, crypto: PlaceholderCryptoService(),
+                    encryptionKey: creds.encryptionKey)
+            }
 
             LibraryView(
                 databaseService: dbService, imageService: appState.imageService,
-                playbackService: playback, credentials: creds
+                playbackService: playback, syncService: syncService, credentials: creds
             ) {
                 do {
                     playback?.stop()
+                    syncService?.stopPeriodicSync()
                     try keychainService.deleteCredentials()
                     try? FileManager.default.removeItem(at: BootstrapService.databasePath())
                     try? FileManager.default.removeItem(at: BootstrapService.syncCursorsPath())

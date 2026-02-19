@@ -15,10 +15,25 @@ enum DatabaseError: LocalizedError {
 
 class DatabaseService {
     private var db: OpaquePointer?
+    private let dbPath: URL
 
     init(path: URL) throws {
+        self.dbPath = path
         var db: OpaquePointer?
         let rc = sqlite3_open_v2(path.path, &db, SQLITE_OPEN_READONLY, nil)
+        guard rc == SQLITE_OK else {
+            let msg = db.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "Unknown error"
+            if let db { sqlite3_close(db) }
+            throw DatabaseError.openFailed(msg)
+        }
+        self.db = db
+    }
+
+    func reopen() throws {
+        if let db { sqlite3_close(db) }
+        self.db = nil
+        var db: OpaquePointer?
+        let rc = sqlite3_open_v2(dbPath.path, &db, SQLITE_OPEN_READONLY, nil)
         guard rc == SQLITE_OK else {
             let msg = db.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "Unknown error"
             if let db { sqlite3_close(db) }

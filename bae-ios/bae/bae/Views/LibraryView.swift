@@ -4,6 +4,7 @@ struct LibraryView: View {
     let databaseService: DatabaseService
     let imageService: ImageService?
     let playbackService: PlaybackService?
+    let syncService: SyncService?
     let credentials: LibraryCredentials
     let onUnlink: () -> Void
 
@@ -11,7 +12,7 @@ struct LibraryView: View {
         TabView {
             ArtistListView(
                 databaseService: databaseService, imageService: imageService,
-                playbackService: playbackService
+                playbackService: playbackService, syncService: syncService
             )
             .tabItem {
                 Label("Library", systemImage: "books.vertical")
@@ -31,6 +32,8 @@ struct LibraryView: View {
                 MiniPlayerView(playbackService: playbackService, imageService: imageService)
             }
         }
+        .onAppear { syncService?.startPeriodicSync() }
+        .onDisappear { syncService?.stopPeriodicSync() }
     }
 }
 
