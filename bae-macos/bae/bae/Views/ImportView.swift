@@ -75,27 +75,82 @@ struct ImportView: View {
     // MARK: - Candidate list
 
     private var candidateList: some View {
-        List(
-            appService.scanResults,
-            id: \.folderPath,
-            selection: Binding(
-                get: { selectedCandidate?.folderPath },
-                set: { path in
-                    selectedCandidate = appService.scanResults.first { $0.folderPath == path }
-                    if let candidate = selectedCandidate {
-                        searchArtist = candidate.artistName
-                        searchAlbum = candidate.albumTitle
-                        searchResults = []
-                        candidateFiles = appService.getCandidateFiles(folderPath: candidate.folderPath)
+        VStack(spacing: 0) {
+            candidateListHeader
+            Divider()
+            List(
+                appService.scanResults,
+                id: \.folderPath,
+                selection: Binding(
+                    get: { selectedCandidate?.folderPath },
+                    set: { path in
+                        selectedCandidate = appService.scanResults.first { $0.folderPath == path }
+                        if let candidate = selectedCandidate {
+                            searchArtist = candidate.artistName
+                            searchAlbum = candidate.albumTitle
+                            searchResults = []
+                            candidateFiles = appService.getCandidateFiles(folderPath: candidate.folderPath)
+                        }
+                    }
+                )
+            ) { candidate in
+                CandidateRow(candidate: candidate, status: appService.importStatuses[candidate.folderPath])
+                    .disabled(candidate.badAudioCount > 0 || candidate.badImageCount > 0)
+            }
+            .scrollContentBackground(.hidden)
+            .background(Theme.surface)
+        }
+    }
+
+    private var candidateListHeader: some View {
+        HStack {
+            Button(action: { openFolderAndAppend() }) {
+                Image(systemName: "plus")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            Spacer()
+            Menu {
+                Button("Clear All") {
+                    appService.clearAllCandidates()
+                    selectedCandidate = nil
+                }
+                Button("Clear Completed") {
+                    let wasSelected = selectedCandidate
+                    appService.clearCompletedCandidates()
+                    if let wasSelected,
+                       !appService.scanResults.contains(where: { $0.folderPath == wasSelected.folderPath }) {
+                        selectedCandidate = nil
                     }
                 }
-            )
-        ) { candidate in
-            CandidateRow(candidate: candidate, status: appService.importStatuses[candidate.folderPath])
-                .disabled(candidate.badAudioCount > 0 || candidate.badImageCount > 0)
+                Button("Clear Incomplete") {
+                    let wasSelected = selectedCandidate
+                    appService.clearIncompleteCandidates()
+                    if let wasSelected,
+                       !appService.scanResults.contains(where: { $0.folderPath == wasSelected.folderPath }) {
+                        selectedCandidate = nil
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
         }
-        .scrollContentBackground(.hidden)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
         .background(Theme.surface)
+    }
+
+    private func openFolderAndAppend() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Select a folder containing music to import"
+        panel.prompt = "Scan"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        appService.scanAdditionalFolder(path: url.path)
     }
 
     // MARK: - Metadata search

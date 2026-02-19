@@ -160,8 +160,44 @@ class AppService: AppEventHandler, @unchecked Sendable {
 
     func scanFolder(path: String) {
         scanResults = []
+        importStatuses = [:]
         Task.detached { [appHandle] in
             try? appHandle.scanFolder(path: path)
+        }
+    }
+
+    /// Scan another folder, appending results to the existing list.
+    func scanAdditionalFolder(path: String) {
+        Task.detached { [appHandle] in
+            try? appHandle.scanFolder(path: path)
+        }
+    }
+
+    func clearAllCandidates() {
+        scanResults = []
+        importStatuses = [:]
+    }
+
+    func clearCompletedCandidates() {
+        let completed = scanResults.filter { candidate in
+            if case .complete = importStatuses[candidate.folderPath] { return true }
+            return false
+        }
+        for candidate in completed {
+            importStatuses.removeValue(forKey: candidate.folderPath)
+        }
+        scanResults.removeAll { candidate in
+            completed.contains { $0.folderPath == candidate.folderPath }
+        }
+    }
+
+    func clearIncompleteCandidates() {
+        let incomplete = scanResults.filter { $0.badAudioCount > 0 || $0.badImageCount > 0 }
+        for candidate in incomplete {
+            importStatuses.removeValue(forKey: candidate.folderPath)
+        }
+        scanResults.removeAll { candidate in
+            incomplete.contains { $0.folderPath == candidate.folderPath }
         }
     }
 
