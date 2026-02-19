@@ -4,26 +4,43 @@ options:
   deploymentTarget:
     macOS: "14.0"
   xcodeVersion: "16.0"
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.8.1"
 targets:
   bae:
     type: application
     platform: macOS
     sources:
       - bae
+    info:
+      path: bae/Info.plist
+      properties:
+        CFBundleDisplayName: bae
+        SUFeedURL: https://github.com/bae-fm/bae/releases/latest/download/appcast.xml
+        SUPublicEDKey: cYiouOrDxmQrHspLwOf/XpQOQOMt3isdYDs6xEDBGs8=
+        SUEnableAutomaticChecks: true
+        CFBundleURLTypes:
+          - CFBundleURLName: fm.bae.url
+            CFBundleURLSchemes:
+              - bae
+        NSLocalNetworkUsageDescription: bae uses your local network for BitTorrent peer discovery.
     dependencies:
       - framework: ../BaeBridgeFFI.xcframework
         embed: false
+      - package: Sparkle
       - sdk: CoreAudio.framework
       - sdk: AudioToolbox.framework
       - sdk: SystemConfiguration.framework
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: fm.bae.macos
+        PRODUCT_BUNDLE_IDENTIFIER: fm.bae.desktop
         PRODUCT_NAME: bae
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: "5.10"
-        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_ENTITLEMENTS: bae/bae.entitlements
         LIBRARY_SEARCH_PATHS:
           - /opt/homebrew/lib
           - /opt/homebrew/opt/ffmpeg/lib

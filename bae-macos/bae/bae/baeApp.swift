@@ -1,3 +1,4 @@
+import Sparkle
 import SwiftUI
 
 // MARK: - FocusedValue for AppService
@@ -19,9 +20,52 @@ extension Notification.Name {
     static let importFolder = Notification.Name("bae.importFolder")
 }
 
+// MARK: - Sparkle update helpers
+
+final class CheckForUpdatesViewModel: ObservableObject {
+    @Published var canCheckForUpdates = false
+
+    private let updater: SPUUpdater
+
+    init(updater: SPUUpdater) {
+        self.updater = updater
+        updater.publisher(for: \.canCheckForUpdates)
+            .assign(to: &$canCheckForUpdates)
+    }
+
+    func checkForUpdates() {
+        updater.checkForUpdates()
+    }
+}
+
+struct CheckForUpdatesView: View {
+    @ObservedObject private var viewModel: CheckForUpdatesViewModel
+
+    init(viewModel: CheckForUpdatesViewModel) {
+        self.viewModel = viewModel
+    }
+
+    var body: some View {
+        Button("Check for Updates...") {
+            viewModel.checkForUpdates()
+        }
+        .disabled(!viewModel.canCheckForUpdates)
+    }
+}
+
 @main
 struct baeApp: App {
     @State private var appService: AppService?
+    private let updaterController: SPUStandardUpdaterController
+    @ObservedObject private var checkForUpdatesViewModel: CheckForUpdatesViewModel
+
+    init() {
+        let controller = SPUStandardUpdaterController(
+            startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil
+        )
+        updaterController = controller
+        checkForUpdatesViewModel = CheckForUpdatesViewModel(updater: controller.updater)
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -29,7 +73,10 @@ struct baeApp: App {
         }
         Settings {
             if let appService {
-                SettingsView(appService: appService)
+                SettingsView(
+                    appService: appService,
+                    checkForUpdatesViewModel: checkForUpdatesViewModel
+                )
             } else {
                 ContentUnavailableView(
                     "No library loaded",
@@ -40,6 +87,9 @@ struct baeApp: App {
             }
         }
         .commands {
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesView(viewModel: checkForUpdatesViewModel)
+            }
             fileMenuCommands
             playbackMenuCommands
         }
