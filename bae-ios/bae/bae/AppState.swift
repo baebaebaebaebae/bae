@@ -12,6 +12,7 @@ class AppState {
     var cloudClient: CloudHomeClient?
     var bootstrapResult: BootstrapResult?
     var imageService: ImageService?
+    var networkMonitor = NetworkMonitor()
 
     init(keychainService: KeychainService) {
         if let creds = keychainService.loadCredentials() {

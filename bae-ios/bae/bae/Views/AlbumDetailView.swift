@@ -6,58 +6,68 @@ struct AlbumDetailView: View {
     let playbackService: PlaybackService?
     let album: Album
     @State private var detail: AlbumDetail?
+    @State private var isLoading = true
 
     var body: some View {
-        List {
-            Section {
-                VStack(alignment: .leading, spacing: 8) {
-                    if let imageService {
-                        AsyncAlbumArt(
-                            imageId: album.coverReleaseId, imageService: imageService, size: 200
-                        )
-                        .frame(maxWidth: .infinity)
-                    } else {
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(.systemGray5))
-                            .aspectRatio(1, contentMode: .fit)
-                            .frame(maxWidth: 200)
-                            .overlay {
-                                Image(systemName: "photo")
-                                    .font(.largeTitle)
+        Group {
+            if isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            if let imageService {
+                                AsyncAlbumArt(
+                                    imageId: album.coverReleaseId, imageService: imageService,
+                                    size: 200
+                                )
+                                .frame(maxWidth: .infinity)
+                            } else {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(.systemGray5))
+                                    .aspectRatio(1, contentMode: .fit)
+                                    .frame(maxWidth: 200)
+                                    .overlay {
+                                        Image(systemName: "photo")
+                                            .font(.largeTitle)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                            }
+                            Text(album.title)
+                                .font(.title2)
+                                .fontWeight(.bold)
+                            Text(album.artistNames)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            if let year = album.year {
+                                Text(String(year))
+                                    .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
-                            .frame(maxWidth: .infinity)
+                        }
+                        .listRowInsets(EdgeInsets())
+                        .padding()
                     }
-                    Text(album.title)
-                        .font(.title2)
-                        .fontWeight(.bold)
-                    Text(album.artistNames)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    if let year = album.year {
-                        Text(String(year))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .listRowInsets(EdgeInsets())
-                .padding()
-            }
-            if let detail {
-                ForEach(detail.releases) { release in
-                    Section(release.releaseName ?? "Tracks") {
-                        ForEach(release.tracks) { track in
-                            trackRow(track: track, allTracks: release.tracks)
+                    if let detail {
+                        ForEach(detail.releases) { release in
+                            Section(release.releaseName ?? "Tracks") {
+                                ForEach(release.tracks) { track in
+                                    trackRow(track: track, allTracks: release.tracks)
+                                }
+                            }
                         }
                     }
                 }
+                .listStyle(.plain)
             }
         }
-        .listStyle(.plain)
         .navigationTitle(album.title)
         .navigationBarTitleDisplayMode(.inline)
         .task {
             detail = try? databaseService.albumDetail(albumId: album.id)
+            isLoading = false
         }
     }
 

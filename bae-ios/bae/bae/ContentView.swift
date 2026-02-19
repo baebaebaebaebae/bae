@@ -66,7 +66,8 @@ struct ContentView: View {
 
             LibraryView(
                 databaseService: dbService, imageService: appState.imageService,
-                playbackService: playback, syncService: syncService, credentials: creds
+                playbackService: playback, syncService: syncService,
+                networkMonitor: appState.networkMonitor, credentials: creds
             ) {
                 do {
                     playback?.stop()
@@ -75,6 +76,7 @@ struct ContentView: View {
                     try? FileManager.default.removeItem(at: BootstrapService.databasePath())
                     try? FileManager.default.removeItem(at: BootstrapService.syncCursorsPath())
                     try? FileManager.default.removeItem(at: BootstrapService.imageCachePath())
+                    playback?.clearAudioCache()
                     appState.cloudClient = nil
                     appState.imageService = nil
                     appState.bootstrapResult = nil

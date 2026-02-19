@@ -11,6 +11,7 @@ struct NowPlayingView: View {
                 Spacer()
                 albumArt
                 trackInfo
+                errorBanner
                 progressSection
                 transportControls
                 Spacer()
@@ -64,6 +65,26 @@ struct NowPlayingView: View {
                 .lineLimit(1)
         }
         .padding(.horizontal)
+    }
+
+    @ViewBuilder
+    private var errorBanner: some View {
+        if let errorMessage = playbackService.error {
+            VStack(spacing: 8) {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                Button("Retry") {
+                    Task {
+                        await playbackService.replayCurrent()
+                    }
+                }
+                .font(.caption)
+                .buttonStyle(.bordered)
+            }
+            .padding(.horizontal)
+        }
     }
 
     private var progressSection: some View {

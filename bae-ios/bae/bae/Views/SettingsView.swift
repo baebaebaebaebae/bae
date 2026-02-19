@@ -3,9 +3,11 @@ import SwiftUI
 struct SettingsView: View {
     let credentials: LibraryCredentials
     let syncService: SyncService?
+    let playbackService: PlaybackService?
     let onUnlink: () -> Void
     @State private var showUnlinkConfirmation = false
     @State private var storageInfo: StorageInfo?
+    @State private var audioCacheSize: String = "Calculating..."
 
     var body: some View {
         NavigationStack {
@@ -39,6 +41,13 @@ struct SettingsView: View {
                     } else {
                         Text("Calculating...")
                             .foregroundStyle(.secondary)
+                    }
+                    if let playbackService {
+                        LabeledContent("Audio Cache", value: audioCacheSize)
+                        Button("Clear Audio Cache") {
+                            playbackService.clearAudioCache()
+                            audioCacheSize = formatBytes(0)
+                        }
                     }
                 }
                 Section("About") {
@@ -74,6 +83,9 @@ struct SettingsView: View {
             }
             .task {
                 storageInfo = calculateStorageInfo()
+                if let playbackService {
+                    audioCacheSize = formatBytes(playbackService.audioCacheSize())
+                }
             }
         }
     }

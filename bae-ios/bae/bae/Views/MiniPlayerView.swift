@@ -40,8 +40,12 @@ struct MiniPlayerView: View {
                         }
                     }
                     Spacer()
-                    // Loading indicator or play/pause
-                    if playbackService.isLoading {
+                    // Error, loading, or play/pause
+                    if playbackService.error != nil {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.title3)
+                            .foregroundStyle(.orange)
+                    } else if playbackService.isLoading {
                         ProgressView()
                     } else {
                         Button {

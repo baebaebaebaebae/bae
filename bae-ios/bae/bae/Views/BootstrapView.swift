@@ -4,6 +4,7 @@ struct BootstrapView: View {
     let bootstrapService: BootstrapService
     let onComplete: (BootstrapResult) -> Void
     let onError: (String) -> Void
+    @State private var retryTrigger = UUID()
 
     var body: some View {
         VStack(spacing: 24) {
@@ -38,11 +39,16 @@ struct BootstrapView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
+                Button("Try Again") {
+                    bootstrapService.progress = .idle
+                    retryTrigger = UUID()
+                }
+                .buttonStyle(.bordered)
             }
 
             Spacer()
         }
-        .task {
+        .task(id: retryTrigger) {
             do {
                 let result = try await bootstrapService.bootstrap()
                 onComplete(result)

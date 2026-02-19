@@ -19,7 +19,6 @@ class PlaybackService {
     private var player: AVAudioPlayer?
     private var playerDelegate: PlayerDelegate?
     private var progressTimer: Timer?
-    private var tempFileURL: URL?
     private var queue: [Track] = []
     private var queueIndex: Int = 0
 
@@ -27,6 +26,13 @@ class PlaybackService {
     private let crypto: CryptoService
     private let encryptionKey: Data
     private let databaseService: DatabaseService
+
+    // MARK: - Audio Cache
+
+    private static let audioCacheDir: URL = {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return caches.appendingPathComponent("audio-cache")
+    }()
 
     // MARK: - Init
 
@@ -67,37 +73,45 @@ class PlaybackService {
                 return
             }
 
-            // 2. Download encrypted file from cloud
-            let storageKey = Self.storagePath(for: fileId)
-            let encrypted = try await cloudClient.readBlob(key: storageKey)
+            let ext = audioFormat.contentType.contains("flac") ? "flac" : "m4a"
+            let cacheURL = Self.audioCacheURL(fileId: fileId, ext: ext)
 
-            // 3. Decrypt with per-release key
-            let releaseKey = try crypto.deriveReleaseKey(
-                masterKey: encryptionKey, releaseId: track.releaseId)
-            let decrypted = try crypto.decryptFile(ciphertext: encrypted, key: releaseKey)
-
-            // 4. Extract track audio (handle CUE/FLAC if needed)
-            let audioData: Data
-            if audioFormat.needsHeaders, let headers = audioFormat.flacHeaders {
-                let dataStart = audioFormat.audioDataStart
-                let start = (audioFormat.startByteOffset ?? 0) + dataStart
-                let end = audioFormat.endByteOffset.map { $0 + dataStart } ?? decrypted.count
-                var trackData = headers
-                trackData.append(decrypted.subdata(in: start..<min(end, decrypted.count)))
-                audioData = trackData
+            let playbackURL: URL
+            if FileManager.default.fileExists(atPath: cacheURL.path) {
+                // Cache hit -- skip download and decrypt
+                playbackURL = cacheURL
             } else {
-                audioData = decrypted
+                // 2. Download encrypted file from cloud
+                let storageKey = Self.storagePath(for: fileId)
+                let encrypted = try await cloudClient.readBlob(key: storageKey)
+
+                // 3. Decrypt with per-release key
+                let releaseKey = try crypto.deriveReleaseKey(
+                    masterKey: encryptionKey, releaseId: track.releaseId)
+                let decrypted = try crypto.decryptFile(ciphertext: encrypted, key: releaseKey)
+
+                // 4. Extract track audio (handle CUE/FLAC if needed)
+                let audioData: Data
+                if audioFormat.needsHeaders, let headers = audioFormat.flacHeaders {
+                    let dataStart = audioFormat.audioDataStart
+                    let start = (audioFormat.startByteOffset ?? 0) + dataStart
+                    let end = audioFormat.endByteOffset.map { $0 + dataStart } ?? decrypted.count
+                    var trackData = headers
+                    trackData.append(decrypted.subdata(in: start..<min(end, decrypted.count)))
+                    audioData = trackData
+                } else {
+                    audioData = decrypted
+                }
+
+                // 5. Write to cache
+                try FileManager.default.createDirectory(
+                    at: Self.audioCacheDir, withIntermediateDirectories: true)
+                try audioData.write(to: cacheURL)
+                playbackURL = cacheURL
             }
 
-            // 5. Write to temp file
-            let ext = audioFormat.contentType.contains("flac") ? "flac" : "m4a"
-            let tempURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("bae-playback-\(track.id).\(ext)")
-            try audioData.write(to: tempURL)
-            tempFileURL = tempURL
-
             // 6. Play
-            let audioPlayer = try AVAudioPlayer(contentsOf: tempURL)
+            let audioPlayer = try AVAudioPlayer(contentsOf: playbackURL)
             let delegate = PlayerDelegate { [weak self] in
                 guard let self else { return }
                 Task { @MainActor in
@@ -151,7 +165,6 @@ class PlaybackService {
         isPlaying = false
         progress = 0
         duration = 0
-        cleanupTempFile()
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
@@ -159,6 +172,13 @@ class PlaybackService {
         player?.currentTime = time
         progress = time
         updateNowPlayingElapsedTime()
+    }
+
+    func replayCurrent() async {
+        guard let track = currentTrack else { return }
+        let albumArtId = currentAlbumArtId
+        let allTracks = queue
+        await play(track: track, albumArtId: albumArtId, allTracks: allTracks)
     }
 
     func playNext() async {
@@ -205,6 +225,27 @@ class PlaybackService {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
+    // MARK: - Audio Cache Management
+
+    func audioCacheSize() -> Int64 {
+        let fm = FileManager.default
+        guard
+            let enumerator = fm.enumerator(
+                at: Self.audioCacheDir, includingPropertiesForKeys: [.fileSizeKey])
+        else { return 0 }
+        var total: Int64 = 0
+        for case let fileURL as URL in enumerator {
+            if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                total += Int64(size)
+            }
+        }
+        return total
+    }
+
+    func clearAudioCache() {
+        try? FileManager.default.removeItem(at: Self.audioCacheDir)
+    }
+
     // MARK: - Storage Path
 
     static func storagePath(for fileId: String) -> String {
@@ -215,6 +256,10 @@ class PlaybackService {
     }
 
     // MARK: - Private
+
+    private static func audioCacheURL(fileId: String, ext: String) -> URL {
+        audioCacheDir.appendingPathComponent("\(fileId).\(ext)")
+    }
 
     private func configureAudioSession() {
         do {
@@ -303,13 +348,6 @@ class PlaybackService {
     private func stopProgressTimer() {
         progressTimer?.invalidate()
         progressTimer = nil
-    }
-
-    private func cleanupTempFile() {
-        if let url = tempFileURL {
-            try? FileManager.default.removeItem(at: url)
-            tempFileURL = nil
-        }
     }
 }
 
