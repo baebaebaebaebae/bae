@@ -28,6 +28,7 @@ struct AlbumGridView: View {
             }
             .padding()
         }
+        .background(Theme.background)
     }
 }
 
@@ -82,7 +83,7 @@ struct AlbumCardView: View {
                 case .failure:
                     albumArtPlaceholder
                 default:
-                    Color(.separatorColor)
+                    Theme.placeholder
                 }
             }
         } else {
@@ -92,7 +93,7 @@ struct AlbumCardView: View {
 
     private var albumArtPlaceholder: some View {
         ZStack {
-            Color(.separatorColor)
+            Theme.placeholder
             Image(systemName: "photo")
                 .font(.title)
                 .foregroundStyle(.secondary)

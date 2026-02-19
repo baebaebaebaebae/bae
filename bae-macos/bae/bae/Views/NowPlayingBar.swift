@@ -22,7 +22,7 @@ struct NowPlayingBar: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(.bar)
+        .background(Theme.surface)
     }
 
     // MARK: - Left: track info
@@ -66,7 +66,7 @@ struct NowPlayingBar: View {
                 case .failure:
                     albumArtPlaceholder
                 default:
-                    Color(.separatorColor)
+                    Theme.placeholder
                 }
             }
         } else {
@@ -76,7 +76,7 @@ struct NowPlayingBar: View {
 
     private var albumArtPlaceholder: some View {
         ZStack {
-            Color(.separatorColor)
+            Theme.placeholder
             Image(systemName: "photo")
                 .font(.caption)
                 .foregroundStyle(.secondary)

@@ -41,6 +41,8 @@ struct SearchView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.background)
     }
 
     private func artistRow(_ artist: BridgeArtistSearchResult) -> some View {
@@ -139,7 +141,7 @@ struct SearchView: View {
                 case .failure:
                     albumArtPlaceholder
                 default:
-                    Color(.separatorColor)
+                    Theme.placeholder
                 }
             }
         } else {
@@ -149,7 +151,7 @@ struct SearchView: View {
 
     private var albumArtPlaceholder: some View {
         ZStack {
-            Color(.separatorColor)
+            Theme.placeholder
             Image(systemName: "photo")
                 .font(.caption2)
                 .foregroundStyle(.secondary)

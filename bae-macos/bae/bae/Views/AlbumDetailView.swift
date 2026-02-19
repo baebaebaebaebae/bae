@@ -105,6 +105,7 @@ struct AlbumDetailView: View {
             }
             .padding()
         }
+        .background(Theme.background)
         .toolbar {
             ToolbarItemGroup {
                 if !detail.releases.isEmpty {
@@ -206,7 +207,7 @@ struct AlbumDetailView: View {
                 case .failure:
                     albumArtPlaceholder
                 default:
-                    Color(.separatorColor)
+                    Theme.placeholder
                 }
             }
         } else {
@@ -216,7 +217,7 @@ struct AlbumDetailView: View {
 
     private var albumArtPlaceholder: some View {
         ZStack {
-            Color(.separatorColor)
+            Theme.placeholder
             Image(systemName: "photo")
                 .font(.largeTitle)
                 .foregroundStyle(.secondary)
@@ -558,7 +559,7 @@ struct AlbumDetailView: View {
                     case .failure:
                         coverOptionPlaceholder
                     default:
-                        Color(.separatorColor)
+                        Theme.placeholder
                     }
                 }
                 .frame(width: 120, height: 120)
@@ -597,7 +598,7 @@ struct AlbumDetailView: View {
 
     private var coverOptionPlaceholder: some View {
         ZStack {
-            Color(.separatorColor)
+            Theme.placeholder
             Image(systemName: "photo")
                 .font(.title2)
                 .foregroundStyle(.tertiary)

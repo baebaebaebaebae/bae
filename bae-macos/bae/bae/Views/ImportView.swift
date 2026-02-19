@@ -54,6 +54,8 @@ struct ImportView: View {
                 ) { candidate in
                     CandidateRow(candidate: candidate, status: appService.importStatuses[candidate.folderPath])
                 }
+                .scrollContentBackground(.hidden)
+                .background(Theme.surface)
             }
         }
     }
@@ -178,6 +180,8 @@ struct ImportView: View {
             }
             .padding(.vertical, 2)
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.background)
     }
 
     // MARK: - Actions

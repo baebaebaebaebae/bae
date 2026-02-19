@@ -39,6 +39,8 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 600)
+        .background(Theme.background)
+        .preferredColorScheme(.dark)
         .navigationTitle(windowTitle)
         .task {
             loadInitialState()
