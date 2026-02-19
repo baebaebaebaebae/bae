@@ -37,6 +37,21 @@ struct LibraryView: View {
                     systemImage: "square.stack",
                     description: Text("Import some music to get started")
                 )
+            } else if let albumId = selectedAlbumId {
+                VSplitView {
+                    AlbumGridView(
+                        albums: albums,
+                        appService: appService,
+                        selectedAlbumId: $selectedAlbumId
+                    )
+                    .frame(minHeight: 120)
+                    AlbumDetailView(
+                        albumId: albumId,
+                        appService: appService,
+                        onClose: { selectedAlbumId = nil }
+                    )
+                    .frame(minHeight: 200)
+                }
             } else {
                 AlbumGridView(
                     albums: albums,
@@ -55,22 +70,6 @@ struct LibraryView: View {
         }
         .task { loadAlbums() }
         .onChange(of: appService.libraryVersion) { _, _ in loadAlbums() }
-        .sheet(isPresented: Binding(
-            get: { selectedAlbumId != nil },
-            set: { if !$0 { selectedAlbumId = nil } }
-        )) {
-            if let albumId = selectedAlbumId {
-                NavigationStack {
-                    AlbumDetailView(albumId: albumId, appService: appService)
-                        .toolbar {
-                            ToolbarItem(placement: .confirmationAction) {
-                                Button("Done") { selectedAlbumId = nil }
-                            }
-                        }
-                }
-                .frame(minWidth: 600, minHeight: 500)
-            }
-        }
     }
 
     private func loadAlbums() {

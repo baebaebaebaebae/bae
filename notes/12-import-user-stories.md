@@ -170,6 +170,47 @@ BridgeImportCandidate:
   bad_image_count: u32      — corrupt image files
 ```
 
+### US-5b: Document viewer
+
+Clicking a document file (log, nfo, m3u, cue, txt) in the file pane opens a viewer overlay. The viewer:
+- Shows the file content in a monospaced font
+- Text is selectable
+- Shows the filename in the header
+- Has a "Done" button and Escape key to close
+- Clicking outside the viewer (on the dark backdrop) also closes it
+- Tries UTF-8 first, falls back to Shift-JIS (common for Japanese rip logs)
+
+NFO and log files often contain release info (catalog numbers, edition notes, rip details) that help with identification.
+
+### US-5c: Audio section collapsed by default
+
+The Audio section in the file pane is collapsed by default (a disclosure group). Users can expand it to see track files, but it's usually not needed for identification — images and documents are more useful for that. This saves vertical space for the more important sections.
+
+---
+
+## Layout
+
+### US-11: Resizable file/search split
+
+The file pane (top) and search area (bottom) in the import main content are separated by a draggable divider. Users can drag the divider to give more space to either the file display or the search results, depending on what they're focused on.
+
+### US-12: Overlays dismiss on click-outside
+
+All overlay panels (image gallery, document viewer, cover picker) dismiss when the user clicks on the dark backdrop area outside the panel. No need to find and click a close button — just click away. Escape key also works.
+
+### US-13: No modal sheets
+
+Content viewers (image gallery, document viewer, cover picker) are presented as centered overlays with a dark backdrop, not as macOS sheet modals. This avoids:
+- Sheet size jumping/animation on open
+- Modal blocking (sheets prevent interaction with the parent window)
+- Inconsistent dismiss behavior
+
+### US-14: Inline album detail
+
+Clicking an album in the library grid shows its detail in the bottom portion of the view (a vertical split), not in a modal sheet. The album grid stays visible above so the user can quickly switch between albums. A close (X) button in the detail header returns to the full grid view.
+
+This matches the iTunes/Music.app pattern where album detail is part of the main flow, not a separate window.
+
 ---
 
 ## What's NOT in scope (yet)
@@ -179,6 +220,4 @@ These are bae-desktop features not yet in the bridge or other platforms:
 - **Disc ID auto-lookup** — automatic matching via CUE file fingerprint (Stage 2 path 1 in the UX goals doc). Requires the full state machine.
 - **Confirm step** — review metadata, select cover art, choose storage profile before importing. Currently we go straight from search result to import.
 - **Auto-advance** — after importing one candidate, automatically select the next pending one.
-- **Image preview / lightbox** — clicking on artwork in the file pane to view it full-size.
-- **Document preview** — viewing text file contents inline.
 - **Drag-to-reorder candidates** — reordering the sidebar list.

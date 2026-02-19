@@ -21,27 +21,55 @@ struct ImportView: View {
     @State private var searchCatalog = ""
     @State private var searchBarcode = ""
     @State private var galleryIndex: Int?
+    @State private var audioExpanded = false
+    @State private var documentContent: (name: String, text: String)?
 
     var body: some View {
-        if appService.scanResults.isEmpty {
-            emptyState
-        } else {
-            HSplitView {
-                candidateList
-                    .frame(minWidth: 200, idealWidth: 250, maxWidth: 350)
-                if let candidate = selectedCandidate {
-                    metadataSearchView(for: candidate)
+        ZStack {
+            if appService.scanResults.isEmpty {
+                emptyState
+            } else {
+                HSplitView {
+                    candidateList
+                        .frame(minWidth: 200, idealWidth: 250, maxWidth: 350)
+                    if let candidate = selectedCandidate {
+                        metadataSearchView(for: candidate)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        ContentUnavailableView(
+                            "Select a folder",
+                            systemImage: "folder",
+                            description: Text("Choose a scanned folder to search for metadata")
+                        )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ContentUnavailableView(
-                        "Select a folder",
-                        systemImage: "folder",
-                        description: Text("Choose a scanned folder to search for metadata")
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // Gallery overlay
+            if galleryIndex != nil, let files = candidateFiles, !files.artwork.isEmpty {
+                Color.black.opacity(0.5)
+                    .ignoresSafeArea()
+                    .onTapGesture { galleryIndex = nil }
+                ImageGalleryView(images: files.artwork, currentIndex: $galleryIndex)
+                    .frame(width: 700, height: 550)
+                    .background(Theme.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .shadow(radius: 20)
+            }
+
+            // Document viewer overlay
+            if let doc = documentContent {
+                Color.black.opacity(0.5)
+                    .ignoresSafeArea()
+                    .onTapGesture { documentContent = nil }
+                DocumentViewerView(name: doc.name, text: doc.text, onClose: { documentContent = nil })
+                    .frame(width: 600, height: 500)
+                    .background(Theme.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .shadow(radius: 20)
+            }
         }
     }
 
@@ -161,25 +189,47 @@ struct ImportView: View {
             candidateHeader(candidate)
             Divider()
             if let files = candidateFiles {
-                filePane(files)
-                Divider()
-            }
-            searchForm
-            Divider()
-            if isSearching {
-                ProgressView("Searching...")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if searchResults.isEmpty {
-                ContentUnavailableView(
-                    "No results",
-                    systemImage: "magnifyingglass",
-                    description: Text("Search MusicBrainz or Discogs to find metadata")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VSplitView {
+                    filePane(files)
+                        .frame(minHeight: 80)
+                    VStack(spacing: 0) {
+                        searchForm
+                        Divider()
+                        if isSearching {
+                            ProgressView("Searching...")
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else if searchResults.isEmpty {
+                            ContentUnavailableView(
+                                "No results",
+                                systemImage: "magnifyingglass",
+                                description: Text("Search MusicBrainz or Discogs to find metadata")
+                            )
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else {
+                            resultsList(for: candidate)
+                        }
+                    }
+                    .frame(minHeight: 120)
+                }
             } else {
-                resultsList(for: candidate)
+                searchForm
+                Divider()
+                if isSearching {
+                    ProgressView("Searching...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if searchResults.isEmpty {
+                    ContentUnavailableView(
+                        "No results",
+                        systemImage: "magnifyingglass",
+                        description: Text("Search MusicBrainz or Discogs to find metadata")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    resultsList(for: candidate)
+                }
             }
         }
+        .animation(nil, value: selectedCandidate?.folderPath)
     }
 
     private func candidateHeader(_ candidate: BridgeImportCandidate) -> some View {
@@ -226,7 +276,7 @@ struct ImportView: View {
             VStack(alignment: .leading, spacing: 12) {
                 switch files.audio {
                 case .cueFlacPairs(let pairs):
-                    fileSection("Audio (\(pairs.count) disc\(pairs.count == 1 ? "" : "s"))") {
+                    DisclosureGroup(isExpanded: $audioExpanded) {
                         ForEach(Array(pairs.enumerated()), id: \.offset) { _, pair in
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(pair.cueName)
@@ -239,9 +289,14 @@ struct ImportView: View {
                                     .foregroundStyle(.tertiary)
                             }
                         }
+                    } label: {
+                        Text("Audio (\(pairs.count) disc\(pairs.count == 1 ? "" : "s"))")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
                     }
                 case .trackFiles(let tracks):
-                    fileSection("Audio (\(tracks.count) tracks)") {
+                    DisclosureGroup(isExpanded: $audioExpanded) {
                         ForEach(Array(tracks.enumerated()), id: \.offset) { _, file in
                             HStack {
                                 Text(file.name)
@@ -253,25 +308,21 @@ struct ImportView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                    } label: {
+                        Text("Audio (\(tracks.count) tracks)")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 if !files.artwork.isEmpty {
                     fileSection("Images (\(files.artwork.count))") {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 8)], spacing: 8) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
                             ForEach(Array(files.artwork.enumerated()), id: \.offset) { index, file in
                                 imageThumb(file)
                                     .onTapGesture { galleryIndex = index }
                             }
                         }
-                    }
-                    .sheet(isPresented: Binding(
-                        get: { galleryIndex != nil },
-                        set: { if !$0 { galleryIndex = nil } }
-                    )) {
-                        ImageGalleryView(
-                            images: files.artwork,
-                            currentIndex: $galleryIndex
-                        )
                     }
                 }
                 if !files.documents.isEmpty {
@@ -289,6 +340,17 @@ struct ImportView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if let text = try? String(contentsOfFile: file.path, encoding: .utf8) {
+                                    documentContent = (name: file.name, text: text)
+                                } else if let text = try? String(contentsOfFile: file.path, encoding: .shiftJIS) {
+                                    documentContent = (name: file.name, text: text)
+                                }
+                            }
+                            .onHover { hovering in
+                                if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                            }
                         }
                     }
                 }
@@ -296,7 +358,6 @@ struct ImportView: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
         }
-        .frame(maxHeight: 250)
     }
 
     private func fileSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -316,7 +377,7 @@ struct ImportView: View {
                 Image(nsImage: nsImage)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: 72, height: 72)
+                    .frame(width: 120, height: 120)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
             } else {
                 ZStack {
@@ -325,14 +386,14 @@ struct ImportView: View {
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
-                .frame(width: 72, height: 72)
+                .frame(width: 120, height: 120)
                 .clipShape(RoundedRectangle(cornerRadius: 4))
             }
             Text(file.name)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .frame(width: 72)
+                .frame(width: 120)
         }
     }
 
@@ -384,6 +445,7 @@ struct ImportView: View {
             }
         }
         .padding()
+        .animation(nil, value: searchTab)
     }
 
     private func resultsList(for candidate: BridgeImportCandidate) -> some View {
@@ -712,6 +774,37 @@ private struct ImageGalleryView: View {
     private func navigateNext() {
         if safeIndex < images.count - 1 {
             currentIndex = safeIndex + 1
+        }
+    }
+}
+
+// MARK: - Document Viewer
+
+private struct DocumentViewerView: View {
+    let name: String
+    let text: String
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(name)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Done") { onClose() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            Divider()
+            ScrollView {
+                Text(text)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
         }
     }
 }

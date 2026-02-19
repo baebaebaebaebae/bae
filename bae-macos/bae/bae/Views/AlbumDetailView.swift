@@ -4,6 +4,7 @@ import AppKit
 struct AlbumDetailView: View {
     let albumId: String
     let appService: AppService
+    var onClose: (() -> Void)?
 
     @State private var detail: BridgeAlbumDetail?
     @State private var error: String?
@@ -35,9 +36,16 @@ struct AlbumDetailView: View {
         .task(id: albumId) {
             await loadDetail()
         }
-        .sheet(isPresented: $showingCoverSheet) {
-            if let detail {
+        .overlay {
+            if showingCoverSheet, let detail {
+                Color.black.opacity(0.5)
+                    .ignoresSafeArea()
+                    .onTapGesture { showingCoverSheet = false }
                 coverSheet(detail)
+                    .frame(width: 500, height: 450)
+                    .background(Theme.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .shadow(radius: 20)
             }
         }
         .alert("Cover Change Failed", isPresented: .init(
@@ -106,25 +114,12 @@ struct AlbumDetailView: View {
             .padding()
         }
         .background(Theme.background)
-        .toolbar {
-            ToolbarItemGroup {
-                if !detail.releases.isEmpty {
-                    let release = detail.releases[selectedReleaseIndex]
-
-                    Button(action: { createShareLink(releaseId: release.id) }) {
-                        Label("Share", systemImage: "square.and.arrow.up")
-                    }
-                    .help("Create share link")
-                    .accessibilityLabel("Create share link")
-                }
-            }
-        }
     }
 
     private func albumHeader(_ detail: BridgeAlbumDetail) -> some View {
         HStack(alignment: .top, spacing: 20) {
             albumArt(detail.album)
-                .frame(width: 300, height: 300)
+                .frame(width: 200, height: 200)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .contextMenu {
                     Button("Change Cover...") {
@@ -133,18 +128,18 @@ struct AlbumDetailView: View {
                     }
                 }
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(detail.album.title)
-                    .font(.largeTitle)
+                    .font(.title)
                     .fontWeight(.bold)
 
                 Text(detail.album.artistNames)
-                    .font(.title2)
+                    .font(.title3)
                     .foregroundStyle(.secondary)
 
                 if let year = detail.album.year {
                     Text(String(year))
-                        .font(.title3)
+                        .font(.callout)
                         .foregroundStyle(.tertiary)
                 }
 
@@ -152,17 +147,34 @@ struct AlbumDetailView: View {
                     releaseMetadata(release)
                 }
 
-                Button(action: {
-                    appService.playAlbum(albumId: albumId)
-                }) {
-                    Label("Play", systemImage: "play.fill")
+                HStack(spacing: 8) {
+                    Button(action: {
+                        appService.playAlbum(albumId: albumId)
+                    }) {
+                        Label("Play", systemImage: "play.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    if !detail.releases.isEmpty {
+                        Button(action: { createShareLink(releaseId: detail.releases[selectedReleaseIndex].id) }) {
+                            Label("Share", systemImage: "square.and.arrow.up")
+                        }
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .padding(.top, 8)
+                .padding(.top, 4)
             }
 
             Spacer()
+
+            if let onClose {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+            }
         }
     }
 
@@ -537,7 +549,6 @@ struct AlbumDetailView: View {
                 .padding()
             }
         }
-        .frame(minWidth: 400, minHeight: 350)
     }
 
     private func remoteCoverOption(_ cover: BridgeRemoteCover, detail: BridgeAlbumDetail) -> some View {
