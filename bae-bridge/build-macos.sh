@@ -3,6 +3,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Use sccache if available
+if command -v sccache &> /dev/null; then
+    export RUSTC_WRAPPER=sccache
+fi
+
 echo "Building for macOS (arm64)..."
 cargo build --release --target aarch64-apple-darwin -p bae-bridge
 

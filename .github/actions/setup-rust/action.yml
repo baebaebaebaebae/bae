@@ -23,9 +23,11 @@ runs:
     - name: Setup sccache
       uses: mozilla-actions/sccache-action@v0.0.9
 
-    - name: Enable sccache GHA cache
+    - name: Enable sccache for Rust builds
       shell: bash
-      run: echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+      run: |
+        echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+        echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
 
     - name: Install cargo-binstall
       shell: bash
