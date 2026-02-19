@@ -29,7 +29,11 @@ struct LibraryView: View {
     }
 
     private var sortedAlbums: [BridgeAlbum] {
-        albums.sorted { a, b in
+        if sortField == .dateAdded {
+            // No dateAdded field — preserve DB order (newest first).
+            return sortDirection == .descending ? albums : albums.reversed()
+        }
+        return albums.sorted { a, b in
             let result: Bool
             switch sortField {
             case .title:
@@ -37,13 +41,14 @@ struct LibraryView: View {
             case .artist:
                 result = a.artistNames.localizedCaseInsensitiveCompare(b.artistNames) == .orderedAscending
             case .year:
-                let yearA = a.year ?? 0
-                let yearB = b.year ?? 0
-                result = yearA < yearB
+                switch (a.year, b.year) {
+                case (nil, nil): result = false
+                case (nil, _): result = false
+                case (_, nil): result = true
+                case (let ya?, let yb?): result = ya < yb
+                }
             case .dateAdded:
-                // BridgeAlbum doesn't have a dateAdded field, so preserve original order
-                // (getAlbums returns newest first from the DB)
-                return sortDirection == .descending
+                result = false // unreachable
             }
             return sortDirection == .ascending ? result : !result
         }

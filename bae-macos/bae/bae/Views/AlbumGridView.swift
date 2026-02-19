@@ -22,12 +22,12 @@ struct AlbumGridView: View {
     ]
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                libraryHeader
-                    .padding(.horizontal)
-                    .padding(.top, 8)
+        VStack(alignment: .leading, spacing: 0) {
+            libraryHeader
+                .padding(.horizontal)
+                .padding(.vertical, 8)
 
+            ScrollView {
                 LazyVGrid(columns: columns, spacing: 20) {
                     ForEach(albums) { album in
                         AlbumCardView(
