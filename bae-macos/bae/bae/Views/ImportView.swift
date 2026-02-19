@@ -10,57 +10,81 @@ struct ImportView: View {
     @State private var searchAlbum = ""
 
     var body: some View {
-        HSplitView {
-            candidateList
-                .frame(minWidth: 200, idealWidth: 250, maxWidth: 350)
+        if appService.scanResults.isEmpty {
+            emptyState
+        } else {
+            HSplitView {
+                candidateList
+                    .frame(minWidth: 200, idealWidth: 250, maxWidth: 350)
 
-            if let candidate = selectedCandidate {
-                metadataSearchView(for: candidate)
+                if let candidate = selectedCandidate {
+                    metadataSearchView(for: candidate)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ContentUnavailableView(
+                        "Select a folder",
+                        systemImage: "folder",
+                        description: Text("Choose a scanned folder to search for metadata")
+                    )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ContentUnavailableView(
-                    "Select a folder",
-                    systemImage: "folder",
-                    description: Text("Choose a scanned folder to search for metadata")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    // MARK: - Empty state
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Button(action: { openFolderAndScan() }) {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 48, weight: .thin))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+
+            Text("Scan a folder to import music")
+                .font(.callout)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func openFolderAndScan() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Select a folder containing music to import"
+        panel.prompt = "Scan"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        appService.scanFolder(path: url.path)
     }
 
     // MARK: - Candidate list
 
     private var candidateList: some View {
-        Group {
-            if appService.scanResults.isEmpty {
-                ContentUnavailableView(
-                    "No folders found",
-                    systemImage: "folder.badge.questionmark",
-                    description: Text("No importable music was found in the selected folder")
-                )
-            } else {
-                List(
-                    appService.scanResults,
-                    id: \.folderPath,
-                    selection: Binding(
-                        get: { selectedCandidate?.folderPath },
-                        set: { path in
-                            selectedCandidate = appService.scanResults.first { $0.folderPath == path }
-                            if let candidate = selectedCandidate {
-                                searchArtist = candidate.artistName
-                                searchAlbum = candidate.albumTitle
-                                searchResults = []
-                            }
-                        }
-                    )
-                ) { candidate in
-                    CandidateRow(candidate: candidate, status: appService.importStatuses[candidate.folderPath])
+        List(
+            appService.scanResults,
+            id: \.folderPath,
+            selection: Binding(
+                get: { selectedCandidate?.folderPath },
+                set: { path in
+                    selectedCandidate = appService.scanResults.first { $0.folderPath == path }
+                    if let candidate = selectedCandidate {
+                        searchArtist = candidate.artistName
+                        searchAlbum = candidate.albumTitle
+                        searchResults = []
+                    }
                 }
-                .scrollContentBackground(.hidden)
-                .background(Theme.surface)
-            }
+            )
+        ) { candidate in
+            CandidateRow(candidate: candidate, status: appService.importStatuses[candidate.folderPath])
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.surface)
     }
 
     // MARK: - Metadata search
