@@ -1,15 +1,17 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use bae_core::config::Config;
 use bae_core::db::Database;
 use bae_core::image_server::{self, ImageServerHandle};
 use bae_core::keys::KeyService;
 use bae_core::library::SharedLibraryManager;
-use tracing::info;
+use bae_core::playback::{PlaybackHandle, PlaybackProgress, PlaybackService, PlaybackState};
+use tracing::{info, warn};
 
 use crate::types::{
     BridgeAlbum, BridgeAlbumDetail, BridgeArtist, BridgeError, BridgeFile, BridgeLibraryInfo,
-    BridgeRelease, BridgeTrack,
+    BridgePlaybackState, BridgeRelease, BridgeRepeatMode, BridgeTrack,
 };
 
 /// Discover all libraries in ~/.bae/libraries/.
@@ -26,6 +28,15 @@ pub fn discover_libraries() -> Result<Vec<BridgeLibraryInfo>, BridgeError> {
         .collect())
 }
 
+/// Callback interface for playback events. Implemented by Swift.
+#[uniffi::export(callback_interface)]
+pub trait AppEventHandler: Send + Sync {
+    fn on_playback_state_changed(&self, state: BridgePlaybackState);
+    fn on_playback_progress(&self, position_ms: u64, duration_ms: u64, track_id: String);
+    fn on_queue_updated(&self, track_ids: Vec<String>);
+    fn on_error(&self, message: String);
+}
+
 /// The central handle to the bae backend. Owns the tokio runtime and all services.
 #[derive(uniffi::Object)]
 pub struct AppHandle {
@@ -35,6 +46,8 @@ pub struct AppHandle {
     #[allow(dead_code)]
     key_service: KeyService,
     image_server: ImageServerHandle,
+    playback_handle: PlaybackHandle,
+    event_handler: Mutex<Option<Arc<dyn AppEventHandler>>>,
 }
 
 #[uniffi::export]
@@ -276,6 +289,243 @@ impl AppHandle {
             })
         })
     }
+
+    /// Play an entire album, optionally starting from a specific track index.
+    pub fn play_album(
+        &self,
+        album_id: String,
+        start_track_index: Option<u32>,
+    ) -> Result<(), BridgeError> {
+        self.runtime.block_on(async {
+            let lm = self.library_manager.get();
+            let releases =
+                lm.get_releases_for_album(&album_id)
+                    .await
+                    .map_err(|e| BridgeError::Database {
+                        msg: format!("{e}"),
+                    })?;
+
+            // Collect all tracks across releases, sorted by disc then track number
+            let mut all_tracks = Vec::new();
+            for rel in &releases {
+                let tracks = lm
+                    .get_tracks(&rel.id)
+                    .await
+                    .map_err(|e| BridgeError::Database {
+                        msg: format!("{e}"),
+                    })?;
+                all_tracks.extend(tracks);
+            }
+
+            all_tracks.sort_by(|a, b| {
+                let disc_a = a.disc_number.unwrap_or(1);
+                let disc_b = b.disc_number.unwrap_or(1);
+                disc_a.cmp(&disc_b).then_with(|| {
+                    a.track_number
+                        .unwrap_or(0)
+                        .cmp(&b.track_number.unwrap_or(0))
+                })
+            });
+
+            let mut track_ids: Vec<String> = all_tracks.into_iter().map(|t| t.id).collect();
+            if track_ids.is_empty() {
+                return Err(BridgeError::NotFound {
+                    msg: format!("No tracks found for album '{album_id}'"),
+                });
+            }
+
+            // Rotate so the start track is first
+            if let Some(idx) = start_track_index {
+                let idx = idx as usize;
+                if idx < track_ids.len() {
+                    track_ids.rotate_left(idx);
+                }
+            }
+
+            self.playback_handle.play_album(track_ids);
+            Ok(())
+        })
+    }
+
+    /// Play a list of tracks in order.
+    pub fn play_tracks(&self, track_ids: Vec<String>) {
+        self.playback_handle.play_album(track_ids);
+    }
+
+    pub fn pause(&self) {
+        self.playback_handle.pause();
+    }
+
+    pub fn resume(&self) {
+        self.playback_handle.resume();
+    }
+
+    pub fn stop(&self) {
+        self.playback_handle.stop();
+    }
+
+    pub fn next_track(&self) {
+        self.playback_handle.next();
+    }
+
+    pub fn previous_track(&self) {
+        self.playback_handle.previous();
+    }
+
+    /// Seek to a position in the current track, in milliseconds.
+    pub fn seek(&self, position_ms: u64) {
+        self.playback_handle
+            .seek(Duration::from_millis(position_ms));
+    }
+
+    pub fn set_volume(&self, volume: f32) {
+        self.playback_handle.set_volume(volume);
+    }
+
+    pub fn set_repeat_mode(&self, mode: BridgeRepeatMode) {
+        let core_mode = match mode {
+            BridgeRepeatMode::None => bae_core::playback::RepeatMode::None,
+            BridgeRepeatMode::Track => bae_core::playback::RepeatMode::Track,
+            BridgeRepeatMode::Album => bae_core::playback::RepeatMode::Album,
+        };
+        self.playback_handle.set_repeat_mode(core_mode);
+    }
+
+    /// Register a callback handler for playback events.
+    /// Spawns a background task that forwards PlaybackProgress events to the handler.
+    pub fn set_event_handler(&self, handler: Box<dyn AppEventHandler>) {
+        let handler: Arc<dyn AppEventHandler> = Arc::from(handler);
+        let prev = self.event_handler.lock().unwrap().replace(handler.clone());
+        drop(prev);
+
+        let rx = self.playback_handle.subscribe_progress();
+        let lm = self.library_manager.clone();
+
+        self.runtime.spawn(dispatch_events(rx, handler, lm));
+    }
+}
+
+/// Background task that reads PlaybackProgress events and dispatches them
+/// to the Swift event handler callback.
+async fn dispatch_events(
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<PlaybackProgress>,
+    handler: Arc<dyn AppEventHandler>,
+    library_manager: SharedLibraryManager,
+) {
+    while let Some(event) = rx.recv().await {
+        match event {
+            PlaybackProgress::StateChanged { state } => {
+                let bridge_state = convert_playback_state(&state, &library_manager).await;
+                handler.on_playback_state_changed(bridge_state);
+            }
+            PlaybackProgress::PositionUpdate {
+                position, track_id, ..
+            } => {
+                handler.on_playback_progress(
+                    position.as_millis() as u64,
+                    0, // duration comes from state changes, not position updates
+                    track_id,
+                );
+            }
+            PlaybackProgress::QueueUpdated { tracks } => {
+                handler.on_queue_updated(tracks);
+            }
+            PlaybackProgress::PlaybackError { message } => {
+                handler.on_error(message);
+            }
+            // Other events (Seeked, SeekError, TrackCompleted, etc.) don't need
+            // separate handling -- state changes cover the UI updates.
+            _ => {}
+        }
+    }
+}
+
+/// Convert a core PlaybackState into a BridgePlaybackState, looking up
+/// track metadata (title, artist names, album_id) from the database.
+async fn convert_playback_state(
+    state: &PlaybackState,
+    lm: &SharedLibraryManager,
+) -> BridgePlaybackState {
+    match state {
+        PlaybackState::Stopped => BridgePlaybackState::Stopped,
+        PlaybackState::Loading { track_id } => BridgePlaybackState::Loading {
+            track_id: track_id.clone(),
+        },
+        PlaybackState::Playing {
+            track,
+            position,
+            duration,
+            decoded_duration,
+            ..
+        } => {
+            let (artist_names, album_id, cover_image_id) = resolve_track_info(lm, &track.id).await;
+            let dur = duration.unwrap_or(*decoded_duration).as_millis() as u64;
+            BridgePlaybackState::Playing {
+                track_id: track.id.clone(),
+                track_title: track.title.clone(),
+                artist_names,
+                album_id,
+                cover_image_id,
+                position_ms: position.as_millis() as u64,
+                duration_ms: dur,
+            }
+        }
+        PlaybackState::Paused {
+            track,
+            position,
+            duration,
+            decoded_duration,
+            ..
+        } => {
+            let (artist_names, album_id, cover_image_id) = resolve_track_info(lm, &track.id).await;
+            let dur = duration.unwrap_or(*decoded_duration).as_millis() as u64;
+            BridgePlaybackState::Paused {
+                track_id: track.id.clone(),
+                track_title: track.title.clone(),
+                artist_names,
+                album_id,
+                cover_image_id,
+                position_ms: position.as_millis() as u64,
+                duration_ms: dur,
+            }
+        }
+    }
+}
+
+/// Look up artist names, album_id, and cover_image_id for a track.
+async fn resolve_track_info(
+    lm: &SharedLibraryManager,
+    track_id: &str,
+) -> (String, String, Option<String>) {
+    let mgr = lm.get();
+
+    let artist_names = match mgr.get_artists_for_track(track_id).await {
+        Ok(artists) => artists
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        Err(e) => {
+            warn!("Failed to get artists for track {track_id}: {e}");
+            String::new()
+        }
+    };
+
+    let (album_id, cover_image_id) = match mgr.get_album_id_for_track(track_id).await {
+        Ok(id) => {
+            let cover = match mgr.get_album_by_id(&id).await {
+                Ok(Some(album)) => album.cover_release_id,
+                _ => None,
+            };
+            (id, cover)
+        }
+        Err(e) => {
+            warn!("Failed to get album_id for track {track_id}: {e}");
+            (String::new(), None)
+        }
+    };
+
+    (artist_names, album_id, cover_image_id)
 }
 
 /// Initialize the app with a specific library.
@@ -345,6 +595,14 @@ pub fn init_app(library_id: String) -> Result<Arc<AppHandle>, BridgeError> {
         bae_core::library::LibraryManager::new(database, encryption_service.clone());
     let shared_library = SharedLibraryManager::new(library_manager);
 
+    // Start playback service (needs an owned LibraryManager clone)
+    let playback_handle = PlaybackService::start(
+        shared_library.get().clone(),
+        encryption_service.clone(),
+        config.library_dir.clone(),
+        runtime.handle().clone(),
+    );
+
     // Start image server
     let image_server = runtime.block_on(image_server::start_image_server(
         shared_library.clone(),
@@ -361,5 +619,7 @@ pub fn init_app(library_id: String) -> Result<Arc<AppHandle>, BridgeError> {
         library_manager: shared_library,
         key_service,
         image_server,
+        playback_handle,
+        event_handler: Mutex::new(None),
     }))
 }

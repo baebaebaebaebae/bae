@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ArtistDetailView: View {
     let artist: BridgeArtist
-    let appHandle: AppHandle
+    let appService: AppService
     @Binding var selectedAlbumId: String?
 
     @State private var albums: [BridgeAlbum] = []
@@ -25,7 +25,7 @@ struct ArtistDetailView: View {
             } else {
                 AlbumGridView(
                     albums: albums,
-                    appHandle: appHandle,
+                    appService: appService,
                     selectedAlbumId: $selectedAlbumId
                 )
             }
@@ -38,7 +38,7 @@ struct ArtistDetailView: View {
 
     private func loadAlbums() {
         do {
-            albums = try appHandle.getArtistAlbums(artistId: artist.id)
+            albums = try appService.appHandle.getArtistAlbums(artistId: artist.id)
             error = nil
         } catch {
             self.error = error.localizedDescription

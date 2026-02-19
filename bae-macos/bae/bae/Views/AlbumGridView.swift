@@ -2,7 +2,7 @@ import SwiftUI
 
 struct AlbumGridView: View {
     let albums: [BridgeAlbum]
-    let appHandle: AppHandle
+    let appService: AppService
     @Binding var selectedAlbumId: String?
 
     private let columns = [
@@ -15,11 +15,14 @@ struct AlbumGridView: View {
                 ForEach(albums, id: \.id) { album in
                     AlbumCardView(
                         album: album,
-                        appHandle: appHandle,
+                        appService: appService,
                         isSelected: selectedAlbumId == album.id
                     )
                     .onTapGesture {
                         selectedAlbumId = album.id
+                    }
+                    .onTapGesture(count: 2) {
+                        appService.playAlbum(albumId: album.id)
                     }
                 }
             }
@@ -30,7 +33,7 @@ struct AlbumGridView: View {
 
 struct AlbumCardView: View {
     let album: BridgeAlbum
-    let appHandle: AppHandle
+    let appService: AppService
     let isSelected: Bool
 
     var body: some View {
@@ -68,7 +71,7 @@ struct AlbumCardView: View {
     @ViewBuilder
     private var albumArt: some View {
         if let coverReleaseId = album.coverReleaseId,
-           let urlString = appHandle.getImageUrl(imageId: coverReleaseId),
+           let urlString = appService.appHandle.getImageUrl(imageId: coverReleaseId),
            let url = URL(string: urlString) {
             AsyncImage(url: url) { phase in
                 switch phase {

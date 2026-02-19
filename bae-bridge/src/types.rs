@@ -62,6 +62,40 @@ pub struct BridgeAlbumDetail {
     pub releases: Vec<BridgeRelease>,
 }
 
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum BridgeRepeatMode {
+    None,
+    Track,
+    Album,
+}
+
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum BridgePlaybackState {
+    Stopped,
+    Loading {
+        track_id: String,
+    },
+    Playing {
+        track_id: String,
+        track_title: String,
+        artist_names: String,
+        album_id: String,
+        /// The image ID for album art (cover_release_id), if available.
+        cover_image_id: Option<String>,
+        position_ms: u64,
+        duration_ms: u64,
+    },
+    Paused {
+        track_id: String,
+        track_title: String,
+        artist_names: String,
+        album_id: String,
+        cover_image_id: Option<String>,
+        position_ms: u64,
+        duration_ms: u64,
+    },
+}
+
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum BridgeError {
     #[error("Not found: {msg}")]

@@ -2,7 +2,7 @@ import SwiftUI
 
 struct AlbumDetailView: View {
     let albumId: String
-    let appHandle: AppHandle
+    let appService: AppService
 
     @State private var detail: BridgeAlbumDetail?
     @State private var error: String?
@@ -74,6 +74,15 @@ struct AlbumDetailView: View {
                 if let release = detail.releases.first {
                     releaseMetadata(release)
                 }
+
+                Button(action: {
+                    appService.playAlbum(albumId: albumId)
+                }) {
+                    Label("Play", systemImage: "play.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .padding(.top, 8)
             }
 
             Spacer()
@@ -110,7 +119,7 @@ struct AlbumDetailView: View {
     @ViewBuilder
     private func albumArt(_ album: BridgeAlbum) -> some View {
         if let coverReleaseId = album.coverReleaseId,
-           let urlString = appHandle.getImageUrl(imageId: coverReleaseId),
+           let urlString = appService.appHandle.getImageUrl(imageId: coverReleaseId),
            let url = URL(string: urlString) {
             AsyncImage(url: url) { phase in
                 switch phase {
@@ -180,14 +189,27 @@ struct AlbumDetailView: View {
                 .font(.headline)
                 .padding(.bottom, 8)
 
-            ForEach(Array(sortedTracks.enumerated()), id: \.element.id) { _, track in
-                trackRow(track, showArtist: isCompilation, showDisc: hasMultipleDiscs)
+            ForEach(Array(sortedTracks.enumerated()), id: \.element.id) { index, track in
+                trackRow(
+                    track,
+                    showArtist: isCompilation,
+                    showDisc: hasMultipleDiscs,
+                    onPlay: {
+                        // Play album starting from this track
+                        appService.playAlbum(albumId: albumId, startTrackIndex: UInt32(index))
+                    }
+                )
                 Divider()
             }
         }
     }
 
-    private func trackRow(_ track: BridgeTrack, showArtist: Bool, showDisc: Bool) -> some View {
+    private func trackRow(
+        _ track: BridgeTrack,
+        showArtist: Bool,
+        showDisc: Bool,
+        onPlay: @escaping () -> Void
+    ) -> some View {
         HStack(spacing: 12) {
             trackNumberLabel(track, showDisc: showDisc)
                 .frame(width: 40, alignment: .trailing)
@@ -216,6 +238,10 @@ struct AlbumDetailView: View {
             }
         }
         .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            onPlay()
+        }
     }
 
     private func trackNumberLabel(_ track: BridgeTrack, showDisc: Bool) -> some View {
@@ -269,7 +295,7 @@ struct AlbumDetailView: View {
 
         do {
             let result = try await Task.detached {
-                try appHandle.getAlbumDetail(albumId: albumId)
+                try appService.appHandle.getAlbumDetail(albumId: albumId)
             }.value
             detail = result
         } catch {

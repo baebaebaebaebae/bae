@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct LibraryView: View {
-    let appHandle: AppHandle
+    let appService: AppService
 
     @State private var artists: [BridgeArtist] = []
     @State private var albums: [BridgeAlbum] = []
@@ -10,45 +10,52 @@ struct LibraryView: View {
     @State private var error: String?
 
     var body: some View {
-        NavigationSplitView {
-            ArtistSidebarView(
-                artists: artists,
-                selection: $selection
-            )
-            .navigationTitle("Artists")
-        } content: {
-            if let error {
-                ContentUnavailableView(
-                    "Failed to load library",
-                    systemImage: "exclamationmark.triangle",
-                    description: Text(error)
+        VStack(spacing: 0) {
+            NavigationSplitView {
+                ArtistSidebarView(
+                    artists: artists,
+                    selection: $selection
                 )
-            } else if albums.isEmpty {
-                ContentUnavailableView(
-                    "No albums",
-                    systemImage: "square.stack",
-                    description: Text("Import some music to get started")
-                )
-            } else {
-                AlbumGridView(
-                    albums: albums,
-                    appHandle: appHandle,
-                    selectedAlbumId: $selectedAlbumId
-                )
-                .navigationTitle(navigationTitle)
+                .navigationTitle("Artists")
+            } content: {
+                if let error {
+                    ContentUnavailableView(
+                        "Failed to load library",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(error)
+                    )
+                } else if albums.isEmpty {
+                    ContentUnavailableView(
+                        "No albums",
+                        systemImage: "square.stack",
+                        description: Text("Import some music to get started")
+                    )
+                } else {
+                    AlbumGridView(
+                        albums: albums,
+                        appService: appService,
+                        selectedAlbumId: $selectedAlbumId
+                    )
+                    .navigationTitle(navigationTitle)
+                }
+            } detail: {
+                if let selectedAlbumId {
+                    AlbumDetailView(
+                        albumId: selectedAlbumId,
+                        appService: appService
+                    )
+                } else {
+                    ContentUnavailableView(
+                        "Select an album",
+                        systemImage: "square.stack",
+                        description: Text("Choose an album to see its details")
+                    )
+                }
             }
-        } detail: {
-            if let selectedAlbumId {
-                AlbumDetailView(
-                    albumId: selectedAlbumId,
-                    appHandle: appHandle
-                )
-            } else {
-                ContentUnavailableView(
-                    "Select an album",
-                    systemImage: "square.stack",
-                    description: Text("Choose an album to see its details")
-                )
+
+            if appService.isActive {
+                Divider()
+                NowPlayingBar(appService: appService)
             }
         }
         .task {
@@ -58,6 +65,18 @@ struct LibraryView: View {
         .onChange(of: selection) { _, _ in
             selectedAlbumId = nil
             loadAlbums()
+        }
+        .onKeyPress(.space) {
+            appService.togglePlayPause()
+            return .handled
+        }
+        .onKeyPress(.rightArrow, modifiers: .command) {
+            appService.nextTrack()
+            return .handled
+        }
+        .onKeyPress(.leftArrow, modifiers: .command) {
+            appService.previousTrack()
+            return .handled
         }
     }
 
@@ -75,7 +94,7 @@ struct LibraryView: View {
 
     private func loadArtists() {
         do {
-            artists = try appHandle.getArtists()
+            artists = try appService.appHandle.getArtists()
         } catch {
             self.error = error.localizedDescription
         }
@@ -85,9 +104,9 @@ struct LibraryView: View {
         do {
             switch selection {
             case .all:
-                albums = try appHandle.getAlbums()
+                albums = try appService.appHandle.getAlbums()
             case .artist(let artistId):
-                albums = try appHandle.getArtistAlbums(artistId: artistId)
+                albums = try appService.appHandle.getArtistAlbums(artistId: artistId)
             }
             error = nil
         } catch {

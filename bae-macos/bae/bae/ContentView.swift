@@ -3,13 +3,13 @@ import SwiftUI
 struct ContentView: View {
     @State private var libraries: [BridgeLibraryInfo] = []
     @State private var selectedLibraryId: String?
-    @State private var appHandle: AppHandle?
+    @State private var appService: AppService?
     @State private var error: String?
 
     var body: some View {
         Group {
-            if let handle = appHandle {
-                LibraryView(appHandle: handle)
+            if let service = appService {
+                LibraryView(appService: service)
             } else {
                 libraryPicker
             }
@@ -68,13 +68,14 @@ struct ContentView: View {
     }
 
     private func openLibrary(_ id: String) {
-        appHandle = nil
+        appService = nil
         error = nil
         Task.detached {
             do {
                 let handle = try initApp(libraryId: id)
+                let service = AppService(appHandle: handle)
                 await MainActor.run {
-                    appHandle = handle
+                    appService = service
                 }
             } catch {
                 await MainActor.run {
