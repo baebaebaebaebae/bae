@@ -117,10 +117,10 @@ struct AlbumDetailView: View {
     }
 
     private func albumHeader(_ detail: BridgeAlbumDetail) -> some View {
-        HStack(alignment: .top, spacing: 20) {
+        HStack(alignment: .top, spacing: 16) {
             albumArt(detail.album)
-                .frame(width: 200, height: 200)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .frame(width: 100, height: 100)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
                 .contextMenu {
                     Button("Change Cover...") {
                         showingCoverSheet = true
@@ -128,23 +128,26 @@ struct AlbumDetailView: View {
                     }
                 }
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(detail.album.title)
-                    .font(.title)
-                    .fontWeight(.bold)
+                    .font(.headline)
+                    .lineLimit(1)
 
-                Text(detail.album.artistNames)
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-
-                if let year = detail.album.year {
-                    Text(String(year))
-                        .font(.callout)
-                        .foregroundStyle(.tertiary)
+                HStack(spacing: 8) {
+                    Text(detail.album.artistNames)
+                        .foregroundStyle(.secondary)
+                    if let year = detail.album.year {
+                        Text("·")
+                            .foregroundStyle(.tertiary)
+                        Text(String(year))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
+                .font(.callout)
+                .lineLimit(1)
 
                 if let release = detail.releases.first {
-                    releaseMetadata(release)
+                    releaseMetadataCompact(release)
                 }
 
                 HStack(spacing: 8) {
@@ -154,14 +157,16 @@ struct AlbumDetailView: View {
                         Label("Play", systemImage: "play.fill")
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
 
                     if !detail.releases.isEmpty {
                         Button(action: { createShareLink(releaseId: detail.releases[selectedReleaseIndex].id) }) {
                             Label("Share", systemImage: "square.and.arrow.up")
                         }
+                        .controlSize(.small)
                     }
                 }
-                .padding(.top, 4)
+                .padding(.top, 2)
             }
 
             Spacer()
@@ -173,7 +178,6 @@ struct AlbumDetailView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .padding(.top, 4)
             }
         }
     }
@@ -195,6 +199,26 @@ struct AlbumDetailView: View {
         }
         .font(.callout)
         .padding(.top, 4)
+    }
+
+    private func releaseMetadataCompact(_ release: BridgeRelease) -> some View {
+        HStack(spacing: 12) {
+            if let format = release.format {
+                Text(format)
+            }
+            if let label = release.label {
+                Text(label)
+            }
+            if let catalog = release.catalogNumber {
+                Text(catalog)
+            }
+            if let country = release.country {
+                Text(country)
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.tertiary)
+        .lineLimit(1)
     }
 
     private func metadataRow(_ label: String, value: String) -> some View {

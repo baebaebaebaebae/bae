@@ -37,27 +37,23 @@ struct LibraryView: View {
                     systemImage: "square.stack",
                     description: Text("Import some music to get started")
                 )
-            } else if let albumId = selectedAlbumId {
-                VSplitView {
+            } else {
+                HSplitView {
                     AlbumGridView(
                         albums: albums,
                         appService: appService,
                         selectedAlbumId: $selectedAlbumId
                     )
-                    .frame(minHeight: 120)
-                    AlbumDetailView(
-                        albumId: albumId,
-                        appService: appService,
-                        onClose: { selectedAlbumId = nil }
-                    )
-                    .frame(minHeight: 200)
+                    .frame(minWidth: 300)
+                    if let albumId = selectedAlbumId {
+                        AlbumDetailView(
+                            albumId: albumId,
+                            appService: appService,
+                            onClose: { selectedAlbumId = nil }
+                        )
+                        .frame(minWidth: 350, idealWidth: 450)
+                    }
                 }
-            } else {
-                AlbumGridView(
-                    albums: albums,
-                    appService: appService,
-                    selectedAlbumId: $selectedAlbumId
-                )
             }
         }
         .onChange(of: searchText) { _, newValue in
