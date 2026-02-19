@@ -17,11 +17,13 @@ struct LibraryView: View {
             .tabItem {
                 Label("Library", systemImage: "books.vertical")
             }
-            Text("Search coming soon")
-                .foregroundStyle(.secondary)
-                .tabItem {
-                    Label("Search", systemImage: "magnifyingglass")
-                }
+            SearchView(
+                databaseService: databaseService, imageService: imageService,
+                playbackService: playbackService
+            )
+            .tabItem {
+                Label("Search", systemImage: "magnifyingglass")
+            }
             SettingsPlaceholderView(credentials: credentials, onUnlink: onUnlink)
                 .tabItem {
                     Label("Settings", systemImage: "gear")

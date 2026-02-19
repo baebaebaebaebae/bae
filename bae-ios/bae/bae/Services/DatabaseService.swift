@@ -245,6 +245,78 @@ class DatabaseService {
         return results.first
     }
 
+    func searchArtists(query: String) throws -> [Artist] {
+        let pattern = "%\(query)%"
+        return try self.query(sql: """
+            SELECT a.id, a.name, a.sort_name
+            FROM artists a
+            WHERE a.name LIKE ?1 COLLATE NOCASE
+            ORDER BY a.name COLLATE NOCASE
+            LIMIT 20
+            """, bind: { [self] stmt in
+                bindText(stmt, index: 1, value: pattern)
+            }) { stmt in
+                Artist(
+                    id: columnText(stmt, index: 0),
+                    name: columnText(stmt, index: 1),
+                    sortName: columnOptionalText(stmt, index: 2)
+                )
+            }
+    }
+
+    func searchAlbums(query: String) throws -> [Album] {
+        let pattern = "%\(query)%"
+        return try self.query(sql: """
+            SELECT al.id, al.title, al.year, al.cover_release_id, al.is_compilation,
+                   GROUP_CONCAT(a.name, ', ') as artist_names
+            FROM albums al
+            LEFT JOIN album_artists aa ON aa.album_id = al.id
+            LEFT JOIN artists a ON a.id = aa.artist_id
+            WHERE al.title LIKE ?1 COLLATE NOCASE
+            GROUP BY al.id
+            ORDER BY al.title COLLATE NOCASE
+            LIMIT 20
+            """, bind: { [self] stmt in
+                bindText(stmt, index: 1, value: pattern)
+            }) { stmt in
+                Album(
+                    id: columnText(stmt, index: 0),
+                    title: columnText(stmt, index: 1),
+                    year: columnOptionalInt(stmt, index: 2),
+                    coverReleaseId: columnOptionalText(stmt, index: 3),
+                    isCompilation: sqlite3_column_int(stmt, 4) != 0,
+                    artistNames: columnOptionalText(stmt, index: 5) ?? "Unknown Artist"
+                )
+            }
+    }
+
+    func searchTracks(query: String) throws -> [Track] {
+        let pattern = "%\(query)%"
+        return try self.query(sql: """
+            SELECT t.id, t.release_id, t.title, t.disc_number, t.track_number, t.duration_ms,
+                   GROUP_CONCAT(a.name, ', ') as track_artists
+            FROM tracks t
+            LEFT JOIN track_artists ta ON ta.track_id = t.id
+            LEFT JOIN artists a ON a.id = ta.artist_id
+            WHERE t.title LIKE ?1 COLLATE NOCASE
+            GROUP BY t.id
+            ORDER BY t.title COLLATE NOCASE
+            LIMIT 20
+            """, bind: { [self] stmt in
+                bindText(stmt, index: 1, value: pattern)
+            }) { stmt in
+                Track(
+                    id: columnText(stmt, index: 0),
+                    releaseId: columnText(stmt, index: 1),
+                    title: columnText(stmt, index: 2),
+                    discNumber: columnOptionalInt(stmt, index: 3),
+                    trackNumber: columnOptionalInt(stmt, index: 4),
+                    durationMs: columnOptionalInt(stmt, index: 5),
+                    artistNames: columnOptionalText(stmt, index: 6)
+                )
+            }
+    }
+
     // MARK: - Private Helpers
 
     private func query<T>(
