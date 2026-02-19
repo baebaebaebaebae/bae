@@ -1,0 +1,36 @@
+name: bae
+options:
+  bundleIdPrefix: fm.bae
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+targets:
+  bae:
+    type: application
+    platform: macOS
+    sources:
+      - bae
+    dependencies:
+      - framework: ../BaeBridgeFFI.xcframework
+        embed: false
+      - sdk: CoreAudio.framework
+      - sdk: AudioToolbox.framework
+      - sdk: SystemConfiguration.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: fm.bae.macos
+        PRODUCT_NAME: bae
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: 1
+        SWIFT_VERSION: "5.10"
+        GENERATE_INFOPLIST_FILE: YES
+        LIBRARY_SEARCH_PATHS:
+          - /opt/homebrew/lib
+          - /opt/homebrew/opt/ffmpeg/lib
+        OTHER_LDFLAGS:
+          - -lavcodec
+          - -lavformat
+          - -lavutil
+          - -lswresample
+          - -lsodium
+          - -ldiscid
