@@ -227,12 +227,12 @@ jobs:
         DMG_SIZE=$(stat -f%z "$DMG_PATH")
         echo "DMG_SIZE=$DMG_SIZE" >> $GITHUB_ENV
 
-    - name: Generate appcast-macos.xml
+    - name: Generate appcast.xml
       run: |
         VERSION="${{ needs.calculate-version.outputs.version }}"
         DMG_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/bae-macos.dmg"
 
-        cat > target/appcast-macos.xml << EOF
+        cat > target/appcast.xml << EOF
         <?xml version="1.0" encoding="utf-8"?>
         <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
           <channel>
@@ -281,7 +281,7 @@ jobs:
         tag_name: v${{ needs.calculate-version.outputs.version }}
         files: |
           target/bae-macos.dmg
-          target/appcast-macos.xml
+          target/appcast.xml
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

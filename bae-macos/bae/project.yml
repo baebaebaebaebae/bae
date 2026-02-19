@@ -18,7 +18,7 @@ targets:
       path: bae/Info.plist
       properties:
         CFBundleDisplayName: bae
-        SUFeedURL: https://github.com/bae-fm/bae/releases/latest/download/appcast-macos.xml
+        SUFeedURL: https://github.com/bae-fm/bae/releases/latest/download/appcast.xml
         SUPublicEDKey: cYiouOrDxmQrHspLwOf/XpQOQOMt3isdYDs6xEDBGs8=
         SUEnableAutomaticChecks: true
         CFBundleURLTypes:
