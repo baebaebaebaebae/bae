@@ -193,7 +193,19 @@ struct ImportView: View {
                     filePane(files)
                         .frame(minHeight: 80)
                     VStack(spacing: 0) {
-                        searchForm
+                        ImportSearchForm(
+                            searchTab: $searchTab,
+                            searchArtist: $searchArtist,
+                            searchAlbum: $searchAlbum,
+                            searchCatalog: $searchCatalog,
+                            searchBarcode: $searchBarcode,
+                            isSearching: isSearching,
+                            hasDiscogsToken: appService.getConfig().hasDiscogsToken,
+                            onSearchMusicbrainz: { searchMusicbrainz() },
+                            onSearchDiscogs: { searchDiscogs() },
+                            onSearchCatalog: { searchByCatalogNumber() },
+                            onSearchBarcode: { searchByBarcode() }
+                        )
                         Divider()
                         if isSearching {
                             ProgressView("Searching...")
@@ -212,7 +224,19 @@ struct ImportView: View {
                     .frame(minHeight: 120)
                 }
             } else {
-                searchForm
+                ImportSearchForm(
+                    searchTab: $searchTab,
+                    searchArtist: $searchArtist,
+                    searchAlbum: $searchAlbum,
+                    searchCatalog: $searchCatalog,
+                    searchBarcode: $searchBarcode,
+                    isSearching: isSearching,
+                    hasDiscogsToken: appService.getConfig().hasDiscogsToken,
+                    onSearchMusicbrainz: { searchMusicbrainz() },
+                    onSearchDiscogs: { searchDiscogs() },
+                    onSearchCatalog: { searchByCatalogNumber() },
+                    onSearchBarcode: { searchByBarcode() }
+                )
                 Divider()
                 if isSearching {
                     ProgressView("Searching...")
@@ -397,94 +421,15 @@ struct ImportView: View {
         }
     }
 
-    // MARK: - Search form
-
-    private var searchForm: some View {
-        VStack(spacing: 8) {
-            Picker("", selection: $searchTab) {
-                Text("General").tag(SearchTab.general)
-                Text("Catalog #").tag(SearchTab.catalogNumber)
-                Text("Barcode").tag(SearchTab.barcode)
-            }
-            .pickerStyle(.segmented)
-            .controlSize(.small)
-            switch searchTab {
-            case .general:
-                HStack {
-                    TextField("Artist", text: $searchArtist)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("Album", text: $searchAlbum)
-                        .textFieldStyle(.roundedBorder)
-                    Button("MusicBrainz") {
-                        searchMusicbrainz()
-                    }
-                    .disabled(searchArtist.isEmpty && searchAlbum.isEmpty)
-                    Button("Discogs") {
-                        searchDiscogs()
-                    }
-                    .disabled(searchArtist.isEmpty && searchAlbum.isEmpty)
-                }
-            case .catalogNumber:
-                HStack {
-                    TextField("e.g. WPCR-80001", text: $searchCatalog)
-                        .textFieldStyle(.roundedBorder)
-                    Button("Search") {
-                        searchByCatalogNumber()
-                    }
-                    .disabled(searchCatalog.isEmpty)
-                }
-            case .barcode:
-                HStack {
-                    TextField("e.g. 4943674251780", text: $searchBarcode)
-                        .textFieldStyle(.roundedBorder)
-                    Button("Search") {
-                        searchByBarcode()
-                    }
-                    .disabled(searchBarcode.isEmpty)
-                }
-            }
-        }
-        .padding()
-        .animation(nil, value: searchTab)
-    }
+    // MARK: - Results list
 
     private func resultsList(for candidate: BridgeImportCandidate) -> some View {
         List(searchResults, id: \.releaseId) { result in
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(result.title)
-                        .font(.body)
-                    HStack(spacing: 8) {
-                        if !result.artist.isEmpty {
-                            Text(result.artist)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let year = result.year {
-                            Text(String(year))
-                                .foregroundStyle(.secondary)
-                        }
-                        if let format = result.format {
-                            Text(format)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let label = result.label {
-                            Text(label)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .font(.caption)
-                    Text(result.source == "musicbrainz" ? "MusicBrainz" : "Discogs")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer()
-                Button("Import") {
-                    commitImport(candidate: candidate, result: result)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(isImporting(candidate.folderPath))
-            }
-            .padding(.vertical, 2)
+            MetadataResultRow(
+                result: result,
+                isImporting: isImporting(candidate.folderPath),
+                onImport: { commitImport(candidate: candidate, result: result) }
+            )
         }
         .scrollContentBackground(.hidden)
         .background(Theme.background)
@@ -601,9 +546,120 @@ struct ImportView: View {
     }
 }
 
+// MARK: - ImportSearchForm (pure leaf)
+
+struct ImportSearchForm: View {
+    @Binding var searchTab: ImportView.SearchTab
+    @Binding var searchArtist: String
+    @Binding var searchAlbum: String
+    @Binding var searchCatalog: String
+    @Binding var searchBarcode: String
+    let isSearching: Bool
+    let hasDiscogsToken: Bool
+    let onSearchMusicbrainz: () -> Void
+    let onSearchDiscogs: () -> Void
+    let onSearchCatalog: () -> Void
+    let onSearchBarcode: () -> Void
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Picker("", selection: $searchTab) {
+                Text("General").tag(ImportView.SearchTab.general)
+                Text("Catalog #").tag(ImportView.SearchTab.catalogNumber)
+                Text("Barcode").tag(ImportView.SearchTab.barcode)
+            }
+            .pickerStyle(.segmented)
+            .controlSize(.small)
+            switch searchTab {
+            case .general:
+                HStack {
+                    TextField("Artist", text: $searchArtist)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("Album", text: $searchAlbum)
+                        .textFieldStyle(.roundedBorder)
+                    Button("MusicBrainz") {
+                        onSearchMusicbrainz()
+                    }
+                    .disabled(searchArtist.isEmpty && searchAlbum.isEmpty || isSearching)
+                    Button("Discogs") {
+                        onSearchDiscogs()
+                    }
+                    .disabled(searchArtist.isEmpty && searchAlbum.isEmpty || isSearching)
+                }
+            case .catalogNumber:
+                HStack {
+                    TextField("e.g. WPCR-80001", text: $searchCatalog)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Search") {
+                        onSearchCatalog()
+                    }
+                    .disabled(searchCatalog.isEmpty || isSearching)
+                }
+            case .barcode:
+                HStack {
+                    TextField("e.g. 4943674251780", text: $searchBarcode)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Search") {
+                        onSearchBarcode()
+                    }
+                    .disabled(searchBarcode.isEmpty || isSearching)
+                }
+            }
+        }
+        .padding()
+        .animation(nil, value: searchTab)
+    }
+}
+
+// MARK: - MetadataResultRow (pure leaf)
+
+struct MetadataResultRow: View {
+    let result: BridgeMetadataResult
+    let isImporting: Bool
+    let onImport: () -> Void
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(result.title)
+                    .font(.body)
+                HStack(spacing: 8) {
+                    if !result.artist.isEmpty {
+                        Text(result.artist)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let year = result.year {
+                        Text(String(year))
+                            .foregroundStyle(.secondary)
+                    }
+                    if let format = result.format {
+                        Text(format)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let label = result.label {
+                        Text(label)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .font(.caption)
+                Text(result.source == "musicbrainz" ? "MusicBrainz" : "Discogs")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer()
+            Button("Import") {
+                onImport()
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isImporting)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
 // MARK: - Candidate Row
 
-private struct CandidateRow: View {
+struct CandidateRow: View {
     let candidate: BridgeImportCandidate
     let status: BridgeImportStatus?
 
@@ -667,7 +723,7 @@ private struct CandidateRow: View {
 
 // MARK: - Image Gallery
 
-private struct ImageGalleryView: View {
+struct ImageGalleryView: View {
     let images: [BridgeFileInfo]
     @Binding var currentIndex: Int?
 
@@ -780,7 +836,7 @@ private struct ImageGalleryView: View {
 
 // MARK: - Document Viewer
 
-private struct DocumentViewerView: View {
+struct DocumentViewerView: View {
     let name: String
     let text: String
     let onClose: () -> Void
@@ -807,4 +863,101 @@ private struct DocumentViewerView: View {
             }
         }
     }
+}
+
+// MARK: - Previews
+
+#Preview("Candidate Row - Pending") {
+    CandidateRow(
+        candidate: BridgeImportCandidate(
+            folderPath: "/path/to/folder",
+            artistName: "Artist Name",
+            albumTitle: "Album Title",
+            trackCount: 12,
+            format: "FLAC",
+            totalSizeBytes: 524_288_000,
+            badAudioCount: 0,
+            badImageCount: 0
+        ),
+        status: nil
+    )
+    .padding()
+}
+
+#Preview("Candidate Row - Complete") {
+    CandidateRow(
+        candidate: BridgeImportCandidate(
+            folderPath: "/path/to/folder",
+            artistName: "Artist Name",
+            albumTitle: "Album Title",
+            trackCount: 12,
+            format: "FLAC",
+            totalSizeBytes: 524_288_000,
+            badAudioCount: 0,
+            badImageCount: 0
+        ),
+        status: .complete
+    )
+    .padding()
+}
+
+#Preview("Candidate Row - Incomplete") {
+    CandidateRow(
+        candidate: BridgeImportCandidate(
+            folderPath: "/path/to/folder",
+            artistName: "Artist Name",
+            albumTitle: "Album Title",
+            trackCount: 10,
+            format: "FLAC",
+            totalSizeBytes: 524_288_000,
+            badAudioCount: 2,
+            badImageCount: 1
+        ),
+        status: nil
+    )
+    .padding()
+}
+
+#Preview("Metadata Result Row") {
+    MetadataResultRow(
+        result: BridgeMetadataResult(
+            source: "musicbrainz",
+            releaseId: "rel-123",
+            title: "Album Title",
+            artist: "Artist Name",
+            year: 2024,
+            format: "CD",
+            label: "Label Name",
+            trackCount: 12
+        ),
+        isImporting: false,
+        onImport: {}
+    )
+    .padding()
+}
+
+#Preview("Import Search Form") {
+    ImportSearchForm(
+        searchTab: .constant(.general),
+        searchArtist: .constant("Artist Name"),
+        searchAlbum: .constant("Album Title"),
+        searchCatalog: .constant(""),
+        searchBarcode: .constant(""),
+        isSearching: false,
+        hasDiscogsToken: true,
+        onSearchMusicbrainz: {},
+        onSearchDiscogs: {},
+        onSearchCatalog: {},
+        onSearchBarcode: {}
+    )
+}
+
+#Preview("Document Viewer") {
+    DocumentViewerView(
+        name: "info.txt",
+        text: "This is sample document content.\nLine 2 of the document.\nLine 3 with more text.",
+        onClose: {}
+    )
+    .frame(width: 600, height: 500)
+    .background(Theme.surface)
 }

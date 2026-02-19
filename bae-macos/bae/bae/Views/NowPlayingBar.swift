@@ -1,8 +1,21 @@
 import SwiftUI
 
 struct NowPlayingBar: View {
-    let appService: AppService
+    let trackTitle: String?
+    let artistNames: String?
+    let coverArtURL: URL?
+    let isPlaying: Bool
+    let currentPositionMs: UInt64
+    let currentDurationMs: UInt64
+    let volume: Float
+    let repeatMode: BridgeRepeatMode
     @Binding var showQueue: Bool
+    let onPlayPause: () -> Void
+    let onNext: () -> Void
+    let onPrevious: () -> Void
+    let onSeek: (UInt64) -> Void
+    let onVolumeChange: (Float) -> Void
+    let onCycleRepeat: () -> Void
 
     @State private var isSeeking = false
     @State private var seekPosition: Double = 0
@@ -36,14 +49,14 @@ struct NowPlayingBar: View {
                 .accessibilityLabel("Album art")
 
             VStack(alignment: .leading, spacing: 2) {
-                if let title = appService.trackTitle {
+                if let title = trackTitle {
                     Text(title)
                         .font(.callout)
                         .fontWeight(.medium)
                         .lineLimit(1)
                 }
 
-                if let artist = appService.artistNames {
+                if let artist = artistNames {
                     Text(artist)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -55,9 +68,7 @@ struct NowPlayingBar: View {
 
     @ViewBuilder
     private var albumArt: some View {
-        if let imageId = appService.coverImageId,
-           let urlString = appService.appHandle.getImageUrl(imageId: imageId),
-           let url = URL(string: urlString) {
+        if let url = coverArtURL {
             AsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
@@ -89,7 +100,7 @@ struct NowPlayingBar: View {
     private var transportControls: some View {
         VStack(spacing: 4) {
             HStack(spacing: 20) {
-                Button(action: { appService.previousTrack() }) {
+                Button(action: onPrevious) {
                     Image(systemName: "backward.fill")
                         .font(.body)
                 }
@@ -97,15 +108,15 @@ struct NowPlayingBar: View {
                 .help("Previous track")
                 .accessibilityLabel("Previous track")
 
-                Button(action: { appService.togglePlayPause() }) {
-                    Image(systemName: appService.isPlaying ? "pause.fill" : "play.fill")
+                Button(action: onPlayPause) {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.title2)
                 }
                 .buttonStyle(.plain)
-                .help(appService.isPlaying ? "Pause" : "Play")
-                .accessibilityLabel(appService.isPlaying ? "Pause" : "Play")
+                .help(isPlaying ? "Pause" : "Play")
+                .accessibilityLabel(isPlaying ? "Pause" : "Play")
 
-                Button(action: { appService.nextTrack() }) {
+                Button(action: onNext) {
                     Image(systemName: "forward.fill")
                         .font(.body)
                 }
@@ -128,17 +139,17 @@ struct NowPlayingBar: View {
             Slider(
                 value: Binding(
                     get: {
-                        isSeeking ? seekPosition : Double(appService.currentPositionMs)
+                        isSeeking ? seekPosition : Double(currentPositionMs)
                     },
                     set: { newValue in
                         isSeeking = true
                         seekPosition = newValue
                     }
                 ),
-                in: 0...max(Double(appService.currentDurationMs), 1),
+                in: 0...max(Double(currentDurationMs), 1),
                 onEditingChanged: { editing in
                     if !editing {
-                        appService.seek(positionMs: UInt64(seekPosition))
+                        onSeek(UInt64(seekPosition))
                         isSeeking = false
                     }
                 }
@@ -146,7 +157,7 @@ struct NowPlayingBar: View {
             .frame(width: 300)
             .accessibilityLabel("Playback position")
 
-            Text(formatTime(appService.currentDurationMs))
+            Text(formatTime(currentDurationMs))
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: 40, alignment: .leading)
@@ -154,7 +165,7 @@ struct NowPlayingBar: View {
     }
 
     private var currentMs: UInt64 {
-        isSeeking ? UInt64(seekPosition) : appService.currentPositionMs
+        isSeeking ? UInt64(seekPosition) : currentPositionMs
     }
 
     // MARK: - Right: volume + repeat
@@ -179,8 +190,8 @@ struct NowPlayingBar: View {
 
             Slider(
                 value: Binding(
-                    get: { appService.volume },
-                    set: { appService.setVolume($0) }
+                    get: { volume },
+                    set: { onVolumeChange($0) }
                 ),
                 in: 0...1
             )
@@ -190,8 +201,8 @@ struct NowPlayingBar: View {
     }
 
     private var repeatButton: some View {
-        Button(action: { appService.cycleRepeatMode() }) {
-            switch appService.repeatMode {
+        Button(action: onCycleRepeat) {
+            switch repeatMode {
             case .none:
                 Image(systemName: "repeat")
                     .foregroundStyle(.secondary)
@@ -210,7 +221,7 @@ struct NowPlayingBar: View {
     }
 
     private var repeatHelp: String {
-        switch appService.repeatMode {
+        switch repeatMode {
         case .none:
             return "Repeat: off"
         case .album:
@@ -228,4 +239,46 @@ struct NowPlayingBar: View {
         let seconds = totalSeconds % 60
         return "\(minutes):\(String(format: "%02d", seconds))"
     }
+}
+
+// MARK: - Previews
+
+#Preview("Playing") {
+    NowPlayingBar(
+        trackTitle: "Track Title",
+        artistNames: "Artist Name",
+        coverArtURL: nil,
+        isPlaying: true,
+        currentPositionMs: 63000,
+        currentDurationMs: 245000,
+        volume: 0.75,
+        repeatMode: .none,
+        showQueue: .constant(false),
+        onPlayPause: {},
+        onNext: {},
+        onPrevious: {},
+        onSeek: { _ in },
+        onVolumeChange: { _ in },
+        onCycleRepeat: {}
+    )
+}
+
+#Preview("Paused") {
+    NowPlayingBar(
+        trackTitle: "Another Track",
+        artistNames: "Another Artist",
+        coverArtURL: nil,
+        isPlaying: false,
+        currentPositionMs: 120000,
+        currentDurationMs: 300000,
+        volume: 0.5,
+        repeatMode: .album,
+        showQueue: .constant(true),
+        onPlayPause: {},
+        onNext: {},
+        onPrevious: {},
+        onSeek: { _ in },
+        onVolumeChange: { _ in },
+        onCycleRepeat: {}
+    )
 }

@@ -31,7 +31,7 @@ struct SettingsView: View {
     }
 }
 
-// MARK: - Library Tab
+// MARK: - Library Tab (wiring view)
 
 private struct LibrarySettingsTab: View {
     let appService: AppService
@@ -41,47 +41,20 @@ private struct LibrarySettingsTab: View {
     @State private var saved = false
 
     var body: some View {
-        Form {
-            if let config {
-                Section {
-                    TextField("Library name", text: $libraryName)
-                        .onSubmit { saveName() }
-                    if saved {
-                        Text("Saved")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section {
-                    LabeledContent("Library ID") {
-                        HStack {
-                            Text(config.libraryId)
-                                .textSelection(.enabled)
-                                .foregroundStyle(.secondary)
-                            Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(config.libraryId, forType: .string)
-                            } label: {
-                                Image(systemName: "doc.on.doc")
-                            }
-                            .buttonStyle(.borderless)
-                            .help("Copy library ID")
-                        }
-                    }
-                    LabeledContent("Path") {
-                        Text(config.libraryPath)
-                            .textSelection(.enabled)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            } else {
+        if let config {
+            LibrarySettingsContent(
+                libraryName: $libraryName,
+                libraryId: config.libraryId,
+                libraryPath: config.libraryPath,
+                saved: saved,
+                onRename: { saveName() }
+            )
+        } else {
+            Form {
                 ProgressView()
             }
-        }
-        .formStyle(.grouped)
-        .task {
-            loadConfig()
+            .formStyle(.grouped)
+            .task { loadConfig() }
         }
     }
 
@@ -106,7 +79,55 @@ private struct LibrarySettingsTab: View {
     }
 }
 
-// MARK: - Discogs Tab
+// MARK: - LibrarySettingsContent (pure leaf)
+
+struct LibrarySettingsContent: View {
+    @Binding var libraryName: String
+    let libraryId: String
+    let libraryPath: String
+    let saved: Bool
+    let onRename: () -> Void
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("Library name", text: $libraryName)
+                    .onSubmit { onRename() }
+                if saved {
+                    Text("Saved")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                LabeledContent("Library ID") {
+                    HStack {
+                        Text(libraryId)
+                            .textSelection(.enabled)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(libraryId, forType: .string)
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Copy library ID")
+                    }
+                }
+                LabeledContent("Path") {
+                    Text(libraryPath)
+                        .textSelection(.enabled)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+// MARK: - Discogs Tab (wiring view)
 
 private struct DiscogsSettingsTab: View {
     let appService: AppService
@@ -117,64 +138,19 @@ private struct DiscogsSettingsTab: View {
     @State private var statusMessage: String?
 
     var body: some View {
-        Form {
-            Section {
-                if hasToken {
-                    LabeledContent("API token") {
-                        HStack {
-                            if showToken {
-                                Text(token)
-                                    .textSelection(.enabled)
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                Text(String(repeating: "*", count: 12))
-                                    .foregroundStyle(.secondary)
-                            }
-                            Button(showToken ? "Hide" : "Show") {
-                                if !showToken {
-                                    if let t = appService.getDiscogsToken() {
-                                        token = t
-                                    }
-                                }
-                                showToken.toggle()
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                    }
-                    Button("Remove token") {
-                        removeToken()
-                    }
-                } else {
-                    HStack {
-                        if showToken {
-                            TextField("API token", text: $token)
-                        } else {
-                            SecureField("API token", text: $token)
-                        }
-                        Button(showToken ? "Hide" : "Show") {
-                            showToken.toggle()
-                        }
-                        .buttonStyle(.borderless)
-                    }
-                    Button("Save") {
-                        saveToken()
-                    }
-                    .disabled(token.isEmpty)
-                }
-                if let statusMessage {
-                    Text(statusMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        DiscogsSettingsContent(
+            token: $token,
+            hasToken: hasToken,
+            showToken: $showToken,
+            statusMessage: statusMessage,
+            onSave: { saveToken() },
+            onRemove: { removeToken() },
+            onRevealToken: {
+                if let t = appService.getDiscogsToken() {
+                    token = t
                 }
             }
-
-            Section {
-                Text("A Discogs API token allows bae to look up album metadata from Discogs. You can create a personal access token in your Discogs account settings.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
+        )
         .task {
             hasToken = appService.appHandle.hasDiscogsToken()
         }
@@ -213,7 +189,78 @@ private struct DiscogsSettingsTab: View {
     }
 }
 
-// MARK: - Subsonic Tab
+// MARK: - DiscogsSettingsContent (pure leaf)
+
+struct DiscogsSettingsContent: View {
+    @Binding var token: String
+    let hasToken: Bool
+    @Binding var showToken: Bool
+    let statusMessage: String?
+    let onSave: () -> Void
+    let onRemove: () -> Void
+    let onRevealToken: () -> Void
+
+    var body: some View {
+        Form {
+            Section {
+                if hasToken {
+                    LabeledContent("API token") {
+                        HStack {
+                            if showToken {
+                                Text(token)
+                                    .textSelection(.enabled)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text(String(repeating: "*", count: 12))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Button(showToken ? "Hide" : "Show") {
+                                if !showToken {
+                                    onRevealToken()
+                                }
+                                showToken.toggle()
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    Button("Remove token") {
+                        onRemove()
+                    }
+                } else {
+                    HStack {
+                        if showToken {
+                            TextField("API token", text: $token)
+                        } else {
+                            SecureField("API token", text: $token)
+                        }
+                        Button(showToken ? "Hide" : "Show") {
+                            showToken.toggle()
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    Button("Save") {
+                        onSave()
+                    }
+                    .disabled(token.isEmpty)
+                }
+                if let statusMessage {
+                    Text(statusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Text("A Discogs API token allows bae to look up album metadata from Discogs. You can create a personal access token in your Discogs account settings.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+// MARK: - Subsonic Tab (wiring view)
 
 private struct SubsonicSettingsTab: View {
     let appService: AppService
@@ -224,60 +271,25 @@ private struct SubsonicSettingsTab: View {
     @State private var config: BridgeConfig?
 
     var body: some View {
-        Form {
-            if let config {
-                Section {
-                    HStack {
-                        Circle()
-                            .fill(isRunning ? Color.green : Color.secondary.opacity(0.4))
-                            .frame(width: 8, height: 8)
-                        Text(isRunning ? "Running" : "Stopped")
-                            .foregroundStyle(isRunning ? .primary : .secondary)
-                    }
-
-                    LabeledContent("Port") {
-                        Text("\(config.subsonicPort)")
-                            .monospaced()
-                            .foregroundStyle(.secondary)
-                    }
-                    LabeledContent("Bind address") {
-                        Text(config.subsonicBindAddress)
-                            .monospaced()
-                            .foregroundStyle(.secondary)
-                    }
-                    if let username = config.subsonicUsername {
-                        LabeledContent("Username") {
-                            Text(username)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    Toggle("Enable Subsonic Server", isOn: Binding(
-                        get: { isRunning },
-                        set: { toggleServer($0) }
-                    ))
-                    .disabled(isToggling)
-
-                    if let error {
-                        Text(error)
-                            .foregroundStyle(.red)
-                            .font(.callout)
-                    }
-                }
-
-                Section {
-                    Text("The Subsonic-compatible server lets you stream your library to apps like Plexamp, play:Sub, and Symfonium. Configuration is managed in config.yaml.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } else {
+        if let config {
+            SubsonicSettingsContent(
+                isRunning: isRunning,
+                isToggling: isToggling,
+                error: error,
+                port: config.subsonicPort,
+                bindAddress: config.subsonicBindAddress,
+                username: config.subsonicUsername,
+                onToggle: { toggleServer($0) }
+            )
+        } else {
+            Form {
                 ProgressView()
             }
-        }
-        .formStyle(.grouped)
-        .task {
-            config = appService.getConfig()
-            isRunning = appService.appHandle.isSubsonicRunning()
+            .formStyle(.grouped)
+            .task {
+                config = appService.getConfig()
+                isRunning = appService.appHandle.isSubsonicRunning()
+            }
         }
     }
 
@@ -309,9 +321,71 @@ private struct SubsonicSettingsTab: View {
     }
 }
 
+// MARK: - SubsonicSettingsContent (pure leaf)
+
+struct SubsonicSettingsContent: View {
+    let isRunning: Bool
+    let isToggling: Bool
+    let error: String?
+    let port: UInt16
+    let bindAddress: String
+    let username: String?
+    let onToggle: (Bool) -> Void
+
+    var body: some View {
+        Form {
+            Section {
+                HStack {
+                    Circle()
+                        .fill(isRunning ? Color.green : Color.secondary.opacity(0.4))
+                        .frame(width: 8, height: 8)
+                    Text(isRunning ? "Running" : "Stopped")
+                        .foregroundStyle(isRunning ? .primary : .secondary)
+                }
+
+                LabeledContent("Port") {
+                    Text("\(port)")
+                        .monospaced()
+                        .foregroundStyle(.secondary)
+                }
+                LabeledContent("Bind address") {
+                    Text(bindAddress)
+                        .monospaced()
+                        .foregroundStyle(.secondary)
+                }
+                if let username {
+                    LabeledContent("Username") {
+                        Text(username)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Toggle("Enable Subsonic Server", isOn: Binding(
+                    get: { isRunning },
+                    set: { onToggle($0) }
+                ))
+                .disabled(isToggling)
+
+                if let error {
+                    Text(error)
+                        .foregroundStyle(.red)
+                        .font(.callout)
+                }
+            }
+
+            Section {
+                Text("The Subsonic-compatible server lets you stream your library to apps like Plexamp, play:Sub, and Symfonium. Configuration is managed in config.yaml.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
 // MARK: - About Tab
 
-private struct AboutSettingsTab: View {
+struct AboutSettingsTab: View {
     @EnvironmentObject var checkForUpdatesViewModel: CheckForUpdatesViewModel
 
     var body: some View {
@@ -337,4 +411,69 @@ private struct AboutSettingsTab: View {
         }
         .frame(maxWidth: .infinity)
     }
+}
+
+// MARK: - Previews
+
+#Preview("Library Settings") {
+    LibrarySettingsContent(
+        libraryName: .constant("My Library"),
+        libraryId: "550e8400-e29b-41d4-a716-446655440000",
+        libraryPath: "/Users/user/.bae/libraries/default",
+        saved: false,
+        onRename: {}
+    )
+    .frame(width: 500, height: 300)
+}
+
+#Preview("Discogs Settings - No Token") {
+    DiscogsSettingsContent(
+        token: .constant(""),
+        hasToken: false,
+        showToken: .constant(false),
+        statusMessage: nil,
+        onSave: {},
+        onRemove: {},
+        onRevealToken: {}
+    )
+    .frame(width: 500, height: 300)
+}
+
+#Preview("Discogs Settings - Has Token") {
+    DiscogsSettingsContent(
+        token: .constant("abc123xyz"),
+        hasToken: true,
+        showToken: .constant(false),
+        statusMessage: nil,
+        onSave: {},
+        onRemove: {},
+        onRevealToken: {}
+    )
+    .frame(width: 500, height: 300)
+}
+
+#Preview("Subsonic Settings - Running") {
+    SubsonicSettingsContent(
+        isRunning: true,
+        isToggling: false,
+        error: nil,
+        port: 4533,
+        bindAddress: "127.0.0.1",
+        username: "admin",
+        onToggle: { _ in }
+    )
+    .frame(width: 500, height: 300)
+}
+
+#Preview("Subsonic Settings - Stopped") {
+    SubsonicSettingsContent(
+        isRunning: false,
+        isToggling: false,
+        error: nil,
+        port: 4533,
+        bindAddress: "127.0.0.1",
+        username: nil,
+        onToggle: { _ in }
+    )
+    .frame(width: 500, height: 300)
 }

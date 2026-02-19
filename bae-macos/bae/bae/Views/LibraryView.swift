@@ -18,13 +18,16 @@ struct LibraryView: View {
         Group {
             if isSearching {
                 SearchView(
-                    appService: appService,
+                    results: appService.searchResults,
+                    searchQuery: appService.searchQuery,
+                    resolveImageURL: { appService.imageURL(for: $0) },
                     onSelectArtist: { _ in },
                     onSelectAlbum: { albumId in
                         searchText = ""
                         appService.search(query: "")
                         selectedAlbumId = albumId
-                    }
+                    },
+                    onPlayTrack: { appService.playTracks(trackIds: [$0]) }
                 )
             } else if let error {
                 ContentUnavailableView(
@@ -41,15 +44,45 @@ struct LibraryView: View {
             } else {
                 HStack(spacing: 0) {
                     AlbumGridView(
-                        albums: albums,
-                        appService: appService,
-                        selectedAlbumId: $selectedAlbumId
+                        albums: albums.map { album in
+                            AlbumCardViewModel(
+                                id: album.id,
+                                title: album.title,
+                                artistNames: album.artistNames,
+                                year: album.year,
+                                coverArtURL: appService.imageURL(for: album.coverReleaseId)
+                            )
+                        },
+                        selectedAlbumId: $selectedAlbumId,
+                        onPlayAlbum: { appService.playAlbum(albumId: $0) }
                     )
                     .frame(maxWidth: .infinity)
                     if showQueue {
                         Divider()
-                        QueueView(appService: appService, onClose: { showQueue = false })
-                            .frame(width: 450)
+                        QueueView(
+                            isActive: appService.isActive,
+                            nowPlayingTitle: appService.trackTitle,
+                            nowPlayingArtist: appService.artistNames,
+                            nowPlayingArtURL: appService.imageURL(for: appService.coverImageId),
+                            items: appService.queueItems.map { item in
+                                QueueItemViewModel(
+                                    id: item.trackId,
+                                    title: item.title,
+                                    artistNames: item.artistNames,
+                                    albumTitle: item.albumTitle,
+                                    durationMs: item.durationMs,
+                                    coverArtURL: appService.imageURL(for: item.coverImageId)
+                                )
+                            },
+                            onClose: { showQueue = false },
+                            onClear: { appService.clearQueue() },
+                            onSkipTo: { appService.skipToQueueIndex(index: UInt32($0)) },
+                            onRemove: { appService.removeFromQueue(index: UInt32($0)) },
+                            onReorder: { from, to in
+                                appService.reorderQueue(fromIndex: UInt32(from), toIndex: UInt32(to))
+                            }
+                        )
+                        .frame(width: 450)
                     } else if let albumId = selectedAlbumId {
                         Divider()
                         AlbumDetailView(

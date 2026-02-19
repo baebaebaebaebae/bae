@@ -1,6 +1,8 @@
 import SwiftUI
 import AppKit
 
+// MARK: - Smart wiring view (keeps appService)
+
 struct AlbumDetailView: View {
     let albumId: String
     let appService: AppService
@@ -27,7 +29,29 @@ struct AlbumDetailView: View {
                     description: Text(error)
                 )
             } else if let detail {
-                albumContent(detail)
+                AlbumDetailContent(
+                    detail: detail,
+                    coverArtURL: appService.imageURL(for: detail.album.coverReleaseId),
+                    selectedReleaseIndex: $selectedReleaseIndex,
+                    showShareCopied: showShareCopied,
+                    transferring: transferring,
+                    resolveImageURL: { appService.imageURL(for: $0) },
+                    onClose: onClose,
+                    onPlay: { appService.playAlbum(albumId: albumId) },
+                    onPlayFromTrack: { index in
+                        appService.playAlbum(albumId: albumId, startTrackIndex: UInt32(index))
+                    },
+                    onShare: {
+                        guard !detail.releases.isEmpty else { return }
+                        createShareLink(releaseId: detail.releases[selectedReleaseIndex].id)
+                    },
+                    onChangeCover: {
+                        showingCoverSheet = true
+                        fetchRemoteCovers()
+                    },
+                    onTransferToManaged: { transferToManaged(releaseId: $0) },
+                    onEject: { ejectRelease(releaseId: $0) }
+                )
             } else {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -41,11 +65,35 @@ struct AlbumDetailView: View {
                 Color.black.opacity(0.5)
                     .ignoresSafeArea()
                     .onTapGesture { showingCoverSheet = false }
-                coverSheet(detail)
-                    .frame(width: 500, height: 450)
-                    .background(Theme.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .shadow(radius: 20)
+                CoverSheetView(
+                    remoteCovers: remoteCovers,
+                    releaseImages: collectImageFiles(detail).map { item in
+                        (name: item.file.originalFilename, url: nil as URL?)
+                    },
+                    loading: loadingRemoteCovers,
+                    onSelectRemote: { cover in
+                        let releaseId = currentReleaseId(detail)
+                        changeCover(
+                            albumId: albumId,
+                            releaseId: releaseId,
+                            selection: .remoteCover(url: cover.url, source: cover.source)
+                        )
+                    },
+                    onSelectReleaseImage: { fileId in
+                        let releaseId = currentReleaseId(detail)
+                        changeCover(
+                            albumId: albumId,
+                            releaseId: releaseId,
+                            selection: .releaseImage(fileId: fileId)
+                        )
+                    },
+                    onRefresh: { fetchRemoteCovers() },
+                    onDone: { showingCoverSheet = false }
+                )
+                .frame(width: 500, height: 450)
+                .background(Theme.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .shadow(radius: 20)
             }
         }
         .alert("Cover Change Failed", isPresented: .init(
@@ -91,13 +139,179 @@ struct AlbumDetailView: View {
         }
     }
 
-    private func albumContent(_ detail: BridgeAlbumDetail) -> some View {
+    // MARK: - Data helpers
+
+    private struct ImageFileItem {
+        let file: BridgeFile
+    }
+
+    private func collectImageFiles(_ detail: BridgeAlbumDetail) -> [ImageFileItem] {
+        var items: [ImageFileItem] = []
+        for release in detail.releases {
+            for file in release.files {
+                if file.contentType.hasPrefix("image/") {
+                    items.append(ImageFileItem(file: file))
+                }
+            }
+        }
+        return items
+    }
+
+    private func currentReleaseId(_ detail: BridgeAlbumDetail) -> String {
+        guard !detail.releases.isEmpty else { return "" }
+        return detail.releases[selectedReleaseIndex].id
+    }
+
+    // MARK: - Actions
+
+    private func fetchRemoteCovers() {
+        guard let detail else { return }
+        let releaseId = currentReleaseId(detail)
+        guard !releaseId.isEmpty else { return }
+
+        loadingRemoteCovers = true
+        remoteCovers = []
+
+        Task.detached { [appHandle = appService.appHandle] in
+            let covers = (try? appHandle.fetchRemoteCovers(releaseId: releaseId)) ?? []
+            await MainActor.run {
+                remoteCovers = covers
+                loadingRemoteCovers = false
+            }
+        }
+    }
+
+    private func changeCover(albumId: String, releaseId: String, selection: BridgeCoverSelection) {
+        Task.detached { [appHandle = appService.appHandle] in
+            do {
+                try appHandle.changeCover(albumId: albumId, releaseId: releaseId, selection: selection)
+                await MainActor.run {
+                    showingCoverSheet = false
+                    Task { await loadDetail() }
+                }
+            } catch {
+                await MainActor.run {
+                    coverChangeError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func createShareLink(releaseId: String) {
+        Task.detached { [appHandle = appService.appHandle] in
+            do {
+                let url = try appHandle.createShareLink(releaseId: releaseId)
+                await MainActor.run {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(url, forType: .string)
+                    withAnimation {
+                        showShareCopied = true
+                    }
+                    Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        withAnimation {
+                            showShareCopied = false
+                        }
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    shareError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func transferToManaged(releaseId: String) {
+        transferring = true
+        transferError = nil
+        Task.detached { [appHandle = appService.appHandle] in
+            do {
+                try appHandle.transferReleaseToManaged(releaseId: releaseId)
+                await MainActor.run {
+                    transferring = false
+                    Task { await loadDetail() }
+                }
+            } catch {
+                await MainActor.run {
+                    transferring = false
+                    transferError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func ejectRelease(releaseId: String) {
+        let panel = NSOpenPanel()
+        panel.title = "Select Eject Directory"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        transferring = true
+        transferError = nil
+        let targetDir = url.path
+        Task.detached { [appHandle = appService.appHandle] in
+            do {
+                try appHandle.ejectReleaseStorage(releaseId: releaseId, targetDir: targetDir)
+                await MainActor.run {
+                    transferring = false
+                    Task { await loadDetail() }
+                }
+            } catch {
+                await MainActor.run {
+                    transferring = false
+                    transferError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func loadDetail() async {
+        detail = nil
+        error = nil
+        selectedReleaseIndex = 0
+
+        do {
+            let result = try await Task.detached {
+                try appService.appHandle.getAlbumDetail(albumId: albumId)
+            }.value
+            detail = result
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+// MARK: - AlbumDetailContent (pure leaf view)
+
+struct AlbumDetailContent: View {
+    let detail: BridgeAlbumDetail
+    let coverArtURL: URL?
+    @Binding var selectedReleaseIndex: Int
+    let showShareCopied: Bool
+    let transferring: Bool
+    let resolveImageURL: (String?) -> URL?
+    let onClose: (() -> Void)?
+    let onPlay: () -> Void
+    let onPlayFromTrack: (Int) -> Void
+    let onShare: () -> Void
+    let onChangeCover: () -> Void
+    let onTransferToManaged: (String) -> Void
+    let onEject: (String) -> Void
+
+    var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                albumHeader(detail)
+                albumHeader
 
                 if detail.releases.count > 1 {
-                    releasePicker(detail)
+                    releasePicker
                 }
 
                 if !detail.releases.isEmpty {
@@ -116,15 +330,14 @@ struct AlbumDetailView: View {
         .background(Theme.background)
     }
 
-    private func albumHeader(_ detail: BridgeAlbumDetail) -> some View {
+    private var albumHeader: some View {
         HStack(alignment: .top, spacing: 16) {
-            albumArt(detail.album)
+            albumArt
                 .frame(width: 100, height: 100)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .contextMenu {
                     Button("Change Cover...") {
-                        showingCoverSheet = true
-                        fetchRemoteCovers()
+                        onChangeCover()
                     }
                 }
 
@@ -151,16 +364,14 @@ struct AlbumDetailView: View {
                 }
 
                 HStack(spacing: 8) {
-                    Button(action: {
-                        appService.playAlbum(albumId: albumId)
-                    }) {
+                    Button(action: onPlay) {
                         Label("Play", systemImage: "play.fill")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
 
                     if !detail.releases.isEmpty {
-                        Button(action: { createShareLink(releaseId: detail.releases[selectedReleaseIndex].id) }) {
+                        Button(action: onShare) {
                             Label("Share", systemImage: "square.and.arrow.up")
                         }
                         .controlSize(.small)
@@ -182,58 +393,9 @@ struct AlbumDetailView: View {
         }
     }
 
-    private func releaseMetadata(_ release: BridgeRelease) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let format = release.format {
-                metadataRow("Format", value: format)
-            }
-            if let label = release.label {
-                metadataRow("Label", value: label)
-            }
-            if let catalog = release.catalogNumber {
-                metadataRow("Catalog", value: catalog)
-            }
-            if let country = release.country {
-                metadataRow("Country", value: country)
-            }
-        }
-        .font(.callout)
-        .padding(.top, 4)
-    }
-
-    private func releaseMetadataCompact(_ release: BridgeRelease) -> some View {
-        HStack(spacing: 12) {
-            if let format = release.format {
-                Text(format)
-            }
-            if let label = release.label {
-                Text(label)
-            }
-            if let catalog = release.catalogNumber {
-                Text(catalog)
-            }
-            if let country = release.country {
-                Text(country)
-            }
-        }
-        .font(.caption)
-        .foregroundStyle(.tertiary)
-        .lineLimit(1)
-    }
-
-    private func metadataRow(_ label: String, value: String) -> some View {
-        HStack(spacing: 6) {
-            Text(label + ":")
-                .foregroundStyle(.secondary)
-            Text(value)
-        }
-    }
-
     @ViewBuilder
-    private func albumArt(_ album: BridgeAlbum) -> some View {
-        if let coverReleaseId = album.coverReleaseId,
-           let urlString = appService.appHandle.getImageUrl(imageId: coverReleaseId),
-           let url = URL(string: urlString) {
+    private var albumArt: some View {
+        if let url = coverArtURL {
             AsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
@@ -260,7 +422,27 @@ struct AlbumDetailView: View {
         }
     }
 
-    private func releasePicker(_ detail: BridgeAlbumDetail) -> some View {
+    private func releaseMetadataCompact(_ release: BridgeRelease) -> some View {
+        HStack(spacing: 12) {
+            if let format = release.format {
+                Text(format)
+            }
+            if let label = release.label {
+                Text(label)
+            }
+            if let catalog = release.catalogNumber {
+                Text(catalog)
+            }
+            if let country = release.country {
+                Text(country)
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.tertiary)
+        .lineLimit(1)
+    }
+
+    private var releasePicker: some View {
         Picker("Release", selection: $selectedReleaseIndex) {
             ForEach(Array(detail.releases.enumerated()), id: \.offset) { index, release in
                 Text(releaseDisplayName(release))
@@ -307,10 +489,7 @@ struct AlbumDetailView: View {
                     track,
                     showArtist: isCompilation,
                     showDisc: hasMultipleDiscs,
-                    onPlay: {
-                        // Play album starting from this track
-                        appService.playAlbum(albumId: albumId, startTrackIndex: UInt32(index))
-                    }
+                    onPlay: { onPlayFromTrack(index) }
                 )
                 Divider()
             }
@@ -443,79 +622,54 @@ struct AlbumDetailView: View {
         let isUnmanaged = !release.managedLocally && !release.managedInCloud && release.unmanagedPath != nil
 
         if isUnmanaged {
-            Button(action: { transferToManaged(releaseId: release.id) }) {
+            Button(action: { onTransferToManaged(release.id) }) {
                 Label("Copy to library", systemImage: "square.and.arrow.down")
             }
             .help("Copy files into managed local storage")
         }
 
         if release.managedLocally {
-            Button(action: { ejectRelease(releaseId: release.id) }) {
+            Button(action: { onEject(release.id) }) {
                 Label("Eject to folder", systemImage: "square.and.arrow.up.on.square")
             }
             .help("Export files to a local folder and remove from managed storage")
         }
     }
 
-    private func transferToManaged(releaseId: String) {
-        transferring = true
-        transferError = nil
-        Task.detached { [appHandle = appService.appHandle] in
-            do {
-                try appHandle.transferReleaseToManaged(releaseId: releaseId)
-                await MainActor.run {
-                    transferring = false
-                    Task { await loadDetail() }
-                }
-            } catch {
-                await MainActor.run {
-                    transferring = false
-                    transferError = error.localizedDescription
-                }
-            }
-        }
+    // MARK: - Formatting
+
+    private func formatDuration(_ ms: Int64) -> String {
+        let totalSeconds = ms / 1000
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        return "\(minutes):\(String(format: "%02d", seconds))"
     }
 
-    private func ejectRelease(releaseId: String) {
-        let panel = NSOpenPanel()
-        panel.title = "Select Eject Directory"
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.canCreateDirectories = true
-        panel.allowsMultipleSelection = false
-
-        guard panel.runModal() == .OK, let url = panel.url else {
-            return
-        }
-
-        transferring = true
-        transferError = nil
-        let targetDir = url.path
-        Task.detached { [appHandle = appService.appHandle] in
-            do {
-                try appHandle.ejectReleaseStorage(releaseId: releaseId, targetDir: targetDir)
-                await MainActor.run {
-                    transferring = false
-                    Task { await loadDetail() }
-                }
-            } catch {
-                await MainActor.run {
-                    transferring = false
-                    transferError = error.localizedDescription
-                }
-            }
-        }
+    private func formatFileSize(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
     }
+}
 
-    // MARK: - Cover Sheet
+// MARK: - CoverSheetView (pure leaf view)
 
-    private func coverSheet(_ detail: BridgeAlbumDetail) -> some View {
+struct CoverSheetView: View {
+    let remoteCovers: [BridgeRemoteCover]
+    let releaseImages: [(name: String, url: URL?)]
+    let loading: Bool
+    let onSelectRemote: (BridgeRemoteCover) -> Void
+    let onSelectReleaseImage: (String) -> Void
+    let onRefresh: () -> Void
+    let onDone: () -> Void
+
+    var body: some View {
         VStack(spacing: 0) {
             HStack {
                 Text("Change Cover")
                     .font(.headline)
                 Spacer()
-                Button("Done") { showingCoverSheet = false }
+                Button("Done") { onDone() }
                     .keyboardShortcut(.cancelAction)
             }
             .padding()
@@ -524,12 +678,11 @@ struct AlbumDetailView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    // Remote covers section
                     Text("Remote Sources")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
-                    if loadingRemoteCovers {
+                    if loading {
                         HStack {
                             ProgressView()
                                 .controlSize(.small)
@@ -544,19 +697,17 @@ struct AlbumDetailView: View {
                     } else {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 120))], spacing: 12) {
                             ForEach(remoteCovers, id: \.url) { cover in
-                                remoteCoverOption(cover, detail: detail)
+                                remoteCoverOption(cover)
                             }
                         }
                     }
 
-                    Button(action: { fetchRemoteCovers() }) {
+                    Button(action: onRefresh) {
                         Label("Refresh", systemImage: "arrow.clockwise")
                     }
-                    .disabled(loadingRemoteCovers)
+                    .disabled(loading)
 
-                    // Image files from releases
-                    let imageFiles = collectImageFiles(detail)
-                    if !imageFiles.isEmpty {
+                    if !releaseImages.isEmpty {
                         Divider()
 
                         Text("Release Files")
@@ -564,8 +715,20 @@ struct AlbumDetailView: View {
                             .foregroundStyle(.secondary)
 
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 120))], spacing: 12) {
-                            ForEach(imageFiles, id: \.file.id) { item in
-                                releaseFileOption(item, detail: detail)
+                            ForEach(Array(releaseImages.enumerated()), id: \.offset) { _, item in
+                                Button(action: { onSelectReleaseImage(item.name) }) {
+                                    VStack(spacing: 4) {
+                                        coverOptionPlaceholder
+                                            .frame(width: 120, height: 120)
+                                            .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                                        Text(item.name)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -575,15 +738,8 @@ struct AlbumDetailView: View {
         }
     }
 
-    private func remoteCoverOption(_ cover: BridgeRemoteCover, detail: BridgeAlbumDetail) -> some View {
-        Button(action: {
-            let releaseId = currentReleaseId(detail)
-            changeCover(
-                albumId: albumId,
-                releaseId: releaseId,
-                selection: .remoteCover(url: cover.url, source: cover.source)
-            )
-        }) {
+    private func remoteCoverOption(_ cover: BridgeRemoteCover) -> some View {
+        Button(action: { onSelectRemote(cover) }) {
             VStack(spacing: 4) {
                 AsyncImage(url: URL(string: cover.thumbnailUrl)) { phase in
                     switch phase {
@@ -608,29 +764,6 @@ struct AlbumDetailView: View {
         .buttonStyle(.plain)
     }
 
-    private func releaseFileOption(_ item: ImageFileItem, detail: BridgeAlbumDetail) -> some View {
-        Button(action: {
-            let releaseId = currentReleaseId(detail)
-            changeCover(
-                albumId: albumId,
-                releaseId: releaseId,
-                selection: .releaseImage(fileId: item.file.id)
-            )
-        }) {
-            VStack(spacing: 4) {
-                coverOptionPlaceholder
-                    .frame(width: 120, height: 120)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-
-                Text(item.file.originalFilename)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
     private var coverOptionPlaceholder: some View {
         ZStack {
             Theme.placeholder
@@ -639,119 +772,90 @@ struct AlbumDetailView: View {
                 .foregroundStyle(.tertiary)
         }
     }
+}
 
-    private func currentReleaseId(_ detail: BridgeAlbumDetail) -> String {
-        guard !detail.releases.isEmpty else { return "" }
-        return detail.releases[selectedReleaseIndex].id
-    }
+// MARK: - Previews
 
-    // MARK: - Data helpers
+#Preview("Album Detail Content") {
+    AlbumDetailContent(
+        detail: BridgeAlbumDetail(
+            album: BridgeAlbum(
+                id: "album-1",
+                title: "Album Title",
+                year: 2024,
+                isCompilation: false,
+                coverReleaseId: nil,
+                artistNames: "Artist Name"
+            ),
+            artists: [BridgeArtist(id: "ar-1", name: "Artist Name")],
+            releases: [
+                BridgeRelease(
+                    id: "rel-1",
+                    albumId: "album-1",
+                    releaseName: nil,
+                    year: 2024,
+                    format: "CD",
+                    label: "Label Name",
+                    catalogNumber: "CAT-001",
+                    country: "US",
+                    managedLocally: true,
+                    managedInCloud: false,
+                    unmanagedPath: nil,
+                    tracks: [
+                        BridgeTrack(id: "t-1", title: "First Track", discNumber: 1, trackNumber: 1, durationMs: 234000, artistNames: "Artist Name"),
+                        BridgeTrack(id: "t-2", title: "Second Track", discNumber: 1, trackNumber: 2, durationMs: 180000, artistNames: "Artist Name"),
+                        BridgeTrack(id: "t-3", title: "Third Track", discNumber: 1, trackNumber: 3, durationMs: 312000, artistNames: "Artist Name"),
+                    ],
+                    files: []
+                )
+            ]
+        ),
+        coverArtURL: nil,
+        selectedReleaseIndex: .constant(0),
+        showShareCopied: false,
+        transferring: false,
+        resolveImageURL: { _ in nil },
+        onClose: {},
+        onPlay: {},
+        onPlayFromTrack: { _ in },
+        onShare: {},
+        onChangeCover: {},
+        onTransferToManaged: { _ in },
+        onEject: { _ in }
+    )
+    .frame(width: 450, height: 600)
+}
 
-    private struct ImageFileItem {
-        let file: BridgeFile
-    }
+#Preview("Cover Sheet") {
+    CoverSheetView(
+        remoteCovers: [
+            BridgeRemoteCover(url: "https://example.com/cover1.jpg", thumbnailUrl: "https://example.com/thumb1.jpg", label: "Front", source: "musicbrainz"),
+            BridgeRemoteCover(url: "https://example.com/cover2.jpg", thumbnailUrl: "https://example.com/thumb2.jpg", label: "Back", source: "musicbrainz"),
+        ],
+        releaseImages: [
+            (name: "cover.jpg", url: nil),
+            (name: "back.jpg", url: nil),
+        ],
+        loading: false,
+        onSelectRemote: { _ in },
+        onSelectReleaseImage: { _ in },
+        onRefresh: {},
+        onDone: {}
+    )
+    .frame(width: 500, height: 450)
+    .background(Theme.surface)
+}
 
-    private func collectImageFiles(_ detail: BridgeAlbumDetail) -> [ImageFileItem] {
-        var items: [ImageFileItem] = []
-        for release in detail.releases {
-            for file in release.files {
-                if file.contentType.hasPrefix("image/") {
-                    items.append(ImageFileItem(file: file))
-                }
-            }
-        }
-        return items
-    }
-
-    // MARK: - Actions
-
-    private func fetchRemoteCovers() {
-        guard let detail else { return }
-        let releaseId = currentReleaseId(detail)
-        guard !releaseId.isEmpty else { return }
-
-        loadingRemoteCovers = true
-        remoteCovers = []
-
-        Task.detached { [appHandle = appService.appHandle] in
-            let covers = (try? appHandle.fetchRemoteCovers(releaseId: releaseId)) ?? []
-            await MainActor.run {
-                remoteCovers = covers
-                loadingRemoteCovers = false
-            }
-        }
-    }
-
-    private func changeCover(albumId: String, releaseId: String, selection: BridgeCoverSelection) {
-        Task.detached { [appHandle = appService.appHandle] in
-            do {
-                try appHandle.changeCover(albumId: albumId, releaseId: releaseId, selection: selection)
-                await MainActor.run {
-                    showingCoverSheet = false
-                    // Reload detail to refresh cover art
-                    Task { await loadDetail() }
-                }
-            } catch {
-                await MainActor.run {
-                    coverChangeError = error.localizedDescription
-                }
-            }
-        }
-    }
-
-    private func createShareLink(releaseId: String) {
-        Task.detached { [appHandle = appService.appHandle] in
-            do {
-                let url = try appHandle.createShareLink(releaseId: releaseId)
-                await MainActor.run {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(url, forType: .string)
-                    withAnimation {
-                        showShareCopied = true
-                    }
-                    // Hide after 2 seconds
-                    Task {
-                        try? await Task.sleep(for: .seconds(2))
-                        withAnimation {
-                            showShareCopied = false
-                        }
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    shareError = error.localizedDescription
-                }
-            }
-        }
-    }
-
-    // MARK: - Formatting
-
-    private func formatDuration(_ ms: Int64) -> String {
-        let totalSeconds = ms / 1000
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        return "\(minutes):\(String(format: "%02d", seconds))"
-    }
-
-    private func formatFileSize(_ bytes: Int64) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.countStyle = .file
-        return formatter.string(fromByteCount: bytes)
-    }
-
-    private func loadDetail() async {
-        detail = nil
-        error = nil
-        selectedReleaseIndex = 0
-
-        do {
-            let result = try await Task.detached {
-                try appService.appHandle.getAlbumDetail(albumId: albumId)
-            }.value
-            detail = result
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
+#Preview("Cover Sheet Loading") {
+    CoverSheetView(
+        remoteCovers: [],
+        releaseImages: [],
+        loading: true,
+        onSelectRemote: { _ in },
+        onSelectReleaseImage: { _ in },
+        onRefresh: {},
+        onDone: {}
+    )
+    .frame(width: 500, height: 450)
+    .background(Theme.surface)
 }
