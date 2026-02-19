@@ -479,7 +479,7 @@ pub struct AppHandle {
     event_handler: Mutex<Option<Arc<dyn AppEventHandler>>>,
     subsonic_server_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     sync_handle: Option<Arc<BridgeSyncHandle>>,
-    sync_loop_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    sync_loop_handle: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 #[uniffi::export]
@@ -1748,6 +1748,125 @@ impl AppHandle {
             Ok(members)
         })
     }
+
+    // =========================================================================
+    // Sync trigger / loop
+    // =========================================================================
+
+    /// Run a single sync cycle: push local changes, pull remote changes.
+    /// Returns the updated sync status. Notifies the event handler on completion
+    /// (on_library_changed if remote changes were applied, on_sync_status_changed always).
+    pub fn trigger_sync(&self) -> Result<BridgeSyncStatus, BridgeError> {
+        let sync_handle = self
+            .sync_handle
+            .as_ref()
+            .ok_or_else(|| BridgeError::Config {
+                msg: "Sync not configured".to_string(),
+            })?;
+
+        self.runtime.block_on(async {
+            let db = self.library_manager.get().database();
+            let result = run_single_sync_cycle(sync_handle, db, &self.config.library_dir).await?;
+
+            // Notify event handler
+            if let Some(handler) = self.event_handler.lock().unwrap().as_ref() {
+                handler.on_sync_status_changed(result.status.clone());
+                if result.changesets_applied > 0 {
+                    handler.on_library_changed();
+                }
+            }
+
+            Ok(result.status)
+        })
+    }
+
+    /// Start a background sync loop that runs every 30 seconds.
+    /// No-op if sync is not configured or a loop is already running.
+    ///
+    /// Spawns a dedicated OS thread with its own tokio runtime because
+    /// the sync session holds a raw sqlite3 pointer (not Send across
+    /// tokio task boundaries).
+    pub fn start_sync_loop(&self) {
+        let Some(sync_handle) = self.sync_handle.clone() else {
+            return;
+        };
+
+        // Don't start a second loop (if a handle exists, thread is running)
+        {
+            let guard = self.sync_loop_handle.lock().unwrap();
+            if guard.is_some() {
+                return;
+            }
+        }
+
+        let library_manager = self.library_manager.clone();
+        let library_dir = self.config.library_dir.clone();
+        let event_handler = self.event_handler.lock().unwrap().clone();
+
+        let handle = std::thread::Builder::new()
+            .name("bae-sync-loop".to_string())
+            .spawn(move || {
+                let rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        warn!("Failed to create sync loop runtime: {e}");
+                        return;
+                    }
+                };
+
+                rt.block_on(async {
+                    // Short delay to avoid racing with app startup
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+
+                    loop {
+                        if let Some(ref handler) = event_handler {
+                            let db = library_manager.get().database();
+
+                            match run_single_sync_cycle(&sync_handle, db, &library_dir).await {
+                                Ok(result) => {
+                                    handler.on_sync_status_changed(result.status);
+                                    if result.changesets_applied > 0 {
+                                        handler.on_library_changed();
+                                    }
+                                }
+                                Err(e) => {
+                                    let status = BridgeSyncStatus {
+                                        configured: true,
+                                        syncing: false,
+                                        last_sync_time: None,
+                                        error: Some(e.to_string()),
+                                        device_count: 0,
+                                    };
+                                    handler.on_sync_status_changed(status);
+                                }
+                            }
+                        }
+
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                    }
+                });
+            })
+            .expect("Failed to spawn sync loop thread");
+
+        let mut guard = self.sync_loop_handle.lock().unwrap();
+        *guard = Some(handle);
+    }
+
+    /// Stop the background sync loop if running.
+    pub fn stop_sync_loop(&self) {
+        // The sync loop thread will stop naturally when the process exits.
+        // We just clear our reference to it.
+        let mut guard = self.sync_loop_handle.lock().unwrap();
+        guard.take();
+    }
+
+    /// Whether sync infrastructure is initialized and ready to use.
+    pub fn is_sync_ready(&self) -> bool {
+        self.sync_handle.is_some()
+    }
 }
 
 /// Background task that reads PlaybackProgress events and dispatches them
@@ -2120,7 +2239,7 @@ pub fn init_app(library_id: String) -> Result<Arc<AppHandle>, BridgeError> {
         runtime.handle().clone(),
         shared_library.clone(),
         encryption_service.clone(),
-        Arc::new(database),
+        Arc::new(database.clone()),
         key_service.clone(),
         config.library_dir.clone(),
     );
@@ -2152,6 +2271,18 @@ pub fn init_app(library_id: String) -> Result<Arc<AppHandle>, BridgeError> {
         }
     };
 
+    // Initialize sync infrastructure if sync is configured and encryption is enabled
+    let sync_handle = if config.sync_enabled(&key_service) {
+        if let Some(ref enc) = encryption_service {
+            runtime.block_on(create_sync_handle(&config, &key_service, &database, enc))
+        } else {
+            info!("Sync is configured but encryption is not enabled, skipping sync initialization");
+            None
+        }
+    } else {
+        None
+    };
+
     info!("AppHandle initialized for library '{library_id}'");
 
     Ok(Arc::new(AppHandle {
@@ -2166,6 +2297,8 @@ pub fn init_app(library_id: String) -> Result<Arc<AppHandle>, BridgeError> {
         import_handle,
         event_handler: Mutex::new(None),
         subsonic_server_handle: Mutex::new(None),
+        sync_handle,
+        sync_loop_handle: Mutex::new(None),
     }))
 }
 
@@ -2223,4 +2356,436 @@ async fn create_bucket_client(
     .map_err(|e| format!("Failed to create S3 cloud home: {e}"))?;
 
     Ok(CloudHomeSyncBucket::new(Box::new(cloud_home), encryption))
+}
+
+/// Create the sync handle if sync bucket credentials and configuration are available.
+///
+/// Extracts the raw sqlite3 write handle, creates the S3 bucket client, HLC,
+/// user keypair, and starts the initial sync session.
+async fn create_sync_handle(
+    config: &Config,
+    key_service: &KeyService,
+    database: &Database,
+    encryption: &EncryptionService,
+) -> Option<Arc<BridgeSyncHandle>> {
+    use bae_core::cloud_home::s3::S3CloudHome;
+
+    let bucket = config.cloud_home_s3_bucket.as_ref()?;
+    let region = config.cloud_home_s3_region.as_ref()?;
+    let endpoint = config.cloud_home_s3_endpoint.clone();
+
+    let (access_key, secret_key) = match key_service.get_cloud_home_credentials() {
+        Some(bae_core::keys::CloudHomeCredentials::S3 {
+            access_key,
+            secret_key,
+        }) => (access_key, secret_key),
+        _ => {
+            warn!("Sync configured but no S3 credentials found");
+            return None;
+        }
+    };
+
+    let key_prefix = config.cloud_home_s3_key_prefix.clone();
+    let cloud_home = match S3CloudHome::new(
+        bucket.clone(),
+        region.clone(),
+        endpoint,
+        access_key,
+        secret_key,
+        key_prefix,
+    )
+    .await
+    {
+        Ok(ch) => ch,
+        Err(e) => {
+            warn!("Failed to create cloud home for sync: {e}");
+            return None;
+        }
+    };
+
+    let bucket_client = CloudHomeSyncBucket::new(Box::new(cloud_home), encryption.clone());
+    let encryption_lock = bucket_client.shared_encryption();
+
+    let raw_db = match database.raw_write_handle().await {
+        Ok(ptr) => ptr,
+        Err(e) => {
+            warn!("Failed to extract raw write handle for sync: {e}");
+            return None;
+        }
+    };
+
+    let session = match unsafe { SyncSession::start(raw_db) } {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("Failed to start initial sync session: {e}");
+            return None;
+        }
+    };
+
+    let user_keypair = match key_service.get_or_create_user_keypair() {
+        Ok(kp) => kp,
+        Err(e) => {
+            warn!("Failed to get/create user keypair for sync: {e}");
+            return None;
+        }
+    };
+
+    let hlc = Hlc::new(config.device_id.clone());
+
+    info!(
+        "Sync initialized (bucket: {}, device: {})",
+        bucket, config.device_id
+    );
+
+    Some(Arc::new(BridgeSyncHandle {
+        bucket_client: Arc::new(bucket_client),
+        hlc: Arc::new(hlc),
+        device_id: config.device_id.clone(),
+        encryption: encryption_lock,
+        raw_db,
+        session: tokio::sync::Mutex::new(Some(session)),
+        user_keypair,
+    }))
+}
+
+/// Path for staging outgoing changeset bytes that survived a push failure.
+fn staging_path(library_dir: &LibraryDir) -> PathBuf {
+    library_dir.join("sync_staging.bin")
+}
+
+/// Stage outgoing changeset bytes to disk before pushing.
+fn stage_changeset(library_dir: &LibraryDir, packed: &[u8]) {
+    if let Err(e) = std::fs::write(staging_path(library_dir), packed) {
+        warn!("Failed to stage outgoing changeset: {e}");
+    }
+}
+
+/// Clear the staged changeset after a successful push.
+fn clear_staged_changeset(library_dir: &LibraryDir) {
+    let _ = std::fs::remove_file(staging_path(library_dir));
+}
+
+/// Read a previously staged changeset (if any) for retry.
+fn read_staged_changeset(library_dir: &LibraryDir) -> Option<Vec<u8>> {
+    let path = staging_path(library_dir);
+    if path.exists() {
+        match std::fs::read(&path) {
+            Ok(data) if !data.is_empty() => Some(data),
+            Ok(_) => {
+                clear_staged_changeset(library_dir);
+                None
+            }
+            Err(e) => {
+                warn!("Failed to read staged changeset: {e}");
+                clear_staged_changeset(library_dir);
+                None
+            }
+        }
+    } else {
+        None
+    }
+}
+
+/// Push a changeset to the sync bucket and update the device head.
+async fn push_changeset(
+    bucket: &dyn SyncBucketClient,
+    device_id: &str,
+    seq: u64,
+    packed: Vec<u8>,
+    snapshot_seq: Option<u64>,
+    timestamp: &str,
+) -> Result<(), bae_core::sync::bucket::BucketError> {
+    bucket.put_changeset(device_id, seq, packed).await?;
+    bucket
+        .put_head(device_id, seq, snapshot_seq, timestamp)
+        .await?;
+    Ok(())
+}
+
+/// Result of a single sync cycle, for internal use.
+struct SyncCycleResult {
+    status: BridgeSyncStatus,
+    changesets_applied: u64,
+}
+
+/// Run a single sync cycle: grab changeset, push, pull, restart session.
+///
+/// This is the bridge equivalent of bae-desktop's `run_sync_cycle`. It manages
+/// all the state (local_seq, cursors, staging, snapshots) by loading/persisting
+/// from the database each cycle, rather than keeping mutable state across calls.
+async fn run_single_sync_cycle(
+    sync_handle: &BridgeSyncHandle,
+    db: &Database,
+    library_dir: &LibraryDir,
+) -> Result<SyncCycleResult, BridgeError> {
+    let bucket: &dyn SyncBucketClient = &*sync_handle.bucket_client;
+    let device_id = &sync_handle.device_id;
+    let hlc = &sync_handle.hlc;
+    let sync_service = SyncService::new(device_id.clone());
+
+    // Load persisted sync state
+    let mut local_seq = db
+        .get_sync_state("local_seq")
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    let snapshot_seq: Option<u64> = db
+        .get_sync_state("snapshot_seq")
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse::<u64>().ok());
+
+    let last_snapshot_time: Option<chrono::DateTime<chrono::Utc>> = db
+        .get_sync_state("last_snapshot_time")
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| chrono::DateTime::parse_from_rfc3339(&v).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc));
+
+    let staged_seq: Option<u64> = db
+        .get_sync_state("staged_seq")
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse::<u64>().ok());
+
+    // Retry any staged changeset from a previous failed push
+    if let Some(seq) = staged_seq {
+        if let Some(staged_data) = read_staged_changeset(library_dir) {
+            let timestamp = hlc.now().to_string();
+
+            info!(seq, "Retrying staged changeset push");
+
+            match push_changeset(
+                bucket,
+                device_id,
+                seq,
+                staged_data,
+                snapshot_seq,
+                &timestamp,
+            )
+            .await
+            {
+                Ok(()) => {
+                    info!(seq, "Staged changeset push succeeded");
+                    clear_staged_changeset(library_dir);
+                    local_seq = seq;
+                    let _ = db.set_sync_state("local_seq", &seq.to_string()).await;
+                    let _ = db.set_sync_state("staged_seq", "").await;
+                }
+                Err(e) => {
+                    return Err(BridgeError::Internal {
+                        msg: format!("Staged changeset push failed: {e}"),
+                    });
+                }
+            }
+        } else {
+            let _ = db.set_sync_state("staged_seq", "").await;
+        }
+    }
+
+    // Load current cursors from DB
+    let cursors = db
+        .get_all_sync_cursors()
+        .await
+        .map_err(|e| BridgeError::Database {
+            msg: format!("Failed to load sync cursors: {e}"),
+        })?;
+
+    // Take the current session
+    let session = match sync_handle.session.lock().await.take() {
+        Some(s) => s,
+        None => {
+            warn!("Sync session was None, creating a new one");
+            unsafe { SyncSession::start(sync_handle.raw_db) }.map_err(|e| {
+                BridgeError::Internal {
+                    msg: format!("Failed to create replacement sync session: {e}"),
+                }
+            })?
+        }
+    };
+
+    let timestamp = hlc.now().to_string();
+
+    // Run the core sync cycle
+    let sync_result = unsafe {
+        sync_service
+            .sync(
+                sync_handle.raw_db,
+                session,
+                local_seq,
+                &cursors,
+                bucket,
+                &timestamp,
+                "background sync",
+                &sync_handle.user_keypair,
+                None,
+                library_dir,
+            )
+            .await
+    };
+
+    let sync_result = match sync_result {
+        Ok(r) => r,
+        Err(e) => {
+            // Try to restart the session even if the cycle failed
+            match unsafe { SyncSession::start(sync_handle.raw_db) } {
+                Ok(new_session) => {
+                    *sync_handle.session.lock().await = Some(new_session);
+                }
+                Err(session_err) => {
+                    warn!("Failed to restart sync session after error: {session_err}");
+                }
+            }
+            return Err(BridgeError::Internal {
+                msg: format!("Sync cycle error: {e}"),
+            });
+        }
+    };
+
+    // Handle outgoing changeset (push)
+    if let Some(outgoing) = &sync_result.outgoing {
+        let seq = outgoing.seq;
+
+        // Stage before pushing so bytes survive a push failure
+        stage_changeset(library_dir, &outgoing.packed);
+        let _ = db.set_sync_state("staged_seq", &seq.to_string()).await;
+
+        match push_changeset(
+            bucket,
+            device_id,
+            seq,
+            outgoing.packed.clone(),
+            snapshot_seq,
+            &timestamp,
+        )
+        .await
+        {
+            Ok(()) => {
+                clear_staged_changeset(library_dir);
+                local_seq = seq;
+                let _ = db.set_sync_state("local_seq", &seq.to_string()).await;
+                let _ = db.set_sync_state("staged_seq", "").await;
+
+                info!(seq, "Pushed changeset");
+            }
+            Err(e) => {
+                warn!(seq, "Push failed, changeset staged for retry: {e}");
+            }
+        }
+    }
+
+    // Persist updated cursors
+    for (cursor_device_id, cursor_seq) in &sync_result.updated_cursors {
+        if let Err(e) = db.set_sync_cursor(cursor_device_id, *cursor_seq).await {
+            warn!(
+                device_id = cursor_device_id,
+                seq = cursor_seq,
+                "Failed to persist sync cursor: {e}"
+            );
+        }
+    }
+
+    // Update HLC with max remote timestamp
+    let max_remote_ts = sync_result
+        .pull
+        .remote_heads
+        .iter()
+        .filter(|h| h.device_id != *device_id)
+        .filter_map(|h| h.last_sync.as_deref())
+        .filter_map(|ts_str| {
+            chrono::DateTime::parse_from_rfc3339(ts_str)
+                .ok()
+                .map(|dt| dt.timestamp_millis().max(0) as u64)
+        })
+        .max();
+
+    if let Some(remote_millis) = max_remote_ts {
+        let remote_ts = bae_core::sync::hlc::Timestamp::new(remote_millis, 0, "remote".to_string());
+        hlc.update(&remote_ts);
+    }
+
+    // Start a new sync session
+    match unsafe { SyncSession::start(sync_handle.raw_db) } {
+        Ok(new_session) => {
+            *sync_handle.session.lock().await = Some(new_session);
+        }
+        Err(e) => {
+            warn!("Failed to start new sync session: {e}");
+            return Err(BridgeError::Internal {
+                msg: format!("Failed to restart sync session: {e}"),
+            });
+        }
+    }
+
+    // Check snapshot policy
+    let hours_since = last_snapshot_time.map(|t| {
+        let elapsed = chrono::Utc::now().signed_duration_since(t);
+        elapsed.num_hours().max(0) as u64
+    });
+
+    if bae_core::sync::snapshot::should_create_snapshot(local_seq, snapshot_seq, hours_since) {
+        info!("Snapshot policy triggered, creating snapshot");
+
+        let temp_dir = std::env::temp_dir();
+        let snapshot_result = {
+            let enc = sync_handle.encryption.read().unwrap();
+            unsafe {
+                bae_core::sync::snapshot::create_snapshot(sync_handle.raw_db, &temp_dir, &enc)
+            }
+        };
+
+        match snapshot_result {
+            Ok(encrypted) => {
+                match bae_core::sync::snapshot::push_snapshot(
+                    bucket, encrypted, device_id, local_seq,
+                )
+                .await
+                {
+                    Ok(()) => {
+                        let _ = db
+                            .set_sync_state("snapshot_seq", &local_seq.to_string())
+                            .await;
+                        let _ = db
+                            .set_sync_state("last_snapshot_time", &chrono::Utc::now().to_rfc3339())
+                            .await;
+
+                        info!(local_seq, "Snapshot created and pushed");
+                    }
+                    Err(e) => {
+                        warn!("Failed to push snapshot: {e}");
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to create snapshot: {e}");
+            }
+        }
+    }
+
+    // Build status from remote heads
+    let now = chrono::Utc::now().to_rfc3339();
+    let core_status = bae_core::sync::status::build_sync_status(
+        &sync_result.pull.remote_heads,
+        device_id,
+        Some(&now),
+    );
+
+    let device_count = (core_status.other_devices.len() + 1) as u32;
+
+    Ok(SyncCycleResult {
+        status: BridgeSyncStatus {
+            configured: true,
+            syncing: false,
+            last_sync_time: Some(now),
+            error: None,
+            device_count,
+        },
+        changesets_applied: sync_result.pull.changesets_applied,
+    })
 }

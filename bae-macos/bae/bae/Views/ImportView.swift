@@ -117,12 +117,6 @@ struct ImportView: View {
     private func importStatusBadge(for folderPath: String) -> some View {
         if let status = appService.importStatuses[folderPath] {
             switch status {
-            case .scanning:
-                Label("Scanning", systemImage: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-            case .readyToImport:
-                Label("Ready", systemImage: "checkmark.circle")
-                    .foregroundStyle(.green)
             case .importing(let percent):
                 ProgressView(value: Double(percent), total: 100)
                     .frame(width: 80)

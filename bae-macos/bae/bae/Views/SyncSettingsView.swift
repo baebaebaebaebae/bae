@@ -3,13 +3,13 @@ import SwiftUI
 struct SyncSettingsView: View {
     let appService: AppService
 
-    @State private var syncStatus: BridgeSyncStatus?
     @State private var syncConfig: BridgeSyncConfig?
     @State private var members: [BridgeMember] = []
     @State private var userPubkey: String?
     @State private var followCode: String?
     @State private var error: String?
     @State private var copiedField: String?
+    @State private var isSyncing = false
 
     // Editable S3 config fields
     @State private var bucket = ""
@@ -19,6 +19,14 @@ struct SyncSettingsView: View {
     @State private var accessKey = ""
     @State private var secretKey = ""
     @State private var shareBaseUrl = ""
+
+    /// Sync status comes from AppService (updated reactively by the background loop).
+    /// Falls back to a direct query on first load.
+    private var syncStatus: BridgeSyncStatus? {
+        appService.syncStatus ?? localSyncStatus
+    }
+
+    @State private var localSyncStatus: BridgeSyncStatus?
 
     var body: some View {
         Form {
@@ -56,6 +64,16 @@ struct SyncSettingsView: View {
                 }
                 LabeledContent("Devices") {
                     Text("\(status.deviceCount)")
+                }
+
+                if status.configured {
+                    HStack {
+                        Spacer()
+                        Button(isSyncing ? "Syncing..." : "Sync Now") {
+                            syncNow()
+                        }
+                        .disabled(isSyncing)
+                    }
                 }
             } else {
                 Text("Loading...")
@@ -194,7 +212,7 @@ struct SyncSettingsView: View {
     }
 
     private func loadSyncInfo() {
-        syncStatus = appService.appHandle.getSyncStatus()
+        localSyncStatus = appService.appHandle.getSyncStatus()
         syncConfig = appService.appHandle.getSyncConfig()
         userPubkey = appService.appHandle.getUserPubkey()
 
@@ -236,10 +254,21 @@ struct SyncSettingsView: View {
             try appService.appHandle.saveSyncConfig(configData: data)
             error = nil
             // Reload status after saving
-            syncStatus = appService.appHandle.getSyncStatus()
+            localSyncStatus = appService.appHandle.getSyncStatus()
             syncConfig = appService.appHandle.getSyncConfig()
         } catch {
             self.error = "Failed to save: \(error.localizedDescription)"
+        }
+    }
+
+    private func syncNow() {
+        isSyncing = true
+        error = nil
+        appService.triggerSync()
+        // The status update arrives via onSyncStatusChanged callback.
+        // Reset the spinner after a short delay (the callback will update the real status).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            isSyncing = false
         }
     }
 

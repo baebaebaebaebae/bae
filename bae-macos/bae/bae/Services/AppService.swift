@@ -21,9 +21,17 @@ class AppService: AppEventHandler, @unchecked Sendable {
     var importStatuses: [String: BridgeImportStatus] = [:]
     var libraryVersion: Int = 0
 
+    // Sync state
+    var syncStatus: BridgeSyncStatus?
+
     init(appHandle: AppHandle) {
         self.appHandle = appHandle
         appHandle.setEventHandler(handler: self)
+
+        // Start background sync loop if sync is configured
+        if appHandle.isSyncReady() {
+            appHandle.startSyncLoop()
+        }
     }
 
     // MARK: - AppEventHandler conformance
@@ -81,6 +89,12 @@ class AppService: AppEventHandler, @unchecked Sendable {
     func onLibraryChanged() {
         Task { @MainActor in
             self.libraryVersion += 1
+        }
+    }
+
+    func onSyncStatusChanged(status: BridgeSyncStatus) {
+        Task { @MainActor in
+            self.syncStatus = status
         }
     }
 
@@ -191,8 +205,21 @@ class AppService: AppEventHandler, @unchecked Sendable {
         }
     }
 
-    // MARK: - Computed properties
+    // MARK: - Sync
 
+    /// Trigger a manual sync cycle. Runs on a background thread since it blocks.
+    func triggerSync() {
+        Task.detached { [appHandle] in
+            let status = try? appHandle.triggerSync()
+            await MainActor.run { [weak self] in
+                if let status {
+                    self?.syncStatus = status
+                }
+            }
+        }
+    }
+
+    // MARK: - Computed properties
 
     /// Whether there is an active track (playing, paused, or loading).
     var isActive: Bool {

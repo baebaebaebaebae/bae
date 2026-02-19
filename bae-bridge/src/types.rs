@@ -122,8 +122,6 @@ pub struct BridgeImportCandidate {
 
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum BridgeImportStatus {
-    Scanning,
-    ReadyToImport,
     Importing { progress_percent: u32 },
     Complete,
     Error { message: String },
