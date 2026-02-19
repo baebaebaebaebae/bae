@@ -36,6 +36,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fm.bae.desktop
+        DEVELOPMENT_TEAM: BTNNN8533W
+        CODE_SIGN_STYLE: Automatic
         PRODUCT_NAME: bae
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: 1
