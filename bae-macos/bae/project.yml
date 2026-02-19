@@ -16,6 +16,7 @@ targets:
       - bae
     info:
       path: bae/Info.plist
+      version: $(MARKETING_VERSION)
       properties:
         CFBundleDisplayName: bae
         SUFeedURL: https://github.com/bae-fm/bae/releases/latest/download/appcast.xml
