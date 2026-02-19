@@ -70,13 +70,12 @@ struct baeApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(appService: $appService)
+                .environmentObject(checkForUpdatesViewModel)
         }
         Settings {
             if let appService {
-                SettingsView(
-                    appService: appService,
-                    checkForUpdatesViewModel: checkForUpdatesViewModel
-                )
+                SettingsView(appService: appService)
+                    .environmentObject(checkForUpdatesViewModel)
             } else {
                 ContentUnavailableView(
                     "No library loaded",

@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     let appService: AppService
-    @ObservedObject var checkForUpdatesViewModel: CheckForUpdatesViewModel
+    @EnvironmentObject var checkForUpdatesViewModel: CheckForUpdatesViewModel
 
     var body: some View {
         TabView {
@@ -22,7 +22,7 @@ struct SettingsView: View {
                 .tabItem {
                     Label("Sync", systemImage: "arrow.triangle.2.circlepath")
                 }
-            AboutSettingsTab(checkForUpdatesViewModel: checkForUpdatesViewModel)
+            AboutSettingsTab()
                 .tabItem {
                     Label("About", systemImage: "info.circle")
                 }
@@ -312,7 +312,7 @@ private struct SubsonicSettingsTab: View {
 // MARK: - About Tab
 
 private struct AboutSettingsTab: View {
-    @ObservedObject var checkForUpdatesViewModel: CheckForUpdatesViewModel
+    @EnvironmentObject var checkForUpdatesViewModel: CheckForUpdatesViewModel
 
     var body: some View {
         VStack(spacing: 16) {
