@@ -12,6 +12,12 @@ struct LibraryView: View {
     @State private var showingImport = false
     @State private var showingSettings = false
     @State private var showingSyncSettings = false
+    @State private var searchText: String = ""
+    @State private var searchDebounceTask: Task<Void, Never>?
+
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,7 +28,22 @@ struct LibraryView: View {
                 )
                 .navigationTitle("Artists")
             } content: {
-                if let error {
+                if isSearching {
+                    SearchView(
+                        appService: appService,
+                        onSelectArtist: { artistId in
+                            searchText = ""
+                            appService.search(query: "")
+                            selection = .artist(artistId)
+                        },
+                        onSelectAlbum: { albumId in
+                            searchText = ""
+                            appService.search(query: "")
+                            selectedAlbumId = albumId
+                        }
+                    )
+                    .navigationTitle("Search")
+                } else if let error {
                     ContentUnavailableView(
                         "Failed to load library",
                         systemImage: "exclamationmark.triangle",
@@ -54,6 +75,15 @@ struct LibraryView: View {
                         systemImage: "square.stack",
                         description: Text("Choose an album to see its details")
                     )
+                }
+            }
+            .searchable(text: $searchText, prompt: "Artists, albums, tracks")
+            .onChange(of: searchText) { _, newValue in
+                searchDebounceTask?.cancel()
+                searchDebounceTask = Task {
+                    try? await Task.sleep(for: .milliseconds(300))
+                    guard !Task.isCancelled else { return }
+                    appService.search(query: newValue)
                 }
             }
             .toolbar {

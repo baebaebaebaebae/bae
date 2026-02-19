@@ -13,6 +13,8 @@ class AppService: AppEventHandler, @unchecked Sendable {
     var queueTrackIds: [String] = []
     var volume: Float = 1.0
     var repeatMode: BridgeRepeatMode = .none
+    var searchQuery: String = ""
+    var searchResults: BridgeSearchResults?
 
     // Import state
     var scanResults: [BridgeImportCandidate] = []
@@ -171,7 +173,26 @@ class AppService: AppEventHandler, @unchecked Sendable {
         }
     }
 
+    // MARK: - Search
+
+    func search(query: String) {
+        searchQuery = query
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
+            searchResults = nil
+            return
+        }
+
+        Task.detached { [appHandle] in
+            let results = try? appHandle.search(query: query)
+            await MainActor.run { [weak self] in
+                guard let self, self.searchQuery == query else { return }
+                self.searchResults = results
+            }
+        }
+    }
+
     // MARK: - Computed properties
+
 
     /// Whether there is an active track (playing, paused, or loading).
     var isActive: Bool {

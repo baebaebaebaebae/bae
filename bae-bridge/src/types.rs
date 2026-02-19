@@ -191,6 +191,39 @@ pub struct BridgeSaveSyncConfig {
     pub share_base_url: Option<String>,
 }
 
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeSearchResults {
+    pub artists: Vec<BridgeArtistSearchResult>,
+    pub albums: Vec<BridgeAlbumSearchResult>,
+    pub tracks: Vec<BridgeTrackSearchResult>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeArtistSearchResult {
+    pub id: String,
+    pub name: String,
+    pub album_count: i64,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeAlbumSearchResult {
+    pub id: String,
+    pub title: String,
+    pub year: Option<i32>,
+    pub cover_release_id: Option<String>,
+    pub artist_name: String,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeTrackSearchResult {
+    pub id: String,
+    pub title: String,
+    pub duration_ms: Option<i64>,
+    pub album_id: String,
+    pub album_title: String,
+    pub artist_name: String,
+}
+
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum BridgeError {
     #[error("Not found: {msg}")]
