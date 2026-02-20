@@ -934,3 +934,26 @@ pub struct TrackSearchResult {
     pub album_title: String,
     pub artist_name: String,
 }
+
+/// Field to sort albums by
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlbumSortField {
+    Title,
+    Artist,
+    Year,
+    DateAdded,
+}
+
+/// Sort direction
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortDirection {
+    Ascending,
+    Descending,
+}
+
+/// A single sort criterion (field + direction)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AlbumSortCriterion {
+    pub field: AlbumSortField,
+    pub direction: SortDirection,
+}

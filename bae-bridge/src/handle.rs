@@ -26,8 +26,24 @@ use crate::types::{
     BridgeFollowedLibrary, BridgeImportCandidate, BridgeImportStatus, BridgeLibraryInfo,
     BridgeMember, BridgeMetadataResult, BridgePlaybackState, BridgeQueueItem, BridgeRelease,
     BridgeRemoteCover, BridgeRepeatMode, BridgeSaveSyncConfig, BridgeSearchResults,
-    BridgeSyncConfig, BridgeSyncStatus, BridgeTrack, BridgeTrackSearchResult,
+    BridgeSortCriterion, BridgeSortDirection, BridgeSortField, BridgeSyncConfig, BridgeSyncStatus,
+    BridgeTrack, BridgeTrackSearchResult,
 };
+
+fn bridge_sort_to_core(c: &BridgeSortCriterion) -> bae_core::db::AlbumSortCriterion {
+    bae_core::db::AlbumSortCriterion {
+        field: match c.field {
+            BridgeSortField::Title => bae_core::db::AlbumSortField::Title,
+            BridgeSortField::Artist => bae_core::db::AlbumSortField::Artist,
+            BridgeSortField::Year => bae_core::db::AlbumSortField::Year,
+            BridgeSortField::DateAdded => bae_core::db::AlbumSortField::DateAdded,
+        },
+        direction: match c.direction {
+            BridgeSortDirection::Ascending => bae_core::db::SortDirection::Ascending,
+            BridgeSortDirection::Descending => bae_core::db::SortDirection::Descending,
+        },
+    }
+}
 
 /// Discover all libraries in ~/.bae/libraries/.
 #[uniffi::export]
@@ -516,13 +532,23 @@ impl AppHandle {
         self.key_service.get_encryption_key().is_some()
     }
 
-    /// Get all albums with their artist names.
-    pub fn get_albums(&self) -> Result<Vec<BridgeAlbum>, BridgeError> {
+    /// Get all albums with their artist names, sorted by the given criteria.
+    ///
+    /// Pass an empty vec for default sort (newest first).
+    pub fn get_albums(
+        &self,
+        sort_criteria: Vec<BridgeSortCriterion>,
+    ) -> Result<Vec<BridgeAlbum>, BridgeError> {
         self.runtime.block_on(async {
             let lm = self.library_manager.get();
-            let albums = lm.get_albums().await.map_err(|e| BridgeError::Database {
-                msg: format!("{e}"),
-            })?;
+            let sort: Vec<bae_core::db::AlbumSortCriterion> =
+                sort_criteria.iter().map(bridge_sort_to_core).collect();
+            let albums = lm
+                .get_albums(&sort)
+                .await
+                .map_err(|e| BridgeError::Database {
+                    msg: format!("{e}"),
+                })?;
 
             let mut result = Vec::with_capacity(albums.len());
             for album in &albums {

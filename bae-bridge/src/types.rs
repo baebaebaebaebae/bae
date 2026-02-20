@@ -280,6 +280,26 @@ pub struct BridgeQueueItem {
     pub cover_image_id: Option<String>,
 }
 
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum BridgeSortField {
+    Title,
+    Artist,
+    Year,
+    DateAdded,
+}
+
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum BridgeSortDirection {
+    Ascending,
+    Descending,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeSortCriterion {
+    pub field: BridgeSortField,
+    pub direction: BridgeSortDirection,
+}
+
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum BridgeError {
     #[error("Not found: {msg}")]

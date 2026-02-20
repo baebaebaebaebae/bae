@@ -77,7 +77,7 @@ impl PlaybackTestFixture {
                 _ => {}
             }
         }
-        let albums = library_manager_arc.get_albums().await?;
+        let albums = library_manager_arc.get_albums(&[]).await?;
         assert!(!albums.is_empty(), "Should have imported album");
         let releases = library_manager_arc
             .get_releases_for_album(&albums[0].id)
@@ -393,7 +393,7 @@ impl CueFlacTestFixture {
             }
         }
 
-        let albums = library_manager_arc.get_albums().await?;
+        let albums = library_manager_arc.get_albums(&[]).await?;
         assert!(!albums.is_empty(), "Should have imported album");
         let releases = library_manager_arc
             .get_releases_for_album(&albums[0].id)
@@ -2029,7 +2029,7 @@ impl HighSampleRateTestFixture {
             }
         }
 
-        let albums = library_manager_arc.get_albums().await?;
+        let albums = library_manager_arc.get_albums(&[]).await?;
         let releases = library_manager_arc
             .get_releases_for_album(&albums[0].id)
             .await?;
@@ -2409,7 +2409,7 @@ async fn test_real_library_cpu_usage() {
     let library_manager = LibraryManager::new(database.clone(), encryption_service.clone());
 
     // Get first album and release
-    let albums = library_manager.get_albums().await.expect("get albums");
+    let albums = library_manager.get_albums(&[]).await.expect("get albums");
     if albums.is_empty() {
         eprintln!("No albums in library");
         return;
@@ -2589,7 +2589,7 @@ async fn test_pause_seek_cue_flac() {
     let library_manager = LibraryManager::new(database.clone(), encryption_service.clone());
 
     // Get albums and find Electric Wizard - Dopethrone (or first CUE/FLAC album)
-    let albums = library_manager.get_albums().await.expect("get albums");
+    let albums = library_manager.get_albums(&[]).await.expect("get albums");
     if albums.is_empty() {
         eprintln!("No albums in library");
         return;
@@ -2817,7 +2817,7 @@ async fn test_playing_seek_cue_flac() {
     let encryption_service = test_encryption_service();
     let library_manager = LibraryManager::new(database.clone(), encryption_service.clone());
 
-    let albums = library_manager.get_albums().await.expect("get albums");
+    let albums = library_manager.get_albums(&[]).await.expect("get albums");
     if albums.is_empty() {
         eprintln!("No albums in library");
         return;

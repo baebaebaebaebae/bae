@@ -98,6 +98,11 @@ name = "test_transfer"
 path = "tests/test_transfer.rs"
 required-features = ["test-utils"]
 
+[[test]]
+name = "test_album_sort"
+path = "tests/test_album_sort.rs"
+required-features = ["test-utils"]
+
 [features]
 default = []
 test-utils = []

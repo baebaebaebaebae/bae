@@ -24,12 +24,15 @@ use bae_core::library::{LibraryEvent, SharedLibraryManager};
 use bae_core::playback::{self, PlaybackProgress};
 #[cfg(feature = "torrent")]
 use bae_core::torrent;
-use bae_ui::display_types::{Album, Artist, File, QueueItem, Release, Track, TrackImportState};
+use bae_ui::display_types::{
+    Album, Artist, File, LibrarySortField, QueueItem, Release, SortCriterion, SortDirection, Track,
+    TrackImportState,
+};
 use bae_ui::stores::{
     ActiveImport, ActiveImportsUiStateStoreExt, AlbumDetailStateStoreExt, AppState,
     AppStateStoreExt, ArtistDetailStateStoreExt, ConfigStateStoreExt, DeviceActivityInfo,
-    ImportOperationStatus, LibraryStateStoreExt, Member, MemberRole, PlaybackStatus,
-    PlaybackUiStateStoreExt, PrepareStep, SyncStateStoreExt,
+    ImportOperationStatus, LibrarySortStateStoreExt, LibraryStateStoreExt, Member, MemberRole,
+    PlaybackStatus, PlaybackUiStateStoreExt, PrepareStep, SyncStateStoreExt, UiStateStoreExt,
 };
 use dioxus::prelude::*;
 use std::collections::HashMap;
@@ -647,6 +650,20 @@ impl AppService {
 
         // Clear any followed source -- we're back to the local library
         self.playback_handle.clear_followed_source();
+
+        spawn(async move {
+            load_library(&state, &library_manager, &imgs).await;
+        });
+    }
+
+    /// Re-fetch library albums with current sort criteria.
+    ///
+    /// Unlike `load_library`, this does not clear the followed source.
+    /// Used when sort criteria change to refresh the album list order.
+    pub fn reload_library_albums(&self) {
+        let state = self.state;
+        let library_manager = self.library_manager.clone();
+        let imgs = self.image_server.clone();
 
         spawn(async move {
             load_library(&state, &library_manager, &imgs).await;
@@ -2068,6 +2085,25 @@ impl AppService {
 // Helper Functions
 // =============================================================================
 
+/// Convert bae-ui sort criteria to bae-core sort criteria
+fn ui_sort_to_core(criteria: &[SortCriterion]) -> Vec<bae_core::db::AlbumSortCriterion> {
+    criteria
+        .iter()
+        .map(|c| bae_core::db::AlbumSortCriterion {
+            field: match c.field {
+                LibrarySortField::Title => bae_core::db::AlbumSortField::Title,
+                LibrarySortField::Artist => bae_core::db::AlbumSortField::Artist,
+                LibrarySortField::Year => bae_core::db::AlbumSortField::Year,
+                LibrarySortField::DateAdded => bae_core::db::AlbumSortField::DateAdded,
+            },
+            direction: match c.direction {
+                SortDirection::Ascending => bae_core::db::SortDirection::Ascending,
+                SortDirection::Descending => bae_core::db::SortDirection::Descending,
+            },
+        })
+        .collect()
+}
+
 /// Load library albums and artists into the Store
 async fn load_library(
     state: &Store<AppState>,
@@ -2077,7 +2113,10 @@ async fn load_library(
     state.library().loading().set(true);
     state.library().error().set(None);
 
-    match library_manager.get().get_albums().await {
+    let ui_criteria = state.ui().library_sort().sort_criteria().read().clone();
+    let sort = ui_sort_to_core(&ui_criteria);
+
+    match library_manager.get().get_albums(&sort).await {
         Ok(album_list) => {
             let mut artists_map = HashMap::new();
             for album in &album_list {
@@ -2135,7 +2174,7 @@ async fn load_followed_library_from_db(
         }
     };
 
-    match db.get_albums().await {
+    match db.get_albums(&[]).await {
         Ok(album_list) => {
             let mut artists_map = HashMap::new();
             for album in &album_list {

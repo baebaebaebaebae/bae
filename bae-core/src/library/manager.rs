@@ -195,9 +195,14 @@ impl LibraryManager {
             .await?;
         Ok(())
     }
-    /// Get all albums in the library
-    pub async fn get_albums(&self) -> Result<Vec<DbAlbum>, LibraryError> {
-        Ok(self.database.get_albums().await?)
+    /// Get all albums in the library, sorted by the given criteria.
+    ///
+    /// Pass an empty slice for default sort (newest first).
+    pub async fn get_albums(
+        &self,
+        sort: &[crate::db::AlbumSortCriterion],
+    ) -> Result<Vec<DbAlbum>, LibraryError> {
+        Ok(self.database.get_albums(sort).await?)
     }
     /// Get album by ID
     pub async fn get_album_by_id(&self, album_id: &str) -> Result<Option<DbAlbum>, LibraryError> {

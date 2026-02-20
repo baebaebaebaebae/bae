@@ -873,23 +873,74 @@ impl Database {
             .await?;
         Ok(())
     }
-    /// Get all albums
-    pub async fn get_albums(&self) -> Result<Vec<DbAlbum>, sqlx::Error> {
-        let rows = sqlx::query(
-            r#"
-            SELECT
-                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id,
-                a.is_compilation, a._updated_at, a.created_at,
-                ad.discogs_master_id, ad.discogs_release_id,
-                amb.musicbrainz_release_group_id, amb.musicbrainz_release_id
-            FROM albums a
-            LEFT JOIN album_discogs ad ON a.id = ad.album_id
-            LEFT JOIN album_musicbrainz amb ON a.id = amb.album_id
-            ORDER BY a.title
-            "#,
-        )
-        .fetch_all(&self.inner.read_pool)
-        .await?;
+    /// Get all albums, sorted by the given criteria.
+    ///
+    /// If `sort` is empty, defaults to `created_at DESC` (newest first).
+    pub async fn get_albums(
+        &self,
+        sort: &[AlbumSortCriterion],
+    ) -> Result<Vec<DbAlbum>, sqlx::Error> {
+        let needs_artist_join = sort.iter().any(|c| c.field == AlbumSortField::Artist);
+
+        let artist_join = if needs_artist_join {
+            "LEFT JOIN album_artists aa_sort ON a.id = aa_sort.album_id AND aa_sort.position = 0 \
+             LEFT JOIN artists art_sort ON aa_sort.artist_id = art_sort.id"
+        } else {
+            ""
+        };
+
+        let order_by = if sort.is_empty() {
+            "a.created_at DESC".to_string()
+        } else {
+            sort.iter()
+                .flat_map(|c| {
+                    let dir = match c.direction {
+                        SortDirection::Ascending => "ASC",
+                        SortDirection::Descending => "DESC",
+                    };
+                    match c.field {
+                        AlbumSortField::Title => {
+                            vec![format!("a.title COLLATE NOCASE {dir}")]
+                        }
+                        AlbumSortField::Artist => {
+                            vec![format!(
+                                "COALESCE(art_sort.sort_name, art_sort.name) COLLATE NOCASE {dir}"
+                            )]
+                        }
+                        AlbumSortField::Year => {
+                            // NULLs last for ascending, NULLs first for descending
+                            let nulls_order = match c.direction {
+                                SortDirection::Ascending => "ASC",
+                                SortDirection::Descending => "DESC",
+                            };
+                            vec![
+                                format!("CASE WHEN a.year IS NULL THEN 1 ELSE 0 END {nulls_order}"),
+                                format!("a.year {dir}"),
+                            ]
+                        }
+                        AlbumSortField::DateAdded => {
+                            vec![format!("a.created_at {dir}")]
+                        }
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
+        let query = format!(
+            "SELECT \
+                a.id, a.title, a.year, a.bandcamp_album_id, a.cover_release_id, \
+                a.is_compilation, a._updated_at, a.created_at, \
+                ad.discogs_master_id, ad.discogs_release_id, \
+                amb.musicbrainz_release_group_id, amb.musicbrainz_release_id \
+            FROM albums a \
+            LEFT JOIN album_discogs ad ON a.id = ad.album_id \
+            LEFT JOIN album_musicbrainz amb ON a.id = amb.album_id \
+            {artist_join} \
+            ORDER BY {order_by}"
+        );
+
+        let rows = sqlx::query(&query).fetch_all(&self.inner.read_pool).await?;
         let mut albums = Vec::new();
         for row in rows {
             let discogs_master_id: Option<String> = row.get("discogs_master_id");

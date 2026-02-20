@@ -26,8 +26,10 @@ pub fn LibraryPage() -> Element {
 
     let on_sort_criteria_change = {
         let sort_state = app.state.ui().library_sort();
+        let app_service = app.clone();
         move |criteria| {
             sort_state.sort_criteria().set(criteria);
+            app_service.reload_library_albums();
         }
     };
 

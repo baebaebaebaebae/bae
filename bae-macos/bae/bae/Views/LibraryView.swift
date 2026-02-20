@@ -5,11 +5,27 @@ enum LibrarySortField: String, CaseIterable {
     case artist = "Artist"
     case year = "Year"
     case dateAdded = "Date Added"
+
+    var bridgeField: BridgeSortField {
+        switch self {
+        case .title: return .title
+        case .artist: return .artist
+        case .year: return .year
+        case .dateAdded: return .dateAdded
+        }
+    }
 }
 
 enum SortDirection {
     case ascending
     case descending
+
+    var bridgeDirection: BridgeSortDirection {
+        switch self {
+        case .ascending: return .ascending
+        case .descending: return .descending
+        }
+    }
 }
 
 struct LibraryView: View {
@@ -27,30 +43,8 @@ struct LibraryView: View {
         !searchText.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
-    private var sortedAlbums: [BridgeAlbum] {
-        if sortField == .dateAdded {
-            // No dateAdded field — preserve DB order (newest first).
-            return sortDirection == .descending ? albums : albums.reversed()
-        }
-        return albums.sorted { a, b in
-            let result: Bool
-            switch sortField {
-            case .title:
-                result = a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
-            case .artist:
-                result = a.artistNames.localizedCaseInsensitiveCompare(b.artistNames) == .orderedAscending
-            case .year:
-                switch (a.year, b.year) {
-                case (nil, nil): result = false
-                case (nil, _): result = false
-                case (_, nil): result = true
-                case (let ya?, let yb?): result = ya < yb
-                }
-            case .dateAdded:
-                result = false // unreachable
-            }
-            return sortDirection == .ascending ? result : !result
-        }
+    private var sortCriteria: [BridgeSortCriterion] {
+        [BridgeSortCriterion(field: sortField.bridgeField, direction: sortDirection.bridgeDirection)]
     }
 
     var body: some View {
@@ -83,7 +77,7 @@ struct LibraryView: View {
             } else {
                 HStack(spacing: 0) {
                     AlbumGridView(
-                        albums: sortedAlbums.map { album in
+                        albums: albums.map { album in
                             AlbumCardViewModel(
                                 id: album.id,
                                 title: album.title,
@@ -123,11 +117,13 @@ struct LibraryView: View {
         }
         .task { loadAlbums() }
         .onChange(of: appService.libraryVersion) { _, _ in loadAlbums() }
+        .onChange(of: sortField) { _, _ in loadAlbums() }
+        .onChange(of: sortDirection) { _, _ in loadAlbums() }
     }
 
     private func loadAlbums() {
         do {
-            albums = try appService.appHandle.getAlbums()
+            albums = try appService.appHandle.getAlbums(sortCriteria: sortCriteria)
             error = nil
         } catch {
             self.error = error.localizedDescription
