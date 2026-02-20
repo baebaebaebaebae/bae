@@ -666,6 +666,11 @@ impl AppHandle {
         self.image_server.image_url_if_exists(&image_id)
     }
 
+    /// Get a signed URL for serving a release file by its ID.
+    pub fn get_file_url(&self, file_id: String) -> String {
+        self.image_server.file_url(&file_id)
+    }
+
     /// Get full album detail including releases, tracks, files, and artists.
     pub fn get_album_detail(&self, album_id: String) -> Result<BridgeAlbumDetail, BridgeError> {
         self.runtime.block_on(async {

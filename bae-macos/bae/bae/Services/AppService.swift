@@ -418,6 +418,10 @@ class AppService: AppEventHandler, @unchecked Sendable {
         return url
     }
 
+    func fileURL(for fileId: String) -> URL? {
+        URL(string: appHandle.getFileUrl(fileId: fileId))
+    }
+
     // MARK: - Settings
 
     func getConfig() -> BridgeConfig {

@@ -34,6 +34,7 @@ struct AlbumDetailView: View {
                 AlbumDetailContent(
                     detail: detail,
                     coverArtURL: appService.imageURL(for: detail.album.coverReleaseId),
+                    lightboxItems: buildLightboxItems(detail),
                     selectedReleaseIndex: $selectedReleaseIndex,
                     showShareCopied: showShareCopied,
                     onClose: onClose,
@@ -190,6 +191,26 @@ struct AlbumDetailView: View {
         return items
     }
 
+    private func buildLightboxItems(_ detail: BridgeAlbumDetail) -> [LightboxItem] {
+        var items: [LightboxItem] = []
+
+        let coverURL = appService.imageURL(for: detail.album.coverReleaseId)
+        items.append(LightboxItem(id: "cover", label: "Cover", url: coverURL))
+
+        if !detail.releases.isEmpty {
+            let release = detail.releases[selectedReleaseIndex]
+            for file in release.files where file.contentType.hasPrefix("image/") {
+                items.append(LightboxItem(
+                    id: file.id,
+                    label: file.originalFilename,
+                    url: appService.fileURL(for: file.id)
+                ))
+            }
+        }
+
+        return items
+    }
+
     private func currentReleaseId(_ detail: BridgeAlbumDetail) -> String {
         guard !detail.releases.isEmpty else { return "" }
         return detail.releases[selectedReleaseIndex].id
@@ -326,6 +347,7 @@ struct AlbumDetailView: View {
 struct AlbumDetailContent: View {
     let detail: BridgeAlbumDetail
     let coverArtURL: URL?
+    let lightboxItems: [LightboxItem]
     @Binding var selectedReleaseIndex: Int
     let showShareCopied: Bool
     let onClose: (() -> Void)?
@@ -340,6 +362,7 @@ struct AlbumDetailContent: View {
     let onDeleteAlbum: () -> Void
 
     @State private var hoverTrackId: String?
+    @State private var lightboxIndex: Int?
 
     var body: some View {
         ScrollView {
@@ -358,6 +381,11 @@ struct AlbumDetailContent: View {
             .padding()
         }
         .background(Theme.background)
+        .overlay {
+            if lightboxIndex != nil, !lightboxItems.isEmpty {
+                ImageLightbox(items: lightboxItems, currentIndex: $lightboxIndex)
+            }
+        }
     }
 
     private var albumHeader: some View {
@@ -365,6 +393,12 @@ struct AlbumDetailContent: View {
             albumArt
                 .frame(width: 160, height: 160)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if !lightboxItems.isEmpty {
+                        lightboxIndex = 0
+                    }
+                }
                 .overlay(alignment: .bottomTrailing) {
                     Menu {
                         Button("Change Cover...") { onChangeCover() }
@@ -919,6 +953,7 @@ struct ManageReleaseSheet: View {
             ]
         ),
         coverArtURL: nil,
+        lightboxItems: [LightboxItem(id: "cover", label: "Cover", url: nil)],
         selectedReleaseIndex: .constant(0),
         showShareCopied: false,
         onClose: {},

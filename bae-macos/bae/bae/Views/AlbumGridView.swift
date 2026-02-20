@@ -349,6 +349,7 @@ private struct LibraryPreview: View {
                 AlbumDetailContent(
                     detail: detail,
                     coverArtURL: PreviewData.albums.first(where: { $0.id == albumId })?.coverArtURL,
+                    lightboxItems: [],
                     selectedReleaseIndex: $selectedReleaseIndex,
                     showShareCopied: false,
                     onClose: { selectedAlbumId = nil },
