@@ -1458,6 +1458,7 @@ struct ImageGalleryView: View {
     let images: [BridgeFileInfo]
     @Binding var currentIndex: Int?
     @State private var thumbCache: [String: NSImage] = [:]
+    @GestureState private var magnification: CGFloat = 1.0
 
     private var safeIndex: Int {
         guard let idx = currentIndex, idx >= 0, idx < images.count else { return 0 }
@@ -1474,14 +1475,21 @@ struct ImageGalleryView: View {
 
     var body: some View {
         ZStack {
-            // Main image (centered, not tappable — taps pass through to dismiss overlay)
+            // Main image (centered, pinch-to-zoom, taps pass through to dismiss overlay)
             if let nsImage = NSImage(contentsOf: URL(fileURLWithPath: currentFile.path)) {
                 Image(nsImage: nsImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
+                    .scaleEffect(magnification)
+                    .animation(.easeOut(duration: 0.25), value: magnification)
+                    .gesture(
+                        MagnifyGesture()
+                            .updating($magnification) { value, state, _ in
+                                state = max(value.magnification, 1.0)
+                            }
+                    )
                     .padding(60)
                     .shadow(color: .black.opacity(0.5), radius: 20)
-                    .allowsHitTesting(false)
             } else {
                 VStack(spacing: 8) {
                     Image(systemName: "photo")
