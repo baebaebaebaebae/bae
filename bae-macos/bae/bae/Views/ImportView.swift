@@ -1498,6 +1498,7 @@ struct ImageGalleryView: View {
                         )
                         .padding(40)
                         .shadow(color: .black.opacity(0.5), radius: 20)
+                        .help(currentFile.name)
                 } else {
                     VStack(spacing: 8) {
                         Image(systemName: "photo")
@@ -1631,6 +1632,7 @@ struct ImageGalleryView: View {
             )
         }
         .buttonStyle(.plain)
+        .help(file.name)
     }
 
     private func galleryThumbnail(for path: String) -> NSImage? {
