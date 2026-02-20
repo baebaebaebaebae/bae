@@ -37,12 +37,15 @@ struct AlbumDetailView: View {
                     lightboxItems: buildLightboxItems(detail),
                     selectedReleaseIndex: $selectedReleaseIndex,
                     showShareCopied: showShareCopied,
+                    currentTrackId: appService.currentTrackId,
+                    isPlaying: appService.isPlaying,
                     onClose: onClose,
                     onPlay: { appService.playAlbum(albumId: albumId) },
                     onShuffle: { appService.playAlbum(albumId: albumId, shuffle: true) },
                     onPlayFromTrack: { index in
                         appService.playAlbum(albumId: albumId, startTrackIndex: UInt32(index))
                     },
+                    onTogglePlayPause: { appService.togglePlayPause() },
                     onShare: {
                         guard !detail.releases.isEmpty else { return }
                         createShareLink(releaseId: detail.releases[selectedReleaseIndex].id)
@@ -355,10 +358,13 @@ struct AlbumDetailContent: View {
     let lightboxItems: [LightboxItem]
     @Binding var selectedReleaseIndex: Int
     let showShareCopied: Bool
+    let currentTrackId: String?
+    let isPlaying: Bool
     let onClose: (() -> Void)?
     let onPlay: () -> Void
     let onShuffle: () -> Void
     let onPlayFromTrack: (Int) -> Void
+    let onTogglePlayPause: () -> Void
     let onShare: () -> Void
     let onAddNext: (String) -> Void
     let onAddToQueue: (String) -> Void
@@ -567,12 +573,16 @@ struct AlbumDetailContent: View {
 
         return VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(sortedTracks.enumerated()), id: \.element.id) { index, track in
+                let isCurrent = currentTrackId == track.id
                 trackRow(
                     track,
                     showArtist: isCompilation,
                     showDisc: hasMultipleDiscs,
                     isHovered: hoverTrackId == track.id,
-                    onPlay: { onPlayFromTrack(index) }
+                    isCurrent: isCurrent,
+                    isCurrentPlaying: isCurrent && isPlaying,
+                    onPlay: { onPlayFromTrack(index) },
+                    onTogglePlayPause: onTogglePlayPause
                 )
                 Divider()
             }
@@ -591,27 +601,43 @@ struct AlbumDetailContent: View {
         showArtist: Bool,
         showDisc: Bool,
         isHovered: Bool,
-        onPlay: @escaping () -> Void
+        isCurrent: Bool,
+        isCurrentPlaying: Bool,
+        onPlay: @escaping () -> Void,
+        onTogglePlayPause: @escaping () -> Void
     ) -> some View {
         HStack(spacing: 12) {
             ZStack {
                 if isHovered {
-                    Button(action: onPlay) {
-                        Image(systemName: "play.fill")
-                            .font(.callout)
+                    if isCurrent && isCurrentPlaying {
+                        Button(action: onTogglePlayPause) {
+                            Image(systemName: "pause.fill")
+                                .font(.callout)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Button(action: isCurrent ? onTogglePlayPause : onPlay) {
+                            Image(systemName: "play.fill")
+                                .font(.callout)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
+                } else if isCurrent {
+                    Image(systemName: "speaker.fill")
+                        .font(.caption)
+                        .foregroundStyle(Color.accentColor)
                 } else {
                     trackNumberLabel(track, showDisc: showDisc)
                 }
             }
             .frame(width: 40, alignment: .trailing)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(isCurrent ? Color.accentColor : .secondary)
             .font(.callout.monospacedDigit())
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.title)
                     .font(.body)
+                    .foregroundStyle(isCurrent ? Color.accentColor : .primary)
                     .lineLimit(1)
 
                 if showArtist {
@@ -959,10 +985,13 @@ struct ManageReleaseSheet: View {
         lightboxItems: [LightboxItem(id: "cover", label: "Cover", url: nil)],
         selectedReleaseIndex: .constant(0),
         showShareCopied: false,
+        currentTrackId: "t-2",
+        isPlaying: true,
         onClose: {},
         onPlay: {},
         onShuffle: {},
         onPlayFromTrack: { _ in },
+        onTogglePlayPause: {},
         onShare: {},
         onAddNext: { _ in },
         onAddToQueue: { _ in },
