@@ -118,6 +118,8 @@ struct ImportView: View {
 
     @State private var galleryIndex: Int?
     @State private var audioExpanded = false
+    @State private var imagesExpanded = true
+    @State private var documentsExpanded = true
     @State private var documentContent: (name: String, text: String)?
 
     var body: some View {
@@ -380,7 +382,7 @@ struct ImportView: View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text(candidate.albumTitle)
-                    .font(.headline)
+                    .font(.title3)
                     .textSelection(.enabled)
                     .help(candidate.folderPath)
                 HStack(spacing: 4) {
@@ -392,7 +394,7 @@ struct ImportView: View {
                     Text(candidate.format)
                     Text(formatBytes(candidate.totalSizeBytes))
                 }
-                .font(.caption)
+                .font(.callout)
                 .foregroundStyle(.secondary)
             }
             Spacer()
@@ -1022,18 +1024,19 @@ struct ImportView: View {
                         ForEach(Array(pairs.enumerated()), id: \.offset) { _, pair in
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(pair.cueName)
-                                    .font(.caption)
+                                    .font(.callout)
                                 Text("\(pair.flacName) (\(formatBytes(pair.totalSize)))")
-                                    .font(.caption)
+                                    .font(.callout)
                                     .foregroundStyle(.secondary)
                                 Text("\(pair.trackCount) tracks")
-                                    .font(.caption2)
+                                    .font(.caption)
                                     .foregroundStyle(.tertiary)
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     } label: {
                         Text("Audio (\(pairs.count) disc\(pairs.count == 1 ? "" : "s"))")
-                            .font(.caption)
+                            .font(.subheadline)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
                     }
@@ -1042,44 +1045,49 @@ struct ImportView: View {
                         ForEach(Array(tracks.enumerated()), id: \.offset) { _, file in
                             HStack {
                                 Text(file.name)
-                                    .font(.caption)
+                                    .font(.callout)
                                     .lineLimit(1)
                                 Spacer()
                                 Text(formatBytes(file.size))
-                                    .font(.caption)
+                                    .font(.callout)
                                     .foregroundStyle(.secondary)
                             }
                         }
                     } label: {
                         Text("Audio (\(tracks.count) tracks)")
-                            .font(.caption)
+                            .font(.subheadline)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
                     }
                 }
                 if !files.artwork.isEmpty {
-                    fileSection("Images (\(files.artwork.count))") {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
+                    DisclosureGroup(isExpanded: $imagesExpanded) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 4)], spacing: 4) {
                             ForEach(Array(files.artwork.enumerated()), id: \.offset) { index, file in
                                 imageThumb(file)
                                     .onTapGesture { galleryIndex = index }
                             }
                         }
+                    } label: {
+                        Text("Images (\(files.artwork.count))")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 if !files.documents.isEmpty {
-                    fileSection("Documents (\(files.documents.count))") {
+                    DisclosureGroup(isExpanded: $documentsExpanded) {
                         ForEach(Array(files.documents.enumerated()), id: \.offset) { _, file in
                             HStack {
                                 Image(systemName: "doc.text")
-                                    .font(.caption)
+                                    .font(.callout)
                                     .foregroundStyle(.secondary)
                                 Text(file.name)
-                                    .font(.caption)
+                                    .font(.callout)
                                     .lineLimit(1)
                                 Spacer()
                                 Text(formatBytes(file.size))
-                                    .font(.caption)
+                                    .font(.callout)
                                     .foregroundStyle(.secondary)
                             }
                             .contentShape(Rectangle())
@@ -1094,21 +1102,16 @@ struct ImportView: View {
                                 if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
                             }
                         }
+                    } label: {
+                        Text("Documents (\(files.documents.count))")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
-        }
-    }
-
-    private func fileSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
-            content()
         }
     }
 
@@ -1119,7 +1122,7 @@ struct ImportView: View {
                 Image(nsImage: nsImage)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: 120, height: 120)
+                    .aspectRatio(1, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
             } else {
                 ZStack {
@@ -1128,14 +1131,13 @@ struct ImportView: View {
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
-                .frame(width: 120, height: 120)
+                .aspectRatio(1, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 4))
             }
             Text(file.name)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .frame(width: 120)
         }
     }
 
@@ -1152,7 +1154,14 @@ struct ImportView: View {
     }
 
     private func formatBytes(_ bytes: UInt64) -> String {
-        let mb = Double(bytes) / (1024 * 1024)
+        let kb = Double(bytes) / 1024
+        if kb < 1 {
+            return "\(bytes) B"
+        }
+        let mb = kb / 1024
+        if mb < 1 {
+            return String(format: "%.0f KB", kb)
+        }
         if mb >= 1024 {
             return String(format: "%.1f GB", mb / 1024)
         }
@@ -1258,7 +1267,7 @@ struct CandidateRow: View {
                 .frame(width: 16)
             VStack(alignment: .leading, spacing: 2) {
                 Text(folderName)
-                    .font(.body)
+                    .font(.callout)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 if candidate.albumTitle != folderName {
