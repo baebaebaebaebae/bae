@@ -786,39 +786,60 @@ struct ImportView: View {
     private func confirmationView(for candidate: BridgeImportCandidate, detail: BridgeReleaseDetail) -> some View {
         let folderPath = candidate.folderPath
         let trackCountMismatch = detail.trackCount != candidate.trackCount
+        let selectedUrl = candidateStates[folderPath]?.selectedCoverUrl
+        let importing = isImporting(folderPath)
+        let status = appService.importStatuses[folderPath]
+        let isComplete = status.map { if case .complete = $0 { return true } else { return false } } ?? false
 
         return ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                // Release metadata
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(detail.title)
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                    Text(detail.artist)
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 16) {
-                        if let year = detail.year {
-                            metadataTag(String(year))
+            VStack(alignment: .leading, spacing: 12) {
+                // Release info card
+                HStack(alignment: .top, spacing: 12) {
+                    // Cover art thumbnail
+                    confirmationCoverThumb(selectedUrl: selectedUrl)
+
+                    // Metadata
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(detail.title)
+                            .font(.headline)
+                            .lineLimit(2)
+                        HStack(spacing: 6) {
+                            if let year = detail.year {
+                                Text(String(year))
+                            }
+                            if let format = detail.format {
+                                if detail.year != nil {
+                                    Text("\u{00b7}")
+                                }
+                                Text(format)
+                            }
                         }
-                        if let format = detail.format {
-                            metadataTag(format)
-                        }
-                        if let label = detail.label {
-                            metadataTag(label)
-                        }
-                        if let catno = detail.catalogNumber {
-                            metadataTag(catno)
-                        }
-                    }
-                    Text(detail.source == "musicbrainz" ? "MusicBrainz" : "Discogs")
                         .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
+                        if let label = detail.label {
+                            Text(label)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(detail.source == "musicbrainz" ? "MusicBrainz" : "Discogs")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    // Change button
+                    Button("Change") {
+                        candidateStates[folderPath]?.mode = .identifying
+                        candidateStates[folderPath]?.releaseDetail = nil
+                    }
+                    .controlSize(.small)
+                    .disabled(importing || isComplete)
                 }
+                .padding(12)
+                .background(Theme.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
 
-                Divider()
-
-                // Track count comparison
+                // Track count mismatch warning
                 if trackCountMismatch {
                     HStack(spacing: 8) {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -832,18 +853,20 @@ struct ImportView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
 
-                // Track listing
-                VStack(alignment: .leading, spacing: 4) {
+                // Compact track listing
+                VStack(alignment: .leading, spacing: 2) {
                     Text("Tracks (\(detail.trackCount))")
                         .font(.caption)
                         .fontWeight(.semibold)
                         .foregroundStyle(.secondary)
+                        .padding(.bottom, 2)
                     ForEach(Array(detail.tracks.enumerated()), id: \.offset) { _, track in
-                        HStack {
+                        HStack(spacing: 0) {
                             Text(track.position)
                                 .font(.caption)
                                 .foregroundStyle(.tertiary)
                                 .frame(width: 30, alignment: .trailing)
+                                .padding(.trailing, 8)
                             Text(track.title)
                                 .font(.caption)
                                 .lineLimit(1)
@@ -857,13 +880,10 @@ struct ImportView: View {
                     }
                 }
 
-                // Cover art selection
+                // Cover art selection (below tracks)
                 if !detail.coverArt.isEmpty || (candidateFiles?.artwork.isEmpty == false) {
-                    Divider()
                     coverArtSection(for: folderPath, detail: detail)
                 }
-
-                Divider()
 
                 // Storage mode
                 VStack(alignment: .leading, spacing: 4) {
@@ -875,6 +895,7 @@ struct ImportView: View {
                         Text("Leave in place").tag(false)
                     }
                     .pickerStyle(.segmented)
+                    .disabled(importing || isComplete)
                     if candidateStates[folderPath]?.managed == true && appService.appHandle.isSyncReady() {
                         Text("Files will sync to cloud")
                             .font(.caption)
@@ -882,21 +903,112 @@ struct ImportView: View {
                     }
                 }
 
-                // Action buttons
-                HStack {
+                // Action row with import status
+                confirmationActionRow(candidate: candidate, detail: detail, status: status, importing: importing, isComplete: isComplete)
+            }
+            .padding()
+        }
+    }
+
+    @ViewBuilder
+    private func confirmationCoverThumb(selectedUrl: String?) -> some View {
+        if let url = selectedUrl {
+            if url.hasPrefix("local:") {
+                let filename = String(url.dropFirst("local:".count))
+                let localPath = candidateFiles?.artwork.first(where: { $0.name == filename })?.path
+                if let path = localPath, let nsImage = NSImage(contentsOf: URL(fileURLWithPath: path)) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 80, height: 80)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                } else {
+                    coverPlaceholder
+                }
+            } else {
+                AsyncImage(url: URL(string: url)) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    ZStack {
+                        Theme.placeholder
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+                .frame(width: 80, height: 80)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+        } else {
+            coverPlaceholder
+        }
+    }
+
+    private var coverPlaceholder: some View {
+        ZStack {
+            Theme.placeholder
+            Image(systemName: "photo")
+                .foregroundStyle(.tertiary)
+        }
+        .frame(width: 80, height: 80)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    @ViewBuilder
+    private func confirmationActionRow(candidate: BridgeImportCandidate, detail: BridgeReleaseDetail, status: BridgeImportStatus?, importing: Bool, isComplete: Bool) -> some View {
+        let folderPath = candidate.folderPath
+
+        HStack {
+            if isComplete {
+                Spacer()
+                Label("Imported", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.callout)
+            } else if let status {
+                switch status {
+                case .importing(let percent):
+                    Button("Back to Search") {
+                        candidateStates[folderPath]?.mode = .identifying
+                        candidateStates[folderPath]?.releaseDetail = nil
+                    }
+                    .disabled(true)
+                    Spacer()
+                    ProgressView(value: Double(percent), total: 100)
+                        .frame(width: 100)
+                    Button("Confirm Import") {
+                        commitConfirmedImport(candidate: candidate, detail: detail)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(true)
+                case .error(let message):
                     Button("Back to Search") {
                         candidateStates[folderPath]?.mode = .identifying
                         candidateStates[folderPath]?.releaseDetail = nil
                     }
                     Spacer()
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
                     Button("Confirm Import") {
                         commitConfirmedImport(candidate: candidate, detail: detail)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(isImporting(folderPath))
+                case .complete:
+                    EmptyView()
                 }
+            } else {
+                Button("Back to Search") {
+                    candidateStates[folderPath]?.mode = .identifying
+                    candidateStates[folderPath]?.releaseDetail = nil
+                }
+                Spacer()
+                Button("Confirm Import") {
+                    commitConfirmedImport(candidate: candidate, detail: detail)
+                }
+                .buttonStyle(.borderedProminent)
             }
-            .padding()
         }
     }
 
@@ -977,15 +1089,6 @@ struct ImportView: View {
                 .lineLimit(1)
                 .frame(width: 120)
         }
-    }
-
-    private func metadataTag(_ text: String) -> some View {
-        Text(text)
-            .font(.caption)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Theme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
     private func commitConfirmedImport(candidate: BridgeImportCandidate, detail: BridgeReleaseDetail) {
