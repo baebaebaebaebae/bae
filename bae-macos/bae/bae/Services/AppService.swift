@@ -110,9 +110,9 @@ class AppService: AppEventHandler, @unchecked Sendable {
 
     // MARK: - Playback controls
 
-    func playAlbum(albumId: String, startTrackIndex: UInt32? = nil) {
+    func playAlbum(albumId: String, startTrackIndex: UInt32? = nil, shuffle: Bool = false) {
         Task.detached { [appHandle] in
-            try? appHandle.playAlbum(albumId: albumId, startTrackIndex: startTrackIndex)
+            try? appHandle.playAlbum(albumId: albumId, startTrackIndex: startTrackIndex, shuffle: shuffle)
         }
     }
 

@@ -847,10 +847,12 @@ impl AppHandle {
     }
 
     /// Play an entire album, optionally starting from a specific track index.
+    /// When shuffle is true, tracks are played in random order and start_track_index is ignored.
     pub fn play_album(
         &self,
         album_id: String,
         start_track_index: Option<u32>,
+        shuffle: bool,
     ) -> Result<(), BridgeError> {
         self.runtime.block_on(async {
             let lm = self.library_manager.get();
@@ -890,8 +892,12 @@ impl AppHandle {
                 });
             }
 
-            // Rotate so the start track is first
-            if let Some(idx) = start_track_index {
+            if shuffle {
+                use rand::seq::SliceRandom;
+                let mut rng = rand::rng();
+                track_ids.shuffle(&mut rng);
+            } else if let Some(idx) = start_track_index {
+                // Rotate so the start track is first
                 let idx = idx as usize;
                 if idx < track_ids.len() {
                     track_ids.rotate_left(idx);

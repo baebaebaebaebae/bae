@@ -892,6 +892,7 @@ dependencies = [
  "hex",
  "libsqlite3-sys",
  "objc",
+ "rand 0.9.2",
  "reqwest",
  "serde_json",
  "serde_yaml",

@@ -29,6 +29,7 @@ libsqlite3-sys = { version = "0.30.1", features = ["session", "bundled"] }
 reqwest = { version = "0.12", features = ["json"] }
 futures = "0.3"
 objc = "0.2"
+rand = "0.9"
 
 [lints.rust]
 unexpected_cfgs = "allow"

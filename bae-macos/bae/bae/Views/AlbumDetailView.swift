@@ -38,7 +38,7 @@ struct AlbumDetailView: View {
                     showShareCopied: showShareCopied,
                     onClose: onClose,
                     onPlay: { appService.playAlbum(albumId: albumId) },
-                    onShuffle: {},
+                    onShuffle: { appService.playAlbum(albumId: albumId, shuffle: true) },
                     onPlayFromTrack: { index in
                         appService.playAlbum(albumId: albumId, startTrackIndex: UInt32(index))
                     },
