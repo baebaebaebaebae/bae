@@ -45,6 +45,35 @@ fn bridge_sort_to_core(c: &BridgeSortCriterion) -> bae_core::db::AlbumSortCriter
     }
 }
 
+/// Check Cover Art Archive for cover art thumbnails.
+/// Does HEAD requests to CAA; returns redirect Location URLs (250px thumbnails).
+async fn check_cover_art(release_ids: &[String]) -> Vec<Option<String>> {
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+
+    let futures: Vec<_> = release_ids
+        .iter()
+        .map(|id| {
+            let client = &client;
+            let url = format!("https://coverartarchive.org/release/{id}/front-250");
+            async move {
+                match client.head(&url).send().await {
+                    Ok(resp) if resp.status() == reqwest::StatusCode::TEMPORARY_REDIRECT => resp
+                        .headers()
+                        .get("location")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string()),
+                    _ => None,
+                }
+            }
+        })
+        .collect();
+
+    futures::future::join_all(futures).await
+}
+
 /// Discover all libraries in ~/.bae/libraries/.
 #[uniffi::export]
 pub fn discover_libraries() -> Result<Vec<BridgeLibraryInfo>, BridgeError> {
@@ -1020,9 +1049,13 @@ impl AppHandle {
                     msg: format!("MusicBrainz search failed: {e}"),
                 })?;
 
+            let release_ids: Vec<String> = releases.iter().map(|r| r.release_id.clone()).collect();
+            let cover_urls = check_cover_art(&release_ids).await;
+
             Ok(releases
                 .into_iter()
-                .map(|r| {
+                .zip(cover_urls)
+                .map(|(r, cover_url)| {
                     let year = r
                         .date
                         .as_ref()
@@ -1037,6 +1070,7 @@ impl AppHandle {
                         format: r.format,
                         label: r.label,
                         track_count: 0,
+                        cover_url,
                     }
                 })
                 .collect())
@@ -1080,6 +1114,7 @@ impl AppHandle {
                     let year = r.year.as_ref().and_then(|y| y.parse::<i32>().ok());
                     let format = r.format.as_ref().map(|f| f.join(", "));
                     let label = r.label.as_ref().and_then(|l| l.first().cloned());
+                    let cover_url = r.thumb.clone();
                     BridgeMetadataResult {
                         source: "discogs".to_string(),
                         release_id: r.id.to_string(),
@@ -1089,6 +1124,7 @@ impl AppHandle {
                         format,
                         label,
                         track_count: 0,
+                        cover_url,
                     }
                 })
                 .collect())
@@ -1113,9 +1149,14 @@ impl AppHandle {
                         msg: format!("MusicBrainz search failed: {e}"),
                     })?;
 
+                let release_ids: Vec<String> =
+                    releases.iter().map(|r| r.release_id.clone()).collect();
+                let cover_urls = check_cover_art(&release_ids).await;
+
                 Ok(releases
                     .into_iter()
-                    .map(|r| {
+                    .zip(cover_urls)
+                    .map(|(r, cover_url)| {
                         let year = r
                             .date
                             .as_ref()
@@ -1130,6 +1171,7 @@ impl AppHandle {
                             format: r.format,
                             label: r.label,
                             track_count: 0,
+                            cover_url,
                         }
                     })
                     .collect())
@@ -1161,6 +1203,7 @@ impl AppHandle {
                         let year = r.year.as_ref().and_then(|y| y.parse::<i32>().ok());
                         let format = r.format.as_ref().map(|f| f.join(", "));
                         let label = r.label.as_ref().and_then(|l| l.first().cloned());
+                        let cover_url = r.thumb.clone();
                         BridgeMetadataResult {
                             source: "discogs".to_string(),
                             release_id: r.id.to_string(),
@@ -1170,6 +1213,7 @@ impl AppHandle {
                             format,
                             label,
                             track_count: 0,
+                            cover_url,
                         }
                     })
                     .collect())
@@ -1195,9 +1239,14 @@ impl AppHandle {
                         msg: format!("MusicBrainz search failed: {e}"),
                     })?;
 
+                let release_ids: Vec<String> =
+                    releases.iter().map(|r| r.release_id.clone()).collect();
+                let cover_urls = check_cover_art(&release_ids).await;
+
                 Ok(releases
                     .into_iter()
-                    .map(|r| {
+                    .zip(cover_urls)
+                    .map(|(r, cover_url)| {
                         let year = r
                             .date
                             .as_ref()
@@ -1212,6 +1261,7 @@ impl AppHandle {
                             format: r.format,
                             label: r.label,
                             track_count: 0,
+                            cover_url,
                         }
                     })
                     .collect())
@@ -1243,6 +1293,7 @@ impl AppHandle {
                         let year = r.year.as_ref().and_then(|y| y.parse::<i32>().ok());
                         let format = r.format.as_ref().map(|f| f.join(", "));
                         let label = r.label.as_ref().and_then(|l| l.first().cloned());
+                        let cover_url = r.thumb.clone();
                         BridgeMetadataResult {
                             source: "discogs".to_string(),
                             release_id: r.id.to_string(),
@@ -1252,6 +1303,7 @@ impl AppHandle {
                             format,
                             label,
                             track_count: 0,
+                            cover_url,
                         }
                     })
                     .collect())
@@ -1413,9 +1465,14 @@ impl AppHandle {
                         return Ok(BridgeDiscIdResult::NoMatches);
                     }
 
+                    let release_ids: Vec<String> =
+                        releases.iter().map(|r| r.release_id.clone()).collect();
+                    let cover_urls = check_cover_art(&release_ids).await;
+
                     let results: Vec<BridgeMetadataResult> = releases
                         .into_iter()
-                        .map(|r| {
+                        .zip(cover_urls)
+                        .map(|(r, cover_url)| {
                             let year = r
                                 .date
                                 .as_ref()
@@ -1430,6 +1487,7 @@ impl AppHandle {
                                 format: r.format,
                                 label: r.label,
                                 track_count: 0,
+                                cover_url,
                             }
                         })
                         .collect();

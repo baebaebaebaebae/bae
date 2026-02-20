@@ -888,6 +888,7 @@ dependencies = [
  "base64",
  "chrono",
  "dirs 5.0.1",
+ "futures",
  "hex",
  "libsqlite3-sys",
  "objc",
