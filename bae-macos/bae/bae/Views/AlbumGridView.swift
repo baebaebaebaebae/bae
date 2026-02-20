@@ -350,14 +350,14 @@ private struct LibraryPreview: View {
                     coverArtURL: PreviewData.albums.first(where: { $0.id == albumId })?.coverArtURL,
                     selectedReleaseIndex: $selectedReleaseIndex,
                     showShareCopied: false,
-                    transferring: false,
                     onClose: { selectedAlbumId = nil },
                     onPlay: {},
+                    onShuffle: {},
                     onPlayFromTrack: { _ in },
                     onShare: {},
                     onChangeCover: {},
-                    onTransferToManaged: { _ in },
-                    onEject: { _ in }
+                    onManage: {},
+                    onDeleteAlbum: {}
                 )
                 .frame(width: 400)
             }

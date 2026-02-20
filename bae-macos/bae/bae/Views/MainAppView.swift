@@ -199,9 +199,17 @@ struct MainAppView: View {
         .toolbar(.hidden)
         .ignoresSafeArea(.all, edges: .top)
         .modifier(TrafficLightOffset(xOffset: 6, yOffset: 7))
-        .onKeyPress(.space) {
-            appService.togglePlayPause()
-            return .handled
+        .onAppear {
+            NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                guard event.keyCode == 49 else { return event } // 49 = space
+                // Don't steal space from text fields
+                if let responder = event.window?.firstResponder,
+                   responder is NSTextView || responder is NSTextField {
+                    return event
+                }
+                appService.togglePlayPause()
+                return nil
+            }
         }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             handleDrop(providers)

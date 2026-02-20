@@ -188,7 +188,7 @@ struct NowPlayingBar: View {
                     .foregroundColor(showQueue ? .accentColor : .secondary)
             }
             .buttonStyle(.plain)
-            .font(.caption)
+            .font(.body)
             .help("Queue")
             .accessibilityLabel("Queue")
             .popover(isPresented: $showQueue, arrowEdge: .top) {
@@ -208,7 +208,7 @@ struct NowPlayingBar: View {
             }
 
             Image(systemName: "speaker.fill")
-                .font(.caption)
+                .font(.body)
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
 
@@ -239,7 +239,7 @@ struct NowPlayingBar: View {
             }
         }
         .buttonStyle(.plain)
-        .font(.caption)
+        .font(.body)
         .help(repeatHelp)
         .accessibilityLabel(repeatHelp)
     }

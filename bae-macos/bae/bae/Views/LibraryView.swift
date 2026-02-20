@@ -76,6 +76,7 @@ struct LibraryView: View {
                     )
                     .frame(maxWidth: 1200)
                     .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 16)
                     if let albumId = selectedAlbumId {
                         Divider()
                         AlbumDetailView(

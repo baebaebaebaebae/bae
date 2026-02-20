@@ -19,6 +19,8 @@ struct AlbumDetailView: View {
     @State private var showShareCopied: Bool = false
     @State private var transferring: Bool = false
     @State private var transferError: String?
+    @State private var showingManageSheet: Bool = false
+    @State private var showingDeleteConfirmation: Bool = false
 
     var body: some View {
         Group {
@@ -34,9 +36,9 @@ struct AlbumDetailView: View {
                     coverArtURL: appService.imageURL(for: detail.album.coverReleaseId),
                     selectedReleaseIndex: $selectedReleaseIndex,
                     showShareCopied: showShareCopied,
-                    transferring: transferring,
                     onClose: onClose,
                     onPlay: { appService.playAlbum(albumId: albumId) },
+                    onShuffle: {},
                     onPlayFromTrack: { index in
                         appService.playAlbum(albumId: albumId, startTrackIndex: UInt32(index))
                     },
@@ -48,8 +50,8 @@ struct AlbumDetailView: View {
                         showingCoverSheet = true
                         fetchRemoteCovers()
                     },
-                    onTransferToManaged: { transferToManaged(releaseId: $0) },
-                    onEject: { ejectRelease(releaseId: $0) }
+                    onManage: { showingManageSheet = true },
+                    onDeleteAlbum: { showingDeleteConfirmation = true }
                 )
             } else {
                 ProgressView()
@@ -123,6 +125,36 @@ struct AlbumDetailView: View {
         } message: {
             if let err = transferError {
                 Text(err)
+            }
+        }
+        .alert("Delete Album", isPresented: $showingDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                // TODO: Wire to appService.appHandle.deleteAlbum(albumId:) once bridge method exists
+                onClose?()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Are you sure you want to delete this album? This cannot be undone.")
+        }
+        .overlay {
+            if showingManageSheet, let detail {
+                let release = detail.releases.isEmpty ? nil : detail.releases[selectedReleaseIndex]
+                Color.black.opacity(0.5)
+                    .ignoresSafeArea()
+                    .onTapGesture { showingManageSheet = false }
+                if let release {
+                    ManageReleaseSheet(
+                        release: release,
+                        transferring: transferring,
+                        onTransferToManaged: { transferToManaged(releaseId: release.id) },
+                        onEject: { ejectRelease(releaseId: release.id) },
+                        onDone: { showingManageSheet = false }
+                    )
+                    .frame(width: 450, height: 400)
+                    .background(Theme.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .shadow(radius: 20)
+                }
             }
         }
         .overlay(alignment: .bottom) {
@@ -294,14 +326,14 @@ struct AlbumDetailContent: View {
     let coverArtURL: URL?
     @Binding var selectedReleaseIndex: Int
     let showShareCopied: Bool
-    let transferring: Bool
     let onClose: (() -> Void)?
     let onPlay: () -> Void
+    let onShuffle: () -> Void
     let onPlayFromTrack: (Int) -> Void
     let onShare: () -> Void
     let onChangeCover: () -> Void
-    let onTransferToManaged: (String) -> Void
-    let onEject: (String) -> Void
+    let onManage: () -> Void
+    let onDeleteAlbum: () -> Void
 
     var body: some View {
         ScrollView {
@@ -315,12 +347,6 @@ struct AlbumDetailContent: View {
                 if !detail.releases.isEmpty {
                     let release = detail.releases[selectedReleaseIndex]
                     trackList(release, isCompilation: detail.album.isCompilation)
-
-                    if !release.files.isEmpty {
-                        fileSection(release)
-                    }
-
-                    storageSection(release)
                 }
             }
             .padding()
@@ -331,12 +357,24 @@ struct AlbumDetailContent: View {
     private var albumHeader: some View {
         HStack(alignment: .top, spacing: 16) {
             albumArt
-                .frame(width: 100, height: 100)
+                .frame(width: 160, height: 160)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
-                .contextMenu {
-                    Button("Change Cover...") {
-                        onChangeCover()
+                .overlay(alignment: .bottomTrailing) {
+                    Menu {
+                        Button("Change Cover...") { onChangeCover() }
+                        Button("Files & Storage...") { onManage() }
+                        Divider()
+                        Button("Delete Album", role: .destructive) { onDeleteAlbum() }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.caption)
+                            .foregroundStyle(.white)
+                            .frame(width: 24, height: 24)
+                            .background(.black.opacity(0.6))
+                            .clipShape(Circle())
                     }
+                    .buttonStyle(.plain)
+                    .padding(6)
                 }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -366,6 +404,11 @@ struct AlbumDetailContent: View {
                         Label("Play", systemImage: "play.fill")
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+
+                    Button(action: onShuffle) {
+                        Label("Shuffle", systemImage: "shuffle")
+                    }
                     .controlSize(.small)
 
                     if !detail.releases.isEmpty {
@@ -544,96 +587,6 @@ struct AlbumDetailContent: View {
         }
     }
 
-    private func fileSection(_ release: BridgeRelease) -> some View {
-        DisclosureGroup("Files") {
-            ForEach(release.files, id: \.id) { file in
-                HStack {
-                    Text(file.originalFilename)
-                        .font(.callout)
-                        .lineLimit(1)
-                    Spacer()
-                    Text(formatFileSize(file.fileSize))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Text(file.contentType)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.vertical, 2)
-            }
-        }
-        .font(.headline)
-    }
-
-    // MARK: - Storage
-
-    private func storageSection(_ release: BridgeRelease) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Storage")
-                .font(.headline)
-
-            HStack(spacing: 8) {
-                storageStatusLabel(release)
-
-                Spacer()
-
-                if transferring {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Transferring...")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                } else {
-                    storageActions(release)
-                }
-            }
-        }
-    }
-
-    private func storageStatusLabel(_ release: BridgeRelease) -> some View {
-        let isUnmanaged = !release.managedLocally && !release.managedInCloud && release.unmanagedPath != nil
-
-        return HStack(spacing: 6) {
-            if release.managedLocally && release.managedInCloud {
-                Image(systemName: "internaldrive")
-                Text("Local + Cloud")
-            } else if release.managedLocally {
-                Image(systemName: "internaldrive")
-                Text("Managed locally")
-            } else if release.managedInCloud {
-                Image(systemName: "cloud")
-                Text("Cloud storage")
-            } else if isUnmanaged {
-                Image(systemName: "folder")
-                Text("Unmanaged")
-            } else {
-                Image(systemName: "folder")
-                Text("No storage")
-            }
-        }
-        .font(.callout)
-        .foregroundStyle(.secondary)
-    }
-
-    @ViewBuilder
-    private func storageActions(_ release: BridgeRelease) -> some View {
-        let isUnmanaged = !release.managedLocally && !release.managedInCloud && release.unmanagedPath != nil
-
-        if isUnmanaged {
-            Button(action: { onTransferToManaged(release.id) }) {
-                Label("Copy to library", systemImage: "square.and.arrow.down")
-            }
-            .help("Copy files into managed local storage")
-        }
-
-        if release.managedLocally {
-            Button(action: { onEject(release.id) }) {
-                Label("Eject to folder", systemImage: "square.and.arrow.up.on.square")
-            }
-            .help("Export files to a local folder and remove from managed storage")
-        }
-    }
-
     // MARK: - Formatting
 
     private func formatDuration(_ ms: Int64) -> String {
@@ -641,12 +594,6 @@ struct AlbumDetailContent: View {
         let minutes = totalSeconds / 60
         let seconds = totalSeconds % 60
         return "\(minutes):\(String(format: "%02d", seconds))"
-    }
-
-    private func formatFileSize(_ bytes: Int64) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.countStyle = .file
-        return formatter.string(fromByteCount: bytes)
     }
 }
 
@@ -772,6 +719,126 @@ struct CoverSheetView: View {
     }
 }
 
+// MARK: - ManageReleaseSheet
+
+struct ManageReleaseSheet: View {
+    let release: BridgeRelease
+    let transferring: Bool
+    let onTransferToManaged: () -> Void
+    let onEject: () -> Void
+    let onDone: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Files & Storage")
+                    .font(.headline)
+                Spacer()
+                Button("Done") { onDone() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding()
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Storage status
+                    storageStatus
+
+                    // Transfer actions
+                    if transferring {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Transferring...")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        transferActions
+                    }
+
+                    if !release.files.isEmpty {
+                        Divider()
+
+                        Text("Files")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+
+                        ForEach(release.files, id: \.id) { file in
+                            HStack {
+                                Text(file.originalFilename)
+                                    .font(.callout)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text(formatFileSize(file.fileSize))
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                Text(file.contentType)
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+                .padding()
+            }
+        }
+    }
+
+    private var storageStatus: some View {
+        let isUnmanaged = !release.managedLocally && !release.managedInCloud && release.unmanagedPath != nil
+
+        return HStack(spacing: 6) {
+            if release.managedLocally && release.managedInCloud {
+                Image(systemName: "internaldrive")
+                Text("Local + Cloud")
+            } else if release.managedLocally {
+                Image(systemName: "internaldrive")
+                Text("Managed locally")
+            } else if release.managedInCloud {
+                Image(systemName: "cloud")
+                Text("Cloud storage")
+            } else if isUnmanaged {
+                Image(systemName: "folder")
+                Text("Unmanaged")
+            } else {
+                Image(systemName: "folder")
+                Text("No storage")
+            }
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private var transferActions: some View {
+        let isUnmanaged = !release.managedLocally && !release.managedInCloud && release.unmanagedPath != nil
+
+        if isUnmanaged {
+            Button(action: onTransferToManaged) {
+                Label("Copy to library", systemImage: "square.and.arrow.down")
+            }
+            .help("Copy files into managed local storage")
+        }
+
+        if release.managedLocally {
+            Button(action: onEject) {
+                Label("Eject to folder", systemImage: "square.and.arrow.up.on.square")
+            }
+            .help("Export files to a local folder and remove from managed storage")
+        }
+    }
+
+    private func formatFileSize(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
+    }
+}
+
 // MARK: - Previews
 
 #Preview("Album Detail Content") {
@@ -811,14 +878,14 @@ struct CoverSheetView: View {
         coverArtURL: nil,
         selectedReleaseIndex: .constant(0),
         showShareCopied: false,
-        transferring: false,
         onClose: {},
         onPlay: {},
+        onShuffle: {},
         onPlayFromTrack: { _ in },
         onShare: {},
         onChangeCover: {},
-        onTransferToManaged: { _ in },
-        onEject: { _ in }
+        onManage: {},
+        onDeleteAlbum: {}
     )
     .frame(width: 450, height: 600)
 }
