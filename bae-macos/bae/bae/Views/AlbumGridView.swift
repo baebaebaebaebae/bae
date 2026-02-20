@@ -211,41 +211,58 @@ struct AlbumCardView: View {
 
 // MARK: - Previews
 
-#Preview("Album Grid") {
-    AlbumGridView(
-        albums: [
-            AlbumCardViewModel(id: "a-1", title: "Album Title", artistNames: "Artist Name", year: 2024, coverArtURL: nil),
-            AlbumCardViewModel(id: "a-2", title: "Another Album", artistNames: "Another Artist", year: 2023, coverArtURL: nil),
-            AlbumCardViewModel(id: "a-3", title: "Third Album", artistNames: "Third Artist", year: nil, coverArtURL: nil),
-            AlbumCardViewModel(id: "a-4", title: "Fourth Album With a Long Title", artistNames: "Artist With Long Name", year: 2022, coverArtURL: nil),
-        ],
-        selectedAlbumId: .constant("a-2"),
-        sortField: .constant(.dateAdded),
-        sortDirection: .constant(.descending),
-        onPlayAlbum: { _ in },
-        onAddToQueue: { _ in },
-        onAddNext: { _ in }
-    )
-    .frame(width: 600, height: 400)
+private struct GridPreview: View {
+    let width: CGFloat
+    let height: CGFloat
+    @State private var selectedAlbumId: String? = "a-04"
+    @State private var sortField: LibrarySortField = .dateAdded
+    @State private var sortDirection: SortDirection = .descending
+
+    var body: some View {
+        AlbumGridView(
+            albums: PreviewData.albums,
+            selectedAlbumId: $selectedAlbumId,
+            sortField: $sortField,
+            sortDirection: $sortDirection,
+            onPlayAlbum: { _ in },
+            onAddToQueue: { _ in },
+            onAddNext: { _ in }
+        )
+        .frame(width: width, height: height)
+    }
+}
+
+#Preview("Grid — Wide") {
+    GridPreview(width: 1100, height: 700)
+}
+
+#Preview("Grid — Medium") {
+    GridPreview(width: 700, height: 600)
+}
+
+#Preview("Grid — Narrow") {
+    GridPreview(width: 400, height: 600)
 }
 
 #Preview("Album Card") {
-    HStack(spacing: 20) {
+    let album = PreviewData.albums[0]
+    let selected = PreviewData.albums[3]
+    return HStack(spacing: 20) {
         AlbumCardView(
-            title: "Album Title",
-            artistNames: "Artist Name",
-            year: 2024,
-            coverArtURL: nil,
+            title: album.title,
+            artistNames: album.artistNames,
+            year: album.year,
+            coverArtURL: album.coverArtURL,
             isSelected: false,
             onPlay: {},
             onAddToQueue: {},
             onAddNext: {}
         )
         AlbumCardView(
-            title: "Selected Album",
-            artistNames: "Another Artist",
-            year: 2023,
-            coverArtURL: nil,
+            title: selected.title,
+            artistNames: selected.artistNames,
+            year: selected.year,
+            coverArtURL: selected.coverArtURL,
             isSelected: true,
             onPlay: {},
             onAddToQueue: {},
@@ -253,4 +270,50 @@ struct AlbumCardView: View {
         )
     }
     .padding()
+}
+
+private struct LibraryPreview: View {
+    @State private var selectedAlbumId: String? = nil
+    @State private var sortField: LibrarySortField = .dateAdded
+    @State private var sortDirection: SortDirection = .descending
+    @State private var selectedReleaseIndex: Int = 0
+
+    var body: some View {
+        HStack(spacing: 0) {
+            AlbumGridView(
+                albums: PreviewData.albums,
+                selectedAlbumId: $selectedAlbumId,
+                sortField: $sortField,
+                sortDirection: $sortDirection,
+                onPlayAlbum: { _ in },
+                onAddToQueue: { _ in },
+                onAddNext: { _ in }
+            )
+
+            if let albumId = selectedAlbumId,
+               let detail = PreviewData.albumDetails[albumId] {
+                Divider()
+                AlbumDetailContent(
+                    detail: detail,
+                    coverArtURL: PreviewData.albums.first(where: { $0.id == albumId })?.coverArtURL,
+                    selectedReleaseIndex: $selectedReleaseIndex,
+                    showShareCopied: false,
+                    transferring: false,
+                    onClose: { selectedAlbumId = nil },
+                    onPlay: {},
+                    onPlayFromTrack: { _ in },
+                    onShare: {},
+                    onChangeCover: {},
+                    onTransferToManaged: { _ in },
+                    onEject: { _ in }
+                )
+                .frame(width: 400)
+            }
+        }
+    }
+}
+
+#Preview("Library — Grid + Detail") {
+    LibraryPreview()
+        .frame(width: 1200, height: 700)
 }

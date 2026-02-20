@@ -306,21 +306,17 @@ private struct QueueDropDelegate: DropDelegate {
 #Preview("With items") {
     QueueView(
         isActive: true,
-        nowPlayingTitle: "Track Title",
-        nowPlayingArtist: "Artist Name",
+        nowPlayingTitle: PreviewData.nowPlayingTitle,
+        nowPlayingArtist: PreviewData.nowPlayingArtist,
         nowPlayingArtURL: nil,
-        items: [
-            QueueItemViewModel(id: "t-1", title: "First Track", artistNames: "Artist A", albumTitle: "Album One", durationMs: 234000, coverArtURL: nil),
-            QueueItemViewModel(id: "t-2", title: "Second Track", artistNames: "Artist B", albumTitle: "Album Two", durationMs: 180000, coverArtURL: nil),
-            QueueItemViewModel(id: "t-3", title: "Third Track", artistNames: "Artist A", albumTitle: "Album One", durationMs: 312000, coverArtURL: nil),
-        ],
+        items: PreviewData.queueItems,
         onClose: {},
         onClear: {},
         onSkipTo: { _ in },
         onRemove: { _ in },
         onReorder: { _, _ in }
     )
-    .frame(width: 450, height: 500)
+    .frame(width: 350, height: 500)
 }
 
 #Preview("Empty") {
@@ -336,5 +332,5 @@ private struct QueueDropDelegate: DropDelegate {
         onRemove: { _ in },
         onReorder: { _, _ in }
     )
-    .frame(width: 450, height: 400)
+    .frame(width: 350, height: 400)
 }

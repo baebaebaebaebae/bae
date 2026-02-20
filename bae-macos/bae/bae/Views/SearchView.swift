@@ -173,17 +173,20 @@ struct SearchView: View {
     SearchView(
         results: BridgeSearchResults(
             artists: [
-                BridgeArtistSearchResult(id: "ar-1", name: "Artist Name", albumCount: 3),
+                BridgeArtistSearchResult(id: "ar-1", name: "Glass Harbor", albumCount: 2),
+                BridgeArtistSearchResult(id: "ar-2", name: "Velvet Mathematics", albumCount: 2),
             ],
             albums: [
-                BridgeAlbumSearchResult(id: "al-1", title: "Album Title", year: 2024, coverReleaseId: nil, artistName: "Artist Name"),
-                BridgeAlbumSearchResult(id: "al-2", title: "Another Album", year: nil, coverReleaseId: nil, artistName: "Another Artist"),
+                BridgeAlbumSearchResult(id: "a-02", title: "Pacific Standard", year: 2019, coverReleaseId: nil, artistName: "Glass Harbor"),
+                BridgeAlbumSearchResult(id: "a-14", title: "Landlocked", year: 2022, coverReleaseId: nil, artistName: "Glass Harbor"),
+                BridgeAlbumSearchResult(id: "a-03", title: "Proof by Induction", year: 2021, coverReleaseId: nil, artistName: "Velvet Mathematics"),
             ],
             tracks: [
-                BridgeTrackSearchResult(id: "t-1", title: "Track Title", durationMs: 234000, albumId: "al-1", albumTitle: "Album Title", artistName: "Artist Name"),
+                BridgeTrackSearchResult(id: "t-03", title: "Tide Pool", durationMs: 198_000, albumId: "a-02", albumTitle: "Pacific Standard", artistName: "Glass Harbor"),
+                BridgeTrackSearchResult(id: "t-05", title: "Axiom", durationMs: 187_000, albumId: "a-03", albumTitle: "Proof by Induction", artistName: "Velvet Mathematics"),
             ]
         ),
-        searchQuery: "artist",
+        searchQuery: "glass",
         resolveImageURL: { _ in nil },
         onSelectArtist: { _ in },
         onSelectAlbum: { _ in },
