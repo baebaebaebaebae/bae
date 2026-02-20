@@ -121,6 +121,7 @@ struct ImportView: View {
     @State private var imagesExpanded = true
     @State private var documentsExpanded = true
     @State private var documentContent: (name: String, text: String)?
+    @State private var thumbnailCache: [String: NSImage] = [:]
 
     var body: some View {
         ZStack {
@@ -227,6 +228,7 @@ struct ImportView: View {
 
     private func selectCandidate(_ candidate: BridgeImportCandidate) {
         selectedCandidate = candidate
+        thumbnailCache = [:]
         candidateFiles = appService.getCandidateFiles(folderPath: candidate.folderPath)
 
         // Initialize per-candidate state if not present
@@ -916,12 +918,19 @@ struct ImportView: View {
             if url.hasPrefix("local:") {
                 let filename = String(url.dropFirst("local:".count))
                 let localPath = candidateFiles?.artwork.first(where: { $0.name == filename })?.path
-                if let path = localPath, let nsImage = NSImage(contentsOf: URL(fileURLWithPath: path)) {
-                    Image(nsImage: nsImage)
+                if let path = localPath, let thumb = thumbnailCache[path] {
+                    Image(nsImage: thumb)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                         .frame(width: 80, height: 80)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
+                } else if let path = localPath {
+                    coverPlaceholder
+                        .task {
+                            if let thumb = generateThumbnail(for: path, maxSize: 200) {
+                                thumbnailCache[path] = thumb
+                            }
+                        }
                 } else {
                     coverPlaceholder
                 }
@@ -1054,15 +1063,20 @@ struct ImportView: View {
                         isSelected: selectedUrl == localUrl,
                         label: file.name
                     ) {
-                        if let nsImage = NSImage(contentsOf: URL(fileURLWithPath: file.path)) {
-                            Image(nsImage: nsImage)
+                        if let thumb = thumbnailCache[file.path] {
+                            Image(nsImage: thumb)
                                 .resizable()
                                 .aspectRatio(contentMode: .fill)
                         } else {
                             ZStack {
                                 Theme.placeholder
-                                Image(systemName: "photo")
-                                    .foregroundStyle(.tertiary)
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            .task {
+                                if let thumb = generateThumbnail(for: file.path, maxSize: 240) {
+                                    thumbnailCache[file.path] = thumb
+                                }
                             }
                         }
                     }
@@ -1221,28 +1235,47 @@ struct ImportView: View {
 
     private func imageThumb(_ file: BridgeFileInfo) -> some View {
         VStack(spacing: 2) {
-            if let url = URL(string: "file://\(file.path)"),
-               let nsImage = NSImage(contentsOf: url) {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
+            if let thumb = thumbnailCache[file.path] {
+                Color.clear
                     .aspectRatio(1, contentMode: .fit)
+                    .overlay {
+                        Image(nsImage: thumb)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    }
+                    .clipped()
                     .clipShape(RoundedRectangle(cornerRadius: 4))
             } else {
                 ZStack {
                     Theme.placeholder
-                    Image(systemName: "photo")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                    ProgressView()
+                        .controlSize(.small)
                 }
                 .aspectRatio(1, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 4))
+                .task {
+                    if let thumb = generateThumbnail(for: file.path, maxSize: 200) {
+                        thumbnailCache[file.path] = thumb
+                    }
+                }
             }
             Text(file.name)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
+    }
+
+    private func generateThumbnail(for path: String, maxSize: Int) -> NSImage? {
+        let url = URL(fileURLWithPath: path) as CFURL
+        guard let source = CGImageSourceCreateWithURL(url, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: maxSize,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 
     // MARK: - Helpers
@@ -1447,6 +1480,7 @@ struct CandidateRow: View {
 struct ImageGalleryView: View {
     let images: [BridgeFileInfo]
     @Binding var currentIndex: Int?
+    @State private var thumbCache: [String: NSImage] = [:]
 
     private var safeIndex: Int {
         guard let idx = currentIndex, idx >= 0, idx < images.count else { return 0 }
@@ -1599,8 +1633,8 @@ struct ImageGalleryView: View {
         let isActive = index == safeIndex
         Button(action: { currentIndex = index }) {
             Group {
-                if let nsImage = NSImage(contentsOf: URL(fileURLWithPath: file.path)) {
-                    Image(nsImage: nsImage)
+                if let thumb = thumbCache[file.path] {
+                    Image(nsImage: thumb)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                         .frame(width: 56, height: 56)
@@ -1611,6 +1645,11 @@ struct ImageGalleryView: View {
                         .overlay {
                             Image(systemName: "photo")
                                 .foregroundStyle(.gray)
+                        }
+                        .task {
+                            if let thumb = galleryThumbnail(for: file.path) {
+                                thumbCache[file.path] = thumb
+                            }
                         }
                 }
             }
@@ -1624,6 +1663,18 @@ struct ImageGalleryView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    private func galleryThumbnail(for path: String) -> NSImage? {
+        let url = URL(fileURLWithPath: path) as CFURL
+        guard let source = CGImageSourceCreateWithURL(url, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: 112,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 
     private func navigatePrevious() {
