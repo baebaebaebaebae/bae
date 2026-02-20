@@ -21,6 +21,7 @@ struct QueueView: View {
     let onSkipTo: (Int) -> Void
     let onRemove: (Int) -> Void
     let onReorder: (Int, Int) -> Void
+    let onInsertTracks: ([String], Int) -> Void
     @State private var hoveredIndex: Int?
     @State private var draggedTrackId: String?
     @State private var dropInsertIndex: Int?
@@ -39,9 +40,14 @@ struct QueueView: View {
                 ContentUnavailableView(
                     "Queue is empty",
                     systemImage: "list.bullet",
-                    description: Text("Play an album to fill the queue")
+                    description: Text("Drag tracks here or play an album")
                 )
                 .frame(maxHeight: .infinity)
+                .dropDestination(for: String.self) { droppedIds, _ in
+                    guard !droppedIds.isEmpty else { return false }
+                    onInsertTracks(droppedIds, 0)
+                    return true
+                }
             } else {
                 ScrollView {
                     VStack(spacing: 0) {
@@ -62,13 +68,26 @@ struct QueueView: View {
                                 items: items,
                                 draggedTrackId: $draggedTrackId,
                                 dropInsertIndex: $dropInsertIndex,
-                                onReorder: onReorder
+                                onReorder: onReorder,
+                                onInsertTracks: onInsertTracks
                             ))
                         }
                         // Insertion line at the very end
                         if dropInsertIndex == items.count {
                             insertionLine
                         }
+
+                        // Drop zone at the end of the list for appending
+                        Color.clear
+                            .frame(height: 40)
+                            .onDrop(of: [UTType.plainText], delegate: QueueDropDelegate(
+                                targetIndex: items.count,
+                                items: items,
+                                draggedTrackId: $draggedTrackId,
+                                dropInsertIndex: $dropInsertIndex,
+                                onReorder: onReorder,
+                                onInsertTracks: onInsertTracks
+                            ))
                     }
                 }
                 .background(Theme.background)
@@ -257,37 +276,78 @@ private struct QueueDropDelegate: DropDelegate {
     @Binding var draggedTrackId: String?
     @Binding var dropInsertIndex: Int?
     let onReorder: (Int, Int) -> Void
+    let onInsertTracks: ([String], Int) -> Void
+
+    /// Whether this is an internal reorder (dragged from within the queue).
+    private var isInternalDrag: Bool {
+        guard let draggedId = draggedTrackId else { return false }
+        return items.contains { $0.id == draggedId }
+    }
 
     func dropEntered(info: DropInfo) {
-        guard let draggedId = draggedTrackId,
-              let fromIndex = items.firstIndex(where: { $0.id == draggedId }) else { return }
-
-        // Show insertion line: above targetIndex when dragging up, below when dragging down
-        if targetIndex > fromIndex {
-            dropInsertIndex = targetIndex + 1
-        } else if targetIndex < fromIndex {
-            dropInsertIndex = targetIndex
+        if let draggedId = draggedTrackId,
+           let fromIndex = items.firstIndex(where: { $0.id == draggedId }) {
+            // Internal reorder: show insertion line relative to source
+            if targetIndex > fromIndex {
+                dropInsertIndex = targetIndex + 1
+            } else if targetIndex < fromIndex {
+                dropInsertIndex = targetIndex
+            } else {
+                dropInsertIndex = nil
+            }
         } else {
-            dropInsertIndex = nil
+            // External drop: show insertion line at target position
+            dropInsertIndex = targetIndex
         }
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
+        DropProposal(operation: isInternalDrag ? .move : .copy)
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        guard let draggedId = draggedTrackId,
-              let fromIndex = items.firstIndex(where: { $0.id == draggedId }) else { return false }
-
-        // When dragging down, pass targetIndex + 1 because PlaybackQueue.reorder()
-        // does insert(to - 1) after remove(from) to compensate for the index shift.
-        let toIndex = targetIndex > fromIndex ? targetIndex + 1 : targetIndex
-        if toIndex != fromIndex {
-            onReorder(fromIndex, toIndex)
+        if let draggedId = draggedTrackId,
+           let fromIndex = items.firstIndex(where: { $0.id == draggedId }) {
+            // Internal reorder
+            let toIndex = targetIndex > fromIndex ? targetIndex + 1 : targetIndex
+            if toIndex != fromIndex {
+                onReorder(fromIndex, toIndex)
+            }
+            draggedTrackId = nil
+            dropInsertIndex = nil
+            return true
         }
 
-        draggedTrackId = nil
+        // External drop: load string IDs from the pasteboard
+        let providers = info.itemProviders(for: [UTType.plainText])
+        guard !providers.isEmpty else {
+            dropInsertIndex = nil
+            return false
+        }
+
+        let insertAt = targetIndex
+        let serialQueue = DispatchQueue(label: "bae.queue-drop-collect")
+        var collectedIds: [String] = []
+        let group = DispatchGroup()
+
+        for provider in providers {
+            group.enter()
+            provider.loadItem(forTypeIdentifier: UTType.plainText.identifier) { item, _ in
+                if let data = item as? Data, let str = String(data: data, encoding: .utf8) {
+                    serialQueue.sync { collectedIds.append(str) }
+                } else if let str = item as? String {
+                    serialQueue.sync { collectedIds.append(str) }
+                }
+                group.leave()
+            }
+        }
+
+        group.notify(queue: .main) {
+            if !collectedIds.isEmpty {
+                onInsertTracks(collectedIds, insertAt)
+            }
+        }
+
         dropInsertIndex = nil
         return true
     }
@@ -297,7 +357,9 @@ private struct QueueDropDelegate: DropDelegate {
     }
 
     func validateDrop(info: DropInfo) -> Bool {
-        draggedTrackId != nil
+        // Accept both internal drags and external drops with plain text
+        if draggedTrackId != nil { return true }
+        return info.hasItemsConforming(to: [UTType.plainText])
     }
 }
 
@@ -314,7 +376,8 @@ private struct QueueDropDelegate: DropDelegate {
         onClear: {},
         onSkipTo: { _ in },
         onRemove: { _ in },
-        onReorder: { _, _ in }
+        onReorder: { _, _ in },
+        onInsertTracks: { _, _ in }
     )
     .frame(width: 350, height: 500)
 }
@@ -330,7 +393,8 @@ private struct QueueDropDelegate: DropDelegate {
         onClear: {},
         onSkipTo: { _ in },
         onRemove: { _ in },
-        onReorder: { _, _ in }
+        onReorder: { _, _ in },
+        onInsertTracks: { _, _ in }
     )
     .frame(width: 350, height: 400)
 }

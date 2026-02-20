@@ -25,11 +25,14 @@ struct NowPlayingBar: View {
     let onQueueSkipTo: (Int) -> Void
     let onQueueRemove: (Int) -> Void
     let onQueueReorder: (Int, Int) -> Void
+    let onQueueInsertTracks: ([String], Int) -> Void
+    let onDropToQueue: ([String]) -> Void
     let onNavigateToAlbum: () -> Void
     let onNavigateToArtist: () -> Void
 
     @State private var isSeeking = false
     @State private var seekPosition: Double = 0
+    @State private var queueButtonDropTargeted = false
 
     var body: some View {
         HStack(spacing: 16) {
@@ -205,6 +208,21 @@ struct NowPlayingBar: View {
             .font(.body)
             .help("Queue")
             .accessibilityLabel("Queue")
+            .padding(4)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(queueButtonDropTargeted ? Color.accentColor.opacity(0.3) : Color.clear)
+            )
+            .scaleEffect(queueButtonDropTargeted ? 1.15 : 1.0)
+            .animation(.easeInOut(duration: 0.15), value: queueButtonDropTargeted)
+            .dropDestination(for: String.self) { droppedIds, _ in
+                queueButtonDropTargeted = false
+                guard !droppedIds.isEmpty else { return false }
+                onDropToQueue(droppedIds)
+                return true
+            } isTargeted: { targeted in
+                queueButtonDropTargeted = targeted
+            }
             .popover(isPresented: $showQueue, arrowEdge: .top) {
                 QueueView(
                     isActive: queueIsActive,
@@ -216,7 +234,8 @@ struct NowPlayingBar: View {
                     onClear: onQueueClear,
                     onSkipTo: onQueueSkipTo,
                     onRemove: onQueueRemove,
-                    onReorder: onQueueReorder
+                    onReorder: onQueueReorder,
+                    onInsertTracks: onQueueInsertTracks
                 )
                 .frame(width: 350, height: 500)
             }
@@ -307,6 +326,8 @@ struct NowPlayingBar: View {
         onQueueSkipTo: { _ in },
         onQueueRemove: { _ in },
         onQueueReorder: { _, _ in },
+        onQueueInsertTracks: { _, _ in },
+        onDropToQueue: { _ in },
         onNavigateToAlbum: {},
         onNavigateToArtist: {}
     )
@@ -338,6 +359,8 @@ struct NowPlayingBar: View {
         onQueueSkipTo: { _ in },
         onQueueRemove: { _ in },
         onQueueReorder: { _, _ in },
+        onQueueInsertTracks: { _, _ in },
+        onDropToQueue: { _ in },
         onNavigateToAlbum: {},
         onNavigateToArtist: {}
     )

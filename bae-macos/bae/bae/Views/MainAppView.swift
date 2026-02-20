@@ -193,6 +193,12 @@ struct MainAppView: View {
                     onQueueReorder: { from, to in
                         appService.reorderQueue(fromIndex: UInt32(from), toIndex: UInt32(to))
                     },
+                    onQueueInsertTracks: { ids, _ in
+                        resolveAndAddToQueue(ids: ids)
+                    },
+                    onDropToQueue: { ids in
+                        resolveAndAddToQueue(ids: ids)
+                    },
                     onNavigateToAlbum: {
                         if let albumId = appService.currentAlbumId {
                             selectedAlbumId = albumId
@@ -295,6 +301,29 @@ struct MainAppView: View {
                 appService.search(query: "")
             }
         }
+    }
+
+    // MARK: - Queue drop handling
+
+    /// Resolves IDs (which may be track IDs or album IDs) into track IDs and adds them to the end of the queue.
+    private func resolveAndAddToQueue(ids: [String]) {
+        Task.detached { [appService] in
+            var trackIds: [String] = []
+            for id in ids {
+                if let detail = try? appService.appHandle.getAlbumDetail(albumId: id) {
+                    trackIds.append(contentsOf: detail.releases.first?.tracks.map(\.id) ?? [])
+                } else {
+                    trackIds.append(id)
+                }
+            }
+            if !trackIds.isEmpty {
+                await MainActor.run {
+                    appService.addToQueue(trackIds: trackIds)
+                }
+            }
+        }
+    }
+
     }
 
     // MARK: - Scan + Drop
