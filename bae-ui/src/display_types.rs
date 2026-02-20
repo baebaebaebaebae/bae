@@ -368,6 +368,35 @@ impl CategorizedFileInfo {
     pub fn is_empty(&self) -> bool {
         self.total_count() == 0
     }
+
+    /// Number of audio tracks (counting CUE tracks, not CUE/FLAC file pairs)
+    pub fn track_count(&self) -> usize {
+        match &self.audio {
+            AudioContentInfo::CueFlacPairs(pairs) => pairs.iter().map(|p| p.track_count).sum(),
+            AudioContentInfo::TrackFiles(tracks) => tracks.len(),
+        }
+    }
+
+    /// Audio format label (e.g. "FLAC", "CUE/FLAC")
+    pub fn audio_format_label(&self) -> &'static str {
+        match &self.audio {
+            AudioContentInfo::CueFlacPairs(_) => "CUE/FLAC",
+            AudioContentInfo::TrackFiles(_) => "FLAC",
+        }
+    }
+
+    /// Whether the audio is CUE/FLAC pairs
+    pub fn is_cue_flac(&self) -> bool {
+        matches!(&self.audio, AudioContentInfo::CueFlacPairs(_))
+    }
+
+    /// Total size of all audio files in bytes
+    pub fn audio_total_size(&self) -> u64 {
+        match &self.audio {
+            AudioContentInfo::CueFlacPairs(pairs) => pairs.iter().map(|p| p.total_size).sum(),
+            AudioContentInfo::TrackFiles(tracks) => tracks.iter().map(|t| t.size).sum(),
+        }
+    }
 }
 
 /// Torrent file info for UI display

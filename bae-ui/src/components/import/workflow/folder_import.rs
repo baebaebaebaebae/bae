@@ -6,12 +6,12 @@
 //! User picks a folder (full-width folder selector).
 //!
 //! ## Working State (after folder selected)
-//! Three-column layout with context header:
+//! Two-column layout with context header:
 //! - Left sidebar: List of detected releases with status
 //! - Detail area (right of sidebar):
-//!   - Header: Shows selected folder name and current step (Identifying/Confirming)
-//!   - Files column (narrow): SmartFileDisplay showing folder contents
-//!   - Workflow area (main): Identify/Confirm workflow for selected release
+//!   - Header: Folder name, track count, format, and file size
+//!   - Files section (top): SmartFileDisplay showing folder contents
+//!   - Workflow area (bottom): Identify/Confirm workflow for selected release
 //!
 //! ## Reactive State Pattern
 //! Pass `ReadStore<ImportState>` down through the tree. Use lenses to read
@@ -23,7 +23,7 @@ use super::{
     MultipleExactMatchesView, SmartFileDisplayView,
 };
 use crate::components::helpers::Tooltip;
-use crate::components::icons::{CloudOffIcon, LoaderIcon};
+use crate::components::icons::{CloudOffIcon, DiscIcon, HardDriveIcon, LoaderIcon, RowsIcon};
 use crate::components::{Button, ButtonSize, ButtonVariant};
 use crate::components::{PanelPosition, ResizablePanel, ResizeDirection};
 use crate::display_types::{
@@ -114,10 +114,10 @@ pub fn FolderImportView(props: FolderImportViewProps) -> Element {
                 // Context header showing folder name and step
                 DetailHeader { state }
 
-                // Content: Files | Workflow
-                div { class: "flex-1 flex flex-row min-h-0",
-                    // Left: Files column (narrow, scrollable)
-                    FilesColumn {
+                // Content: Files on top, workflow on bottom
+                div { class: "flex-1 flex flex-col min-h-0",
+                    // Top: Files section (resizable height)
+                    FilesSection {
                         state,
                         viewing_index: props.viewing_index,
                         text_file_content: props.text_file_content.clone(),
@@ -126,8 +126,8 @@ pub fn FolderImportView(props: FolderImportViewProps) -> Element {
                         on_encoding_change: props.on_encoding_change,
                     }
 
-                    // Right: Workflow (main, fills remaining space)
-                    div { class: "flex-1 min-h-0 flex flex-col bg-gray-800/30",
+                    // Bottom: Workflow (fills remaining space)
+                    div { class: "flex-1 min-h-0 flex flex-col",
                         WorkflowContent {
                             state,
                             on_skip_detection: props.on_skip_detection,
@@ -457,7 +457,7 @@ fn ConfirmStep(
 // Detail Header
 // ============================================================================
 
-/// Header showing the selected folder name
+/// Header showing the selected folder name and file summary
 #[component]
 fn DetailHeader(state: ReadStore<ImportState>) -> Element {
     let folder_path = state.current_candidate_key().read().clone();
@@ -469,6 +469,13 @@ fn DetailHeader(state: ReadStore<ImportState>) -> Element {
             .find(|c| &c.path == key)
             .map(|c| c.name.clone())
     });
+    let files = folder_path.as_ref().and_then(|key| {
+        state
+            .candidate_states()
+            .read()
+            .get(key)
+            .map(|s| s.files().clone())
+    });
 
     let Some(name) = folder_name else {
         return rsx! {};
@@ -477,11 +484,38 @@ fn DetailHeader(state: ReadStore<ImportState>) -> Element {
     let tooltip = folder_path.unwrap_or_default();
 
     rsx! {
-        div { class: "flex-shrink-0 px-4 py-4 bg-gray-800/30",
+        div { class: "flex-shrink-0 px-4 py-3 bg-gray-800/30",
             Tooltip { text: tooltip, placement: Placement::Bottom, nowrap: false,
                 div { class: "cursor-default",
                     span { class: "text-[0.9375rem] font-medium text-gray-300 truncate select-text",
                         "{name}"
+                    }
+                }
+            }
+            if let Some(files) = files {
+                {
+                    let track_count = files.track_count();
+                    let format_label = files.audio_format_label();
+                    let total_size = crate::format_file_size(files.audio_total_size() as i64);
+                    let is_cue = files.is_cue_flac();
+                    rsx! {
+                        div { class: "flex items-center gap-3 mt-1.5 text-xs text-gray-500",
+                            if track_count > 0 {
+                                span { class: "flex items-center gap-1",
+                                    if is_cue {
+                                        DiscIcon { class: "w-3.5 h-3.5" }
+                                    } else {
+                                        RowsIcon { class: "w-3.5 h-3.5" }
+                                    }
+                                    "{track_count} tracks"
+                                }
+                                span { class: "text-gray-600", "{format_label}" }
+                                span { class: "flex items-center gap-1",
+                                    HardDriveIcon { class: "w-3.5 h-3.5" }
+                                    "{total_size}"
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -490,12 +524,12 @@ fn DetailHeader(state: ReadStore<ImportState>) -> Element {
 }
 
 // ============================================================================
-// Files Column
+// Files Section (top)
 // ============================================================================
 
-/// Vertical files column showing folder contents
+/// Files section showing folder contents (top of vertical split)
 #[component]
-fn FilesColumn(
+fn FilesSection(
     state: ReadStore<ImportState>,
     viewing_index: ReadSignal<Option<usize>>,
     text_file_content: Option<Result<String, String>>,
@@ -516,25 +550,15 @@ fn FilesColumn(
         })
         .unwrap_or_default();
 
-    // Snap to image grid widths when images present
-    // thumbnail=72px, gap=8px, padding=32px → width(N) = 80N + 24
-    let has_images = !files.artwork.is_empty();
-    let snap_points = if has_images {
-        Some(vec![184.0, 264.0, 344.0]) // 2, 3, 4 columns
-    } else {
-        None
-    };
-
     rsx! {
         ResizablePanel {
-            storage_key: "import-files-width",
-            min_size: 184.0,
-            max_size: 344.0,
-            default_size: 264.0,
-            grabber_span_ratio: 0.8,
-            direction: ResizeDirection::Horizontal,
+            storage_key: "import-files-height",
+            min_size: 100.0,
+            max_size: 400.0,
+            default_size: 180.0,
+            grabber_span_ratio: 0.6,
+            direction: ResizeDirection::Vertical,
             position: PanelPosition::Relative,
-            snap_points,
             div { class: "h-full overflow-y-auto pt-1 px-4 pb-4 bg-gray-800/30",
                 SmartFileDisplayView {
                     files,
