@@ -117,6 +117,7 @@ struct ImportView: View {
     @State private var candidateStates: [String: CandidateSearchState] = [:]
 
     @State private var galleryIndex: Int?
+    @FocusState private var galleryFocused: Bool
     @State private var showCoverPicker = false
     @State private var audioExpanded = false
     @State private var imagesExpanded = true
@@ -149,31 +150,32 @@ struct ImportView: View {
 
             // Gallery overlay
             if galleryIndex != nil, let files = candidateFiles, !files.artwork.isEmpty {
-                ZStack {
-                    Color.black.opacity(0.6)
-                        .ignoresSafeArea()
-                        .onTapGesture { galleryIndex = nil }
-                    ImageGalleryView(images: files.artwork, currentIndex: $galleryIndex)
-                        .padding(40)
-                }
-                .focusable()
-                .focusEffectDisabled()
-                .onKeyPress(.escape) {
-                    galleryIndex = nil
-                    return .handled
-                }
-                .onKeyPress(.leftArrow) {
-                    if let idx = galleryIndex, idx > 0 {
-                        galleryIndex = idx - 1
+                Color.black.opacity(0.6)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { galleryIndex = nil }
+                ImageGalleryView(images: files.artwork, currentIndex: $galleryIndex)
+                    .allowsHitTesting(true)
+                    .focusable()
+                    .focusEffectDisabled()
+                    .focused($galleryFocused)
+                    .onKeyPress(.escape) {
+                        galleryIndex = nil
+                        return .handled
                     }
-                    return .handled
-                }
-                .onKeyPress(.rightArrow) {
-                    if let idx = galleryIndex, idx < files.artwork.count - 1 {
-                        galleryIndex = idx + 1
+                    .onKeyPress(.leftArrow) {
+                        if let idx = galleryIndex {
+                            galleryIndex = idx == 0 ? files.artwork.count - 1 : idx - 1
+                        }
+                        return .handled
                     }
-                    return .handled
-                }
+                    .onKeyPress(.rightArrow) {
+                        if let idx = galleryIndex {
+                            galleryIndex = idx == files.artwork.count - 1 ? 0 : idx + 1
+                        }
+                        return .handled
+                    }
+                    .onAppear { galleryFocused = true }
             }
 
             // Document viewer overlay
@@ -1471,105 +1473,103 @@ struct ImageGalleryView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Main image area
-            GeometryReader { geometry in
-                let availableHeight = geometry.size.height - 120
-                ZStack {
-                    if let nsImage = NSImage(contentsOf: URL(fileURLWithPath: currentFile.path)) {
-                        Image(nsImage: nsImage)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxWidth: geometry.size.width - 120, maxHeight: availableHeight)
-                            .shadow(color: .black.opacity(0.5), radius: 20)
-                    } else {
-                        VStack(spacing: 8) {
-                            Image(systemName: "photo")
-                                .font(.largeTitle)
-                                .foregroundStyle(.gray)
-                            Text("Cannot load image")
-                                .font(.callout)
-                                .foregroundStyle(.gray)
-                        }
-                    }
-
-                    // Navigation buttons
-                    if canCycle {
-                        HStack {
-                            Button(action: navigatePrevious) {
-                                ZStack {
-                                    Circle()
-                                        .fill(.black.opacity(0.4))
-                                        .frame(width: 48, height: 48)
-                                    Image(systemName: "chevron.left")
-                                        .font(.title2.weight(.medium))
-                                        .foregroundStyle(.white.opacity(0.8))
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            Spacer()
-                            Button(action: navigateNext) {
-                                ZStack {
-                                    Circle()
-                                        .fill(.black.opacity(0.4))
-                                        .frame(width: 48, height: 48)
-                                    Image(systemName: "chevron.right")
-                                        .font(.title2.weight(.medium))
-                                        .foregroundStyle(.white.opacity(0.8))
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.horizontal, 16)
-                    }
-
-                    // Close button (top-right)
-                    VStack {
-                        HStack {
-                            Spacer()
-                            Button(action: { currentIndex = nil }) {
-                                ZStack {
-                                    Circle()
-                                        .fill(.black.opacity(0.4))
-                                        .frame(width: 36, height: 36)
-                                    Image(systemName: "xmark")
-                                        .font(.body.weight(.semibold))
-                                        .foregroundStyle(.white.opacity(0.8))
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .padding(12)
-                        }
-                        Spacer()
-                    }
+        ZStack {
+            // Main image (centered, not tappable — taps pass through to dismiss overlay)
+            if let nsImage = NSImage(contentsOf: URL(fileURLWithPath: currentFile.path)) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .padding(60)
+                    .shadow(color: .black.opacity(0.5), radius: 20)
+                    .allowsHitTesting(false)
+            } else {
+                VStack(spacing: 8) {
+                    Image(systemName: "photo")
+                        .font(.largeTitle)
+                        .foregroundStyle(.gray)
+                    Text("Cannot load image")
+                        .font(.callout)
+                        .foregroundStyle(.gray)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .onTapGesture { currentIndex = nil }
+                .allowsHitTesting(false)
             }
 
-            // Thumbnail strip (centered at bottom)
+            // Navigation buttons (left/right edges)
             if canCycle {
-                ScrollViewReader { scrollProxy in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(Array(images.enumerated()), id: \.offset) { index, file in
-                                thumbnailView(for: file, at: index)
-                                    .id(index)
+                HStack {
+                    Button(action: navigatePrevious) {
+                        ZStack {
+                            Circle()
+                                .fill(.black.opacity(0.4))
+                                .frame(width: 48, height: 48)
+                            Image(systemName: "chevron.left")
+                                .font(.title2.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    Spacer()
+                    Button(action: navigateNext) {
+                        ZStack {
+                            Circle()
+                                .fill(.black.opacity(0.4))
+                                .frame(width: 48, height: 48)
+                            Image(systemName: "chevron.right")
+                                .font(.title2.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 16)
+            }
+
+            // Close button (top-right)
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: { currentIndex = nil }) {
+                        ZStack {
+                            Circle()
+                                .fill(.black.opacity(0.4))
+                                .frame(width: 36, height: 36)
+                            Image(systemName: "xmark")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .padding(12)
+                }
+                Spacer()
+            }
+
+            // Thumbnail strip (bottom center)
+            if canCycle {
+                VStack {
+                    Spacer()
+                    ScrollViewReader { scrollProxy in
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(Array(images.enumerated()), id: \.offset) { index, file in
+                                    thumbnailView(for: file, at: index)
+                                        .id(index)
+                                }
+                            }
+                            .padding(.horizontal, 8)
+                        }
+                        .frame(height: 64)
+                        .onChange(of: safeIndex) { _, newIndex in
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                scrollProxy.scrollTo(newIndex, anchor: .center)
                             }
                         }
-                        .padding(.horizontal, 8)
                     }
-                    .frame(height: 64)
-                    .onChange(of: safeIndex) { _, newIndex in
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            scrollProxy.scrollTo(newIndex, anchor: .center)
-                        }
-                    }
+                    .padding(.bottom, 16)
                 }
-                .padding(.bottom, 16)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
