@@ -6,20 +6,22 @@ enum MainSection {
     case importing
 }
 
-// Adjusts the vertical position of the window's traffic light buttons (close/minimize/zoom).
+// Adjusts the position of the window's traffic light buttons (close/minimize/zoom).
 // With .hiddenTitleBar, the buttons sit at the system default position which doesn't align
 // with our custom title bar content. This modifier accesses the NSWindow and shifts them.
 // Reapplies on window resize since macOS resets button positions during resize.
 // Technique from: https://medium.com/@clyapp/fix-the-problem-that-nswindow-traffic-light-buttons-always-revert-to-its-origin-position-after-6a13675df18a
 struct TrafficLightOffset: ViewModifier {
+    let xOffset: CGFloat
     let yOffset: CGFloat
 
     func body(content: Content) -> some View {
         content
-            .background(TrafficLightHelper(yOffset: yOffset))
+            .background(TrafficLightHelper(xOffset: xOffset, yOffset: yOffset))
     }
 
     private struct TrafficLightHelper: NSViewRepresentable {
+        let xOffset: CGFloat
         let yOffset: CGFloat
 
         func makeNSView(context: Context) -> NSView {
@@ -27,7 +29,7 @@ struct TrafficLightOffset: ViewModifier {
             DispatchQueue.main.async {
                 guard let window = view.window else { return }
                 adjustButtons(in: window)
-                context.coordinator.observeResize(window: window, yOffset: yOffset)
+                context.coordinator.observeResize(window: window, xOffset: xOffset, yOffset: yOffset)
             }
             return view
         }
@@ -42,6 +44,7 @@ struct TrafficLightOffset: ViewModifier {
             for buttonType: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
                 guard let button = window.standardWindowButton(buttonType) else { continue }
                 var origin = button.frame.origin
+                origin.x += xOffset
                 origin.y -= yOffset
                 button.setFrameOrigin(origin)
             }
@@ -50,7 +53,7 @@ struct TrafficLightOffset: ViewModifier {
         class Coordinator: NSObject {
             private var observation: Any?
 
-            func observeResize(window: NSWindow, yOffset: CGFloat) {
+            func observeResize(window: NSWindow, xOffset: CGFloat, yOffset: CGFloat) {
                 observation = NotificationCenter.default.addObserver(
                     forName: NSWindow.didResizeNotification,
                     object: window,
@@ -60,6 +63,7 @@ struct TrafficLightOffset: ViewModifier {
                     for buttonType: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
                         guard let button = window.standardWindowButton(buttonType) else { continue }
                         var origin = button.frame.origin
+                        origin.x += xOffset
                         origin.y -= yOffset
                         button.setFrameOrigin(origin)
                     }
@@ -73,9 +77,32 @@ struct TrafficLightOffset: ViewModifier {
     }
 }
 
+// Makes an area behave like a native title bar: draggable to move the window,
+// double-click to zoom (maximize/restore). Needed because .hiddenTitleBar removes
+// the system title bar and our custom HStack doesn't inherit that behavior.
+struct WindowDragArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = DragView()
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private class DragView: NSView {
+        override func mouseDown(with event: NSEvent) {
+            if event.clickCount == 2 {
+                window?.zoom(nil)
+            } else {
+                window?.performDrag(with: event)
+            }
+        }
+    }
+}
+
 struct SearchField: View {
     @Binding var text: String
     var prompt: String
+    var onEscape: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 6) {
@@ -84,6 +111,11 @@ struct SearchField: View {
                 .font(.caption)
             TextField(prompt, text: $text)
                 .textFieldStyle(.plain)
+                .onKeyPress(.escape) {
+                    text = ""
+                    onEscape?()
+                    return .handled
+                }
             if !text.isEmpty {
                 Button(action: { text = "" }) {
                     Image(systemName: "xmark.circle.fill")
@@ -105,13 +137,16 @@ struct MainAppView: View {
     @Environment(\.openSettings) private var openSettings
     @State private var activeSection: MainSection = .library
     @State private var searchText: String = ""
+    @State private var selectedAlbumId: String?
     @State private var showQueue = false
+    @State private var searchDebounceTask: Task<Void, Never>?
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
             titleBar
             ZStack {
-                LibraryView(appService: appService, searchText: $searchText)
+                LibraryView(appService: appService, selectedAlbumId: $selectedAlbumId)
                     .opacity(activeSection == .library ? 1 : 0)
                     .allowsHitTesting(activeSection == .library)
 
@@ -163,7 +198,7 @@ struct MainAppView: View {
         }
         .toolbar(.hidden)
         .ignoresSafeArea(.all, edges: .top)
-        .modifier(TrafficLightOffset(yOffset: 3))
+        .modifier(TrafficLightOffset(xOffset: 6, yOffset: 7))
         .onKeyPress(.space) {
             appService.togglePlayPause()
             return .handled
@@ -179,8 +214,12 @@ struct MainAppView: View {
 
     // MARK: - Title bar
 
+    private var showSearchResults: Bool {
+        searchFocused && !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     private var titleBar: some View {
-        HStack(spacing: 12) {
+        ZStack {
             Picker("Section", selection: $activeSection) {
                 Text("Library").tag(MainSection.library)
                 Text("Import").tag(MainSection.importing)
@@ -189,10 +228,30 @@ struct MainAppView: View {
             .labelsHidden()
             .frame(width: 200)
 
-            Spacer()
-
-            SearchField(text: $searchText, prompt: "Artists, albums, tracks")
+            HStack(spacing: 12) {
+                Spacer()
+                SearchField(text: $searchText, prompt: "Artists, albums, tracks", onEscape: { searchFocused = false })
+                .focused($searchFocused)
                 .frame(width: 250)
+                .popover(isPresented: .constant(showSearchResults), arrowEdge: .bottom) {
+                    SearchView(
+                        results: appService.searchResults,
+                        searchQuery: appService.searchQuery,
+                        resolveImageURL: { appService.imageURL(for: $0) },
+                        onSelectArtist: { _ in
+                            searchFocused = false
+                            searchText = ""
+                        },
+                        onSelectAlbum: { albumId in
+                            searchFocused = false
+                            searchText = ""
+                            appService.search(query: "")
+                            selectedAlbumId = albumId
+                        },
+                        onPlayTrack: { _ in }
+                    )
+                    .frame(width: 400, height: 350)
+                }
 
             Button(action: { openSettings() }) {
                 Image(systemName: "gearshape")
@@ -200,12 +259,28 @@ struct MainAppView: View {
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
             .help("Settings")
+            }
         }
-        .padding(.top, 6)
+        .padding(.top, 8)
         .padding(.bottom, 8)
         .padding(.leading, 80)
         .padding(.trailing, 16)
+        .background { WindowDragArea() }
         .background(Theme.surface)
+        .onChange(of: searchText) { _, newValue in
+            searchDebounceTask?.cancel()
+            searchDebounceTask = Task {
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+                appService.search(query: newValue)
+            }
+        }
+        .onChange(of: searchFocused) { _, focused in
+            if !focused {
+                searchText = ""
+                appService.search(query: "")
+            }
+        }
     }
 
     // MARK: - Scan + Drop

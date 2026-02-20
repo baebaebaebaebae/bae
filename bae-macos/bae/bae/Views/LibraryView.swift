@@ -74,6 +74,7 @@ struct LibraryView: View {
                         onAddToQueue: { albumId in addAlbumToQueue(albumId: albumId) },
                         onAddNext: { albumId in addAlbumNext(albumId: albumId) }
                     )
+                    .frame(maxWidth: 1200)
                     .frame(maxWidth: .infinity)
                     if let albumId = selectedAlbumId {
                         Divider()
