@@ -117,6 +117,7 @@ struct ImportView: View {
     @State private var candidateStates: [String: CandidateSearchState] = [:]
 
     @State private var galleryIndex: Int?
+    @State private var showCoverPicker = false
     @State private var audioExpanded = false
     @State private var imagesExpanded = true
     @State private var documentsExpanded = true
@@ -797,8 +798,24 @@ struct ImportView: View {
             VStack(alignment: .leading, spacing: 12) {
                 // Release info card
                 HStack(alignment: .top, spacing: 12) {
-                    // Cover art thumbnail
+                    // Cover art thumbnail (tappable to open picker)
                     confirmationCoverThumb(selectedUrl: selectedUrl)
+                        .overlay(alignment: .topTrailing) {
+                            if !detail.coverArt.isEmpty || (candidateFiles?.artwork.isEmpty == false) {
+                                Image(systemName: "pencil")
+                                    .font(.caption2)
+                                    .foregroundStyle(.white)
+                                    .padding(3)
+                                    .background(.black.opacity(0.5))
+                                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                                    .padding(2)
+                            }
+                        }
+                        .onTapGesture {
+                            if !detail.coverArt.isEmpty || (candidateFiles?.artwork.isEmpty == false) {
+                                showCoverPicker = true
+                            }
+                        }
 
                     // Metadata
                     VStack(alignment: .leading, spacing: 3) {
@@ -882,11 +899,6 @@ struct ImportView: View {
                     }
                 }
 
-                // Cover art selection (below tracks)
-                if !detail.coverArt.isEmpty || (candidateFiles?.artwork.isEmpty == false) {
-                    coverArtSection(for: folderPath, detail: detail)
-                }
-
                 // Storage mode
                 VStack(alignment: .leading, spacing: 4) {
                     Picker("Storage", selection: Binding(
@@ -909,6 +921,19 @@ struct ImportView: View {
                 confirmationActionRow(candidate: candidate, detail: detail, status: status, importing: importing, isComplete: isComplete)
             }
             .padding()
+        }
+        .sheet(isPresented: $showCoverPicker) {
+            CoverPickerView(
+                remoteCoverArts: detail.coverArt,
+                localArtwork: candidateFiles?.artwork ?? [],
+                selectedUrl: selectedUrl,
+                onSelect: { url in
+                    candidateStates[folderPath]?.selectedCoverUrl = url
+                    showCoverPicker = false
+                },
+                onDone: { showCoverPicker = false }
+            )
+            .frame(width: 600, height: 500)
         }
     }
 
@@ -1018,90 +1043,6 @@ struct ImportView: View {
                 }
                 .buttonStyle(.borderedProminent)
             }
-        }
-    }
-
-    @ViewBuilder
-    private func coverArtSection(for folderPath: String, detail: BridgeReleaseDetail) -> some View {
-        let selectedUrl = candidateStates[folderPath]?.selectedCoverUrl
-        let localArtwork = candidateFiles?.artwork ?? []
-
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Cover Art")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
-                // Remote cover options
-                ForEach(Array(detail.coverArt.enumerated()), id: \.offset) { _, cover in
-                    coverOption(
-                        isSelected: selectedUrl == cover.url,
-                        label: cover.source == "musicbrainz" ? "Cover Art Archive" : "Discogs"
-                    ) {
-                        AsyncImage(url: URL(string: cover.url)) { image in
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        } placeholder: {
-                            ZStack {
-                                Theme.placeholder
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                        }
-                    }
-                    .onTapGesture {
-                        candidateStates[folderPath]?.selectedCoverUrl = cover.url
-                    }
-                }
-
-                // Local artwork options
-                ForEach(Array(localArtwork.enumerated()), id: \.offset) { _, file in
-                    let localUrl = "local:\(file.name)"
-                    coverOption(
-                        isSelected: selectedUrl == localUrl,
-                        label: file.name
-                    ) {
-                        if let thumb = thumbnailCache[file.path] {
-                            Image(nsImage: thumb)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        } else {
-                            ZStack {
-                                Theme.placeholder
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                            .task {
-                                if let thumb = generateThumbnail(for: file.path, maxSize: 240) {
-                                    thumbnailCache[file.path] = thumb
-                                }
-                            }
-                        }
-                    }
-                    .onTapGesture {
-                        candidateStates[folderPath]?.selectedCoverUrl = localUrl
-                    }
-                }
-            }
-        }
-    }
-
-    private func coverOption<Content: View>(isSelected: Bool, label: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(spacing: 2) {
-            content()
-                .frame(width: 120, height: 120)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
-                )
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .frame(width: 120)
         }
     }
 
@@ -1686,6 +1627,266 @@ struct ImageGalleryView: View {
     private func navigateNext() {
         if canCycle {
             currentIndex = safeIndex == images.count - 1 ? 0 : safeIndex + 1
+        }
+    }
+}
+
+// MARK: - Cover Picker
+
+/// A gallery-style picker for selecting cover art from remote and local sources.
+/// Presented as a sheet from the import confirmation view.
+struct CoverPickerView: View {
+    let remoteCoverArts: [BridgeCoverArt]
+    let localArtwork: [BridgeFileInfo]
+    let selectedUrl: String?
+    let onSelect: (String) -> Void
+    let onDone: () -> Void
+
+    @State private var currentIndex: Int = 0
+
+    private struct CoverItem {
+        let url: String  // remote URL or "local:filename"
+        let label: String
+        let isLocal: Bool
+        let localPath: String?
+    }
+
+    private var items: [CoverItem] {
+        var result: [CoverItem] = []
+        for cover in remoteCoverArts {
+            result.append(CoverItem(
+                url: cover.url,
+                label: cover.source == "musicbrainz" ? "Cover Art Archive" : "Discogs",
+                isLocal: false,
+                localPath: nil
+            ))
+        }
+        for file in localArtwork {
+            result.append(CoverItem(
+                url: "local:\(file.name)",
+                label: file.name,
+                isLocal: true,
+                localPath: file.path
+            ))
+        }
+        return result
+    }
+
+    private var safeIndex: Int {
+        guard currentIndex >= 0, currentIndex < items.count else { return 0 }
+        return currentIndex
+    }
+
+    private var currentItem: CoverItem {
+        items[safeIndex]
+    }
+
+    private var canCycle: Bool {
+        items.count > 1
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Spacer()
+                Button("Done") { onDone() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+
+            Divider()
+
+            if items.isEmpty {
+                ContentUnavailableView(
+                    "No cover art available",
+                    systemImage: "photo",
+                    description: Text("No remote or local artwork found")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                // Large preview
+                GeometryReader { geometry in
+                    let previewHeight = geometry.size.height - 120
+                    ZStack {
+                        coverPreview(for: currentItem)
+                            .frame(maxWidth: geometry.size.width - 40, maxHeight: previewHeight)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+
+                // Source label + count
+                VStack(spacing: 8) {
+                    Text("\(currentItem.label) \u{2014} \(safeIndex + 1) of \(items.count)")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    // Thumbnail strip
+                    if canCycle {
+                        ScrollViewReader { scrollProxy in
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                                        pickerThumbnail(for: item, at: index)
+                                            .id(index)
+                                    }
+                                }
+                                .padding(.horizontal, 8)
+                            }
+                            .frame(height: 64)
+                            .onChange(of: safeIndex) { _, newIndex in
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    scrollProxy.scrollTo(newIndex, anchor: .center)
+                                }
+                            }
+                        }
+                    }
+
+                    // Use This Cover button
+                    HStack {
+                        Spacer()
+                        Button("Use This Cover") {
+                            onSelect(currentItem.url)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(currentItem.url == selectedUrl)
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .padding(.bottom, 12)
+            }
+        }
+        .background(Theme.background)
+        .onAppear {
+            // Start at the currently selected cover
+            if let selectedUrl, let idx = items.firstIndex(where: { $0.url == selectedUrl }) {
+                currentIndex = idx
+            }
+        }
+        .onKeyPress(.leftArrow) {
+            navigatePrevious()
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            navigateNext()
+            return .handled
+        }
+        .onKeyPress(.escape) {
+            onDone()
+            return .handled
+        }
+    }
+
+    @ViewBuilder
+    private func coverPreview(for item: CoverItem) -> some View {
+        if item.isLocal {
+            if let path = item.localPath, let nsImage = NSImage(contentsOf: URL(fileURLWithPath: path)) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .shadow(radius: 10)
+            } else {
+                imageFallback
+            }
+        } else {
+            AsyncImage(url: URL(string: item.url)) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .shadow(radius: 10)
+                case .failure:
+                    imageFallback
+                default:
+                    ProgressView()
+                        .controlSize(.large)
+                }
+            }
+        }
+    }
+
+    private var imageFallback: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "photo")
+                .font(.largeTitle)
+                .foregroundStyle(.tertiary)
+            Text("Cannot load image")
+                .font(.callout)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    @ViewBuilder
+    private func pickerThumbnail(for item: CoverItem, at index: Int) -> some View {
+        let isActive = index == safeIndex
+        let isSelected = item.url == selectedUrl
+
+        Button(action: { currentIndex = index }) {
+            Group {
+                if item.isLocal {
+                    if let path = item.localPath, let nsImage = NSImage(contentsOf: URL(fileURLWithPath: path)) {
+                        Image(nsImage: nsImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 56, height: 56)
+                            .clipped()
+                    } else {
+                        thumbnailPlaceholder
+                    }
+                } else {
+                    AsyncImage(url: URL(string: item.url)) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 56, height: 56)
+                                .clipped()
+                        case .failure:
+                            thumbnailPlaceholder
+                        default:
+                            Theme.placeholder
+                                .frame(width: 56, height: 56)
+                        }
+                    }
+                }
+            }
+            .frame(width: 56, height: 56)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(
+                        isSelected ? Color.accentColor : (isActive ? Color.primary : Color.clear),
+                        lineWidth: isSelected || isActive ? 2 : 0
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var thumbnailPlaceholder: some View {
+        Color.gray.opacity(0.3)
+            .frame(width: 56, height: 56)
+            .overlay {
+                Image(systemName: "photo")
+                    .foregroundStyle(.gray)
+            }
+    }
+
+    private func navigatePrevious() {
+        if canCycle {
+            currentIndex = safeIndex == 0 ? items.count - 1 : safeIndex - 1
+        }
+    }
+
+    private func navigateNext() {
+        if canCycle {
+            currentIndex = safeIndex == items.count - 1 ? 0 : safeIndex + 1
         }
     }
 }
