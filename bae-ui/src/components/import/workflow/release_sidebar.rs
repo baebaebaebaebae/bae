@@ -194,26 +194,38 @@ pub fn ReleaseSidebarView(
                 // Divider
                 div { class: "mx-1.5 mb-1.5 border-b border-white/10" }
 
-                // Folder list
-                div { class: "flex-1 flex flex-col overflow-y-auto p-1.5 pt-0 space-y-0.5 min-w-0",
-                    for (index , candidate) in detected.iter().enumerate() {
-                        CandidateRow {
-                            key: "{index}",
-                            index,
-                            name: candidate.name.clone(),
-                            path: candidate.path.clone(),
-                            status: compute_status(&candidate_states, &candidate.path),
-                            is_selected: selected_index == Some(index),
-                            on_select: move |index: usize| {
-                                if *show_menu.peek() {
-                                    show_menu.set(false);
-                                    pending_select.set(Some(index));
-                                } else {
-                                    on_select.call(index);
+                // Folder list — complete candidates first, incomplete last (stable order)
+                div { class: "flex-1 flex flex-col overflow-y-auto p-1.5 pt-0 space-y-1 min-w-0",
+                    {
+                        let mut sorted_indices: Vec<usize> = (0..detected.len()).collect();
+                        sorted_indices
+                            .sort_by_key(|&i| {
+                                matches!(
+                                    compute_status(&candidate_states, &detected[i].path),
+                                    DetectedCandidateStatus::Incomplete { .. }
+                                ) as u8
+                            });
+                        rsx! {
+                            for index in sorted_indices.iter().copied() {
+                                CandidateRow {
+                                    key: "{index}",
+                                    index,
+                                    name: detected[index].name.clone(),
+                                    path: detected[index].path.clone(),
+                                    status: compute_status(&candidate_states, &detected[index].path),
+                                    is_selected: selected_index == Some(index),
+                                    on_select: move |index: usize| {
+                                        if *show_menu.peek() {
+                                            show_menu.set(false);
+                                            pending_select.set(Some(index));
+                                        } else {
+                                            on_select.call(index);
+                                        }
+                                    },
+                                    on_open_folder,
+                                    on_remove,
                                 }
-                            },
-                            on_open_folder,
-                            on_remove,
+                            }
                         }
                     }
                 }
@@ -266,6 +278,24 @@ fn incomplete_message(
     }
 }
 
+/// Middle-truncate a string, preserving the beginning and end.
+///
+/// If the string fits within `max_chars`, returns it unchanged.
+/// Otherwise shows the first ~60% and last ~40% with "..." in the middle.
+fn middle_truncate(s: &str, max_chars: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count <= max_chars {
+        return s.to_string();
+    }
+    let ellipsis = "...";
+    let available = max_chars.saturating_sub(ellipsis.len());
+    let head = (available * 3) / 5; // ~60% at the start
+    let tail = available - head; // ~40% at the end
+    let start: String = s.chars().take(head).collect();
+    let end: String = s.chars().skip(char_count - tail).collect();
+    format!("{start}{ellipsis}{end}")
+}
+
 /// Single candidate row with tooltip on the folder icon.
 #[component]
 fn CandidateRow(
@@ -283,11 +313,12 @@ fn CandidateRow(
         status,
         DetectedCandidateStatus::Pending | DetectedCandidateStatus::Incomplete { .. }
     );
+    let display_name = middle_truncate(&name, 45);
 
     rsx! {
         div {
             class: format!(
-                "group w-full flex items-center gap-2.5 pl-3 pr-2 py-2 rounded-lg transition-all duration-150 min-w-0 {}",
+                "group w-full flex items-center gap-2.5 pl-3 pr-2 py-2.5 rounded-lg transition-all duration-150 min-w-0 {}",
                 if is_incomplete {
                     "text-gray-500 cursor-default"
                 } else if is_selected {
@@ -312,7 +343,7 @@ fn CandidateRow(
                             nowrap: true,
                             cross_axis_offset: -TOOLTIP_PADDING_X,
                             button {
-                                class: "flex-shrink-0 text-gray-400 hover:text-white transition-colors",
+                                class: "flex-shrink-0 text-gray-400 hover:text-white active:scale-90 transition-all",
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
                                     on_open_folder.call(open_path.clone());
@@ -337,7 +368,7 @@ fn CandidateRow(
                             nowrap: true,
                             cross_axis_offset: -TOOLTIP_PADDING_X,
                             button {
-                                class: "flex-shrink-0 text-gray-600 hover:text-white transition-colors",
+                                class: "flex-shrink-0 text-gray-600 hover:text-white active:scale-90 transition-all",
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
                                     on_open_folder.call(open_path.clone());
@@ -350,8 +381,10 @@ fn CandidateRow(
             }
 
             div { class: "flex-1 min-w-0",
-                div { class: format!("text-xs truncate {}", if is_incomplete { "text-gray-500" } else { "" }),
-                    {name}
+                Tooltip { text: name, placement: Placement::Top, nowrap: false,
+                    div { class: format!("text-xs {}", if is_incomplete { "text-gray-500" } else { "" }),
+                        {display_name}
+                    }
                 }
                 if let DetectedCandidateStatus::Incomplete {
                     bad_audio_count,

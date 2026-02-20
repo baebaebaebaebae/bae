@@ -129,7 +129,10 @@ pub fn ImportPage() -> Element {
     };
 
     let on_open_folder = move |path: String| {
-        let _ = std::process::Command::new("open").arg(&path).spawn();
+        let _ = std::process::Command::new("open")
+            .arg("-R")
+            .arg(&path)
+            .spawn();
     };
 
     rsx! {
