@@ -64,40 +64,42 @@ struct AlbumDetailView: View {
         .task(id: albumId) {
             await loadDetail()
         }
-        .overlay {
-            if showingCoverSheet, let detail {
-                Color.black.opacity(0.5)
-                    .ignoresSafeArea()
-                    .onTapGesture { showingCoverSheet = false }
-                CoverSheetView(
-                    remoteCovers: remoteCovers,
-                    releaseImages: collectImageFiles(detail).map { item in
-                        (id: item.file.id, name: item.file.originalFilename, url: nil as URL?)
-                    },
-                    loading: loadingRemoteCovers,
-                    onSelectRemote: { cover in
-                        let releaseId = currentReleaseId(detail)
-                        changeCover(
-                            albumId: albumId,
-                            releaseId: releaseId,
-                            selection: .remoteCover(url: cover.url, source: cover.source)
-                        )
-                    },
-                    onSelectReleaseImage: { fileId in
-                        let releaseId = currentReleaseId(detail)
-                        changeCover(
-                            albumId: albumId,
-                            releaseId: releaseId,
-                            selection: .releaseImage(fileId: fileId)
-                        )
-                    },
-                    onRefresh: { fetchRemoteCovers() },
-                    onDone: { showingCoverSheet = false }
-                )
-                .frame(width: 500, height: 450)
-                .background(Theme.surface)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .shadow(radius: 20)
+        .windowOverlay(isPresented: showingCoverSheet && detail != nil) {
+            if let detail {
+                ZStack {
+                    Color.black.opacity(0.5)
+                        .ignoresSafeArea()
+                        .onTapGesture { showingCoverSheet = false }
+                    CoverSheetView(
+                        remoteCovers: remoteCovers,
+                        releaseImages: collectImageFiles(detail).map { item in
+                            (id: item.file.id, name: item.file.originalFilename, url: nil as URL?)
+                        },
+                        loading: loadingRemoteCovers,
+                        onSelectRemote: { cover in
+                            let releaseId = currentReleaseId(detail)
+                            changeCover(
+                                albumId: albumId,
+                                releaseId: releaseId,
+                                selection: .remoteCover(url: cover.url, source: cover.source)
+                            )
+                        },
+                        onSelectReleaseImage: { fileId in
+                            let releaseId = currentReleaseId(detail)
+                            changeCover(
+                                albumId: albumId,
+                                releaseId: releaseId,
+                                selection: .releaseImage(fileId: fileId)
+                            )
+                        },
+                        onRefresh: { fetchRemoteCovers() },
+                        onDone: { showingCoverSheet = false }
+                    )
+                    .frame(width: 500, height: 450)
+                    .background(Theme.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .shadow(radius: 20)
+                }
             }
         }
         .alert("Cover Change Failed", isPresented: .init(
@@ -139,24 +141,26 @@ struct AlbumDetailView: View {
         } message: {
             Text("Are you sure you want to delete this album? This cannot be undone.")
         }
-        .overlay {
-            if showingManageSheet, let detail {
+        .windowOverlay(isPresented: showingManageSheet && detail != nil) {
+            if let detail {
                 let release = detail.releases.isEmpty ? nil : detail.releases[selectedReleaseIndex]
-                Color.black.opacity(0.5)
-                    .ignoresSafeArea()
-                    .onTapGesture { showingManageSheet = false }
-                if let release {
-                    ManageReleaseSheet(
-                        release: release,
-                        transferring: transferring,
-                        onTransferToManaged: { transferToManaged(releaseId: release.id) },
-                        onEject: { ejectRelease(releaseId: release.id) },
-                        onDone: { showingManageSheet = false }
-                    )
-                    .frame(width: 450, height: 400)
-                    .background(Theme.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .shadow(radius: 20)
+                ZStack {
+                    Color.black.opacity(0.5)
+                        .ignoresSafeArea()
+                        .onTapGesture { showingManageSheet = false }
+                    if let release {
+                        ManageReleaseSheet(
+                            release: release,
+                            transferring: transferring,
+                            onTransferToManaged: { transferToManaged(releaseId: release.id) },
+                            onEject: { ejectRelease(releaseId: release.id) },
+                            onDone: { showingManageSheet = false }
+                        )
+                        .frame(width: 450, height: 400)
+                        .background(Theme.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .shadow(radius: 20)
+                    }
                 }
             }
         }
@@ -382,10 +386,8 @@ struct AlbumDetailContent: View {
             .padding()
         }
         .background(Theme.background)
-        .overlay {
-            if lightboxIndex != nil, !lightboxItems.isEmpty {
-                ImageLightbox(items: lightboxItems, currentIndex: $lightboxIndex)
-            }
+        .windowOverlay(isPresented: lightboxIndex != nil && !lightboxItems.isEmpty) {
+            ImageLightbox(items: lightboxItems, currentIndex: $lightboxIndex)
         }
     }
 
@@ -403,7 +405,7 @@ struct AlbumDetailContent: View {
                 .overlay(alignment: .bottomTrailing) {
                     Menu {
                         Button("Change Cover...") { onChangeCover() }
-                        Button("Files & Storage...") { onManage() }
+                        Button("Storage...") { onManage() }
                         Divider()
                         Button("Delete Album", role: .destructive) { onDeleteAlbum() }
                     } label: {
@@ -809,7 +811,7 @@ struct ManageReleaseSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Files & Storage")
+                Text("Storage")
                     .font(.headline)
                 Spacer()
                 Button("Done") { onDone() }
