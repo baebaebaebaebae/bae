@@ -391,7 +391,7 @@ struct ImportView: View {
                 // File pane (left)
                 if let files = candidateFiles {
                     filePane(files)
-                        .frame(minWidth: 200)
+                        .frame(minWidth: 200, idealWidth: 280, maxWidth: 400)
                 }
                 // Right pane: confirmation replaces search when confirming
                 if mode == .loadingDetail {
