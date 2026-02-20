@@ -194,8 +194,9 @@ struct AlbumDetailView: View {
     private func buildLightboxItems(_ detail: BridgeAlbumDetail) -> [LightboxItem] {
         var items: [LightboxItem] = []
 
-        let coverURL = appService.imageURL(for: detail.album.coverReleaseId)
-        items.append(LightboxItem(id: "cover", label: "Cover", url: coverURL))
+        if let coverURL = appService.imageURL(for: detail.album.coverReleaseId) {
+            items.append(LightboxItem(id: "cover", label: "Cover", url: coverURL))
+        }
 
         if !detail.releases.isEmpty {
             let release = detail.releases[selectedReleaseIndex]
