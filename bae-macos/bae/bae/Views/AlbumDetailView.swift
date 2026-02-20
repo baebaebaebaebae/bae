@@ -46,6 +46,8 @@ struct AlbumDetailView: View {
                         guard !detail.releases.isEmpty else { return }
                         createShareLink(releaseId: detail.releases[selectedReleaseIndex].id)
                     },
+                    onAddNext: { trackId in appService.addNext(trackIds: [trackId]) },
+                    onAddToQueue: { trackId in appService.addToQueue(trackIds: [trackId]) },
                     onChangeCover: {
                         showingCoverSheet = true
                         fetchRemoteCovers()
@@ -331,9 +333,13 @@ struct AlbumDetailContent: View {
     let onShuffle: () -> Void
     let onPlayFromTrack: (Int) -> Void
     let onShare: () -> Void
+    let onAddNext: (String) -> Void
+    let onAddToQueue: (String) -> Void
     let onChangeCover: () -> Void
     let onManage: () -> Void
     let onDeleteAlbum: () -> Void
+
+    @State private var hoverTrackId: String?
 
     var body: some View {
         ScrollView {
@@ -530,6 +536,7 @@ struct AlbumDetailContent: View {
                     track,
                     showArtist: isCompilation,
                     showDisc: hasMultipleDiscs,
+                    isHovered: hoverTrackId == track.id,
                     onPlay: { onPlayFromTrack(index) }
                 )
                 Divider()
@@ -541,13 +548,24 @@ struct AlbumDetailContent: View {
         _ track: BridgeTrack,
         showArtist: Bool,
         showDisc: Bool,
+        isHovered: Bool,
         onPlay: @escaping () -> Void
     ) -> some View {
         HStack(spacing: 12) {
-            trackNumberLabel(track, showDisc: showDisc)
-                .frame(width: 40, alignment: .trailing)
-                .foregroundStyle(.secondary)
-                .font(.callout.monospacedDigit())
+            ZStack {
+                if isHovered {
+                    Button(action: onPlay) {
+                        Image(systemName: "play.fill")
+                            .font(.callout)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    trackNumberLabel(track, showDisc: showDisc)
+                }
+            }
+            .frame(width: 40, alignment: .trailing)
+            .foregroundStyle(.secondary)
+            .font(.callout.monospacedDigit())
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.title)
@@ -570,11 +588,21 @@ struct AlbumDetailContent: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 10)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             onPlay()
         }
+        .onHover { hovering in
+            hoverTrackId = hovering ? track.id : nil
+        }
+        .contextMenu {
+            Button("Play") { onPlay() }
+            Button("Play Next") { onAddNext(track.id) }
+            Button("Add to Queue") { onAddToQueue(track.id) }
+        }
+        .focusable()
+        .draggable(track.id)
     }
 
     private func trackNumberLabel(_ track: BridgeTrack, showDisc: Bool) -> some View {
@@ -883,6 +911,8 @@ struct ManageReleaseSheet: View {
         onShuffle: {},
         onPlayFromTrack: { _ in },
         onShare: {},
+        onAddNext: { _ in },
+        onAddToQueue: { _ in },
         onChangeCover: {},
         onManage: {},
         onDeleteAlbum: {}

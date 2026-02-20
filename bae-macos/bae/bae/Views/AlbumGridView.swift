@@ -43,6 +43,7 @@ struct AlbumGridView: View {
                             onAddToQueue: { onAddToQueue(album.id) },
                             onAddNext: { onAddNext(album.id) }
                         )
+                        .draggable(album.id)
                         .onTapGesture {
                             selectedAlbumId = album.id
                         }
@@ -355,6 +356,8 @@ private struct LibraryPreview: View {
                     onShuffle: {},
                     onPlayFromTrack: { _ in },
                     onShare: {},
+                    onAddNext: { _ in },
+                    onAddToQueue: { _ in },
                     onChangeCover: {},
                     onManage: {},
                     onDeleteAlbum: {}
