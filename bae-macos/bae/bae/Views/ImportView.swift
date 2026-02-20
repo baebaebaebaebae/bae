@@ -730,15 +730,14 @@ struct CandidateRow: View {
             }
             .opacity(isIncomplete ? 0.5 : 1.0)
             Spacer()
-            if isHovered {
-                Button(action: onRemove) {
-                    Image(systemName: "xmark")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("Remove from list")
+            Button(action: onRemove) {
+                Image(systemName: "xmark")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
+            .buttonStyle(.plain)
+            .help("Remove from list")
+            .opacity(isHovered ? 1 : 0)
         }
         .onHover { hovering in
             isHovered = hovering
