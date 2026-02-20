@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -526,6 +527,8 @@ pub struct AppHandle {
     subsonic_server_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     sync_handle: Option<Arc<BridgeSyncHandle>>,
     sync_loop_handle: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// Maps import_id (UUID) → folder_path so progress events can be keyed by folder.
+    import_id_to_folder: Arc<Mutex<HashMap<String, String>>>,
 }
 
 #[uniffi::export]
@@ -1399,6 +1402,10 @@ impl AppHandle {
     ) -> Result<(), BridgeError> {
         self.runtime.block_on(async {
             let import_id = uuid::Uuid::new_v4().to_string();
+            self.import_id_to_folder
+                .lock()
+                .unwrap()
+                .insert(import_id.clone(), folder_path.clone());
             let folder = PathBuf::from(&folder_path);
 
             let cover = selected_cover.map(|c| match c {
@@ -1721,8 +1728,9 @@ impl AppHandle {
 
         // Import progress events
         let import_rx = self.import_handle.subscribe_all_imports();
+        let id_map = self.import_id_to_folder.clone();
         self.runtime
-            .spawn(dispatch_import_events(import_rx, handler));
+            .spawn(dispatch_import_events(import_rx, handler, id_map));
     }
 
     /// Fetch available remote cover art options for a release.
@@ -3215,9 +3223,13 @@ async fn dispatch_scan_events(
 }
 
 /// Background task that reads import progress events and forwards them to Swift.
+///
+/// The import core uses random UUIDs as import_id, but the Swift UI keys status
+/// by folder_path. The `id_map` translates between the two so events reach the UI.
 async fn dispatch_import_events(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<ImportProgress>,
     handler: Arc<dyn AppEventHandler>,
+    id_map: Arc<Mutex<HashMap<String, String>>>,
 ) {
     while let Some(event) = rx.recv().await {
         match event {
@@ -3227,12 +3239,15 @@ async fn dispatch_import_events(
                 album_title,
                 ..
             } => {
-                handler.on_import_progress(
-                    import_id,
-                    BridgeImportStatus::Importing {
-                        progress_percent: 0,
-                    },
-                );
+                let folder = id_map.lock().unwrap().get(&import_id).cloned();
+                if let Some(folder) = folder {
+                    handler.on_import_progress(
+                        folder,
+                        BridgeImportStatus::Importing {
+                            progress_percent: 0,
+                        },
+                    );
+                }
 
                 info!(
                     "Import preparing: {} - {}",
@@ -3240,13 +3255,19 @@ async fn dispatch_import_events(
                     step.display_text()
                 );
             }
-            ImportProgress::Started { id, .. } => {
-                handler.on_import_progress(
-                    id,
-                    BridgeImportStatus::Importing {
-                        progress_percent: 0,
-                    },
-                );
+            ImportProgress::Started {
+                import_id: Some(iid),
+                ..
+            } => {
+                let folder = id_map.lock().unwrap().get(&iid).cloned();
+                if let Some(folder) = folder {
+                    handler.on_import_progress(
+                        folder,
+                        BridgeImportStatus::Importing {
+                            progress_percent: 0,
+                        },
+                    );
+                }
             }
             ImportProgress::Progress {
                 id,
@@ -3256,12 +3277,15 @@ async fn dispatch_import_events(
             } => {
                 // Only forward release-level progress, not per-track
                 if id != iid {
-                    handler.on_import_progress(
-                        iid,
-                        BridgeImportStatus::Importing {
-                            progress_percent: percent as u32,
-                        },
-                    );
+                    let folder = id_map.lock().unwrap().get(&iid).cloned();
+                    if let Some(folder) = folder {
+                        handler.on_import_progress(
+                            folder,
+                            BridgeImportStatus::Importing {
+                                progress_percent: percent as u32,
+                            },
+                        );
+                    }
                 }
             }
             ImportProgress::Complete {
@@ -3269,7 +3293,10 @@ async fn dispatch_import_events(
                 import_id: Some(iid),
                 ..
             } => {
-                handler.on_import_progress(iid, BridgeImportStatus::Complete);
+                let folder = id_map.lock().unwrap().remove(&iid);
+                if let Some(folder) = folder {
+                    handler.on_import_progress(folder, BridgeImportStatus::Complete);
+                }
                 handler.on_library_changed();
             }
             ImportProgress::Failed {
@@ -3277,7 +3304,11 @@ async fn dispatch_import_events(
                 import_id: Some(iid),
                 ..
             } => {
-                handler.on_import_progress(iid, BridgeImportStatus::Error { message: error });
+                let folder = id_map.lock().unwrap().remove(&iid);
+                if let Some(folder) = folder {
+                    handler
+                        .on_import_progress(folder, BridgeImportStatus::Error { message: error });
+                }
             }
             _ => {}
         }
@@ -3609,6 +3640,7 @@ pub fn init_app(library_id: String) -> Result<Arc<AppHandle>, BridgeError> {
         subsonic_server_handle: Mutex::new(None),
         sync_handle,
         sync_loop_handle: Mutex::new(None),
+        import_id_to_folder: Arc::new(Mutex::new(HashMap::new())),
     }))
 }
 
