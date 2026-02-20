@@ -821,7 +821,7 @@ struct ImportView: View {
                     // Cover art thumbnail (tappable to open picker)
                     confirmationCoverThumb(selectedUrl: selectedUrl)
                         .overlay(alignment: .topTrailing) {
-                            if !detail.coverArt.isEmpty || (candidateFiles?.artwork.isEmpty == false) {
+                            if !importing && !isComplete && (!detail.coverArt.isEmpty || (candidateFiles?.artwork.isEmpty == false)) {
                                 Image(systemName: "pencil")
                                     .font(.caption2)
                                     .foregroundStyle(.white)
@@ -832,7 +832,7 @@ struct ImportView: View {
                             }
                         }
                         .onTapGesture {
-                            if !detail.coverArt.isEmpty || (candidateFiles?.artwork.isEmpty == false) {
+                            if !importing && !isComplete && (!detail.coverArt.isEmpty || (candidateFiles?.artwork.isEmpty == false)) {
                                 showCoverPicker = true
                             }
                         }
