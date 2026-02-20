@@ -117,7 +117,6 @@ struct ImportView: View {
     @State private var candidateStates: [String: CandidateSearchState] = [:]
 
     @State private var galleryIndex: Int?
-    @FocusState private var galleryFocused: Bool
     @State private var showCoverPicker = false
     @State private var audioExpanded = false
     @State private var imagesExpanded = true
@@ -150,32 +149,16 @@ struct ImportView: View {
 
             // Gallery overlay
             if galleryIndex != nil, let files = candidateFiles, !files.artwork.isEmpty {
-                Color.black.opacity(0.85)
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture { galleryIndex = nil }
-                ImageGalleryView(images: files.artwork, currentIndex: $galleryIndex)
-                    .allowsHitTesting(true)
-                    .focusable()
-                    .focusEffectDisabled()
-                    .focused($galleryFocused)
-                    .onKeyPress(.escape) {
-                        galleryIndex = nil
-                        return .handled
-                    }
-                    .onKeyPress(.leftArrow) {
-                        if let idx = galleryIndex {
-                            galleryIndex = idx == 0 ? files.artwork.count - 1 : idx - 1
-                        }
-                        return .handled
-                    }
-                    .onKeyPress(.rightArrow) {
-                        if let idx = galleryIndex {
-                            galleryIndex = idx == files.artwork.count - 1 ? 0 : idx + 1
-                        }
-                        return .handled
-                    }
-                    .onAppear { galleryFocused = true }
+                ImageLightbox(
+                    items: files.artwork.map { file in
+                        LightboxItem(
+                            id: file.path,
+                            label: file.name,
+                            url: URL(fileURLWithPath: file.path)
+                        )
+                    },
+                    currentIndex: $galleryIndex
+                )
             }
 
             // Document viewer overlay
@@ -1452,213 +1435,6 @@ struct CandidateRow: View {
     }
 }
 
-// MARK: - Image Gallery
-
-struct ImageGalleryView: View {
-    let images: [BridgeFileInfo]
-    @Binding var currentIndex: Int?
-    @State private var thumbCache: [String: NSImage] = [:]
-    @State private var magnification: CGFloat = 1.0
-    @State private var magnifyAnchor: UnitPoint = .center
-
-    private var safeIndex: Int {
-        guard let idx = currentIndex, idx >= 0, idx < images.count else { return 0 }
-        return idx
-    }
-
-    private var currentFile: BridgeFileInfo {
-        images[safeIndex]
-    }
-
-    private var canCycle: Bool {
-        images.count > 1
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            // Image area (flexible, with nav/close overlays)
-            ZStack {
-                // Main image (centered, pinch-to-zoom)
-                if let nsImage = NSImage(contentsOf: URL(fileURLWithPath: currentFile.path)) {
-                    Image(nsImage: nsImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .scaleEffect(magnification, anchor: magnifyAnchor)
-                        .gesture(
-                            MagnifyGesture()
-                                .onChanged { value in
-                                    magnifyAnchor = value.startAnchor
-                                    magnification = max(value.magnification, 1.0)
-                                }
-                                .onEnded { _ in
-                                    withAnimation(.easeOut(duration: 0.25)) {
-                                        magnification = 1.0
-                                    }
-                                }
-                        )
-                        .padding(40)
-                        .shadow(color: .black.opacity(0.5), radius: 20)
-                        .help(currentFile.name)
-                } else {
-                    VStack(spacing: 8) {
-                        Image(systemName: "photo")
-                            .font(.largeTitle)
-                            .foregroundStyle(.gray)
-                        Text("Cannot load image")
-                            .font(.callout)
-                            .foregroundStyle(.gray)
-                    }
-                    .allowsHitTesting(false)
-                }
-
-                // Navigation buttons (left/right edges)
-                if canCycle {
-                    HStack {
-                        Button(action: navigatePrevious) {
-                            ZStack {
-                                Circle()
-                                    .fill(.black.opacity(0.4))
-                                    .frame(width: 48, height: 48)
-                                Image(systemName: "chevron.left")
-                                    .font(.title2.weight(.medium))
-                                    .foregroundStyle(.white.opacity(0.8))
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        Spacer()
-                        Button(action: navigateNext) {
-                            ZStack {
-                                Circle()
-                                    .fill(.black.opacity(0.4))
-                                    .frame(width: 48, height: 48)
-                                Image(systemName: "chevron.right")
-                                    .font(.title2.weight(.medium))
-                                    .foregroundStyle(.white.opacity(0.8))
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.horizontal, 16)
-                    .opacity(magnification > 1.01 ? 0 : 1)
-                }
-
-                // Close button (top-right)
-                VStack {
-                    HStack {
-                        Spacer()
-                        Button(action: { currentIndex = nil }) {
-                            ZStack {
-                                Circle()
-                                    .fill(.black.opacity(0.4))
-                                    .frame(width: 36, height: 36)
-                                Image(systemName: "xmark")
-                                    .font(.body.weight(.semibold))
-                                    .foregroundStyle(.white.opacity(0.8))
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .padding(12)
-                    }
-                    Spacer()
-                }
-                .opacity(magnification > 1.01 ? 0 : 1)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            // Thumbnail strip (fixed height, below the image area)
-            if canCycle {
-                GeometryReader { geo in
-                    ScrollViewReader { scrollProxy in
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 6) {
-                                ForEach(Array(images.enumerated()), id: \.offset) { index, file in
-                                    thumbnailView(for: file, at: index)
-                                        .id(index)
-                                }
-                            }
-                            .padding(.horizontal, 8)
-                            .frame(minWidth: geo.size.width)
-                        }
-                        .onChange(of: safeIndex) { _, newIndex in
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                scrollProxy.scrollTo(newIndex, anchor: .center)
-                            }
-                        }
-                    }
-                }
-                .frame(height: 64)
-                .padding(.bottom, 16)
-                .opacity(magnification > 1.01 ? 0 : 1)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onChange(of: safeIndex) { _, _ in
-            magnification = 1.0
-        }
-    }
-
-    @ViewBuilder
-    private func thumbnailView(for file: BridgeFileInfo, at index: Int) -> some View {
-        let isActive = index == safeIndex
-        Button(action: { currentIndex = index }) {
-            Group {
-                if let thumb = thumbCache[file.path] {
-                    Image(nsImage: thumb)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 56, height: 56)
-                        .clipped()
-                } else {
-                    Color.gray.opacity(0.3)
-                        .frame(width: 56, height: 56)
-                        .overlay {
-                            Image(systemName: "photo")
-                                .foregroundStyle(.gray)
-                        }
-                        .task {
-                            if let thumb = galleryThumbnail(for: file.path) {
-                                thumbCache[file.path] = thumb
-                            }
-                        }
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(
-                        isActive ? .white : .gray.opacity(0.4),
-                        lineWidth: isActive ? 2 : 1
-                    )
-            )
-        }
-        .buttonStyle(.plain)
-        .help(file.name)
-    }
-
-    private func galleryThumbnail(for path: String) -> NSImage? {
-        let url = URL(fileURLWithPath: path) as CFURL
-        guard let source = CGImageSourceCreateWithURL(url, nil) else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageSourceThumbnailMaxPixelSize: 112,
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-        ]
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-    }
-
-    private func navigatePrevious() {
-        if canCycle {
-            currentIndex = safeIndex == 0 ? images.count - 1 : safeIndex - 1
-        }
-    }
-
-    private func navigateNext() {
-        if canCycle {
-            currentIndex = safeIndex == images.count - 1 ? 0 : safeIndex + 1
-        }
-    }
-}
 
 // MARK: - Cover Picker
 

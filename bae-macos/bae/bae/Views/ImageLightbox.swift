@@ -9,6 +9,9 @@ struct LightboxItem: Identifiable {
 struct ImageLightbox: View {
     let items: [LightboxItem]
     @Binding var currentIndex: Int?
+    @State private var magnification: CGFloat = 1.0
+    @State private var magnifyAnchor: UnitPoint = .center
+    @FocusState private var focused: Bool
 
     private var safeIndex: Int {
         guard let idx = currentIndex, idx >= 0, idx < items.count else { return 0 }
@@ -25,46 +28,107 @@ struct ImageLightbox: View {
 
     var body: some View {
         ZStack {
+            // Background overlay — dismiss on tap
             Color.black.opacity(0.85)
                 .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { currentIndex = nil }
 
+            // Content (does not pass taps to dismiss overlay)
             VStack(spacing: 0) {
-                GeometryReader { geometry in
-                    let availableHeight = geometry.size.height - 120
-                    ZStack {
-                        if let url = currentItem.url {
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case .success(let image):
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(
-                                            maxWidth: geometry.size.width - 120,
-                                            maxHeight: availableHeight
-                                        )
-                                        .shadow(color: .black.opacity(0.5), radius: 20)
-                                case .failure:
-                                    imageFallback
-                                default:
-                                    ProgressView()
-                                        .controlSize(.large)
+                // Image area (flexible, with nav/close overlays)
+                ZStack {
+                    if let url = currentItem.url {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .scaleEffect(magnification, anchor: magnifyAnchor)
+                                    .gesture(
+                                        MagnifyGesture()
+                                            .onChanged { value in
+                                                magnifyAnchor = value.startAnchor
+                                                magnification = max(value.magnification, 1.0)
+                                            }
+                                            .onEnded { _ in
+                                                withAnimation(.easeOut(duration: 0.25)) {
+                                                    magnification = 1.0
+                                                }
+                                            }
+                                    )
+                                    .padding(40)
+                                    .shadow(color: .black.opacity(0.5), radius: 20)
+                                    .help(currentItem.label)
+                            case .failure:
+                                imageFallback
+                            default:
+                                ProgressView()
+                                    .controlSize(.large)
+                            }
+                        }
+                    } else {
+                        imageFallback
+                    }
+
+                    // Navigation buttons (left/right edges)
+                    if canCycle {
+                        HStack {
+                            Button(action: navigatePrevious) {
+                                ZStack {
+                                    Circle()
+                                        .fill(.black.opacity(0.4))
+                                        .frame(width: 48, height: 48)
+                                    Image(systemName: "chevron.left")
+                                        .font(.title2.weight(.medium))
+                                        .foregroundStyle(.white.opacity(0.8))
                                 }
                             }
-                        } else {
-                            imageFallback
+                            .buttonStyle(.plain)
+                            Spacer()
+                            Button(action: navigateNext) {
+                                ZStack {
+                                    Circle()
+                                        .fill(.black.opacity(0.4))
+                                        .frame(width: 48, height: 48)
+                                    Image(systemName: "chevron.right")
+                                        .font(.title2.weight(.medium))
+                                        .foregroundStyle(.white.opacity(0.8))
+                                }
+                            }
+                            .buttonStyle(.plain)
                         }
+                        .padding(.horizontal, 16)
+                        .opacity(magnification > 1.01 ? 0 : 1)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    // Close button (top-right)
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Button(action: { currentIndex = nil }) {
+                                ZStack {
+                                    Circle()
+                                        .fill(.black.opacity(0.4))
+                                        .frame(width: 36, height: 36)
+                                    Image(systemName: "xmark")
+                                        .font(.body.weight(.semibold))
+                                        .foregroundStyle(.white.opacity(0.8))
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .padding(12)
+                        }
+                        Spacer()
+                    }
+                    .opacity(magnification > 1.01 ? 0 : 1)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                VStack(spacing: 10) {
-                    Text("\(currentItem.label) \u{2014} \(safeIndex + 1) of \(items.count)")
-                        .font(.callout)
-                        .foregroundStyle(.white.opacity(0.7))
-                        .lineLimit(1)
-
-                    if canCycle {
+                // Thumbnail strip (fixed height, below the image area)
+                if canCycle {
+                    GeometryReader { geo in
                         ScrollViewReader { scrollProxy in
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 6) {
@@ -74,8 +138,8 @@ struct ImageLightbox: View {
                                     }
                                 }
                                 .padding(.horizontal, 8)
+                                .frame(minWidth: geo.size.width)
                             }
-                            .frame(height: 64)
                             .onChange(of: safeIndex) { _, newIndex in
                                 withAnimation(.easeInOut(duration: 0.2)) {
                                     scrollProxy.scrollTo(newIndex, anchor: .center)
@@ -83,66 +147,21 @@ struct ImageLightbox: View {
                             }
                         }
                     }
-                }
-                .padding(.bottom, 16)
-            }
-
-            if canCycle {
-                HStack {
-                    Button(action: navigatePrevious) {
-                        ZStack {
-                            Circle()
-                                .fill(.black.opacity(0.4))
-                                .frame(width: 48, height: 48)
-                            Image(systemName: "chevron.left")
-                                .font(.title2.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.8))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.leading, 16)
-                    Spacer()
+                    .frame(height: 64)
+                    .padding(.bottom, 16)
+                    .opacity(magnification > 1.01 ? 0 : 1)
                 }
             }
-
-            if canCycle {
-                HStack {
-                    Spacer()
-                    Button(action: navigateNext) {
-                        ZStack {
-                            Circle()
-                                .fill(.black.opacity(0.4))
-                                .frame(width: 48, height: 48)
-                            Image(systemName: "chevron.right")
-                                .font(.title2.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.8))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.trailing, 16)
-                }
-            }
-
-            VStack {
-                HStack {
-                    Spacer()
-                    Button(action: { currentIndex = nil }) {
-                        ZStack {
-                            Circle()
-                                .fill(.black.opacity(0.4))
-                                .frame(width: 36, height: 36)
-                            Image(systemName: "xmark")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(.white.opacity(0.8))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .padding(12)
-                }
-                Spacer()
-            }
+            .allowsHitTesting(true)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .focusable()
+        .focusEffectDisabled()
+        .focused($focused)
+        .onKeyPress(.escape) {
+            currentIndex = nil
+            return .handled
+        }
         .onKeyPress(.leftArrow) {
             navigatePrevious()
             return .handled
@@ -151,9 +170,9 @@ struct ImageLightbox: View {
             navigateNext()
             return .handled
         }
-        .onKeyPress(.escape) {
-            currentIndex = nil
-            return .handled
+        .onAppear { focused = true }
+        .onChange(of: safeIndex) { _, _ in
+            magnification = 1.0
         }
     }
 
@@ -166,6 +185,7 @@ struct ImageLightbox: View {
                 .font(.callout)
                 .foregroundStyle(.gray)
         }
+        .allowsHitTesting(false)
     }
 
     @ViewBuilder
@@ -204,6 +224,7 @@ struct ImageLightbox: View {
             )
         }
         .buttonStyle(.plain)
+        .help(item.label)
     }
 
     private var thumbnailPlaceholder: some View {
