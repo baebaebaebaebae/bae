@@ -8,6 +8,8 @@ struct AlbumCardViewModel: Identifiable {
     let coverArtURL: URL?
 }
 
+private let albumCardSize: CGFloat = 180
+
 struct AlbumGridView: View {
     let albums: [AlbumCardViewModel]
     @Binding var selectedAlbumId: String?
@@ -18,17 +20,18 @@ struct AlbumGridView: View {
     let onAddNext: (String) -> Void
 
     private let columns = [
-        GridItem(.adaptive(minimum: 160), spacing: 16)
+        GridItem(.adaptive(minimum: albumCardSize), spacing: 24, alignment: .topLeading)
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            libraryHeader
-                .padding(.horizontal)
-                .padding(.vertical, 8)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                libraryHeader
+                    .padding(.horizontal)
+                    .padding(.top, 40)
+                    .padding(.bottom, 20)
 
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: 20) {
+                LazyVGrid(columns: columns, spacing: 28) {
                     ForEach(albums) { album in
                         AlbumCardView(
                             title: album.title,
@@ -40,9 +43,6 @@ struct AlbumGridView: View {
                             onAddToQueue: { onAddToQueue(album.id) },
                             onAddNext: { onAddNext(album.id) }
                         )
-                        .onTapGesture(count: 2) {
-                            onPlayAlbum(album.id)
-                        }
                         .onTapGesture {
                             selectedAlbumId = album.id
                         }
@@ -58,8 +58,7 @@ struct AlbumGridView: View {
     private var libraryHeader: some View {
         HStack {
             Text("Library")
-                .font(.title2)
-                .fontWeight(.bold)
+                .font(.system(size: 36, weight: .bold))
 
             Spacer()
 
@@ -118,42 +117,33 @@ struct AlbumCardView: View {
     let onAddNext: () -> Void
 
     @State private var isHovered = false
+    @State private var showMenu = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            ZStack(alignment: .topTrailing) {
-                albumArt
-                    .frame(width: 160, height: 160)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .strokeBorder(
-                                Color.accentColor,
-                                lineWidth: isSelected ? 3 : 0
-                            )
-                    )
-
-                if isHovered {
-                    Menu {
-                        Button("Play") { onPlay() }
-                        Button("Add to Queue") { onAddToQueue() }
-                        Button("Add Next") { onAddNext() }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.caption)
-                            .foregroundColor(.white)
-                            .frame(width: 24, height: 24)
-                            .background(.black.opacity(0.7))
-                            .clipShape(Circle())
+            albumArt
+                .aspectRatio(1, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(
+                            Color.accentColor,
+                            lineWidth: isSelected ? 3 : 0
+                        )
+                )
+                .overlay(alignment: .bottom) {
+                    if isHovered || showMenu {
+                        HStack {
+                            CardButton(systemName: "play.fill", accented: true, action: onPlay)
+                            Spacer()
+                            CardMenuButton(onAddToQueue: onAddToQueue, onAddNext: onAddNext, showMenu: $showMenu)
+                        }
+                        .padding(8)
+                        .transition(.opacity)
                     }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .padding(6)
                 }
-            }
-            .onHover { hovering in
-                isHovered = hovering
-            }
+                .onHover { isHovered = $0 }
+                .padding(.bottom, 6)
 
             Text(title)
                 .font(.callout)
@@ -171,7 +161,6 @@ struct AlbumCardView: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .frame(width: 160)
         .contextMenu {
             Button("Play") { onPlay() }
             Button("Add to Queue") { onAddToQueue() }
@@ -209,7 +198,94 @@ struct AlbumCardView: View {
     }
 }
 
+// MARK: - Card Overlay Buttons
+
+private struct CardButton: View {
+    let systemName: String
+    let accented: Bool
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: 30, height: 30)
+                .background(isHovered && accented ? Color.accentColor : Color.black.opacity(0.4))
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+    }
+}
+
+private struct CardMenuButton: View {
+    let onAddToQueue: () -> Void
+    let onAddNext: () -> Void
+    @Binding var showMenu: Bool
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: presentMenu) {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: 30, height: 30)
+                .background(isHovered ? Color.accentColor : Color.black.opacity(0.4))
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+    }
+
+    private func presentMenu() {
+        showMenu = true
+        let menu = NSMenu()
+        let queueItem = MenuItem(title: "Add to Queue") { onAddToQueue() }
+        menu.addItem(queueItem)
+        let nextItem = MenuItem(title: "Add Next") { onAddNext() }
+        menu.addItem(nextItem)
+
+        menu.popUp(positioning: nil,
+                    at: NSEvent.mouseLocation,
+                    in: nil)
+        showMenu = false
+    }
+}
+
+private class MenuItem: NSMenuItem {
+    private let handler: () -> Void
+
+    init(title: String, handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(fire), keyEquivalent: "")
+        self.target = self
+    }
+
+    required init(coder: NSCoder) { fatalError() }
+
+    @objc private func fire() { handler() }
+}
+
 // MARK: - Previews
+
+private func sortedAlbums(
+    _ field: LibrarySortField, _ direction: SortDirection
+) -> [AlbumCardViewModel] {
+    let sorted: [AlbumCardViewModel]
+    switch field {
+    case .title:
+        sorted = PreviewData.albums.sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
+    case .artist:
+        sorted = PreviewData.albums.sorted { $0.artistNames.localizedCompare($1.artistNames) == .orderedAscending }
+    case .year:
+        sorted = PreviewData.albums.sorted { ($0.year ?? 0) < ($1.year ?? 0) }
+    case .dateAdded:
+        sorted = PreviewData.albums
+    }
+    return direction == .ascending ? sorted : sorted.reversed()
+}
 
 private struct GridPreview: View {
     let width: CGFloat
@@ -220,7 +296,7 @@ private struct GridPreview: View {
 
     var body: some View {
         AlbumGridView(
-            albums: PreviewData.albums,
+            albums: sortedAlbums(sortField, sortDirection),
             selectedAlbumId: $selectedAlbumId,
             sortField: $sortField,
             sortDirection: $sortDirection,
@@ -281,7 +357,7 @@ private struct LibraryPreview: View {
     var body: some View {
         HStack(spacing: 0) {
             AlbumGridView(
-                albums: PreviewData.albums,
+                albums: sortedAlbums(sortField, sortDirection),
                 selectedAlbumId: $selectedAlbumId,
                 sortField: $sortField,
                 sortDirection: $sortDirection,
