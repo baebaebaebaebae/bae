@@ -150,7 +150,7 @@ struct ImportView: View {
 
             // Gallery overlay
             if galleryIndex != nil, let files = candidateFiles, !files.artwork.isEmpty {
-                Color.black.opacity(0.6)
+                Color.black.opacity(0.85)
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture { galleryIndex = nil }
