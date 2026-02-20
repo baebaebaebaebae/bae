@@ -56,7 +56,7 @@ struct AlbumGridView: View {
     }
 
     private var libraryHeader: some View {
-        HStack {
+        HStack(alignment: .firstTextBaseline) {
             Text("Library")
                 .font(.system(size: 36, weight: .bold))
 
@@ -82,12 +82,8 @@ struct AlbumGridView: View {
                     }
                 }
             } label: {
-                HStack(spacing: 4) {
-                    Text(sortField.rawValue)
+                Text(sortField.rawValue)
                         .font(.callout)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption2)
-                }
                 .foregroundStyle(.secondary)
             }
             .menuStyle(.borderlessButton)
