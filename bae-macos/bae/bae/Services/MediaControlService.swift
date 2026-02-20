@@ -116,7 +116,7 @@ class MediaControlService {
 
         guard let urlString = appHandle.getImageUrl(imageId: imageId),
               let url = URL(string: urlString),
-              let image = NSImage(contentsOf: url)
+              let image = loadDownsampledImage(from: url, maxSize: 600)
         else {
             cachedArtworkImageId = nil
             cachedArtwork = nil
@@ -128,5 +128,16 @@ class MediaControlService {
         cachedArtworkImageId = imageId
         cachedArtwork = artwork
         info[MPMediaItemPropertyArtwork] = artwork
+    }
+
+    private func loadDownsampledImage(from url: URL, maxSize: Int) -> NSImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: maxSize,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 }

@@ -960,15 +960,24 @@ struct ImportView: View {
                     coverPlaceholder
                 }
             } else {
-                AsyncImage(url: URL(string: url)) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    ZStack {
-                        Theme.placeholder
-                        ProgressView()
-                            .controlSize(.small)
+                AsyncImage(url: URL(string: url)) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    case .failure:
+                        ZStack {
+                            Theme.placeholder
+                            Image(systemName: "photo")
+                                .foregroundStyle(.tertiary)
+                        }
+                    default:
+                        ZStack {
+                            Theme.placeholder
+                            ProgressView()
+                                .controlSize(.small)
+                        }
                     }
                 }
                 .frame(width: 80, height: 80)
@@ -1643,6 +1652,7 @@ struct CoverPickerView: View {
     let onDone: () -> Void
 
     @State private var currentIndex: Int = 0
+    @State private var thumbCache: [String: NSImage] = [:]
 
     private struct CoverItem {
         let url: String  // remote URL or "local:filename"
@@ -1829,14 +1839,20 @@ struct CoverPickerView: View {
         Button(action: { currentIndex = index }) {
             Group {
                 if item.isLocal {
-                    if let path = item.localPath, let nsImage = NSImage(contentsOf: URL(fileURLWithPath: path)) {
-                        Image(nsImage: nsImage)
+                    if let path = item.localPath, let thumb = thumbCache[path] {
+                        Image(nsImage: thumb)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
                             .frame(width: 56, height: 56)
                             .clipped()
                     } else {
                         thumbnailPlaceholder
+                            .task {
+                                guard let path = item.localPath else { return }
+                                if let thumb = pickerThumb(for: path) {
+                                    thumbCache[path] = thumb
+                                }
+                            }
                     }
                 } else {
                     AsyncImage(url: URL(string: item.url)) { phase in
@@ -1876,6 +1892,18 @@ struct CoverPickerView: View {
                 Image(systemName: "photo")
                     .foregroundStyle(.gray)
             }
+    }
+
+    private func pickerThumb(for path: String) -> NSImage? {
+        let url = URL(fileURLWithPath: path) as CFURL
+        guard let source = CGImageSourceCreateWithURL(url, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: 112,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 
     private func navigatePrevious() {
