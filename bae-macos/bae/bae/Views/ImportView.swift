@@ -1458,7 +1458,8 @@ struct ImageGalleryView: View {
     let images: [BridgeFileInfo]
     @Binding var currentIndex: Int?
     @State private var thumbCache: [String: NSImage] = [:]
-    @GestureState private var magnification: CGFloat = 1.0
+    @State private var magnification: CGFloat = 1.0
+    @State private var magnifyAnchor: UnitPoint = .center
 
     private var safeIndex: Int {
         guard let idx = currentIndex, idx >= 0, idx < images.count else { return 0 }
@@ -1480,11 +1481,17 @@ struct ImageGalleryView: View {
                 Image(nsImage: nsImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .scaleEffect(magnification)
+                    .scaleEffect(magnification, anchor: magnifyAnchor)
                     .gesture(
                         MagnifyGesture()
-                            .updating($magnification) { value, state, _ in
-                                state = max(value.magnification, 1.0)
+                            .onChanged { value in
+                                magnifyAnchor = value.startAnchor
+                                magnification = max(value.magnification, 1.0)
+                            }
+                            .onEnded { _ in
+                                withAnimation(.easeOut(duration: 0.4)) {
+                                    magnification = 1.0
+                                }
                             }
                     )
                     .padding(60)
@@ -1577,6 +1584,9 @@ struct ImageGalleryView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: safeIndex) { _, _ in
+            magnification = 1.0
+        }
     }
 
     @ViewBuilder
