@@ -252,7 +252,11 @@ struct MainAppView: View {
                         .frame(width: 350, height: 500)
                         .background(Theme.surface)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .shadow(color: .black.opacity(0.3), radius: 12, y: -2)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Theme.border, lineWidth: 1)
+                        )
+                        .shadow(color: .black.opacity(0.5), radius: 16, y: -4)
                     }
                     .padding(.trailing, 8)
                     .padding(.bottom, 68)
