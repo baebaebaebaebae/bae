@@ -71,6 +71,7 @@ struct CandidateSearchState {
     var releaseDetail: BridgeReleaseDetail?
     var selectedCoverUrl: String?
     var prefetchError: String?
+    var managed: Bool = true
 
     func activeResults() -> TabSearchState {
         switch (activeTab, activeSource) {
@@ -864,6 +865,23 @@ struct ImportView: View {
 
                 Divider()
 
+                // Storage mode
+                VStack(alignment: .leading, spacing: 4) {
+                    Picker("Storage", selection: Binding(
+                        get: { candidateStates[folderPath]?.managed ?? true },
+                        set: { candidateStates[folderPath]?.managed = $0 }
+                    )) {
+                        Text("Copy to library").tag(true)
+                        Text("Leave in place").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    if candidateStates[folderPath]?.managed == true && appService.appHandle.isSyncReady() {
+                        Text("Files will sync to cloud")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 // Action buttons
                 HStack {
                     Button("Back to Search") {
@@ -973,6 +991,7 @@ struct ImportView: View {
     private func commitConfirmedImport(candidate: BridgeImportCandidate, detail: BridgeReleaseDetail) {
         let folderPath = candidate.folderPath
         let selectedUrl = candidateStates[folderPath]?.selectedCoverUrl
+        let managed = candidateStates[folderPath]?.managed ?? true
 
         let coverSelection: BridgeCoverSelection?
         if let url = selectedUrl {
@@ -990,7 +1009,8 @@ struct ImportView: View {
             folderPath: folderPath,
             releaseId: detail.releaseId,
             source: detail.source,
-            selectedCover: coverSelection
+            selectedCover: coverSelection,
+            managed: managed
         )
     }
 

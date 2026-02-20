@@ -261,13 +261,14 @@ class AppService: AppEventHandler, @unchecked Sendable {
         }.value
     }
 
-    func commitImport(folderPath: String, releaseId: String, source: String, selectedCover: BridgeCoverSelection? = nil) {
+    func commitImport(folderPath: String, releaseId: String, source: String, selectedCover: BridgeCoverSelection? = nil, managed: Bool = true) {
         Task.detached { [appHandle] in
             try? appHandle.commitImport(
                 folderPath: folderPath,
                 releaseId: releaseId,
                 source: source,
-                selectedCover: selectedCover
+                selectedCover: selectedCover,
+                managed: managed
             )
         }
     }

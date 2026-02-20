@@ -1395,6 +1395,7 @@ impl AppHandle {
         release_id: String,
         source: String,
         selected_cover: Option<BridgeCoverSelection>,
+        managed: bool,
     ) -> Result<(), BridgeError> {
         self.runtime.block_on(async {
             let import_id = uuid::Uuid::new_v4().to_string();
@@ -1429,7 +1430,7 @@ impl AppHandle {
                     }),
                     folder,
                     master_year: 0,
-                    managed: true,
+                    managed,
                     selected_cover: cover,
                 }
             } else {
@@ -1454,7 +1455,7 @@ impl AppHandle {
                     mb_release: None,
                     folder,
                     master_year: 0,
-                    managed: true,
+                    managed,
                     selected_cover: cover,
                 }
             };
