@@ -1039,6 +1039,7 @@ struct ImportView: View {
                     }
                     .buttonStyle(.borderedProminent)
                 case .complete:
+                    // Handled by isComplete check above
                     EmptyView()
                 }
             } else {
@@ -1057,6 +1058,10 @@ struct ImportView: View {
 
     private func commitConfirmedImport(candidate: BridgeImportCandidate, detail: BridgeReleaseDetail) {
         let folderPath = candidate.folderPath
+
+        // Show immediate feedback before the bridge sends the first event
+        appService.importStatuses[folderPath] = .importing(progressPercent: 0)
+
         let selectedUrl = candidateStates[folderPath]?.selectedCoverUrl
         let managed = candidateStates[folderPath]?.managed ?? true
 
