@@ -109,6 +109,25 @@ struct ImportView: View {
         return complete + incomplete
     }
 
+    private var candidateSelectionBinding: Binding<String?> {
+        Binding(
+            get: { selectedCandidate?.folderPath },
+            set: { path in
+                guard let candidate = appService.scanResults.first(where: { $0.folderPath == path }) else {
+                    return
+                }
+                if candidate.badAudioCount > 0 || candidate.badImageCount > 0 {
+                    return
+                }
+                selectedCandidate = candidate
+                searchArtist = candidate.artistName
+                searchAlbum = candidate.albumTitle
+                searchResults = []
+                candidateFiles = appService.getCandidateFiles(folderPath: candidate.folderPath)
+            }
+        )
+    }
+
     private var candidateList: some View {
         VStack(spacing: 0) {
             candidateListHeader
@@ -116,23 +135,7 @@ struct ImportView: View {
             List(
                 sortedCandidates,
                 id: \.folderPath,
-                selection: Binding(
-                    get: { selectedCandidate?.folderPath },
-                    set: { path in
-                        guard let candidate = appService.scanResults.first(where: { $0.folderPath == path }) else {
-                            return
-                        }
-                        // Don't select incomplete candidates
-                        if candidate.badAudioCount > 0 || candidate.badImageCount > 0 {
-                            return
-                        }
-                        selectedCandidate = candidate
-                        searchArtist = candidate.artistName
-                        searchAlbum = candidate.albumTitle
-                        searchResults = []
-                        candidateFiles = appService.getCandidateFiles(folderPath: candidate.folderPath)
-                    }
-                )
+                selection: candidateSelectionBinding
             ) { candidate in
                 CandidateRow(
                     candidate: candidate,

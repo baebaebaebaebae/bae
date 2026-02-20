@@ -216,14 +216,14 @@ class AppService: AppEventHandler, @unchecked Sendable {
         }
     }
 
-    func removeCandidate(folderPath: String) {
-        importStatuses.removeValue(forKey: folderPath)
-        scanResults.removeAll { $0.folderPath == folderPath }
-    }
-
     func clearAllCandidates() {
         scanResults = []
         importStatuses = [:]
+    }
+
+    func removeCandidate(folderPath: String) {
+        importStatuses.removeValue(forKey: folderPath)
+        scanResults.removeAll { $0.folderPath == folderPath }
     }
 
     func clearCompletedCandidates() {
