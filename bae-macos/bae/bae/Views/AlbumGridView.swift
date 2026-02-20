@@ -131,22 +131,18 @@ struct AlbumCardView: View {
                             lineWidth: isSelected ? 3 : 0
                         )
                 )
-                .overlay(alignment: .bottom) {
+                .overlay(alignment: .topTrailing) {
                     if isHovered || showMenu {
-                        HStack {
-                            CardButton(systemName: "play.fill", accented: true, action: onPlay)
-                            Spacer()
-                            CardMenuButton(onAddToQueue: onAddToQueue, onAddNext: onAddNext, showMenu: $showMenu)
-                        }
-                        .padding(8)
-                        .transition(.opacity)
+                        CardMenuButton(onPlay: onPlay, onAddToQueue: onAddToQueue, onAddNext: onAddNext, showMenu: $showMenu)
+                            .padding(6)
+                            .transition(.opacity)
                     }
                 }
                 .onHover { isHovered = $0 }
                 .padding(.bottom, 6)
 
             Text(title)
-                .font(.callout)
+                .font(.body)
                 .fontWeight(.medium)
                 .lineLimit(1)
 
@@ -198,29 +194,10 @@ struct AlbumCardView: View {
     }
 }
 
-// MARK: - Card Overlay Buttons
-
-private struct CardButton: View {
-    let systemName: String
-    let accented: Bool
-    let action: () -> Void
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(width: 30, height: 30)
-                .background(isHovered && accented ? Color.accentColor : Color.black.opacity(0.4))
-                .clipShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-    }
-}
+// MARK: - Card Overlay Button
 
 private struct CardMenuButton: View {
+    let onPlay: () -> Void
     let onAddToQueue: () -> Void
     let onAddNext: () -> Void
     @Binding var showMenu: Bool
@@ -242,6 +219,9 @@ private struct CardMenuButton: View {
     private func presentMenu() {
         showMenu = true
         let menu = NSMenu()
+        let playItem = MenuItem(title: "Play") { onPlay() }
+        menu.addItem(playItem)
+        menu.addItem(NSMenuItem.separator())
         let queueItem = MenuItem(title: "Add to Queue") { onAddToQueue() }
         menu.addItem(queueItem)
         let nextItem = MenuItem(title: "Add Next") { onAddNext() }
