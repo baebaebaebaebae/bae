@@ -175,6 +175,7 @@ pub struct BridgeMetadataResult {
     pub format: Option<String>,
     pub label: Option<String>,
     pub track_count: u32,
+    pub cover_url: Option<String>,
 }
 
 #[derive(Debug, Clone, uniffi::Enum)]

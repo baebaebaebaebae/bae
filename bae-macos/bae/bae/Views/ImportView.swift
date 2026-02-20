@@ -54,8 +54,6 @@ struct CandidateSearchState {
     // Search field values (preserved per candidate)
     var searchArtist: String = ""
     var searchAlbum: String = ""
-    var searchYear: String = ""
-    var searchLabel: String = ""
     var searchCatalog: String = ""
     var searchBarcode: String = ""
 
@@ -66,6 +64,7 @@ struct CandidateSearchState {
     // Disc ID
     var discIdLookupState: DiscIdLookupState = .none
     var autoMatches: [BridgeMetadataResult] = []
+    var showManualSearch: Bool = false
 
     // Confirmation
     var mode: CandidateMode = .identifying
@@ -165,6 +164,12 @@ struct ImportView: View {
                     .background(Theme.surface)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .shadow(radius: 20)
+            }
+        }
+        .onChange(of: appService.scanResults.count) {
+            if selectedCandidate == nil,
+               let first = appService.scanResults.first(where: { $0.badAudioCount == 0 && $0.badImageCount == 0 }) {
+                selectCandidate(first)
             }
         }
     }
@@ -443,14 +448,12 @@ struct ImportView: View {
     private func searchAndResultsPane(for candidate: BridgeImportCandidate, state: CandidateSearchState) -> some View {
         let folderPath = candidate.folderPath
         let tabState = state.activeResults()
+        let hasAutoMatches = !state.autoMatches.isEmpty
+        let showingAutoMatches = hasAutoMatches && !state.showManualSearch
 
         VStack(spacing: 0) {
             // Disc ID banner
             discIdBanner(for: candidate, state: state)
-
-            // Search form
-            importSearchForm(for: folderPath)
-            Divider()
 
             // Prefetch error
             if let error = state.prefetchError {
@@ -464,31 +467,59 @@ struct ImportView: View {
                 .padding(.vertical, 6)
             }
 
-            // Auto-match results (if disc ID found multiple)
-            if !state.autoMatches.isEmpty && state.autoMatches.count > 1 {
+            if showingAutoMatches {
+                // Show auto matches directly (no search form)
+                HStack {
+                    Button("Search manually") {
+                        candidateStates[folderPath]?.showManualSearch = true
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 6)
+                Divider()
                 autoMatchSection(for: candidate, matches: state.autoMatches)
-            }
-
-            // Search results
-            if tabState.isSearching {
-                ProgressView("Searching...")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if !tabState.hasSearched && state.autoMatches.count <= 1 {
-                ContentUnavailableView(
-                    "No results",
-                    systemImage: "magnifyingglass",
-                    description: Text("Search MusicBrainz or Discogs to find metadata")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if tabState.results.isEmpty && tabState.hasSearched {
-                ContentUnavailableView(
-                    "No matches found",
-                    systemImage: "magnifyingglass",
-                    description: Text("Try different search terms or another source")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                resultsList(for: candidate, results: tabState.results)
+                // Show search form
+                if hasAutoMatches {
+                    HStack {
+                        Button("View disc ID matches (\(state.autoMatches.count))") {
+                            candidateStates[folderPath]?.showManualSearch = false
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                        Spacer()
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 6)
+                }
+
+                importSearchForm(for: folderPath)
+                Divider()
+
+                // Search results
+                if tabState.isSearching {
+                    ProgressView("Searching...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if !tabState.hasSearched {
+                    ContentUnavailableView(
+                        "No results",
+                        systemImage: "magnifyingglass",
+                        description: Text("Search MusicBrainz or Discogs to find metadata")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if tabState.results.isEmpty {
+                    ContentUnavailableView(
+                        "No matches found",
+                        systemImage: "magnifyingglass",
+                        description: Text("Try different search terms or another source")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    resultsList(for: candidate, results: tabState.results)
+                }
             }
         }
     }
@@ -540,25 +571,16 @@ struct ImportView: View {
     }
 
     private func autoMatchSection(for candidate: BridgeImportCandidate, matches: [BridgeMetadataResult]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Disc ID matches")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal)
-                .padding(.top, 8)
-            List(matches, id: \.releaseId) { result in
-                MetadataResultRow(
-                    result: result,
-                    localTrackCount: candidate.trackCount,
-                    isImporting: isImporting(candidate.folderPath),
-                    onSelect: { prefetchAndConfirm(folderPath: candidate.folderPath, result: result) }
-                )
-            }
-            .scrollContentBackground(.hidden)
-            .background(Theme.background)
-            .frame(maxHeight: 200)
+        List(matches, id: \.releaseId) { result in
+            MetadataResultRow(
+                result: result,
+                localTrackCount: candidate.trackCount,
+                isImporting: isImporting(candidate.folderPath),
+                onSelect: { prefetchAndConfirm(folderPath: candidate.folderPath, result: result) }
+            )
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.background)
     }
 
     // MARK: - Search form
@@ -578,47 +600,22 @@ struct ImportView: View {
 
             switch state.activeTab {
             case .general:
-                VStack(spacing: 6) {
-                    HStack {
-                        TextField("Artist", text: searchFieldBinding(for: folderPath, keyPath: \.searchArtist))
-                            .textFieldStyle(.roundedBorder)
-                        TextField("Album", text: searchFieldBinding(for: folderPath, keyPath: \.searchAlbum))
-                            .textFieldStyle(.roundedBorder)
+                HStack {
+                    TextField("Artist", text: searchFieldBinding(for: folderPath, keyPath: \.searchArtist))
+                        .textFieldStyle(.roundedBorder)
+                    TextField("Album", text: searchFieldBinding(for: folderPath, keyPath: \.searchAlbum))
+                        .textFieldStyle(.roundedBorder)
+                    sourcePicker(for: folderPath)
+                    Button("Search") {
+                        searchGeneral(for: folderPath)
                     }
-                    HStack {
-                        TextField("Year", text: searchFieldBinding(for: folderPath, keyPath: \.searchYear))
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 80)
-                        TextField("Label", text: searchFieldBinding(for: folderPath, keyPath: \.searchLabel))
-                            .textFieldStyle(.roundedBorder)
-                        Spacer()
-
-                        // Source picker
-                        Picker("", selection: activeSourceBinding(for: folderPath)) {
-                            ForEach(SearchSource.allCases, id: \.self) { source in
-                                Text(source.label).tag(source)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 200)
-
-                        Button("Search") {
-                            searchGeneral(for: folderPath)
-                        }
-                        .disabled(state.searchArtist.isEmpty && state.searchAlbum.isEmpty)
-                    }
+                    .disabled(state.searchArtist.isEmpty && state.searchAlbum.isEmpty)
                 }
             case .catalogNumber:
                 HStack {
                     TextField("e.g. WPCR-80001", text: searchFieldBinding(for: folderPath, keyPath: \.searchCatalog))
                         .textFieldStyle(.roundedBorder)
-                    Picker("", selection: activeSourceBinding(for: folderPath)) {
-                        ForEach(SearchSource.allCases, id: \.self) { source in
-                            Text(source.label).tag(source)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 200)
+                    sourcePicker(for: folderPath)
                     Button("Search") {
                         searchByCatalog(for: folderPath)
                     }
@@ -628,13 +625,7 @@ struct ImportView: View {
                 HStack {
                     TextField("e.g. 4943674251780", text: searchFieldBinding(for: folderPath, keyPath: \.searchBarcode))
                         .textFieldStyle(.roundedBorder)
-                    Picker("", selection: activeSourceBinding(for: folderPath)) {
-                        ForEach(SearchSource.allCases, id: \.self) { source in
-                            Text(source.label).tag(source)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 200)
+                    sourcePicker(for: folderPath)
                     Button("Search") {
                         searchByBarcode(for: folderPath)
                     }
@@ -644,6 +635,16 @@ struct ImportView: View {
         }
         .padding()
         .animation(nil, value: state.activeTab)
+    }
+
+    private func sourcePicker(for folderPath: String) -> some View {
+        Picker("", selection: activeSourceBinding(for: folderPath)) {
+            ForEach(SearchSource.allCases, id: \.self) { source in
+                Text(source.label).tag(source)
+            }
+        }
+        .pickerStyle(.segmented)
+        .frame(width: 200)
     }
 
     // MARK: - Bindings into per-candidate state
@@ -698,16 +699,14 @@ struct ImportView: View {
 
         let artist = state.searchArtist
         let album = state.searchAlbum
-        let year = state.searchYear.isEmpty ? nil : state.searchYear
-        let label = state.searchLabel.isEmpty ? nil : state.searchLabel
 
         Task {
             let results: [BridgeMetadataResult]
             switch capturedSource {
             case .musicbrainz:
-                results = await appService.searchMusicbrainz(artist: artist, album: album, year: year, label: label)
+                results = await appService.searchMusicbrainz(artist: artist, album: album, year: nil, label: nil)
             case .discogs:
-                results = await appService.searchDiscogs(artist: artist, album: album, year: year, label: label)
+                results = await appService.searchDiscogs(artist: artist, album: album, year: nil, label: nil)
             }
 
             await MainActor.run {
@@ -1180,7 +1179,19 @@ struct MetadataResultRow: View {
     }
 
     var body: some View {
-        HStack {
+        HStack(spacing: 10) {
+            AsyncImage(url: result.coverUrl.flatMap { URL(string: $0) }) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                ZStack {
+                    Color(nsColor: .controlBackgroundColor)
+                    Image(systemName: "photo")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .frame(width: 44, height: 44)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
             VStack(alignment: .leading, spacing: 2) {
                 Text(result.title)
                     .font(.body)
@@ -1545,7 +1556,8 @@ struct DocumentViewerView: View {
             year: 2024,
             format: "CD",
             label: "Label Name",
-            trackCount: 12
+            trackCount: 12,
+            coverUrl: nil
         ),
         localTrackCount: 12,
         isImporting: false,
