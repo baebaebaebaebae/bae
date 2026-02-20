@@ -352,28 +352,33 @@ struct ImportView: View {
         appService.scanAdditionalFolder(path: url.path)
     }
 
-    // MARK: - Main pane (routes to search or confirmation)
+    // MARK: - Main pane (file pane + search + optional confirmation)
 
     @ViewBuilder
     private func mainPane(for candidate: BridgeImportCandidate) -> some View {
         let folderPath = candidate.folderPath
         let mode = candidateStates[folderPath]?.mode ?? .identifying
+        let state = candidateStates[folderPath] ?? CandidateSearchState()
 
         VStack(spacing: 0) {
             candidateHeader(candidate)
             Divider()
-            switch mode {
-            case .identifying:
-                searchPane(for: candidate)
-            case .loadingDetail:
-                ProgressView("Loading release details...")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .confirming:
-                if let detail = candidateStates[folderPath]?.releaseDetail {
+            HSplitView {
+                // File pane (left)
+                if let files = candidateFiles {
+                    filePane(files)
+                        .frame(minWidth: 200)
+                }
+                // Search/results pane (middle)
+                searchAndResultsPane(for: candidate, state: state)
+                    .frame(minWidth: 300)
+                // Confirmation pane (right, appears when loading detail or confirming)
+                if mode == .loadingDetail {
+                    ProgressView("Loading release details...")
+                        .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
+                } else if mode == .confirming, let detail = candidateStates[folderPath]?.releaseDetail {
                     confirmationView(for: candidate, detail: detail)
-                } else {
-                    // Shouldn't happen, but fall back to search
-                    searchPane(for: candidate)
+                        .frame(minWidth: 300)
                 }
             }
         }
@@ -419,26 +424,6 @@ struct ImportView: View {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
                     .lineLimit(1)
-            }
-        }
-    }
-
-    // MARK: - Search pane
-
-    private func searchPane(for candidate: BridgeImportCandidate) -> some View {
-        let folderPath = candidate.folderPath
-        let state = candidateStates[folderPath] ?? CandidateSearchState()
-
-        return Group {
-            if let files = candidateFiles {
-                HSplitView {
-                    filePane(files)
-                        .frame(minWidth: 200)
-                    searchAndResultsPane(for: candidate, state: state)
-                        .frame(minWidth: 300)
-                }
-            } else {
-                searchAndResultsPane(for: candidate, state: state)
             }
         }
     }
