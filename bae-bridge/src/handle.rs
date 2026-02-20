@@ -3348,22 +3348,6 @@ async fn resolve_track_info(
 ) -> (Option<String>, String, String, String, Option<String>) {
     let mgr = lm.get();
 
-    let (artist_id, artist_names) = match mgr.get_artists_for_track(track_id).await {
-        Ok(artists) => {
-            let id = artists.first().map(|a| a.id.clone());
-            let names = artists
-                .iter()
-                .map(|a| a.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            (id, names)
-        }
-        Err(e) => {
-            warn!("Failed to get artists for track {track_id}: {e}");
-            (None, String::new())
-        }
-    };
-
     let (album_id, album_title, cover_image_id) = match mgr.get_album_id_for_track(track_id).await {
         Ok(id) => {
             let (title, cover) = match mgr.get_album_by_id(&id).await {
@@ -3375,6 +3359,33 @@ async fn resolve_track_info(
         Err(e) => {
             warn!("Failed to get album_id for track {track_id}: {e}");
             (String::new(), String::new(), None)
+        }
+    };
+
+    let (artist_id, artist_names) = match mgr.get_artists_for_track(track_id).await {
+        Ok(artists) if !artists.is_empty() => {
+            let id = artists.first().map(|a| a.id.clone());
+            let names = artists
+                .iter()
+                .map(|a| a.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            (id, names)
+        }
+        _ => {
+            // Fall back to album artists
+            match mgr.get_artists_for_album(&album_id).await {
+                Ok(artists) if !artists.is_empty() => {
+                    let id = artists.first().map(|a| a.id.clone());
+                    let names = artists
+                        .iter()
+                        .map(|a| a.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    (id, names)
+                }
+                _ => (None, String::new()),
+            }
         }
     };
 
