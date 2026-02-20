@@ -103,28 +103,48 @@ struct ImportView: View {
 
     // MARK: - Candidate list
 
+    private var sortedCandidates: [BridgeImportCandidate] {
+        let complete = appService.scanResults.filter { $0.badAudioCount == 0 && $0.badImageCount == 0 }
+        let incomplete = appService.scanResults.filter { $0.badAudioCount > 0 || $0.badImageCount > 0 }
+        return complete + incomplete
+    }
+
     private var candidateList: some View {
         VStack(spacing: 0) {
             candidateListHeader
             Divider()
             List(
-                appService.scanResults,
+                sortedCandidates,
                 id: \.folderPath,
                 selection: Binding(
                     get: { selectedCandidate?.folderPath },
                     set: { path in
-                        selectedCandidate = appService.scanResults.first { $0.folderPath == path }
-                        if let candidate = selectedCandidate {
-                            searchArtist = candidate.artistName
-                            searchAlbum = candidate.albumTitle
-                            searchResults = []
-                            candidateFiles = appService.getCandidateFiles(folderPath: candidate.folderPath)
+                        guard let candidate = appService.scanResults.first(where: { $0.folderPath == path }) else {
+                            return
                         }
+                        // Don't select incomplete candidates
+                        if candidate.badAudioCount > 0 || candidate.badImageCount > 0 {
+                            return
+                        }
+                        selectedCandidate = candidate
+                        searchArtist = candidate.artistName
+                        searchAlbum = candidate.albumTitle
+                        searchResults = []
+                        candidateFiles = appService.getCandidateFiles(folderPath: candidate.folderPath)
                     }
                 )
             ) { candidate in
-                CandidateRow(candidate: candidate, status: appService.importStatuses[candidate.folderPath])
-                    .disabled(candidate.badAudioCount > 0 || candidate.badImageCount > 0)
+                CandidateRow(
+                    candidate: candidate,
+                    status: appService.importStatuses[candidate.folderPath],
+                    onRemove: {
+                        if selectedCandidate?.folderPath == candidate.folderPath {
+                            selectedCandidate = nil
+                        }
+                        appService.removeCandidate(folderPath: candidate.folderPath)
+                    }
+                )
+                .padding(.vertical, 4)
             }
             .scrollContentBackground(.hidden)
             .background(Theme.surface)
@@ -659,9 +679,16 @@ struct MetadataResultRow: View {
 struct CandidateRow: View {
     let candidate: BridgeImportCandidate
     let status: BridgeImportStatus?
+    let onRemove: () -> Void
+
+    @State private var isHovered = false
 
     private var isIncomplete: Bool {
         candidate.badAudioCount > 0 || candidate.badImageCount > 0
+    }
+
+    private var folderName: String {
+        URL(fileURLWithPath: candidate.folderPath).lastPathComponent
     }
 
     private var incompleteMessage: String? {
@@ -679,13 +706,20 @@ struct CandidateRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             statusIcon
                 .frame(width: 16)
             VStack(alignment: .leading, spacing: 2) {
-                Text(candidate.albumTitle)
+                Text(folderName)
                     .font(.body)
                     .lineLimit(1)
+                    .truncationMode(.middle)
+                if candidate.albumTitle != folderName {
+                    Text(candidate.albumTitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
                 if let message = incompleteMessage {
                     Text(message)
                         .font(.caption)
@@ -694,6 +728,19 @@ struct CandidateRow: View {
                 }
             }
             .opacity(isIncomplete ? 0.5 : 1.0)
+            Spacer()
+            if isHovered {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Remove from list")
+            }
+        }
+        .onHover { hovering in
+            isHovered = hovering
         }
     }
 
@@ -712,8 +759,14 @@ struct CandidateRow: View {
                     .foregroundStyle(.red)
             }
         } else {
-            Image(systemName: "folder")
-                .foregroundStyle(.secondary)
+            Button(action: {
+                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: candidate.folderPath)
+            }) {
+                Image(systemName: "folder")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Reveal in Finder")
         }
     }
 }
@@ -867,7 +920,7 @@ struct DocumentViewerView: View {
 #Preview("Candidate Row - Pending") {
     CandidateRow(
         candidate: BridgeImportCandidate(
-            folderPath: "/path/to/folder",
+            folderPath: "/path/to/Album Title",
             artistName: "Artist Name",
             albumTitle: "Album Title",
             trackCount: 12,
@@ -876,7 +929,8 @@ struct DocumentViewerView: View {
             badAudioCount: 0,
             badImageCount: 0
         ),
-        status: nil
+        status: nil,
+        onRemove: {}
     )
     .padding()
 }
@@ -884,7 +938,7 @@ struct DocumentViewerView: View {
 #Preview("Candidate Row - Complete") {
     CandidateRow(
         candidate: BridgeImportCandidate(
-            folderPath: "/path/to/folder",
+            folderPath: "/path/to/Album Title",
             artistName: "Artist Name",
             albumTitle: "Album Title",
             trackCount: 12,
@@ -893,7 +947,8 @@ struct DocumentViewerView: View {
             badAudioCount: 0,
             badImageCount: 0
         ),
-        status: .complete
+        status: .complete,
+        onRemove: {}
     )
     .padding()
 }
@@ -901,7 +956,7 @@ struct DocumentViewerView: View {
 #Preview("Candidate Row - Incomplete") {
     CandidateRow(
         candidate: BridgeImportCandidate(
-            folderPath: "/path/to/folder",
+            folderPath: "/path/to/Album Title",
             artistName: "Artist Name",
             albumTitle: "Album Title",
             trackCount: 10,
@@ -910,7 +965,26 @@ struct DocumentViewerView: View {
             badAudioCount: 2,
             badImageCount: 1
         ),
-        status: nil
+        status: nil,
+        onRemove: {}
+    )
+    .padding()
+}
+
+#Preview("Candidate Row - Folder differs from title") {
+    CandidateRow(
+        candidate: BridgeImportCandidate(
+            folderPath: "/path/to/CD1",
+            artistName: "Artist Name",
+            albumTitle: "Album Title",
+            trackCount: 8,
+            format: "FLAC",
+            totalSizeBytes: 380_000_000,
+            badAudioCount: 0,
+            badImageCount: 0
+        ),
+        status: nil,
+        onRemove: {}
     )
     .padding()
 }
