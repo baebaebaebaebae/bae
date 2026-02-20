@@ -249,26 +249,39 @@ class AppService: AppEventHandler, @unchecked Sendable {
         }
     }
 
-    func searchMusicbrainz(artist: String, album: String) async -> [BridgeMetadataResult] {
+    func searchMusicbrainz(artist: String, album: String, year: String? = nil, label: String? = nil) async -> [BridgeMetadataResult] {
         return await Task.detached { [appHandle] in
-            (try? appHandle.searchMusicbrainz(artist: artist, album: album)) ?? []
+            (try? appHandle.searchMusicbrainz(artist: artist, album: album, year: year, label: label)) ?? []
         }.value
     }
 
-    func searchDiscogs(artist: String, album: String) async -> [BridgeMetadataResult] {
+    func searchDiscogs(artist: String, album: String, year: String? = nil, label: String? = nil) async -> [BridgeMetadataResult] {
         return await Task.detached { [appHandle] in
-            (try? appHandle.searchDiscogs(artist: artist, album: album)) ?? []
+            (try? appHandle.searchDiscogs(artist: artist, album: album, year: year, label: label)) ?? []
         }.value
     }
 
-    func commitImport(folderPath: String, releaseId: String, source: String) {
+    func commitImport(folderPath: String, releaseId: String, source: String, selectedCover: BridgeCoverSelection? = nil) {
         Task.detached { [appHandle] in
             try? appHandle.commitImport(
                 folderPath: folderPath,
                 releaseId: releaseId,
-                source: source
+                source: source,
+                selectedCover: selectedCover
             )
         }
+    }
+
+    func lookupDiscId(discid: String) async -> BridgeDiscIdResult? {
+        return await Task.detached { [appHandle] in
+            try? appHandle.lookupDiscid(discid: discid)
+        }.value
+    }
+
+    func prefetchRelease(releaseId: String, source: String) async -> BridgeReleaseDetail? {
+        return await Task.detached { [appHandle] in
+            try? appHandle.prefetchRelease(releaseId: releaseId, source: source)
+        }.value
     }
 
     func searchByCatalogNumber(catalog: String, source: String) async -> [BridgeMetadataResult] {

@@ -22,12 +22,12 @@ use tracing::{info, warn};
 use crate::types::{
     BridgeAlbum, BridgeAlbumDetail, BridgeAlbumSearchResult, BridgeArtist,
     BridgeArtistSearchResult, BridgeAudioContent, BridgeCandidateFiles, BridgeConfig,
-    BridgeCoverSelection, BridgeCueFlacPair, BridgeError, BridgeFile, BridgeFileInfo,
-    BridgeFollowedLibrary, BridgeImportCandidate, BridgeImportStatus, BridgeLibraryInfo,
-    BridgeMember, BridgeMetadataResult, BridgePlaybackState, BridgeQueueItem, BridgeRelease,
-    BridgeRemoteCover, BridgeRepeatMode, BridgeSaveSyncConfig, BridgeSearchResults,
-    BridgeSortCriterion, BridgeSortDirection, BridgeSortField, BridgeSyncConfig, BridgeSyncStatus,
-    BridgeTrack, BridgeTrackSearchResult,
+    BridgeCoverArt, BridgeCoverSelection, BridgeCueFlacPair, BridgeDiscIdResult, BridgeError,
+    BridgeFile, BridgeFileInfo, BridgeFollowedLibrary, BridgeImportCandidate, BridgeImportStatus,
+    BridgeLibraryInfo, BridgeMember, BridgeMetadataResult, BridgePlaybackState, BridgeQueueItem,
+    BridgeRelease, BridgeReleaseDetail, BridgeReleaseTrack, BridgeRemoteCover, BridgeRepeatMode,
+    BridgeSaveSyncConfig, BridgeSearchResults, BridgeSortCriterion, BridgeSortDirection,
+    BridgeSortField, BridgeSyncConfig, BridgeSyncStatus, BridgeTrack, BridgeTrackSearchResult,
 };
 
 fn bridge_sort_to_core(c: &BridgeSortCriterion) -> bae_core::db::AlbumSortCriterion {
@@ -1003,11 +1003,15 @@ impl AppHandle {
         &self,
         artist: String,
         album: String,
+        year: Option<String>,
+        label: Option<String>,
     ) -> Result<Vec<BridgeMetadataResult>, BridgeError> {
         self.runtime.block_on(async {
             let params = bae_core::musicbrainz::ReleaseSearchParams {
                 artist: Some(artist),
                 album: Some(album),
+                year,
+                label,
                 ..Default::default()
             };
             let releases = bae_core::musicbrainz::search_releases_with_params(&params)
@@ -1044,6 +1048,8 @@ impl AppHandle {
         &self,
         artist: String,
         album: String,
+        year: Option<String>,
+        label: Option<String>,
     ) -> Result<Vec<BridgeMetadataResult>, BridgeError> {
         self.runtime.block_on(async {
             let api_key =
@@ -1056,6 +1062,8 @@ impl AppHandle {
             let params = bae_core::discogs::client::DiscogsSearchParams {
                 artist: Some(artist),
                 release_title: Some(album),
+                year,
+                label,
                 ..Default::default()
             };
             let results =
@@ -1323,10 +1331,20 @@ impl AppHandle {
         folder_path: String,
         release_id: String,
         source: String,
+        selected_cover: Option<BridgeCoverSelection>,
     ) -> Result<(), BridgeError> {
         self.runtime.block_on(async {
             let import_id = uuid::Uuid::new_v4().to_string();
             let folder = PathBuf::from(&folder_path);
+
+            let cover = selected_cover.map(|c| match c {
+                BridgeCoverSelection::ReleaseImage { file_id } => {
+                    bae_core::import::CoverSelection::Local(file_id)
+                }
+                BridgeCoverSelection::RemoteCover { url, .. } => {
+                    bae_core::import::CoverSelection::Remote(url)
+                }
+            });
 
             let request = if source == "musicbrainz" {
                 bae_core::import::ImportRequest::Folder {
@@ -1349,7 +1367,7 @@ impl AppHandle {
                     folder,
                     master_year: 0,
                     managed: true,
-                    selected_cover: None,
+                    selected_cover: cover,
                 }
             } else {
                 // Discogs: need to fetch the full release first
@@ -1374,7 +1392,7 @@ impl AppHandle {
                     folder,
                     master_year: 0,
                     managed: true,
-                    selected_cover: None,
+                    selected_cover: cover,
                 }
             };
 
@@ -1383,6 +1401,181 @@ impl AppHandle {
                 .await
                 .map_err(|e| BridgeError::Import { msg: e })?;
             Ok(())
+        })
+    }
+
+    /// Lookup releases by MusicBrainz disc ID.
+    pub fn lookup_discid(&self, discid: String) -> Result<BridgeDiscIdResult, BridgeError> {
+        self.runtime.block_on(async {
+            match bae_core::musicbrainz::lookup_by_discid(&discid).await {
+                Ok((releases, _external_urls)) => {
+                    if releases.is_empty() {
+                        return Ok(BridgeDiscIdResult::NoMatches);
+                    }
+
+                    let results: Vec<BridgeMetadataResult> = releases
+                        .into_iter()
+                        .map(|r| {
+                            let year = r
+                                .date
+                                .as_ref()
+                                .and_then(|d| d.split('-').next())
+                                .and_then(|y| y.parse::<i32>().ok());
+                            BridgeMetadataResult {
+                                source: "musicbrainz".to_string(),
+                                release_id: r.release_id,
+                                title: r.title,
+                                artist: r.artist,
+                                year,
+                                format: r.format,
+                                label: r.label,
+                                track_count: 0,
+                            }
+                        })
+                        .collect();
+
+                    if results.len() == 1 {
+                        Ok(BridgeDiscIdResult::SingleMatch {
+                            result: results.into_iter().next().unwrap(),
+                        })
+                    } else {
+                        Ok(BridgeDiscIdResult::MultipleMatches { results })
+                    }
+                }
+                Err(bae_core::musicbrainz::MusicBrainzError::NotFound(_)) => {
+                    Ok(BridgeDiscIdResult::NoMatches)
+                }
+                Err(e) => Err(BridgeError::Import {
+                    msg: format!("DiscID lookup failed: {e}"),
+                }),
+            }
+        })
+    }
+
+    /// Prefetch full release details for the confirmation step.
+    pub fn prefetch_release(
+        &self,
+        release_id: String,
+        source: String,
+    ) -> Result<BridgeReleaseDetail, BridgeError> {
+        self.runtime.block_on(async {
+            if source == "musicbrainz" {
+                let (_mb_release, _external_urls, mb_response) =
+                    bae_core::musicbrainz::lookup_release_by_id(&release_id)
+                        .await
+                        .map_err(|e| BridgeError::Import {
+                            msg: format!("Failed to fetch release: {e}"),
+                        })?;
+
+                let mb_release = mb_response.to_mb_release();
+                let year = mb_release
+                    .date
+                    .as_ref()
+                    .and_then(|d| d.split('-').next())
+                    .and_then(|y| y.parse::<i32>().ok());
+
+                let tracks: Vec<BridgeReleaseTrack> = mb_response
+                    .media
+                    .iter()
+                    .flat_map(|medium| {
+                        medium.tracks.iter().map(|t| BridgeReleaseTrack {
+                            title: t
+                                .title
+                                .clone()
+                                .or_else(|| t.recording.as_ref().and_then(|r| r.title.clone()))
+                                .unwrap_or_default(),
+                            artist: None,
+                            duration_ms: t.length,
+                            position: t.number.clone().unwrap_or_else(|| {
+                                t.position.map(|p| p.to_string()).unwrap_or_default()
+                            }),
+                        })
+                    })
+                    .collect();
+
+                let cover_url = format!(
+                    "https://coverartarchive.org/release/{}/front-500",
+                    release_id
+                );
+                let cover_art = vec![BridgeCoverArt {
+                    url: cover_url,
+                    source: "musicbrainz".to_string(),
+                }];
+
+                Ok(BridgeReleaseDetail {
+                    release_id: mb_response.id,
+                    source: "musicbrainz".to_string(),
+                    title: mb_response.title,
+                    artist: mb_release.artist,
+                    year,
+                    format: mb_release.format,
+                    label: mb_release.label,
+                    catalog_number: mb_release.catalog_number,
+                    track_count: tracks.len() as u32,
+                    tracks,
+                    cover_art,
+                })
+            } else {
+                let api_key =
+                    self.key_service
+                        .get_discogs_key()
+                        .ok_or_else(|| BridgeError::Import {
+                            msg: "Discogs API key not configured".to_string(),
+                        })?;
+                let client = bae_core::discogs::DiscogsClient::new(api_key);
+                let release =
+                    client
+                        .get_release(&release_id)
+                        .await
+                        .map_err(|e| BridgeError::Import {
+                            msg: format!("Failed to fetch Discogs release: {e}"),
+                        })?;
+
+                let tracks: Vec<BridgeReleaseTrack> = release
+                    .tracklist
+                    .iter()
+                    .map(|t| BridgeReleaseTrack {
+                        title: t.title.clone(),
+                        artist: None,
+                        duration_ms: t.duration.as_ref().and_then(|d| parse_duration_to_ms(d)),
+                        position: t.position.clone(),
+                    })
+                    .collect();
+
+                let mut cover_art = Vec::new();
+                if let Some(ref url) = release.cover_image {
+                    cover_art.push(BridgeCoverArt {
+                        url: url.clone(),
+                        source: "discogs".to_string(),
+                    });
+                }
+
+                let year = release.year.map(|y| y as i32);
+                let artist = release
+                    .artists
+                    .iter()
+                    .map(|a| a.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                Ok(BridgeReleaseDetail {
+                    release_id: release.id.clone(),
+                    source: "discogs".to_string(),
+                    title: release.title.clone(),
+                    artist,
+                    year,
+                    format: if release.format.is_empty() {
+                        None
+                    } else {
+                        Some(release.format.join(", "))
+                    },
+                    label: release.label.first().cloned(),
+                    catalog_number: release.catno.clone(),
+                    track_count: tracks.len() as u32,
+                    tracks,
+                    cover_art,
+                })
+            }
         })
     }
 
@@ -2924,15 +3117,20 @@ async fn dispatch_scan_events(
                     AudioContent::TrackFiles(tracks) => tracks.iter().map(|t| t.size).sum(),
                 };
 
+                let folder_contents =
+                    bae_core::import::detect_folder_contents(candidate.path.clone()).ok();
+                let metadata = folder_contents.as_ref().map(|fc| &fc.metadata);
+
                 handler.on_scan_result(BridgeImportCandidate {
                     folder_path: candidate.path.to_string_lossy().to_string(),
-                    artist_name: String::new(),
+                    artist_name: metadata.and_then(|m| m.artist.clone()).unwrap_or_default(),
                     album_title: candidate.name,
                     track_count,
                     format,
                     total_size_bytes,
                     bad_audio_count: candidate.files.bad_audio_count as u32,
                     bad_image_count: candidate.files.bad_image_count as u32,
+                    mb_discid: metadata.and_then(|m| m.mb_discid.clone()),
                 });
             }
             ScanEvent::Error(msg) => {
@@ -3155,6 +3353,25 @@ async fn write_cover_and_update_db(
         })?;
 
     Ok(())
+}
+
+/// Parse a Discogs-style duration string ("3:45") to milliseconds.
+fn parse_duration_to_ms(duration: &str) -> Option<u64> {
+    let parts: Vec<&str> = duration.split(':').collect();
+    match parts.len() {
+        2 => {
+            let mins: u64 = parts[0].parse().ok()?;
+            let secs: u64 = parts[1].parse().ok()?;
+            Some((mins * 60 + secs) * 1000)
+        }
+        3 => {
+            let hours: u64 = parts[0].parse().ok()?;
+            let mins: u64 = parts[1].parse().ok()?;
+            let secs: u64 = parts[2].parse().ok()?;
+            Some((hours * 3600 + mins * 60 + secs) * 1000)
+        }
+        _ => None,
+    }
 }
 
 /// Find the S3 key for a release's cover image.

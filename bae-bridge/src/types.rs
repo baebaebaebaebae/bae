@@ -125,6 +125,7 @@ pub struct BridgeImportCandidate {
     pub total_size_bytes: u64,
     pub bad_audio_count: u32,
     pub bad_image_count: u32,
+    pub mb_discid: Option<String>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -174,6 +175,42 @@ pub struct BridgeMetadataResult {
     pub format: Option<String>,
     pub label: Option<String>,
     pub track_count: u32,
+}
+
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum BridgeDiscIdResult {
+    NoMatches,
+    SingleMatch { result: BridgeMetadataResult },
+    MultipleMatches { results: Vec<BridgeMetadataResult> },
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeCoverArt {
+    pub url: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeReleaseDetail {
+    pub release_id: String,
+    pub source: String,
+    pub title: String,
+    pub artist: String,
+    pub year: Option<i32>,
+    pub format: Option<String>,
+    pub label: Option<String>,
+    pub catalog_number: Option<String>,
+    pub track_count: u32,
+    pub tracks: Vec<BridgeReleaseTrack>,
+    pub cover_art: Vec<BridgeCoverArt>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BridgeReleaseTrack {
+    pub title: String,
+    pub artist: Option<String>,
+    pub duration_ms: Option<u64>,
+    pub position: String,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
