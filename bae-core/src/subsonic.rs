@@ -448,7 +448,7 @@ async fn get_cover_art(
     };
 
     // Look up the album to find its cover_release_id
-    let albums = match state.library_manager.get().get_albums().await {
+    let albums = match state.library_manager.get().get_albums(&[]).await {
         Ok(albums) => albums,
         Err(e) => {
             error!("Failed to load albums for cover art: {}", e);
@@ -744,7 +744,7 @@ async fn stream_song(
 async fn load_artists(
     library_manager: &SharedLibraryManager,
 ) -> Result<ArtistsResponse, LibraryError> {
-    let albums = library_manager.get().get_albums().await?;
+    let albums = library_manager.get().get_albums(&[]).await?;
     let mut artist_map: HashMap<String, HashMap<String, u32>> = HashMap::new();
     for album in &albums {
         let artists = library_manager
@@ -789,7 +789,7 @@ async fn load_artists(
 async fn load_albums(
     library_manager: &SharedLibraryManager,
 ) -> Result<AlbumListResponse, LibraryError> {
-    let db_albums = library_manager.get().get_albums().await?;
+    let db_albums = library_manager.get().get_albums(&[]).await?;
     let mut albums = Vec::new();
     for db_album in db_albums {
         let tracks = library_manager.get().get_tracks(&db_album.id).await?;
@@ -833,7 +833,7 @@ async fn load_album_with_songs(
     library_manager: &SharedLibraryManager,
     album_id: &str,
 ) -> Result<serde_json::Value, LibraryError> {
-    let albums = library_manager.get().get_albums().await?;
+    let albums = library_manager.get().get_albums(&[]).await?;
     let db_album = albums
         .into_iter()
         .find(|a| a.id == album_id)

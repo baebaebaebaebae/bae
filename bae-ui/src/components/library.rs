@@ -28,46 +28,6 @@ struct AlbumGridItem {
     artists: Vec<Artist>,
 }
 
-/// Sort albums based on an ordered list of criteria
-fn sort_albums(
-    albums: &[Album],
-    artists_by_album: &HashMap<String, Vec<Artist>>,
-    criteria: &[SortCriterion],
-) -> Vec<Album> {
-    let mut sorted = albums.to_vec();
-    sorted.sort_by(|a, b| {
-        for criterion in criteria {
-            let cmp = match criterion.field {
-                LibrarySortField::Title => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
-                LibrarySortField::Artist => {
-                    let artist_a = artists_by_album
-                        .get(&a.id)
-                        .and_then(|v| v.first())
-                        .map(|a| a.name.to_lowercase())
-                        .unwrap_or_default();
-                    let artist_b = artists_by_album
-                        .get(&b.id)
-                        .and_then(|v| v.first())
-                        .map(|a| a.name.to_lowercase())
-                        .unwrap_or_default();
-                    artist_a.cmp(&artist_b)
-                }
-                LibrarySortField::Year => a.year.cmp(&b.year),
-                LibrarySortField::DateAdded => a.date_added.cmp(&b.date_added),
-            };
-            let cmp = match criterion.direction {
-                SortDirection::Ascending => cmp,
-                SortDirection::Descending => cmp.reverse(),
-            };
-            if cmp != std::cmp::Ordering::Equal {
-                return cmp;
-            }
-        }
-        std::cmp::Ordering::Equal
-    });
-    sorted
-}
-
 fn sort_field_label(field: LibrarySortField) -> &'static str {
     match field {
         LibrarySortField::Title => "Title",
@@ -117,8 +77,6 @@ pub fn LibraryView(
 
     let sort_criteria = sort_state.sort_criteria().read().clone();
     let view_mode = *sort_state.view_mode().read();
-
-    let sorted_albums = sort_albums(&albums, &artists_by_album, &sort_criteria);
     let mut scroll_target: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
 
     rsx! {
@@ -172,7 +130,7 @@ pub fn LibraryView(
                     match view_mode {
                         LibraryViewMode::Albums => rsx! {
                             AlbumGrid {
-                                albums: sorted_albums,
+                                albums: albums.clone(),
                                 artists_by_album,
                                 on_album_click,
                                 on_artist_click,

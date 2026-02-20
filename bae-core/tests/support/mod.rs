@@ -10,6 +10,7 @@ pub fn tracing_init() {
 }
 
 /// Create a test encryption service with a zero key
+#[allow(dead_code)]
 pub fn test_encryption_service() -> Option<bae_core::encryption::EncryptionService> {
     Some(bae_core::encryption::EncryptionService::new_with_key(
         &[0u8; 32],

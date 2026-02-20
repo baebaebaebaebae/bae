@@ -209,7 +209,7 @@ impl CueFlacTestFixture {
             }
         }
 
-        let albums = library_manager_arc.get_albums().await?;
+        let albums = library_manager_arc.get_albums(&[]).await?;
         assert!(!albums.is_empty(), "Should have imported album");
         let releases = library_manager_arc
             .get_releases_for_album(&albums[0].id)
