@@ -223,22 +223,6 @@ struct NowPlayingBar: View {
             } isTargeted: { targeted in
                 queueButtonDropTargeted = targeted
             }
-            .popover(isPresented: $showQueue, arrowEdge: .top) {
-                QueueView(
-                    isActive: queueIsActive,
-                    nowPlayingTitle: queueNowPlayingTitle,
-                    nowPlayingArtist: queueNowPlayingArtist,
-                    nowPlayingArtURL: queueNowPlayingArtURL,
-                    items: queueItems,
-                    onClose: { showQueue = false },
-                    onClear: onQueueClear,
-                    onSkipTo: onQueueSkipTo,
-                    onRemove: onQueueRemove,
-                    onReorder: onQueueReorder,
-                    onInsertTracks: onQueueInsertTracks
-                )
-                .frame(width: 350, height: 500)
-            }
 
             Image(systemName: "speaker.fill")
                 .font(.body)

@@ -166,56 +166,99 @@ struct MainAppView: View {
                 if appService.isActive {
                     Divider()
                     NowPlayingBar(
-                    trackTitle: appService.trackTitle,
-                    artistNames: appService.artistNames,
-                    coverArtURL: appService.imageURL(for: appService.coverImageId),
-                    isPlaying: appService.isPlaying,
-                    currentPositionMs: appService.currentPositionMs,
-                    currentDurationMs: appService.currentDurationMs,
-                    volume: appService.volume,
-                    repeatMode: appService.repeatMode,
-                    showQueue: $showQueue,
-                    queueIsActive: appService.isActive,
-                    queueNowPlayingTitle: appService.trackTitle,
-                    queueNowPlayingArtist: appService.artistNames,
-                    queueNowPlayingArtURL: appService.imageURL(for: appService.coverImageId),
-                    queueItems: appService.queueItems.map { item in
-                        QueueItemViewModel(
-                            id: item.trackId,
-                            title: item.title,
-                            artistNames: item.artistNames,
-                            albumTitle: item.albumTitle,
-                            durationMs: item.durationMs,
-                            coverArtURL: appService.imageURL(for: item.coverImageId)
+                        trackTitle: appService.trackTitle,
+                        artistNames: appService.artistNames,
+                        coverArtURL: appService.imageURL(for: appService.coverImageId),
+                        isPlaying: appService.isPlaying,
+                        currentPositionMs: appService.currentPositionMs,
+                        currentDurationMs: appService.currentDurationMs,
+                        volume: appService.volume,
+                        repeatMode: appService.repeatMode,
+                        showQueue: $showQueue,
+                        queueIsActive: appService.isActive,
+                        queueNowPlayingTitle: appService.trackTitle,
+                        queueNowPlayingArtist: appService.artistNames,
+                        queueNowPlayingArtURL: appService.imageURL(for: appService.coverImageId),
+                        queueItems: appService.queueItems.map { item in
+                            QueueItemViewModel(
+                                id: item.trackId,
+                                title: item.title,
+                                artistNames: item.artistNames,
+                                albumTitle: item.albumTitle,
+                                durationMs: item.durationMs,
+                                coverArtURL: appService.imageURL(for: item.coverImageId)
+                            )
+                        },
+                        onPlayPause: { appService.togglePlayPause() },
+                        onNext: { appService.nextTrack() },
+                        onPrevious: { appService.previousTrack() },
+                        onSeek: { appService.seek(positionMs: $0) },
+                        onVolumeChange: { appService.setVolume($0) },
+                        onCycleRepeat: { appService.cycleRepeatMode() },
+                        onQueueClear: { appService.clearQueue() },
+                        onQueueSkipTo: { appService.skipToQueueIndex(index: UInt32($0)) },
+                        onQueueRemove: { appService.removeFromQueue(index: UInt32($0)) },
+                        onQueueReorder: { from, to in
+                            appService.reorderQueue(fromIndex: UInt32(from), toIndex: UInt32(to))
+                        },
+                        onQueueInsertTracks: { ids, index in
+                            resolveAndInsertInQueue(ids: ids, at: index)
+                        },
+                        onDropToQueue: { ids in
+                            resolveAndAddToQueue(ids: ids)
+                        },
+                        onNavigateToAlbum: {
+                            if let albumId = appService.currentAlbumId {
+                                selectedAlbumId = albumId
+                            }
+                        },
+                        onNavigateToArtist: {}
+                    )
+                }
+            }
+
+            // Queue overlay (positioned at bottom-right, above now playing bar)
+            if showQueue && appService.isActive {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        QueueView(
+                            isActive: appService.isActive,
+                            nowPlayingTitle: appService.trackTitle,
+                            nowPlayingArtist: appService.artistNames,
+                            nowPlayingArtURL: appService.imageURL(for: appService.coverImageId),
+                            items: appService.queueItems.map { item in
+                                QueueItemViewModel(
+                                    id: item.trackId,
+                                    title: item.title,
+                                    artistNames: item.artistNames,
+                                    albumTitle: item.albumTitle,
+                                    durationMs: item.durationMs,
+                                    coverArtURL: appService.imageURL(for: item.coverImageId)
+                                )
+                            },
+                            onClose: { showQueue = false },
+                            onClear: { appService.clearQueue() },
+                            onSkipTo: { appService.skipToQueueIndex(index: UInt32($0)) },
+                            onRemove: { appService.removeFromQueue(index: UInt32($0)) },
+                            onReorder: { from, to in
+                                appService.reorderQueue(fromIndex: UInt32(from), toIndex: UInt32(to))
+                            },
+                            onInsertTracks: { ids, index in
+                                resolveAndInsertInQueue(ids: ids, at: index)
+                            }
                         )
-                    },
-                    onPlayPause: { appService.togglePlayPause() },
-                    onNext: { appService.nextTrack() },
-                    onPrevious: { appService.previousTrack() },
-                    onSeek: { appService.seek(positionMs: $0) },
-                    onVolumeChange: { appService.setVolume($0) },
-                    onCycleRepeat: { appService.cycleRepeatMode() },
-                    onQueueClear: { appService.clearQueue() },
-                    onQueueSkipTo: { appService.skipToQueueIndex(index: UInt32($0)) },
-                    onQueueRemove: { appService.removeFromQueue(index: UInt32($0)) },
-                    onQueueReorder: { from, to in
-                        appService.reorderQueue(fromIndex: UInt32(from), toIndex: UInt32(to))
-                    },
-                    onQueueInsertTracks: { ids, _ in
-                        resolveAndAddToQueue(ids: ids)
-                    },
-                    onDropToQueue: { ids in
-                        resolveAndAddToQueue(ids: ids)
-                    },
-                    onNavigateToAlbum: {
-                        if let albumId = appService.currentAlbumId {
-                            selectedAlbumId = albumId
-                        }
-                    },
-                    onNavigateToArtist: {}
-                )
+                        .frame(width: 350, height: 500)
+                        .background(Theme.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .shadow(color: .black.opacity(0.3), radius: 12, y: -2)
+                    }
+                    .padding(.trailing, 8)
+                    .padding(.bottom, 68)
+                }
             }
-            }
+
             if overlayCoordinator.lightboxIndex != nil && !overlayCoordinator.lightboxItems.isEmpty {
                 ImageLightbox(items: overlayCoordinator.lightboxItems, currentIndex: $overlayCoordinator.lightboxIndex)
             }
@@ -319,6 +362,24 @@ struct MainAppView: View {
     // MARK: - Queue drop handling
 
     /// Resolves IDs (which may be track IDs or album IDs) into track IDs and adds them to the end of the queue.
+    private func resolveAndInsertInQueue(ids: [String], at index: Int) {
+        Task.detached { [appService] in
+            var trackIds: [String] = []
+            for id in ids {
+                if let detail = try? appService.appHandle.getAlbumDetail(albumId: id) {
+                    trackIds.append(contentsOf: detail.releases.first?.tracks.map(\.id) ?? [])
+                } else {
+                    trackIds.append(id)
+                }
+            }
+            if !trackIds.isEmpty {
+                await MainActor.run {
+                    appService.insertInQueue(trackIds: trackIds, index: UInt32(index))
+                }
+            }
+        }
+    }
+
     private func resolveAndAddToQueue(ids: [String]) {
         Task.detached { [appService] in
             var trackIds: [String] = []

@@ -73,6 +73,7 @@ pub enum PlaybackCommand {
     SetVolume(f32),
     AddToQueue(Vec<String>),
     AddNext(Vec<String>),
+    InsertInQueue(Vec<String>, usize),
     RemoveFromQueue(usize),
     ReorderQueue {
         from: usize,
@@ -160,6 +161,11 @@ impl PlaybackHandle {
     }
     pub fn add_next(&self, track_ids: Vec<String>) {
         let _ = self.command_tx.send(PlaybackCommand::AddNext(track_ids));
+    }
+    pub fn insert_in_queue(&self, track_ids: Vec<String>, index: usize) {
+        let _ = self
+            .command_tx
+            .send(PlaybackCommand::InsertInQueue(track_ids, index));
     }
     pub fn remove_from_queue(&self, index: usize) {
         let _ = self
@@ -991,6 +997,10 @@ impl PlaybackService {
                 }
                 PlaybackCommand::AddNext(track_ids) => {
                     self.playback_queue.add_next(track_ids);
+                    self.emit_queue_update();
+                }
+                PlaybackCommand::InsertInQueue(track_ids, index) => {
+                    self.playback_queue.insert_at(index, track_ids);
                     self.emit_queue_update();
                 }
                 PlaybackCommand::RemoveFromQueue(index) => {

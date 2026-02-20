@@ -172,6 +172,10 @@ class AppService: AppEventHandler, @unchecked Sendable {
         appHandle.addNext(trackIds: trackIds)
     }
 
+    func insertInQueue(trackIds: [String], index: UInt32) {
+        appHandle.insertInQueue(trackIds: trackIds, index: index)
+    }
+
     func removeFromQueue(index: UInt32) {
         appHandle.removeFromQueue(index: index)
     }

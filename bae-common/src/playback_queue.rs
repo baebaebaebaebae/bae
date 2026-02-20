@@ -62,6 +62,14 @@ impl PlaybackQueue {
         }
     }
 
+    /// Insert track IDs at a specific position in the queue.
+    pub fn insert_at(&mut self, index: usize, track_ids: Vec<String>) {
+        let pos = index.min(self.queue.len());
+        for (i, track_id) in track_ids.into_iter().enumerate() {
+            self.queue.insert(pos + i, track_id);
+        }
+    }
+
     /// Remove a track at the given index. Returns the removed track ID if valid.
     pub fn remove(&mut self, index: usize) -> Option<String> {
         if index < self.queue.len() {
@@ -360,6 +368,38 @@ mod tests {
     fn test_repeat_mode_default() {
         let q = PlaybackQueue::new();
         assert_eq!(q.repeat_mode(), RepeatMode::None);
+    }
+
+    #[test]
+    fn test_insert_at_middle() {
+        let mut q = PlaybackQueue::new();
+        q.add_to_queue(vec!["a".into(), "b".into(), "c".into()]);
+        q.insert_at(1, vec!["x".into(), "y".into()]);
+        assert_eq!(q.tracks(), vec!["a", "x", "y", "b", "c"]);
+    }
+
+    #[test]
+    fn test_insert_at_beginning() {
+        let mut q = PlaybackQueue::new();
+        q.add_to_queue(vec!["a".into(), "b".into()]);
+        q.insert_at(0, vec!["x".into()]);
+        assert_eq!(q.tracks(), vec!["x", "a", "b"]);
+    }
+
+    #[test]
+    fn test_insert_at_end() {
+        let mut q = PlaybackQueue::new();
+        q.add_to_queue(vec!["a".into(), "b".into()]);
+        q.insert_at(2, vec!["x".into()]);
+        assert_eq!(q.tracks(), vec!["a", "b", "x"]);
+    }
+
+    #[test]
+    fn test_insert_at_beyond_end_clamps() {
+        let mut q = PlaybackQueue::new();
+        q.add_to_queue(vec!["a".into()]);
+        q.insert_at(999, vec!["x".into()]);
+        assert_eq!(q.tracks(), vec!["a", "x"]);
     }
 
     #[test]

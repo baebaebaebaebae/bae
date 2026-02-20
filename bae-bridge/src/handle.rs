@@ -971,6 +971,11 @@ impl AppHandle {
         self.playback_handle.add_next(track_ids);
     }
 
+    pub fn insert_in_queue(&self, track_ids: Vec<String>, index: u32) {
+        self.playback_handle
+            .insert_in_queue(track_ids, index as usize);
+    }
+
     pub fn remove_from_queue(&self, index: u32) {
         self.playback_handle.remove_from_queue(index as usize);
     }
