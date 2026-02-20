@@ -212,9 +212,9 @@ struct ImportView: View {
             candidateHeader(candidate)
             Divider()
             if let files = candidateFiles {
-                VSplitView {
+                HSplitView {
                     filePane(files)
-                        .frame(minHeight: 80)
+                        .frame(minWidth: 200)
                     VStack(spacing: 0) {
                         ImportSearchForm(
                             searchTab: $searchTab,
@@ -243,7 +243,7 @@ struct ImportView: View {
                             resultsList(for: candidate)
                         }
                     }
-                    .frame(minHeight: 120)
+                    .frame(minWidth: 300)
                 }
             } else {
                 ImportSearchForm(
