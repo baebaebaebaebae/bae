@@ -1475,117 +1475,118 @@ struct ImageGalleryView: View {
     }
 
     var body: some View {
-        ZStack {
-            // Main image (centered, pinch-to-zoom, taps pass through to dismiss overlay)
-            if let nsImage = NSImage(contentsOf: URL(fileURLWithPath: currentFile.path)) {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .scaleEffect(magnification, anchor: magnifyAnchor)
-                    .gesture(
-                        MagnifyGesture()
-                            .onChanged { value in
-                                magnifyAnchor = value.startAnchor
-                                magnification = max(value.magnification, 1.0)
-                            }
-                            .onEnded { _ in
-                                withAnimation(.easeOut(duration: 0.25)) {
-                                    magnification = 1.0
+        VStack(spacing: 0) {
+            // Image area (flexible, with nav/close overlays)
+            ZStack {
+                // Main image (centered, pinch-to-zoom)
+                if let nsImage = NSImage(contentsOf: URL(fileURLWithPath: currentFile.path)) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .scaleEffect(magnification, anchor: magnifyAnchor)
+                        .gesture(
+                            MagnifyGesture()
+                                .onChanged { value in
+                                    magnifyAnchor = value.startAnchor
+                                    magnification = max(value.magnification, 1.0)
                                 }
-                            }
-                    )
-                    .padding(60)
-                    .shadow(color: .black.opacity(0.5), radius: 20)
-            } else {
-                VStack(spacing: 8) {
-                    Image(systemName: "photo")
-                        .font(.largeTitle)
-                        .foregroundStyle(.gray)
-                    Text("Cannot load image")
-                        .font(.callout)
-                        .foregroundStyle(.gray)
-                }
-                .allowsHitTesting(false)
-            }
-
-            // Navigation buttons (left/right edges)
-            if canCycle {
-                HStack {
-                    Button(action: navigatePrevious) {
-                        ZStack {
-                            Circle()
-                                .fill(.black.opacity(0.4))
-                                .frame(width: 48, height: 48)
-                            Image(systemName: "chevron.left")
-                                .font(.title2.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.8))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    Spacer()
-                    Button(action: navigateNext) {
-                        ZStack {
-                            Circle()
-                                .fill(.black.opacity(0.4))
-                                .frame(width: 48, height: 48)
-                            Image(systemName: "chevron.right")
-                                .font(.title2.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.8))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 16)
-                .opacity(magnification > 1.01 ? 0 : 1)
-            }
-
-            // Close button (top-right)
-            VStack {
-                HStack {
-                    Spacer()
-                    Button(action: { currentIndex = nil }) {
-                        ZStack {
-                            Circle()
-                                .fill(.black.opacity(0.4))
-                                .frame(width: 36, height: 36)
-                            Image(systemName: "xmark")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(.white.opacity(0.8))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .padding(12)
-                }
-                Spacer()
-            }
-            .opacity(magnification > 1.01 ? 0 : 1)
-
-            // Thumbnail strip (bottom center)
-            if canCycle {
-                VStack {
-                    Spacer()
-                    GeometryReader { geo in
-                        ScrollViewReader { scrollProxy in
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 6) {
-                                    ForEach(Array(images.enumerated()), id: \.offset) { index, file in
-                                        thumbnailView(for: file, at: index)
-                                            .id(index)
+                                .onEnded { _ in
+                                    withAnimation(.easeOut(duration: 0.25)) {
+                                        magnification = 1.0
                                     }
                                 }
-                                .padding(.horizontal, 8)
-                                .frame(minWidth: geo.size.width)
+                        )
+                        .padding(40)
+                        .shadow(color: .black.opacity(0.5), radius: 20)
+                } else {
+                    VStack(spacing: 8) {
+                        Image(systemName: "photo")
+                            .font(.largeTitle)
+                            .foregroundStyle(.gray)
+                        Text("Cannot load image")
+                            .font(.callout)
+                            .foregroundStyle(.gray)
+                    }
+                    .allowsHitTesting(false)
+                }
+
+                // Navigation buttons (left/right edges)
+                if canCycle {
+                    HStack {
+                        Button(action: navigatePrevious) {
+                            ZStack {
+                                Circle()
+                                    .fill(.black.opacity(0.4))
+                                    .frame(width: 48, height: 48)
+                                Image(systemName: "chevron.left")
+                                    .font(.title2.weight(.medium))
+                                    .foregroundStyle(.white.opacity(0.8))
                             }
-                            .onChange(of: safeIndex) { _, newIndex in
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    scrollProxy.scrollTo(newIndex, anchor: .center)
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                        Button(action: navigateNext) {
+                            ZStack {
+                                Circle()
+                                    .fill(.black.opacity(0.4))
+                                    .frame(width: 48, height: 48)
+                                Image(systemName: "chevron.right")
+                                    .font(.title2.weight(.medium))
+                                    .foregroundStyle(.white.opacity(0.8))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 16)
+                    .opacity(magnification > 1.01 ? 0 : 1)
+                }
+
+                // Close button (top-right)
+                VStack {
+                    HStack {
+                        Spacer()
+                        Button(action: { currentIndex = nil }) {
+                            ZStack {
+                                Circle()
+                                    .fill(.black.opacity(0.4))
+                                    .frame(width: 36, height: 36)
+                                Image(systemName: "xmark")
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(.white.opacity(0.8))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .padding(12)
+                    }
+                    Spacer()
+                }
+                .opacity(magnification > 1.01 ? 0 : 1)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // Thumbnail strip (fixed height, below the image area)
+            if canCycle {
+                GeometryReader { geo in
+                    ScrollViewReader { scrollProxy in
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(Array(images.enumerated()), id: \.offset) { index, file in
+                                    thumbnailView(for: file, at: index)
+                                        .id(index)
                                 }
+                            }
+                            .padding(.horizontal, 8)
+                            .frame(minWidth: geo.size.width)
+                        }
+                        .onChange(of: safeIndex) { _, newIndex in
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                scrollProxy.scrollTo(newIndex, anchor: .center)
                             }
                         }
                     }
-                    .frame(height: 64)
-                    .padding(.bottom, 16)
                 }
+                .frame(height: 64)
+                .padding(.bottom, 16)
                 .opacity(magnification > 1.01 ? 0 : 1)
             }
         }
