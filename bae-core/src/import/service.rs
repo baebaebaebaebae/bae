@@ -1157,18 +1157,21 @@ impl ImportService {
             db_release.id, total_files
         );
 
-        // Determine the common parent folder for unmanaged_path
-        if let Some(first_file) = discovered_files.first() {
-            if let Some(parent) = first_file.path.parent() {
-                let unmanaged_path = parent
-                    .to_str()
-                    .ok_or_else(|| format!("Cannot convert path to string: {:?}", parent))?;
-                self.database
-                    .set_release_unmanaged(&db_release.id, unmanaged_path)
-                    .await
-                    .map_err(|e| format!("Failed to set unmanaged path: {}", e))?;
-            }
-        }
+        // Determine the common parent folder for unmanaged_path.
+        // Audio files are always in the root, so the first file's parent is
+        // the release folder. Other files (artwork, docs) may be in
+        // subdirectories like Covers/.
+        let unmanaged_root = discovered_files
+            .first()
+            .and_then(|f| f.path.parent())
+            .ok_or_else(|| "No files to determine unmanaged path".to_string())?;
+        let unmanaged_path_str = unmanaged_root
+            .to_str()
+            .ok_or_else(|| format!("Cannot convert path to string: {:?}", unmanaged_root))?;
+        self.database
+            .set_release_unmanaged(&db_release.id, unmanaged_path_str)
+            .await
+            .map_err(|e| format!("Failed to set unmanaged path: {}", e))?;
 
         let file_to_tracks: HashMap<String, Vec<String>> = {
             let mut map: HashMap<String, Vec<String>> = HashMap::new();
@@ -1182,12 +1185,25 @@ impl ImportService {
             map
         };
 
-        // Build file records and insert in a single batch
+        // Build file records and insert in a single batch.
+        // Store relative paths from unmanaged_root so files in subdirectories
+        // (e.g. Covers/front.png) resolve correctly.
         let mut db_files: Vec<DbFile> = Vec::with_capacity(total_files);
         let mut file_ids: HashMap<String, String> = HashMap::new();
 
         for file in discovered_files.iter() {
-            let filename = file
+            let relative_path = file
+                .path
+                .strip_prefix(unmanaged_root)
+                .map_err(|_| {
+                    format!(
+                        "File {:?} is not under unmanaged root {:?}",
+                        file.path, unmanaged_root
+                    )
+                })?
+                .to_str()
+                .ok_or_else(|| format!("Invalid path: {:?}", file.path))?;
+            let bare_filename = file
                 .path
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -1201,11 +1217,11 @@ impl ImportService {
 
             let db_file = DbFile::new(
                 &db_release.id,
-                filename,
+                relative_path,
                 file.size as i64,
                 ContentType::from_extension(&ext),
             );
-            file_ids.insert(filename.to_string(), db_file.id.clone());
+            file_ids.insert(bare_filename.to_string(), db_file.id.clone());
             db_files.push(db_file);
         }
 
@@ -1376,22 +1392,28 @@ impl ImportService {
         );
 
         // Set unmanaged_path for the torrent's temp folder
-        if let Some(first_file) = discovered_files.first() {
-            if let Some(parent) = first_file.path.parent() {
-                if let Some(p) = parent.to_str() {
-                    let _ = self.database.set_release_unmanaged(&db_release.id, p).await;
-                }
-            }
+        let torrent_root = discovered_files
+            .first()
+            .and_then(|f| f.path.parent())
+            .ok_or_else(|| "No files to determine unmanaged path".to_string())?;
+        if let Some(p) = torrent_root.to_str() {
+            let _ = self.database.set_release_unmanaged(&db_release.id, p).await;
         }
 
-        // Build and batch-insert file records
+        // Build and batch-insert file records (store relative paths)
         let mut db_files: Vec<DbFile> = Vec::with_capacity(total_files);
         for file in discovered_files.iter() {
-            let filename = file
+            let relative_path = file
                 .path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .ok_or_else(|| format!("Invalid filename: {:?}", file.path))?;
+                .strip_prefix(torrent_root)
+                .ok()
+                .and_then(|p| p.to_str())
+                .unwrap_or_else(|| {
+                    file.path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown")
+                });
             let ext = file
                 .path
                 .extension()
@@ -1401,7 +1423,7 @@ impl ImportService {
 
             let db_file = DbFile::new(
                 &db_release.id,
-                filename,
+                relative_path,
                 file.size as i64,
                 ContentType::from_extension(&ext),
             );
