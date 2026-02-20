@@ -146,14 +146,11 @@ struct ImportView: View {
 
             // Gallery overlay
             if galleryIndex != nil, let files = candidateFiles, !files.artwork.isEmpty {
-                Color.black.opacity(0.5)
+                Color.black.opacity(0.6)
                     .ignoresSafeArea()
                     .onTapGesture { galleryIndex = nil }
                 ImageGalleryView(images: files.artwork, currentIndex: $galleryIndex)
-                    .frame(width: 700, height: 550)
-                    .background(Theme.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .shadow(radius: 20)
+                    .padding(40)
             }
 
             // Document viewer overlay
@@ -1352,18 +1349,129 @@ struct ImageGalleryView: View {
         images[safeIndex]
     }
 
+    private var canCycle: Bool {
+        images.count > 1
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            toolbar
-            Divider()
-            ZStack {
-                Color(nsColor: .controlBackgroundColor)
-                imageContent
+        ZStack {
+            // Main image area
+            VStack(spacing: 0) {
+                // Image viewer
+                GeometryReader { geometry in
+                    let availableHeight = geometry.size.height - 120
+                    ZStack {
+                        if let nsImage = NSImage(contentsOf: URL(fileURLWithPath: currentFile.path)) {
+                            Image(nsImage: nsImage)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: geometry.size.width - 120, maxHeight: availableHeight)
+                                .shadow(color: .black.opacity(0.5), radius: 20)
+                        } else {
+                            VStack(spacing: 8) {
+                                Image(systemName: "photo")
+                                    .font(.largeTitle)
+                                    .foregroundStyle(.gray)
+                                Text("Cannot load image")
+                                    .font(.callout)
+                                    .foregroundStyle(.gray)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+
+                // Caption + thumbnail strip
+                VStack(spacing: 10) {
+                    // Filename and count
+                    Text("\(currentFile.name) \u{2014} \(safeIndex + 1) of \(images.count)")
+                        .font(.callout)
+                        .foregroundStyle(.white.opacity(0.7))
+                        .lineLimit(1)
+
+                    // Thumbnail strip
+                    if canCycle {
+                        ScrollViewReader { scrollProxy in
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(Array(images.enumerated()), id: \.offset) { index, file in
+                                        thumbnailView(for: file, at: index)
+                                            .id(index)
+                                    }
+                                }
+                                .padding(.horizontal, 8)
+                            }
+                            .frame(height: 64)
+                            .onChange(of: safeIndex) { _, newIndex in
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    scrollProxy.scrollTo(newIndex, anchor: .center)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.bottom, 16)
             }
-            Divider()
-            caption
+
+            // Previous button
+            if canCycle {
+                HStack {
+                    Button(action: navigatePrevious) {
+                        ZStack {
+                            Circle()
+                                .fill(.black.opacity(0.4))
+                                .frame(width: 48, height: 48)
+                            Image(systemName: "chevron.left")
+                                .font(.title2.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, 16)
+                    Spacer()
+                }
+            }
+
+            // Next button
+            if canCycle {
+                HStack {
+                    Spacer()
+                    Button(action: navigateNext) {
+                        ZStack {
+                            Circle()
+                                .fill(.black.opacity(0.4))
+                                .frame(width: 48, height: 48)
+                            Image(systemName: "chevron.right")
+                                .font(.title2.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 16)
+                }
+            }
+
+            // Close button (top-right)
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: { currentIndex = nil }) {
+                        ZStack {
+                            Circle()
+                                .fill(.black.opacity(0.4))
+                                .frame(width: 36, height: 36)
+                            Image(systemName: "xmark")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .padding(12)
+                }
+                Spacer()
+            }
         }
-        .frame(minWidth: 600, minHeight: 500)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onKeyPress(.leftArrow) {
             navigatePrevious()
             return .handled
@@ -1372,76 +1480,53 @@ struct ImageGalleryView: View {
             navigateNext()
             return .handled
         }
-    }
-
-    private var toolbar: some View {
-        HStack {
-            Text("\(safeIndex + 1) of \(images.count)")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Button("Done") {
-                currentIndex = nil
-            }
-            .keyboardShortcut(.cancelAction)
+        .onKeyPress(.escape) {
+            currentIndex = nil
+            return .handled
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
     }
 
-    private var imageContent: some View {
-        HStack(spacing: 0) {
-            Button(action: navigatePrevious) {
-                Image(systemName: "chevron.left")
-                    .font(.title2)
-                    .frame(width: 44, height: 44)
+    @ViewBuilder
+    private func thumbnailView(for file: BridgeFileInfo, at index: Int) -> some View {
+        let isActive = index == safeIndex
+        Button(action: { currentIndex = index }) {
+            Group {
+                if let nsImage = NSImage(contentsOf: URL(fileURLWithPath: file.path)) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 56, height: 56)
+                        .clipped()
+                } else {
+                    Color.gray.opacity(0.3)
+                        .frame(width: 56, height: 56)
+                        .overlay {
+                            Image(systemName: "photo")
+                                .foregroundStyle(.gray)
+                        }
+                }
             }
-            .buttonStyle(.plain)
-            .disabled(safeIndex == 0)
-            .opacity(safeIndex == 0 ? 0.3 : 1.0)
-            Spacer()
-            if let nsImage = NSImage(contentsOf: URL(fileURLWithPath: currentFile.path)) {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .padding(16)
-            } else {
-                ContentUnavailableView(
-                    "Cannot load image",
-                    systemImage: "photo",
-                    description: Text(currentFile.name)
-                )
-            }
-            Spacer()
-            Button(action: navigateNext) {
-                Image(systemName: "chevron.right")
-                    .font(.title2)
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain)
-            .disabled(safeIndex >= images.count - 1)
-            .opacity(safeIndex >= images.count - 1 ? 0.3 : 1.0)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(
+                        isActive ? .white : .gray.opacity(0.4),
+                        lineWidth: isActive ? 2 : 1
+                    )
+            )
         }
-        .padding(.horizontal, 8)
-    }
-
-    private var caption: some View {
-        Text(currentFile.name)
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .padding(.vertical, 8)
+        .buttonStyle(.plain)
     }
 
     private func navigatePrevious() {
-        if safeIndex > 0 {
-            currentIndex = safeIndex - 1
+        if canCycle {
+            currentIndex = safeIndex == 0 ? images.count - 1 : safeIndex - 1
         }
     }
 
     private func navigateNext() {
-        if safeIndex < images.count - 1 {
-            currentIndex = safeIndex + 1
+        if canCycle {
+            currentIndex = safeIndex == images.count - 1 ? 0 : safeIndex + 1
         }
     }
 }
