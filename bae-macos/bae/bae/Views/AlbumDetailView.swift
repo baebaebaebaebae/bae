@@ -526,11 +526,9 @@ struct AlbumDetailContent: View {
 
         let hasMultipleDiscs = Set(release.tracks.compactMap(\.discNumber)).count > 1
 
-        return VStack(alignment: .leading, spacing: 0) {
-            Text("Tracks")
-                .font(.headline)
-                .padding(.bottom, 8)
+        let totalDurationMs = sortedTracks.compactMap(\.durationMs).reduce(0, +)
 
+        return VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(sortedTracks.enumerated()), id: \.element.id) { index, track in
                 trackRow(
                     track,
@@ -540,6 +538,13 @@ struct AlbumDetailContent: View {
                     onPlay: { onPlayFromTrack(index) }
                 )
                 Divider()
+            }
+
+            if totalDurationMs > 0 {
+                Text(formatTotalDuration(totalDurationMs))
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 8)
             }
         }
     }
@@ -622,6 +627,16 @@ struct AlbumDetailContent: View {
         let minutes = totalSeconds / 60
         let seconds = totalSeconds % 60
         return "\(minutes):\(String(format: "%02d", seconds))"
+    }
+
+    private func formatTotalDuration(_ ms: Int64) -> String {
+        let totalMinutes = ms / 1000 / 60
+        if totalMinutes >= 60 {
+            let hours = totalMinutes / 60
+            let mins = totalMinutes % 60
+            return mins > 0 ? "\(hours) hr \(mins) min" : "\(hours) hr"
+        }
+        return "\(totalMinutes) min"
     }
 }
 

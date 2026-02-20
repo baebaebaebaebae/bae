@@ -324,8 +324,6 @@ struct MainAppView: View {
         }
     }
 
-    }
-
     // MARK: - Scan + Drop
 
     private func openFolderAndScan() {
