@@ -30,18 +30,12 @@ enum SortDirection {
 
 struct LibraryView: View {
     let appService: AppService
-    @Binding var searchText: String
+    @Binding var selectedAlbumId: String?
 
     @State private var albums: [BridgeAlbum] = []
-    @State private var selectedAlbumId: String?
     @State private var error: String?
-    @State private var searchDebounceTask: Task<Void, Never>?
     @State private var sortField: LibrarySortField = .dateAdded
     @State private var sortDirection: SortDirection = .descending
-
-    private var isSearching: Bool {
-        !searchText.trimmingCharacters(in: .whitespaces).isEmpty
-    }
 
     private var sortCriteria: [BridgeSortCriterion] {
         [BridgeSortCriterion(field: sortField.bridgeField, direction: sortDirection.bridgeDirection)]
@@ -49,20 +43,7 @@ struct LibraryView: View {
 
     var body: some View {
         Group {
-            if isSearching {
-                SearchView(
-                    results: appService.searchResults,
-                    searchQuery: appService.searchQuery,
-                    resolveImageURL: { appService.imageURL(for: $0) },
-                    onSelectArtist: { _ in },
-                    onSelectAlbum: { albumId in
-                        searchText = ""
-                        appService.search(query: "")
-                        selectedAlbumId = albumId
-                    },
-                    onPlayTrack: { appService.playTracks(trackIds: [$0]) }
-                )
-            } else if let error {
+            if let error {
                 ContentUnavailableView(
                     "Failed to load library",
                     systemImage: "exclamationmark.triangle",
@@ -107,14 +88,6 @@ struct LibraryView: View {
             }
         }
         .animation(nil, value: selectedAlbumId)
-        .onChange(of: searchText) { _, newValue in
-            searchDebounceTask?.cancel()
-            searchDebounceTask = Task {
-                try? await Task.sleep(for: .milliseconds(300))
-                guard !Task.isCancelled else { return }
-                appService.search(query: newValue)
-            }
-        }
         .task { loadAlbums() }
         .onChange(of: appService.libraryVersion) { _, _ in loadAlbums() }
         .onChange(of: sortField) { _, _ in loadAlbums() }

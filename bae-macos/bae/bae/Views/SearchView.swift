@@ -100,7 +100,7 @@ struct SearchView: View {
 
     private func trackRow(_ track: BridgeTrackSearchResult) -> some View {
         Button(action: {
-            onPlayTrack(track.id)
+            onSelectAlbum(track.albumId)
         }) {
             HStack(spacing: 12) {
                 Image(systemName: "waveform")
