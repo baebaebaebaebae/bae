@@ -1481,7 +1481,6 @@ struct ImageGalleryView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .scaleEffect(magnification)
-                    .animation(.easeOut(duration: 0.25), value: magnification)
                     .gesture(
                         MagnifyGesture()
                             .updating($magnification) { value, state, _ in
