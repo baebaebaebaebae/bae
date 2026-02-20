@@ -6,6 +6,73 @@ enum MainSection {
     case importing
 }
 
+// Adjusts the vertical position of the window's traffic light buttons (close/minimize/zoom).
+// With .hiddenTitleBar, the buttons sit at the system default position which doesn't align
+// with our custom title bar content. This modifier accesses the NSWindow and shifts them.
+// Reapplies on window resize since macOS resets button positions during resize.
+// Technique from: https://medium.com/@clyapp/fix-the-problem-that-nswindow-traffic-light-buttons-always-revert-to-its-origin-position-after-6a13675df18a
+struct TrafficLightOffset: ViewModifier {
+    let yOffset: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .background(TrafficLightHelper(yOffset: yOffset))
+    }
+
+    private struct TrafficLightHelper: NSViewRepresentable {
+        let yOffset: CGFloat
+
+        func makeNSView(context: Context) -> NSView {
+            let view = NSView()
+            DispatchQueue.main.async {
+                guard let window = view.window else { return }
+                adjustButtons(in: window)
+                context.coordinator.observeResize(window: window, yOffset: yOffset)
+            }
+            return view
+        }
+
+        func updateNSView(_ nsView: NSView, context: Context) {}
+
+        func makeCoordinator() -> Coordinator {
+            Coordinator()
+        }
+
+        private func adjustButtons(in window: NSWindow) {
+            for buttonType: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
+                guard let button = window.standardWindowButton(buttonType) else { continue }
+                var origin = button.frame.origin
+                origin.y -= yOffset
+                button.setFrameOrigin(origin)
+            }
+        }
+
+        class Coordinator: NSObject {
+            private var observation: Any?
+
+            func observeResize(window: NSWindow, yOffset: CGFloat) {
+                observation = NotificationCenter.default.addObserver(
+                    forName: NSWindow.didResizeNotification,
+                    object: window,
+                    queue: .main
+                ) { notification in
+                    guard let window = notification.object as? NSWindow else { return }
+                    for buttonType: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
+                        guard let button = window.standardWindowButton(buttonType) else { continue }
+                        var origin = button.frame.origin
+                        origin.y -= yOffset
+                        button.setFrameOrigin(origin)
+                    }
+                }
+            }
+
+            deinit {
+                if let observation { NotificationCenter.default.removeObserver(observation) }
+            }
+        }
+    }
+}
+
 struct SearchField: View {
     @Binding var text: String
     var prompt: String
@@ -96,6 +163,7 @@ struct MainAppView: View {
         }
         .toolbar(.hidden)
         .ignoresSafeArea(.all, edges: .top)
+        .modifier(TrafficLightOffset(yOffset: 3))
         .onKeyPress(.space) {
             appService.togglePlayPause()
             return .handled
