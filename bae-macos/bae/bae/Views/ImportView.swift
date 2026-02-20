@@ -1489,7 +1489,7 @@ struct ImageGalleryView: View {
                                 magnification = max(value.magnification, 1.0)
                             }
                             .onEnded { _ in
-                                withAnimation(.easeOut(duration: 0.4)) {
+                                withAnimation(.easeOut(duration: 0.25)) {
                                     magnification = 1.0
                                 }
                             }
@@ -1536,6 +1536,7 @@ struct ImageGalleryView: View {
                     .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 16)
+                .opacity(magnification > 1.01 ? 0 : 1)
             }
 
             // Close button (top-right)
@@ -1557,6 +1558,7 @@ struct ImageGalleryView: View {
                 }
                 Spacer()
             }
+            .opacity(magnification > 1.01 ? 0 : 1)
 
             // Thumbnail strip (bottom center)
             if canCycle {
@@ -1581,6 +1583,7 @@ struct ImageGalleryView: View {
                     }
                     .padding(.bottom, 16)
                 }
+                .opacity(magnification > 1.01 ? 0 : 1)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
