@@ -1564,23 +1564,26 @@ struct ImageGalleryView: View {
             if canCycle {
                 VStack {
                     Spacer()
-                    ScrollViewReader { scrollProxy in
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 6) {
-                                ForEach(Array(images.enumerated()), id: \.offset) { index, file in
-                                    thumbnailView(for: file, at: index)
-                                        .id(index)
+                    GeometryReader { geo in
+                        ScrollViewReader { scrollProxy in
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(Array(images.enumerated()), id: \.offset) { index, file in
+                                        thumbnailView(for: file, at: index)
+                                            .id(index)
+                                    }
                                 }
+                                .padding(.horizontal, 8)
+                                .frame(minWidth: geo.size.width)
                             }
-                            .padding(.horizontal, 8)
-                        }
-                        .frame(height: 64)
-                        .onChange(of: safeIndex) { _, newIndex in
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                scrollProxy.scrollTo(newIndex, anchor: .center)
+                            .onChange(of: safeIndex) { _, newIndex in
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    scrollProxy.scrollTo(newIndex, anchor: .center)
+                                }
                             }
                         }
                     }
+                    .frame(height: 64)
                     .padding(.bottom, 16)
                 }
                 .opacity(magnification > 1.01 ? 0 : 1)
