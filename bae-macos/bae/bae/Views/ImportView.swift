@@ -279,13 +279,11 @@ struct ImportView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(candidate.albumTitle)
                     .font(.headline)
-                HStack(spacing: 12) {
-                    Label("\(candidate.trackCount) tracks", systemImage: "list.bullet")
-                    Label(candidate.format, systemImage: "waveform")
-                    Label(formatBytes(candidate.totalSizeBytes), systemImage: "internaldrive")
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .help(candidate.folderPath)
+                Text("\(candidate.trackCount) tracks · \(candidate.format) · \(formatBytes(candidate.totalSizeBytes))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
             importStatusBadge(for: candidate.folderPath)
