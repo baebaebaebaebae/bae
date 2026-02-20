@@ -370,15 +370,15 @@ struct ImportView: View {
                     filePane(files)
                         .frame(minWidth: 200)
                 }
-                // Search/results pane (middle)
-                searchAndResultsPane(for: candidate, state: state)
-                    .frame(minWidth: 300)
-                // Confirmation pane (right, appears when loading detail or confirming)
+                // Right pane: confirmation replaces search when confirming
                 if mode == .loadingDetail {
                     ProgressView("Loading release details...")
                         .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
                 } else if mode == .confirming, let detail = candidateStates[folderPath]?.releaseDetail {
                     confirmationView(for: candidate, detail: detail)
+                        .frame(minWidth: 300, maxWidth: .infinity)
+                } else {
+                    searchAndResultsPane(for: candidate, state: state)
                         .frame(minWidth: 300)
                 }
             }

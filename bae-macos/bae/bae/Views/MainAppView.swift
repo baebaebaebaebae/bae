@@ -132,6 +132,12 @@ struct SearchField: View {
     }
 }
 
+@Observable
+class OverlayCoordinator {
+    var lightboxItems: [LightboxItem] = []
+    var lightboxIndex: Int?
+}
+
 struct MainAppView: View {
     let appService: AppService
     @Environment(\.openSettings) private var openSettings
@@ -141,23 +147,25 @@ struct MainAppView: View {
     @State private var showQueue = false
     @State private var searchDebounceTask: Task<Void, Never>?
     @FocusState private var searchFocused: Bool
+    @State private var overlayCoordinator = OverlayCoordinator()
 
     var body: some View {
-        VStack(spacing: 0) {
-            titleBar
-            ZStack {
-                LibraryView(appService: appService, selectedAlbumId: $selectedAlbumId)
-                    .opacity(activeSection == .library ? 1 : 0)
-                    .allowsHitTesting(activeSection == .library)
+        ZStack {
+            VStack(spacing: 0) {
+                titleBar
+                ZStack {
+                    LibraryView(appService: appService, selectedAlbumId: $selectedAlbumId)
+                        .opacity(activeSection == .library ? 1 : 0)
+                        .allowsHitTesting(activeSection == .library)
 
-                ImportView(appService: appService)
-                    .opacity(activeSection == .importing ? 1 : 0)
-                    .allowsHitTesting(activeSection == .importing)
-            }
+                    ImportView(appService: appService)
+                        .opacity(activeSection == .importing ? 1 : 0)
+                        .allowsHitTesting(activeSection == .importing)
+                }
 
-            if appService.isActive {
-                Divider()
-                NowPlayingBar(
+                if appService.isActive {
+                    Divider()
+                    NowPlayingBar(
                     trackTitle: appService.trackTitle,
                     artistNames: appService.artistNames,
                     coverArtURL: appService.imageURL(for: appService.coverImageId),
@@ -207,7 +215,12 @@ struct MainAppView: View {
                     onNavigateToArtist: {}
                 )
             }
+            }
+            if overlayCoordinator.lightboxIndex != nil && !overlayCoordinator.lightboxItems.isEmpty {
+                ImageLightbox(items: overlayCoordinator.lightboxItems, currentIndex: $overlayCoordinator.lightboxIndex)
+            }
         }
+        .environment(overlayCoordinator)
         .toolbar(.hidden)
         .ignoresSafeArea(.all, edges: .top)
         .modifier(TrafficLightOffset(xOffset: 6, yOffset: 7))

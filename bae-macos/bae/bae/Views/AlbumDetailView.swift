@@ -67,42 +67,34 @@ struct AlbumDetailView: View {
         .task(id: albumId) {
             await loadDetail()
         }
-        .windowOverlay(isPresented: showingCoverSheet && detail != nil) {
+        .sheet(isPresented: $showingCoverSheet) {
             if let detail {
-                ZStack {
-                    Color.black.opacity(0.5)
-                        .ignoresSafeArea()
-                        .onTapGesture { showingCoverSheet = false }
-                    CoverSheetView(
-                        remoteCovers: remoteCovers,
-                        releaseImages: collectImageFiles(detail).map { item in
-                            (id: item.file.id, name: item.file.originalFilename, url: nil as URL?)
-                        },
-                        loading: loadingRemoteCovers,
-                        onSelectRemote: { cover in
-                            let releaseId = currentReleaseId(detail)
-                            changeCover(
-                                albumId: albumId,
-                                releaseId: releaseId,
-                                selection: .remoteCover(url: cover.url, source: cover.source)
-                            )
-                        },
-                        onSelectReleaseImage: { fileId in
-                            let releaseId = currentReleaseId(detail)
-                            changeCover(
-                                albumId: albumId,
-                                releaseId: releaseId,
-                                selection: .releaseImage(fileId: fileId)
-                            )
-                        },
-                        onRefresh: { fetchRemoteCovers() },
-                        onDone: { showingCoverSheet = false }
-                    )
-                    .frame(width: 500, height: 450)
-                    .background(Theme.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .shadow(radius: 20)
-                }
+                CoverSheetView(
+                    remoteCovers: remoteCovers,
+                    releaseImages: collectImageFiles(detail).map { item in
+                        (id: item.file.id, name: item.file.originalFilename, url: nil as URL?)
+                    },
+                    loading: loadingRemoteCovers,
+                    onSelectRemote: { cover in
+                        let releaseId = currentReleaseId(detail)
+                        changeCover(
+                            albumId: albumId,
+                            releaseId: releaseId,
+                            selection: .remoteCover(url: cover.url, source: cover.source)
+                        )
+                    },
+                    onSelectReleaseImage: { fileId in
+                        let releaseId = currentReleaseId(detail)
+                        changeCover(
+                            albumId: albumId,
+                            releaseId: releaseId,
+                            selection: .releaseImage(fileId: fileId)
+                        )
+                    },
+                    onRefresh: { fetchRemoteCovers() },
+                    onDone: { showingCoverSheet = false }
+                )
+                .frame(width: 500, height: 450)
             }
         }
         .alert("Cover Change Failed", isPresented: .init(
@@ -144,26 +136,18 @@ struct AlbumDetailView: View {
         } message: {
             Text("Are you sure you want to delete this album? This cannot be undone.")
         }
-        .windowOverlay(isPresented: showingManageSheet && detail != nil) {
+        .sheet(isPresented: $showingManageSheet) {
             if let detail {
                 let release = detail.releases.isEmpty ? nil : detail.releases[selectedReleaseIndex]
-                ZStack {
-                    Color.black.opacity(0.5)
-                        .ignoresSafeArea()
-                        .onTapGesture { showingManageSheet = false }
-                    if let release {
-                        ManageReleaseSheet(
-                            release: release,
-                            transferring: transferring,
-                            onTransferToManaged: { transferToManaged(releaseId: release.id) },
-                            onEject: { ejectRelease(releaseId: release.id) },
-                            onDone: { showingManageSheet = false }
-                        )
-                        .frame(width: 450, height: 400)
-                        .background(Theme.surface)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .shadow(radius: 20)
-                    }
+                if let release {
+                    ManageReleaseSheet(
+                        release: release,
+                        transferring: transferring,
+                        onTransferToManaged: { transferToManaged(releaseId: release.id) },
+                        onEject: { ejectRelease(releaseId: release.id) },
+                        onDone: { showingManageSheet = false }
+                    )
+                    .frame(width: 450, height: 400)
                 }
             }
         }
@@ -372,8 +356,8 @@ struct AlbumDetailContent: View {
     let onManage: () -> Void
     let onDeleteAlbum: () -> Void
 
+    @Environment(OverlayCoordinator.self) private var overlayCoordinator
     @State private var hoverTrackId: String?
-    @State private var lightboxIndex: Int?
 
     var body: some View {
         ScrollView {
@@ -392,9 +376,6 @@ struct AlbumDetailContent: View {
             .padding()
         }
         .background(Theme.background)
-        .windowOverlay(isPresented: lightboxIndex != nil && !lightboxItems.isEmpty) {
-            ImageLightbox(items: lightboxItems, currentIndex: $lightboxIndex)
-        }
     }
 
     private var albumHeader: some View {
@@ -405,7 +386,8 @@ struct AlbumDetailContent: View {
                 .contentShape(Rectangle())
                 .onTapGesture {
                     if !lightboxItems.isEmpty {
-                        lightboxIndex = 0
+                        overlayCoordinator.lightboxItems = lightboxItems
+                        overlayCoordinator.lightboxIndex = 0
                     }
                 }
                 .overlay(alignment: .bottomTrailing) {
@@ -1000,6 +982,7 @@ struct ManageReleaseSheet: View {
         onDeleteAlbum: {}
     )
     .frame(width: 450, height: 600)
+    .environment(OverlayCoordinator())
 }
 
 #Preview("Cover Sheet") {
