@@ -59,7 +59,7 @@ class MediaControlService {
         let infoCenter = MPNowPlayingInfoCenter.default()
 
         switch state {
-        case let .playing(_, trackTitle, artistNames, _, albumTitle, coverImageId, positionMs, durationMs):
+        case let .playing(_, trackTitle, artistNames, _, _, albumTitle, coverImageId, positionMs, durationMs):
             var info = infoCenter.nowPlayingInfo ?? [:]
             info[MPMediaItemPropertyTitle] = trackTitle
             info[MPMediaItemPropertyArtist] = artistNames
@@ -70,7 +70,7 @@ class MediaControlService {
             loadArtwork(imageId: coverImageId, appHandle: appHandle, into: &info)
             infoCenter.nowPlayingInfo = info
 
-        case let .paused(_, trackTitle, artistNames, _, albumTitle, coverImageId, positionMs, durationMs):
+        case let .paused(_, trackTitle, artistNames, _, _, albumTitle, coverImageId, positionMs, durationMs):
             var info = infoCenter.nowPlayingInfo ?? [:]
             info[MPMediaItemPropertyTitle] = trackTitle
             info[MPMediaItemPropertyArtist] = artistNames

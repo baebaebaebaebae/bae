@@ -25,6 +25,8 @@ struct NowPlayingBar: View {
     let onQueueSkipTo: (Int) -> Void
     let onQueueRemove: (Int) -> Void
     let onQueueReorder: (Int, Int) -> Void
+    let onNavigateToAlbum: () -> Void
+    let onNavigateToArtist: () -> Void
 
     @State private var isSeeking = false
     @State private var seekPosition: Double = 0
@@ -56,6 +58,10 @@ struct NowPlayingBar: View {
                 .frame(width: 48, height: 48)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .accessibilityLabel("Album art")
+                .onTapGesture { onNavigateToAlbum() }
+                .onHover { hovering in
+                    if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
 
             VStack(alignment: .leading, spacing: 2) {
                 if let title = trackTitle {
@@ -63,6 +69,10 @@ struct NowPlayingBar: View {
                         .font(.callout)
                         .fontWeight(.medium)
                         .lineLimit(1)
+                        .onTapGesture { onNavigateToAlbum() }
+                        .onHover { hovering in
+                            if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                        }
                 }
 
                 if let artist = artistNames {
@@ -70,6 +80,10 @@ struct NowPlayingBar: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .onTapGesture { onNavigateToArtist() }
+                        .onHover { hovering in
+                            if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                        }
                 }
             }
         }
@@ -292,7 +306,9 @@ struct NowPlayingBar: View {
         onQueueClear: {},
         onQueueSkipTo: { _ in },
         onQueueRemove: { _ in },
-        onQueueReorder: { _, _ in }
+        onQueueReorder: { _, _ in },
+        onNavigateToAlbum: {},
+        onNavigateToArtist: {}
     )
 }
 
@@ -321,6 +337,8 @@ struct NowPlayingBar: View {
         onQueueClear: {},
         onQueueSkipTo: { _ in },
         onQueueRemove: { _ in },
-        onQueueReorder: { _, _ in }
+        onQueueReorder: { _, _ in },
+        onNavigateToAlbum: {},
+        onNavigateToArtist: {}
     )
 }

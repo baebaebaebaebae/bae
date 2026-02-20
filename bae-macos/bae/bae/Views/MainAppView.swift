@@ -192,7 +192,13 @@ struct MainAppView: View {
                     onQueueRemove: { appService.removeFromQueue(index: UInt32($0)) },
                     onQueueReorder: { from, to in
                         appService.reorderQueue(fromIndex: UInt32(from), toIndex: UInt32(to))
-                    }
+                    },
+                    onNavigateToAlbum: {
+                        if let albumId = appService.currentAlbumId {
+                            selectedAlbumId = albumId
+                        }
+                    },
+                    onNavigateToArtist: {}
                 )
             }
         }

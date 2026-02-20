@@ -43,11 +43,11 @@ class AppService: AppEventHandler, @unchecked Sendable {
         Task { @MainActor in
             self.playbackState = state
             switch state {
-            case let .playing(trackId, _, _, _, _, _, positionMs, durationMs):
+            case let .playing(trackId, _, _, _, _, _, _, positionMs, durationMs):
                 self.currentTrackId = trackId
                 self.currentPositionMs = positionMs
                 self.currentDurationMs = durationMs
-            case let .paused(trackId, _, _, _, _, _, positionMs, durationMs):
+            case let .paused(trackId, _, _, _, _, _, _, positionMs, durationMs):
                 self.currentTrackId = trackId
                 self.currentPositionMs = positionMs
                 self.currentDurationMs = durationMs
@@ -352,9 +352,9 @@ class AppService: AppEventHandler, @unchecked Sendable {
     /// Current track title, or nil if nothing is active.
     var trackTitle: String? {
         switch playbackState {
-        case let .playing(_, trackTitle, _, _, _, _, _, _):
+        case let .playing(_, trackTitle, _, _, _, _, _, _, _):
             return trackTitle
-        case let .paused(_, trackTitle, _, _, _, _, _, _):
+        case let .paused(_, trackTitle, _, _, _, _, _, _, _):
             return trackTitle
         default:
             return nil
@@ -364,9 +364,9 @@ class AppService: AppEventHandler, @unchecked Sendable {
     /// Current artist names, or nil if nothing is active.
     var artistNames: String? {
         switch playbackState {
-        case let .playing(_, _, artistNames, _, _, _, _, _):
+        case let .playing(_, _, artistNames, _, _, _, _, _, _):
             return artistNames
-        case let .paused(_, _, artistNames, _, _, _, _, _):
+        case let .paused(_, _, artistNames, _, _, _, _, _, _):
             return artistNames
         default:
             return nil
@@ -376,10 +376,34 @@ class AppService: AppEventHandler, @unchecked Sendable {
     /// Cover image ID for the currently playing track's album.
     var coverImageId: String? {
         switch playbackState {
-        case let .playing(_, _, _, _, _, coverImageId, _, _):
+        case let .playing(_, _, _, _, _, _, coverImageId, _, _):
             return coverImageId
-        case let .paused(_, _, _, _, _, coverImageId, _, _):
+        case let .paused(_, _, _, _, _, _, coverImageId, _, _):
             return coverImageId
+        default:
+            return nil
+        }
+    }
+
+    /// Album ID for the currently playing track.
+    var currentAlbumId: String? {
+        switch playbackState {
+        case let .playing(_, _, _, _, albumId, _, _, _, _):
+            return albumId
+        case let .paused(_, _, _, _, albumId, _, _, _, _):
+            return albumId
+        default:
+            return nil
+        }
+    }
+
+    /// Artist ID for the currently playing track (first artist).
+    var currentArtistId: String? {
+        switch playbackState {
+        case let .playing(_, _, _, artistId, _, _, _, _, _):
+            return artistId
+        case let .paused(_, _, _, artistId, _, _, _, _, _):
+            return artistId
         default:
             return nil
         }
