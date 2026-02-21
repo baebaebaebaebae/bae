@@ -217,52 +217,6 @@ struct MainAppView: View {
                 }
             }
 
-            // Queue overlay (positioned at bottom-right, above now playing bar)
-            if showQueue && appService.isActive {
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        QueueView(
-                            isActive: appService.isActive,
-                            nowPlayingTitle: appService.trackTitle,
-                            nowPlayingArtist: appService.artistNames,
-                            nowPlayingArtURL: appService.imageURL(for: appService.coverImageId),
-                            items: appService.queueItems.map { item in
-                                QueueItemViewModel(
-                                    id: item.trackId,
-                                    title: item.title,
-                                    artistNames: item.artistNames,
-                                    albumTitle: item.albumTitle,
-                                    durationMs: item.durationMs,
-                                    coverArtURL: appService.imageURL(for: item.coverImageId)
-                                )
-                            },
-                            onClose: { showQueue = false },
-                            onClear: { appService.clearQueue() },
-                            onSkipTo: { appService.skipToQueueIndex(index: UInt32($0)) },
-                            onRemove: { appService.removeFromQueue(index: UInt32($0)) },
-                            onReorder: { from, to in
-                                appService.reorderQueue(fromIndex: UInt32(from), toIndex: UInt32(to))
-                            },
-                            onInsertTracks: { ids, index in
-                                resolveAndInsertInQueue(ids: ids, at: index)
-                            }
-                        )
-                        .frame(width: 350, height: 500)
-                        .background(Theme.surface)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Theme.border, lineWidth: 1)
-                        )
-                        .shadow(color: .black.opacity(0.5), radius: 16, y: -4)
-                    }
-                    .padding(.trailing, 8)
-                    .padding(.bottom, 68)
-                }
-            }
-
             if overlayCoordinator.lightboxIndex != nil && !overlayCoordinator.lightboxItems.isEmpty {
                 ImageLightbox(items: overlayCoordinator.lightboxItems, currentIndex: $overlayCoordinator.lightboxIndex)
             }

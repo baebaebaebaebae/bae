@@ -1,5 +1,21 @@
 import SwiftUI
 
+// Patches SwiftUI's .popover to use .applicationDefined behavior so it
+// stays open during drag operations. Dismiss via the queue button or X.
+private struct StablePopoverBehavior: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            if let popover = view.window?.value(forKey: "_popover") as? NSPopover {
+                popover.behavior = .applicationDefined
+            }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
 struct NowPlayingBar: View {
     let trackTitle: String?
     let artistNames: String?
@@ -222,6 +238,23 @@ struct NowPlayingBar: View {
                 return true
             } isTargeted: { targeted in
                 queueButtonDropTargeted = targeted
+            }
+            .popover(isPresented: $showQueue, arrowEdge: .bottom) {
+                QueueView(
+                    isActive: queueIsActive,
+                    nowPlayingTitle: queueNowPlayingTitle,
+                    nowPlayingArtist: queueNowPlayingArtist,
+                    nowPlayingArtURL: queueNowPlayingArtURL,
+                    items: queueItems,
+                    onClose: { showQueue = false },
+                    onClear: { onQueueClear() },
+                    onSkipTo: { onQueueSkipTo($0) },
+                    onRemove: { onQueueRemove($0) },
+                    onReorder: { onQueueReorder($0, $1) },
+                    onInsertTracks: { onQueueInsertTracks($0, $1) }
+                )
+                .frame(width: 350, height: 500)
+                .background { StablePopoverBehavior() }
             }
 
             Image(systemName: "speaker.fill")
