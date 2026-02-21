@@ -82,7 +82,7 @@ struct AlbumDetailView: View {
                 CoverSheetView(
                     remoteCovers: remoteCovers,
                     releaseImages: collectImageFiles(detail).map { item in
-                        (id: item.file.id, name: item.file.originalFilename, url: nil as URL?)
+                        (id: item.file.id, name: item.file.originalFilename, url: appService.fileURL(for: item.file.id))
                     },
                     loading: loadingRemoteCovers,
                     onSelectRemote: { cover in
@@ -463,6 +463,7 @@ struct AlbumDetailContent: View {
                             .font(.body)
                     }
                     .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
                     .fixedSize()
                 }
                 .padding(.top, 2)
@@ -511,23 +512,11 @@ struct AlbumDetailContent: View {
     }
 
     private func releaseMetadataCompact(_ release: BridgeRelease) -> some View {
-        HStack(spacing: 12) {
-            if let format = release.format {
-                Text(format)
-            }
-            if let label = release.label {
-                Text(label)
-            }
-            if let catalog = release.catalogNumber {
-                Text(catalog)
-            }
-            if let country = release.country {
-                Text(country)
-            }
-        }
-        .font(.caption)
-        .foregroundStyle(.tertiary)
-        .lineLimit(1)
+        let parts = [release.format, release.label, release.catalogNumber, release.country]
+            .compactMap(\.self)
+        return Text(parts.joined(separator: " · "))
+            .font(.caption)
+            .foregroundStyle(.tertiary)
     }
 
     private var releasePicker: some View {
