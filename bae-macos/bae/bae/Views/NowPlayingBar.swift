@@ -1,9 +1,9 @@
 import SwiftUI
 
-// Patches SwiftUI's .popover to use .applicationDefined behavior so it
-// stays open during drag operations. Dismiss via the queue button or X.
+/// Patches SwiftUI's .popover to use .applicationDefined behavior so it
+/// stays open during drag operations. Dismiss via the queue button or X.
 private struct StablePopoverBehavior: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
+    func makeNSView(context _: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
             if let popover = view.window?.value(forKey: "_popover") as? NSPopover {
@@ -13,7 +13,7 @@ private struct StablePopoverBehavior: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    func updateNSView(_: NSView, context _: Context) {}
 }
 
 struct NowPlayingBar: View {
@@ -113,7 +113,7 @@ struct NowPlayingBar: View {
         if let url = coverArtURL {
             AsyncImage(url: url) { phase in
                 switch phase {
-                case .success(let image):
+                case let .success(image):
                     image
                         .resizable()
                         .aspectRatio(contentMode: .fill)
@@ -186,15 +186,15 @@ struct NowPlayingBar: View {
                     set: { newValue in
                         isSeeking = true
                         seekPosition = newValue
-                    }
+                    },
                 ),
-                in: 0...max(Double(currentDurationMs), 1),
+                in: 0 ... max(Double(currentDurationMs), 1),
                 onEditingChanged: { editing in
                     if !editing {
                         onSeek(UInt64(seekPosition))
                         isSeeking = false
                     }
-                }
+                },
             )
             .frame(width: 300)
             .accessibilityLabel("Playback position")
@@ -227,7 +227,7 @@ struct NowPlayingBar: View {
             .padding(4)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(queueButtonDropTargeted ? Color.accentColor.opacity(0.3) : Color.clear)
+                    .fill(queueButtonDropTargeted ? Color.accentColor.opacity(0.3) : Color.clear),
             )
             .scaleEffect(queueButtonDropTargeted ? 1.15 : 1.0)
             .animation(.easeInOut(duration: 0.15), value: queueButtonDropTargeted)
@@ -251,7 +251,7 @@ struct NowPlayingBar: View {
                     onSkipTo: { onQueueSkipTo($0) },
                     onRemove: { onQueueRemove($0) },
                     onReorder: { onQueueReorder($0, $1) },
-                    onInsertTracks: { onQueueInsertTracks($0, $1) }
+                    onInsertTracks: { onQueueInsertTracks($0, $1) },
                 )
                 .frame(width: 350, height: 500)
                 .background { StablePopoverBehavior() }
@@ -265,9 +265,9 @@ struct NowPlayingBar: View {
             Slider(
                 value: Binding(
                     get: { volume },
-                    set: { onVolumeChange($0) }
+                    set: { onVolumeChange($0) },
                 ),
-                in: 0...1
+                in: 0 ... 1,
             )
             .frame(width: 80)
             .accessibilityLabel("Volume")
@@ -297,11 +297,11 @@ struct NowPlayingBar: View {
     private var repeatHelp: String {
         switch repeatMode {
         case .none:
-            return "Repeat: off"
+            "Repeat: off"
         case .album:
-            return "Repeat: album"
+            "Repeat: album"
         case .track:
-            return "Repeat: track"
+            "Repeat: track"
         }
     }
 
@@ -323,7 +323,7 @@ struct NowPlayingBar: View {
         artistNames: PreviewData.nowPlayingArtist,
         coverArtURL: PreviewData.nowPlayingCoverURL,
         isPlaying: true,
-        currentPositionMs: 63_000,
+        currentPositionMs: 63000,
         currentDurationMs: 210_000,
         volume: 0.75,
         repeatMode: .none,
@@ -346,7 +346,7 @@ struct NowPlayingBar: View {
         onQueueInsertTracks: { _, _ in },
         onDropToQueue: { _ in },
         onNavigateToAlbum: {},
-        onNavigateToArtist: {}
+        onNavigateToArtist: {},
     )
 }
 
@@ -379,6 +379,6 @@ struct NowPlayingBar: View {
         onQueueInsertTracks: { _, _ in },
         onDropToQueue: { _ in },
         onNavigateToAlbum: {},
-        onNavigateToArtist: {}
+        onNavigateToArtist: {},
     )
 }

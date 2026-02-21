@@ -14,8 +14,8 @@ enum SearchSource: Hashable, CaseIterable {
 
     var label: String {
         switch self {
-        case .musicbrainz: return "MusicBrainz"
-        case .discogs: return "Discogs"
+        case .musicbrainz: "MusicBrainz"
+        case .discogs: "Discogs"
         }
     }
 }
@@ -75,12 +75,12 @@ struct CandidateSearchState {
 
     func activeResults() -> TabSearchState {
         switch (activeTab, activeSource) {
-        case (.general, .musicbrainz): return generalMb
-        case (.general, .discogs): return generalDiscogs
-        case (.catalogNumber, .musicbrainz): return catalogMb
-        case (.catalogNumber, .discogs): return catalogDiscogs
-        case (.barcode, .musicbrainz): return barcodeMb
-        case (.barcode, .discogs): return barcodeDiscogs
+        case (.general, .musicbrainz): generalMb
+        case (.general, .discogs): generalDiscogs
+        case (.catalogNumber, .musicbrainz): catalogMb
+        case (.catalogNumber, .discogs): catalogDiscogs
+        case (.barcode, .musicbrainz): barcodeMb
+        case (.barcode, .discogs): barcodeDiscogs
         }
     }
 
@@ -139,7 +139,7 @@ struct ImportView: View {
                         ContentUnavailableView(
                             "Select a folder",
                             systemImage: "folder",
-                            description: Text("Choose a scanned folder to search for metadata")
+                            description: Text("Choose a scanned folder to search for metadata"),
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -154,10 +154,10 @@ struct ImportView: View {
                         LightboxItem(
                             id: file.path,
                             label: file.name,
-                            url: URL(fileURLWithPath: file.path)
+                            url: URL(fileURLWithPath: file.path),
                         )
                     },
-                    currentIndex: $galleryIndex
+                    currentIndex: $galleryIndex,
                 )
             }
 
@@ -175,7 +175,8 @@ struct ImportView: View {
         }
         .onChange(of: appService.scanResults.count) {
             if selectedCandidate == nil,
-               let first = appService.scanResults.first(where: { $0.badAudioCount == 0 && $0.badImageCount == 0 }) {
+               let first = appService.scanResults.first(where: { $0.badAudioCount == 0 && $0.badImageCount == 0 })
+            {
                 selectCandidate(first)
             }
         }
@@ -228,7 +229,7 @@ struct ImportView: View {
                     return
                 }
                 selectCandidate(candidate)
-            }
+            },
         )
     }
 
@@ -265,11 +266,11 @@ struct ImportView: View {
         switch result {
         case .noMatches:
             candidateStates[folderPath]?.discIdLookupState = .notFound
-        case .singleMatch(let match):
+        case let .singleMatch(match):
             candidateStates[folderPath]?.discIdLookupState = .found
             candidateStates[folderPath]?.autoMatches = [match]
             prefetchAndConfirm(folderPath: folderPath, result: match)
-        case .multipleMatches(let matches):
+        case let .multipleMatches(matches):
             candidateStates[folderPath]?.discIdLookupState = .found
             candidateStates[folderPath]?.autoMatches = matches
         }
@@ -284,7 +285,7 @@ struct ImportView: View {
             List(
                 sortedCandidates,
                 id: \.folderPath,
-                selection: candidateSelectionBinding
+                selection: candidateSelectionBinding,
             ) { candidate in
                 CandidateRow(
                     candidate: candidate,
@@ -295,7 +296,7 @@ struct ImportView: View {
                         }
                         candidateStates.removeValue(forKey: candidate.folderPath)
                         appService.removeCandidate(folderPath: candidate.folderPath)
-                    }
+                    },
                 )
                 .padding(.vertical, 4)
             }
@@ -322,7 +323,8 @@ struct ImportView: View {
                     let wasSelected = selectedCandidate
                     appService.clearCompletedCandidates()
                     if let wasSelected,
-                       !appService.scanResults.contains(where: { $0.folderPath == wasSelected.folderPath }) {
+                       !appService.scanResults.contains(where: { $0.folderPath == wasSelected.folderPath })
+                    {
                         selectedCandidate = nil
                     }
                     // Clean up orphaned candidate states
@@ -333,7 +335,8 @@ struct ImportView: View {
                     let wasSelected = selectedCandidate
                     appService.clearIncompleteCandidates()
                     if let wasSelected,
-                       !appService.scanResults.contains(where: { $0.folderPath == wasSelected.folderPath }) {
+                       !appService.scanResults.contains(where: { $0.folderPath == wasSelected.folderPath })
+                    {
                         selectedCandidate = nil
                     }
                     let validPaths = Set(appService.scanResults.map(\.folderPath))
@@ -423,13 +426,13 @@ struct ImportView: View {
     private func importStatusBadge(for folderPath: String) -> some View {
         if let status = appService.importStatuses[folderPath] {
             switch status {
-            case .importing(let percent):
+            case let .importing(percent):
                 ProgressView(value: Double(percent), total: 100)
                     .frame(width: 80)
             case .complete:
                 Label("Done", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
-            case .error(let message):
+            case let .error(message):
                 Label(message, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
                     .lineLimit(1)
@@ -500,14 +503,14 @@ struct ImportView: View {
                     ContentUnavailableView(
                         "No results",
                         systemImage: "magnifyingglass",
-                        description: Text("Search MusicBrainz or Discogs to find metadata")
+                        description: Text("Search MusicBrainz or Discogs to find metadata"),
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if tabState.results.isEmpty {
                     ContentUnavailableView(
                         "No matches found",
                         systemImage: "magnifyingglass",
-                        description: Text("Try different search terms or another source")
+                        description: Text("Try different search terms or another source"),
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -548,7 +551,7 @@ struct ImportView: View {
                     Text("No releases found for disc ID")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                case .error(let msg):
+                case let .error(msg):
                     Image(systemName: "exclamationmark.triangle")
                         .foregroundStyle(.red)
                     Text(msg)
@@ -569,7 +572,7 @@ struct ImportView: View {
                 result: result,
                 localTrackCount: candidate.trackCount,
                 isImporting: isImporting(candidate.folderPath),
-                onSelect: { prefetchAndConfirm(folderPath: candidate.folderPath, result: result) }
+                onSelect: { prefetchAndConfirm(folderPath: candidate.folderPath, result: result) },
             )
         }
         .scrollContentBackground(.hidden)
@@ -645,21 +648,21 @@ struct ImportView: View {
     private func activeTabBinding(for folderPath: String) -> Binding<SearchTab> {
         Binding(
             get: { candidateStates[folderPath]?.activeTab ?? .general },
-            set: { candidateStates[folderPath]?.activeTab = $0 }
+            set: { candidateStates[folderPath]?.activeTab = $0 },
         )
     }
 
     private func activeSourceBinding(for folderPath: String) -> Binding<SearchSource> {
         Binding(
             get: { candidateStates[folderPath]?.activeSource ?? .musicbrainz },
-            set: { candidateStates[folderPath]?.activeSource = $0 }
+            set: { candidateStates[folderPath]?.activeSource = $0 },
         )
     }
 
     private func searchFieldBinding(for folderPath: String, keyPath: WritableKeyPath<CandidateSearchState, String>) -> Binding<String> {
         Binding(
             get: { candidateStates[folderPath]?[keyPath: keyPath] ?? "" },
-            set: { candidateStates[folderPath]?[keyPath: keyPath] = $0 }
+            set: { candidateStates[folderPath]?[keyPath: keyPath] = $0 },
         )
     }
 
@@ -671,7 +674,7 @@ struct ImportView: View {
                 result: result,
                 localTrackCount: candidate.trackCount,
                 isImporting: isImporting(candidate.folderPath),
-                onSelect: { prefetchAndConfirm(folderPath: candidate.folderPath, result: result) }
+                onSelect: { prefetchAndConfirm(folderPath: candidate.folderPath, result: result) },
             )
         }
         .scrollContentBackground(.hidden)
@@ -694,12 +697,11 @@ struct ImportView: View {
         let album = state.searchAlbum
 
         Task {
-            let results: [BridgeMetadataResult]
-            switch capturedSource {
+            let results: [BridgeMetadataResult] = switch capturedSource {
             case .musicbrainz:
-                results = await appService.searchMusicbrainz(artist: artist, album: album, year: nil, label: nil)
+                await appService.searchMusicbrainz(artist: artist, album: album, year: nil, label: nil)
             case .discogs:
-                results = await appService.searchDiscogs(artist: artist, album: album, year: nil, label: nil)
+                await appService.searchDiscogs(artist: artist, album: album, year: nil, label: nil)
             }
 
             await MainActor.run {
@@ -797,7 +799,7 @@ struct ImportView: View {
         let selectedUrl = candidateStates[folderPath]?.selectedCoverUrl
         let importing = isImporting(folderPath)
         let status = appService.importStatuses[folderPath]
-        let isComplete = status.map { if case .complete = $0 { return true } else { return false } } ?? false
+        let isComplete = status.map { if case .complete = $0 { true } else { false } } ?? false
 
         return ScrollView {
             VStack(alignment: .leading, spacing: 12) {
@@ -806,7 +808,7 @@ struct ImportView: View {
                     // Cover art thumbnail (tappable to open picker)
                     confirmationCoverThumb(selectedUrl: selectedUrl)
                         .overlay(alignment: .topTrailing) {
-                            if !importing && !isComplete && (!detail.coverArt.isEmpty || (candidateFiles?.artwork.isEmpty == false)) {
+                            if !importing, !isComplete, !detail.coverArt.isEmpty || (candidateFiles?.artwork.isEmpty == false) {
                                 Image(systemName: "pencil")
                                     .font(.caption2)
                                     .foregroundStyle(.white)
@@ -817,7 +819,7 @@ struct ImportView: View {
                             }
                         }
                         .onTapGesture {
-                            if !importing && !isComplete && (!detail.coverArt.isEmpty || (candidateFiles?.artwork.isEmpty == false)) {
+                            if !importing, !isComplete, !detail.coverArt.isEmpty || (candidateFiles?.artwork.isEmpty == false) {
                                 showCoverPicker = true
                             }
                         }
@@ -908,14 +910,14 @@ struct ImportView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Picker("Storage", selection: Binding(
                         get: { candidateStates[folderPath]?.managed ?? true },
-                        set: { candidateStates[folderPath]?.managed = $0 }
+                        set: { candidateStates[folderPath]?.managed = $0 },
                     )) {
                         Text("Copy to library").tag(true)
                         Text("Leave in place").tag(false)
                     }
                     .pickerStyle(.segmented)
                     .disabled(importing || isComplete)
-                    if candidateStates[folderPath]?.managed == true && appService.appHandle.isSyncReady() {
+                    if candidateStates[folderPath]?.managed == true, appService.appHandle.isSyncReady() {
                         Text("Files will sync to cloud")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -936,7 +938,7 @@ struct ImportView: View {
                     candidateStates[folderPath]?.selectedCoverUrl = url
                     showCoverPicker = false
                 },
-                onDone: { showCoverPicker = false }
+                onDone: { showCoverPicker = false },
             )
             .frame(width: 600, height: 500)
         }
@@ -967,7 +969,7 @@ struct ImportView: View {
             } else {
                 AsyncImage(url: URL(string: url)) { phase in
                     switch phase {
-                    case .success(let image):
+                    case let .success(image):
                         image
                             .resizable()
                             .aspectRatio(contentMode: .fill)
@@ -1004,7 +1006,7 @@ struct ImportView: View {
     }
 
     @ViewBuilder
-    private func confirmationActionRow(candidate: BridgeImportCandidate, detail: BridgeReleaseDetail, status: BridgeImportStatus?, importing: Bool, isComplete: Bool) -> some View {
+    private func confirmationActionRow(candidate: BridgeImportCandidate, detail: BridgeReleaseDetail, status: BridgeImportStatus?, importing _: Bool, isComplete: Bool) -> some View {
         let folderPath = candidate.folderPath
 
         HStack {
@@ -1015,7 +1017,7 @@ struct ImportView: View {
                     .font(.callout)
             } else if let status {
                 switch status {
-                case .importing(let percent):
+                case let .importing(percent):
                     Button("Back to Search") {
                         candidateStates[folderPath]?.mode = .identifying
                         candidateStates[folderPath]?.releaseDetail = nil
@@ -1029,7 +1031,7 @@ struct ImportView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(true)
-                case .error(let message):
+                case let .error(message):
                     Button("Back to Search") {
                         candidateStates[folderPath]?.mode = .identifying
                         candidateStates[folderPath]?.releaseDetail = nil
@@ -1087,7 +1089,7 @@ struct ImportView: View {
             releaseId: detail.releaseId,
             source: detail.source,
             selectedCover: coverSelection,
-            managed: managed
+            managed: managed,
         )
     }
 
@@ -1097,7 +1099,7 @@ struct ImportView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 switch files.audio {
-                case .cueFlacPairs(let pairs):
+                case let .cueFlacPairs(pairs):
                     DisclosureGroup(isExpanded: $audioExpanded) {
                         ForEach(Array(pairs.enumerated()), id: \.offset) { _, pair in
                             VStack(alignment: .leading, spacing: 2) {
@@ -1118,7 +1120,7 @@ struct ImportView: View {
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
                     }
-                case .trackFiles(let tracks):
+                case let .trackFiles(tracks):
                     DisclosureGroup(isExpanded: $audioExpanded) {
                         ForEach(Array(tracks.enumerated()), id: \.offset) { _, file in
                             HStack {
@@ -1360,7 +1362,7 @@ struct CandidateRow: View {
         let badAudio = candidate.badAudioCount
         let badImages = candidate.badImageCount
         let totalAudio = candidate.trackCount + badAudio
-        if badAudio > 0 && badImages > 0 {
+        if badAudio > 0, badImages > 0 {
             return "\(badAudio) of \(totalAudio) tracks incomplete, \(badImages) corrupt image(s)"
         } else if badAudio > 0 {
             return "\(badAudio) of \(totalAudio) tracks incomplete"
@@ -1435,7 +1437,6 @@ struct CandidateRow: View {
     }
 }
 
-
 // MARK: - Cover Picker
 
 /// A gallery-style picker for selecting cover art from remote and local sources.
@@ -1451,7 +1452,7 @@ struct CoverPickerView: View {
     @State private var thumbCache: [String: NSImage] = [:]
 
     private struct CoverItem {
-        let url: String  // remote URL or "local:filename"
+        let url: String // remote URL or "local:filename"
         let label: String
         let isLocal: Bool
         let localPath: String?
@@ -1464,7 +1465,7 @@ struct CoverPickerView: View {
                 url: cover.url,
                 label: cover.source == "musicbrainz" ? "Cover Art Archive" : "Discogs",
                 isLocal: false,
-                localPath: nil
+                localPath: nil,
             ))
         }
         for file in localArtwork {
@@ -1472,7 +1473,7 @@ struct CoverPickerView: View {
                 url: "local:\(file.name)",
                 label: file.name,
                 isLocal: true,
-                localPath: file.path
+                localPath: file.path,
             ))
         }
         return result
@@ -1508,7 +1509,7 @@ struct CoverPickerView: View {
                 ContentUnavailableView(
                     "No cover art available",
                     systemImage: "photo",
-                    description: Text("No remote or local artwork found")
+                    description: Text("No remote or local artwork found"),
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -1600,7 +1601,7 @@ struct CoverPickerView: View {
         } else {
             AsyncImage(url: URL(string: item.url)) { phase in
                 switch phase {
-                case .success(let image):
+                case let .success(image):
                     image
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -1653,7 +1654,7 @@ struct CoverPickerView: View {
                 } else {
                     AsyncImage(url: URL(string: item.url)) { phase in
                         switch phase {
-                        case .success(let image):
+                        case let .success(image):
                             image
                                 .resizable()
                                 .aspectRatio(contentMode: .fill)
@@ -1674,8 +1675,8 @@ struct CoverPickerView: View {
                 RoundedRectangle(cornerRadius: 6)
                     .stroke(
                         isSelected ? Color.accentColor : (isActive ? Color.primary : Color.clear),
-                        lineWidth: isSelected || isActive ? 2 : 0
-                    )
+                        lineWidth: isSelected || isActive ? 2 : 0,
+                    ),
             )
         }
         .buttonStyle(.plain)
@@ -1759,10 +1760,10 @@ struct DocumentViewerView: View {
             totalSizeBytes: 524_288_000,
             badAudioCount: 0,
             badImageCount: 0,
-            mbDiscid: nil
+            mbDiscid: nil,
         ),
         status: nil,
-        onRemove: {}
+        onRemove: {},
     )
     .padding()
 }
@@ -1778,10 +1779,10 @@ struct DocumentViewerView: View {
             totalSizeBytes: 524_288_000,
             badAudioCount: 0,
             badImageCount: 0,
-            mbDiscid: nil
+            mbDiscid: nil,
         ),
         status: .complete,
-        onRemove: {}
+        onRemove: {},
     )
     .padding()
 }
@@ -1797,10 +1798,10 @@ struct DocumentViewerView: View {
             totalSizeBytes: 524_288_000,
             badAudioCount: 2,
             badImageCount: 1,
-            mbDiscid: nil
+            mbDiscid: nil,
         ),
         status: nil,
-        onRemove: {}
+        onRemove: {},
     )
     .padding()
 }
@@ -1816,10 +1817,10 @@ struct DocumentViewerView: View {
             totalSizeBytes: 380_000_000,
             badAudioCount: 0,
             badImageCount: 0,
-            mbDiscid: nil
+            mbDiscid: nil,
         ),
         status: nil,
-        onRemove: {}
+        onRemove: {},
     )
     .padding()
 }
@@ -1835,11 +1836,11 @@ struct DocumentViewerView: View {
             format: "CD",
             label: "Label Name",
             trackCount: 12,
-            coverUrl: nil
+            coverUrl: nil,
         ),
         localTrackCount: 12,
         isImporting: false,
-        onSelect: {}
+        onSelect: {},
     )
     .padding()
 }
@@ -1848,7 +1849,7 @@ struct DocumentViewerView: View {
     DocumentViewerView(
         name: "info.txt",
         text: "This is sample document content.\nLine 2 of the document.\nLine 3 with more text.",
-        onClose: {}
+        onClose: {},
     )
     .frame(width: 600, height: 500)
     .background(Theme.surface)

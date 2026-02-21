@@ -146,6 +146,19 @@ fi
 
 # bae-macos checks (depends on bae-bridge)
 if has_changes_in "bae-macos" || has_changes_in "bae-bridge"; then
+    if command -v swiftformat &> /dev/null; then
+        run_check "swiftformat (bae-macos)" swiftformat bae-macos/bae/bae/ --config bae-macos/.swiftformat || {
+            echo "swiftformat failed"
+            exit 1
+        }
+        # Re-stage any formatting changes
+        git --no-pager diff --name-only bae-macos/ | while read -r file; do
+            if echo "$CHANGED_FILES" | grep -qF "$file"; then
+                git add "$file"
+            fi
+        done
+    fi
+
     run_check "build bridge (bae-macos)" ./bae-bridge/build-macos.sh || {
         echo "Bridge build failed"
         exit 1

@@ -1,0 +1,2 @@
+--swiftversion 6.1
+--exclude bae/bae/bae_bridge.swift,bae/build

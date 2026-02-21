@@ -27,7 +27,7 @@ struct ContentView: View {
                     libraryId: libraryId,
                     libraryName: libraryName,
                     fingerprint: fingerprint,
-                    onUnlocked: { openLibrary(libraryId) }
+                    onUnlocked: { openLibrary(libraryId) },
                 )
             case let .library(service):
                 MainAppView(appService: service)
@@ -69,14 +69,14 @@ struct ContentView: View {
                 let handle = try initApp(libraryId: libraryId)
 
                 // Check if encryption is configured but key is missing from keyring
-                if handle.isEncrypted() && !handle.checkEncryptionKeyAvailable() {
+                if handle.isEncrypted(), !handle.checkEncryptionKeyAvailable() {
                     let name = handle.libraryName()
                     let fp = handle.getEncryptionFingerprint()
                     await MainActor.run {
                         screen = .unlock(
                             libraryId: libraryId,
                             libraryName: name,
-                            fingerprint: fp
+                            fingerprint: fp,
                         )
                     }
                     return

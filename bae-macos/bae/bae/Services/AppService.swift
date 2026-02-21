@@ -23,7 +23,7 @@ class AppService: AppEventHandler, @unchecked Sendable {
     var importStatuses: [String: BridgeImportStatus] = [:]
     var libraryVersion: Int = 0
 
-    // Sync state
+    /// Sync state
     var syncStatus: BridgeSyncStatus?
 
     init(appHandle: AppHandle) {
@@ -51,7 +51,7 @@ class AppService: AppEventHandler, @unchecked Sendable {
                 self.currentTrackId = trackId
                 self.currentPositionMs = positionMs
                 self.currentDurationMs = durationMs
-            case .loading(let trackId):
+            case let .loading(trackId):
                 self.currentTrackId = trackId
             case .stopped:
                 self.currentTrackId = nil
@@ -184,7 +184,7 @@ class AppService: AppEventHandler, @unchecked Sendable {
         // Optimistic local reorder for instant UI feedback (mirrors PlaybackQueue.reorder logic)
         let from = Int(fromIndex)
         let to = Int(toIndex)
-        if from < queueItems.count && to <= queueItems.count && from != to {
+        if from < queueItems.count, to <= queueItems.count, from != to {
             let item = queueItems.remove(at: from)
             if to > from {
                 queueItems.insert(item, at: to - 1)
@@ -254,13 +254,13 @@ class AppService: AppEventHandler, @unchecked Sendable {
     }
 
     func searchMusicbrainz(artist: String, album: String, year: String? = nil, label: String? = nil) async -> [BridgeMetadataResult] {
-        return await Task.detached { [appHandle] in
+        await Task.detached { [appHandle] in
             (try? appHandle.searchMusicbrainz(artist: artist, album: album, year: year, label: label)) ?? []
         }.value
     }
 
     func searchDiscogs(artist: String, album: String, year: String? = nil, label: String? = nil) async -> [BridgeMetadataResult] {
-        return await Task.detached { [appHandle] in
+        await Task.detached { [appHandle] in
             (try? appHandle.searchDiscogs(artist: artist, album: album, year: year, label: label)) ?? []
         }.value
     }
@@ -272,31 +272,31 @@ class AppService: AppEventHandler, @unchecked Sendable {
                 releaseId: releaseId,
                 source: source,
                 selectedCover: selectedCover,
-                managed: managed
+                managed: managed,
             )
         }
     }
 
     func lookupDiscId(discid: String) async -> BridgeDiscIdResult? {
-        return await Task.detached { [appHandle] in
+        await Task.detached { [appHandle] in
             try? appHandle.lookupDiscid(discid: discid)
         }.value
     }
 
     func prefetchRelease(releaseId: String, source: String) async -> BridgeReleaseDetail? {
-        return await Task.detached { [appHandle] in
+        await Task.detached { [appHandle] in
             try? appHandle.prefetchRelease(releaseId: releaseId, source: source)
         }.value
     }
 
     func searchByCatalogNumber(catalog: String, source: String) async -> [BridgeMetadataResult] {
-        return await Task.detached { [appHandle] in
+        await Task.detached { [appHandle] in
             (try? appHandle.searchByCatalogNumber(catalogNumber: catalog, source: source)) ?? []
         }.value
     }
 
     func searchByBarcode(barcode: String, source: String) async -> [BridgeMetadataResult] {
-        return await Task.detached { [appHandle] in
+        await Task.detached { [appHandle] in
             (try? appHandle.searchByBarcode(barcode: barcode, source: source)) ?? []
         }.value
     }
@@ -317,8 +317,8 @@ class AppService: AppEventHandler, @unchecked Sendable {
         Task.detached { [appHandle] in
             let results = try? appHandle.search(query: query)
             await MainActor.run { [weak self] in
-                guard let self, self.searchQuery == query else { return }
-                self.searchResults = results
+                guard let self, searchQuery == query else { return }
+                searchResults = results
             }
         }
     }
@@ -343,9 +343,9 @@ class AppService: AppEventHandler, @unchecked Sendable {
     var isActive: Bool {
         switch playbackState {
         case .stopped:
-            return false
+            false
         default:
-            return true
+            true
         }
     }
 
@@ -358,11 +358,11 @@ class AppService: AppEventHandler, @unchecked Sendable {
     var trackTitle: String? {
         switch playbackState {
         case let .playing(_, trackTitle, _, _, _, _, _, _, _):
-            return trackTitle
+            trackTitle
         case let .paused(_, trackTitle, _, _, _, _, _, _, _):
-            return trackTitle
+            trackTitle
         default:
-            return nil
+            nil
         }
     }
 
@@ -370,11 +370,11 @@ class AppService: AppEventHandler, @unchecked Sendable {
     var artistNames: String? {
         switch playbackState {
         case let .playing(_, _, artistNames, _, _, _, _, _, _):
-            return artistNames
+            artistNames
         case let .paused(_, _, artistNames, _, _, _, _, _, _):
-            return artistNames
+            artistNames
         default:
-            return nil
+            nil
         }
     }
 
@@ -382,11 +382,11 @@ class AppService: AppEventHandler, @unchecked Sendable {
     var coverImageId: String? {
         switch playbackState {
         case let .playing(_, _, _, _, _, _, coverImageId, _, _):
-            return coverImageId
+            coverImageId
         case let .paused(_, _, _, _, _, _, coverImageId, _, _):
-            return coverImageId
+            coverImageId
         default:
-            return nil
+            nil
         }
     }
 
@@ -394,11 +394,11 @@ class AppService: AppEventHandler, @unchecked Sendable {
     var currentAlbumId: String? {
         switch playbackState {
         case let .playing(_, _, _, _, albumId, _, _, _, _):
-            return albumId
+            albumId
         case let .paused(_, _, _, _, albumId, _, _, _, _):
-            return albumId
+            albumId
         default:
-            return nil
+            nil
         }
     }
 
@@ -406,11 +406,11 @@ class AppService: AppEventHandler, @unchecked Sendable {
     var currentArtistId: String? {
         switch playbackState {
         case let .playing(_, _, _, artistId, _, _, _, _, _):
-            return artistId
+            artistId
         case let .paused(_, _, _, artistId, _, _, _, _, _):
-            return artistId
+            artistId
         default:
-            return nil
+            nil
         }
     }
 

@@ -16,13 +16,13 @@ struct ArtistDetailView: View {
                 ContentUnavailableView(
                     "Failed to load artist",
                     systemImage: "exclamationmark.triangle",
-                    description: Text(error)
+                    description: Text(error),
                 )
             } else if albums.isEmpty {
                 ContentUnavailableView(
                     "No albums",
                     systemImage: "square.stack",
-                    description: Text("No albums found for this artist")
+                    description: Text("No albums found for this artist"),
                 )
             } else {
                 AlbumGridView(
@@ -32,7 +32,7 @@ struct ArtistDetailView: View {
                             title: album.title,
                             artistNames: album.artistNames,
                             year: album.year,
-                            coverArtURL: appService.imageURL(for: album.coverReleaseId)
+                            coverArtURL: appService.imageURL(for: album.coverReleaseId),
                         )
                     },
                     selectedAlbumId: $selectedAlbumId,
@@ -58,7 +58,7 @@ struct ArtistDetailView: View {
                                 }
                             }
                         }
-                    }
+                    },
                 )
             }
         }

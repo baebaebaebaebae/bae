@@ -24,7 +24,7 @@ struct SyncSettingsView: View {
     @State private var showingRemoveConfirmation = false
     @State private var isRemoving = false
 
-    // Provider selection
+    /// Provider selection
     @State private var selectedProvider: String = "none"
 
     // Editable S3 config fields
@@ -65,7 +65,7 @@ struct SyncSettingsView: View {
                 syncStatus: syncStatus,
                 isSyncing: isSyncing,
                 error: error,
-                onSync: { syncNow() }
+                onSync: { syncNow() },
             )
 
             cloudProviderSection
@@ -75,7 +75,7 @@ struct SyncSettingsView: View {
                 followCode: followCode,
                 syncConfigured: syncStatus?.configured == true,
                 copiedField: $copiedField,
-                onGenerateFollowCode: { generateFollowCode() }
+                onGenerateFollowCode: { generateFollowCode() },
             )
 
             FollowedLibrariesSection(
@@ -83,7 +83,7 @@ struct SyncSettingsView: View {
                 followCodeInput: $followCodeInput,
                 followError: followError,
                 onFollow: { followLibrary() },
-                onUnfollow: { unfollowLibrary(id: $0) }
+                onUnfollow: { unfollowLibrary(id: $0) },
             )
 
             MembersSection(
@@ -100,7 +100,7 @@ struct SyncSettingsView: View {
                 onRemove: { pubkey in
                     memberToRemove = members.first { $0.pubkey == pubkey }
                     showingRemoveConfirmation = true
-                }
+                },
             )
         }
         .formStyle(.grouped)
@@ -114,7 +114,7 @@ struct SyncSettingsView: View {
         .confirmationDialog(
             "Remove member?",
             isPresented: $showingRemoveConfirmation,
-            presenting: memberToRemove
+            presenting: memberToRemove,
         ) { member in
             Button("Remove", role: .destructive) {
                 removeMember(member.pubkey)
@@ -131,7 +131,7 @@ struct SyncSettingsView: View {
             if isConnected, let config = syncConfig {
                 CloudProviderConnectedSection(
                     config: config,
-                    onDisconnect: { disconnect() }
+                    onDisconnect: { disconnect() },
                 )
             } else {
                 providerPicker
@@ -294,13 +294,13 @@ struct SyncSettingsView: View {
 
     private func displayName(for provider: String) -> String {
         switch provider {
-        case "s3": return "S3"
-        case "bae_cloud": return "bae Cloud"
-        case "google_drive": return "Google Drive"
-        case "dropbox": return "Dropbox"
-        case "onedrive": return "OneDrive"
-        case "icloud": return "iCloud Drive"
-        default: return provider
+        case "s3": "S3"
+        case "bae_cloud": "bae Cloud"
+        case "google_drive": "Google Drive"
+        case "dropbox": "Dropbox"
+        case "onedrive": "OneDrive"
+        case "icloud": "iCloud Drive"
+        default: provider
         }
     }
 
@@ -373,7 +373,7 @@ struct SyncSettingsView: View {
             keyPrefix: keyPrefix.isEmpty ? nil : keyPrefix,
             accessKey: accessKey,
             secretKey: secretKey,
-            shareBaseUrl: shareBaseUrl.isEmpty ? nil : shareBaseUrl
+            shareBaseUrl: shareBaseUrl.isEmpty ? nil : shareBaseUrl,
         )
         do {
             try appService.appHandle.saveSyncConfig(configData: data)
@@ -503,7 +503,7 @@ struct SyncSettingsView: View {
             do {
                 let code = try appService.appHandle.inviteMember(
                     publicKeyHex: invitePublicKey,
-                    role: inviteRole
+                    role: inviteRole,
                 )
                 let updatedMembers = try appService.appHandle.getMembers()
                 await MainActor.run {
@@ -662,13 +662,13 @@ struct CloudProviderConnectedSection: View {
 
     private func displayName(for provider: String) -> String {
         switch provider {
-        case "s3": return "S3"
-        case "bae_cloud": return "bae Cloud"
-        case "google_drive": return "Google Drive"
-        case "dropbox": return "Dropbox"
-        case "onedrive": return "OneDrive"
-        case "icloud": return "iCloud Drive"
-        default: return provider
+        case "s3": "S3"
+        case "bae_cloud": "bae Cloud"
+        case "google_drive": "Google Drive"
+        case "dropbox": "Dropbox"
+        case "onedrive": "OneDrive"
+        case "icloud": "iCloud Drive"
+        default: provider
         }
     }
 }
@@ -823,7 +823,7 @@ struct MembersSection: View {
                                     .background(
                                         member.role == "owner"
                                             ? Color.blue.opacity(0.15)
-                                            : Color.gray.opacity(0.15)
+                                            : Color.gray.opacity(0.15),
                                     )
                                     .clipShape(Capsule())
                             }
@@ -893,11 +893,11 @@ struct MembersSection: View {
                 syncing: false,
                 lastSyncTime: "2 minutes ago",
                 error: nil,
-                deviceCount: 3
+                deviceCount: 3,
             ),
             isSyncing: false,
             error: nil,
-            onSync: {}
+            onSync: {},
         )
     }
     .formStyle(.grouped)
@@ -912,11 +912,11 @@ struct MembersSection: View {
                 syncing: false,
                 lastSyncTime: nil,
                 error: nil,
-                deviceCount: 1
+                deviceCount: 1,
             ),
             isSyncing: false,
             error: nil,
-            onSync: {}
+            onSync: {},
         )
     }
     .formStyle(.grouped)
@@ -935,9 +935,9 @@ struct MembersSection: View {
                     s3KeyPrefix: nil,
                     shareBaseUrl: "https://share.example.com",
                     cloudAccountDisplay: nil,
-                    baeCloudUrl: nil
+                    baeCloudUrl: nil,
                 ),
-                onDisconnect: {}
+                onDisconnect: {},
             )
         }
     }
@@ -957,9 +957,9 @@ struct MembersSection: View {
                     s3KeyPrefix: nil,
                     shareBaseUrl: nil,
                     cloudAccountDisplay: "user@example.com",
-                    baeCloudUrl: "https://cloud.example.com/lib/abc"
+                    baeCloudUrl: "https://cloud.example.com/lib/abc",
                 ),
-                onDisconnect: {}
+                onDisconnect: {},
             )
         }
     }
@@ -974,7 +974,7 @@ struct MembersSection: View {
             followCode: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibiI6Ikp",
             syncConfigured: true,
             copiedField: .constant(nil),
-            onGenerateFollowCode: {}
+            onGenerateFollowCode: {},
         )
     }
     .formStyle(.grouped)
@@ -991,7 +991,7 @@ struct MembersSection: View {
             followCodeInput: .constant(""),
             followError: nil,
             onFollow: {},
-            onUnfollow: { _ in }
+            onUnfollow: { _ in },
         )
     }
     .formStyle(.grouped)
@@ -1005,7 +1005,7 @@ struct MembersSection: View {
             followCodeInput: .constant(""),
             followError: nil,
             onFollow: {},
-            onUnfollow: { _ in }
+            onUnfollow: { _ in },
         )
     }
     .formStyle(.grouped)
@@ -1023,7 +1023,7 @@ struct MembersSection: View {
             copiedField: .constant(nil),
             isRemoving: false,
             onInvite: {},
-            onRemove: { _ in }
+            onRemove: { _ in },
         )
     }
     .formStyle(.grouped)
@@ -1038,7 +1038,7 @@ struct MembersSection: View {
             copiedField: .constant(nil),
             isRemoving: false,
             onInvite: {},
-            onRemove: { _ in }
+            onRemove: { _ in },
         )
     }
     .formStyle(.grouped)

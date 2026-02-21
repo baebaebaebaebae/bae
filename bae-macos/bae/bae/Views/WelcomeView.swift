@@ -171,7 +171,7 @@ struct WelcomeView: View {
                     endpoint: ep,
                     accessKey: ak,
                     secretKey: sk,
-                    encryptionKeyHex: ek
+                    encryptionKeyHex: ek,
                 )
                 await MainActor.run {
                     isRestoring = false

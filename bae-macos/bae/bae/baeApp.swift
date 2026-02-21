@@ -61,7 +61,7 @@ struct baeApp: App {
 
     init() {
         let controller = SPUStandardUpdaterController(
-            startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil
+            startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil,
         )
         updaterController = controller
         checkForUpdatesViewModel = CheckForUpdatesViewModel(updater: controller.updater)
@@ -81,7 +81,7 @@ struct baeApp: App {
                 ContentUnavailableView(
                     "No library loaded",
                     systemImage: "books.vertical",
-                    description: Text("Open a library first to access settings")
+                    description: Text("Open a library first to access settings"),
                 )
                 .frame(width: 300, height: 200)
             }

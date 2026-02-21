@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 // MARK: - Smart wiring view (keeps appService)
 
@@ -28,7 +28,7 @@ struct AlbumDetailView: View {
                 ContentUnavailableView(
                     "Failed to load album",
                     systemImage: "exclamationmark.triangle",
-                    description: Text(error)
+                    description: Text(error),
                 )
             } else if let detail {
                 AlbumDetailContent(
@@ -52,12 +52,22 @@ struct AlbumDetailView: View {
                     },
                     onAddNext: { trackId in appService.addNext(trackIds: [trackId]) },
                     onAddToQueue: { trackId in appService.addToQueue(trackIds: [trackId]) },
+                    onAddNextAlbum: {
+                        guard !detail.releases.isEmpty else { return }
+                        let trackIds = detail.releases[selectedReleaseIndex].tracks.map(\.id)
+                        appService.addNext(trackIds: trackIds)
+                    },
+                    onAddAlbumToQueue: {
+                        guard !detail.releases.isEmpty else { return }
+                        let trackIds = detail.releases[selectedReleaseIndex].tracks.map(\.id)
+                        appService.addToQueue(trackIds: trackIds)
+                    },
                     onChangeCover: {
                         showingCoverSheet = true
                         fetchRemoteCovers()
                     },
                     onManage: { showingManageSheet = true },
-                    onDeleteAlbum: { showingDeleteConfirmation = true }
+                    onDeleteAlbum: { showingDeleteConfirmation = true },
                 )
             } else {
                 ProgressView()
@@ -80,7 +90,7 @@ struct AlbumDetailView: View {
                         changeCover(
                             albumId: albumId,
                             releaseId: releaseId,
-                            selection: .remoteCover(url: cover.url, source: cover.source)
+                            selection: .remoteCover(url: cover.url, source: cover.source),
                         )
                     },
                     onSelectReleaseImage: { fileId in
@@ -88,18 +98,18 @@ struct AlbumDetailView: View {
                         changeCover(
                             albumId: albumId,
                             releaseId: releaseId,
-                            selection: .releaseImage(fileId: fileId)
+                            selection: .releaseImage(fileId: fileId),
                         )
                     },
                     onRefresh: { fetchRemoteCovers() },
-                    onDone: { showingCoverSheet = false }
+                    onDone: { showingCoverSheet = false },
                 )
                 .frame(width: 500, height: 450)
             }
         }
         .alert("Cover Change Failed", isPresented: .init(
             get: { coverChangeError != nil },
-            set: { if !$0 { coverChangeError = nil } }
+            set: { if !$0 { coverChangeError = nil } },
         )) {
             Button("OK") { coverChangeError = nil }
         } message: {
@@ -109,7 +119,7 @@ struct AlbumDetailView: View {
         }
         .alert("Share Failed", isPresented: .init(
             get: { shareError != nil },
-            set: { if !$0 { shareError = nil } }
+            set: { if !$0 { shareError = nil } },
         )) {
             Button("OK") { shareError = nil }
         } message: {
@@ -119,7 +129,7 @@ struct AlbumDetailView: View {
         }
         .alert("Transfer Failed", isPresented: .init(
             get: { transferError != nil },
-            set: { if !$0 { transferError = nil } }
+            set: { if !$0 { transferError = nil } },
         )) {
             Button("OK") { transferError = nil }
         } message: {
@@ -145,7 +155,7 @@ struct AlbumDetailView: View {
                         transferring: transferring,
                         onTransferToManaged: { transferToManaged(releaseId: release.id) },
                         onEject: { ejectRelease(releaseId: release.id) },
-                        onDone: { showingManageSheet = false }
+                        onDone: { showingManageSheet = false },
                     )
                     .frame(width: 450, height: 400)
                 }
@@ -195,7 +205,7 @@ struct AlbumDetailView: View {
                 items.append(LightboxItem(
                     id: file.id,
                     label: file.originalFilename,
-                    url: appService.fileURL(for: file.id)
+                    url: appService.fileURL(for: file.id),
                 ))
             }
         }
@@ -352,6 +362,8 @@ struct AlbumDetailContent: View {
     let onShare: () -> Void
     let onAddNext: (String) -> Void
     let onAddToQueue: (String) -> Void
+    let onAddNextAlbum: () -> Void
+    let onAddAlbumToQueue: () -> Void
     let onChangeCover: () -> Void
     let onManage: () -> Void
     let onDeleteAlbum: () -> Void
@@ -390,23 +402,6 @@ struct AlbumDetailContent: View {
                         overlayCoordinator.lightboxIndex = 0
                     }
                 }
-                .overlay(alignment: .bottomTrailing) {
-                    Menu {
-                        Button("Change Cover...") { onChangeCover() }
-                        Button("Storage...") { onManage() }
-                        Divider()
-                        Button("Delete Album", role: .destructive) { onDeleteAlbum() }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.caption)
-                            .foregroundStyle(.white)
-                            .frame(width: 24, height: 24)
-                            .background(.black.opacity(0.6))
-                            .clipShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .padding(6)
-                }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(detail.album.title)
@@ -437,17 +432,38 @@ struct AlbumDetailContent: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
 
-                    Button(action: onShuffle) {
-                        Label("Shuffle", systemImage: "shuffle")
-                    }
-                    .controlSize(.small)
-
-                    if !detail.releases.isEmpty {
+                    Menu {
+                        Button(action: onPlay) {
+                            Label("Play", systemImage: "play.fill")
+                        }
+                        Button(action: onShuffle) {
+                            Label("Shuffle", systemImage: "shuffle")
+                        }
+                        Divider()
+                        Button(action: { onAddNextAlbum() }) {
+                            Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                        }
+                        Button(action: { onAddAlbumToQueue() }) {
+                            Label("Add to Queue", systemImage: "text.append")
+                        }
+                        Divider()
                         Button(action: onShare) {
                             Label("Share", systemImage: "square.and.arrow.up")
                         }
-                        .controlSize(.small)
+                        .disabled(detail.releases.isEmpty)
+                        Divider()
+                        Button("Change Cover...") { onChangeCover() }
+                        Button("Storage...") { onManage() }
+                        Divider()
+                        Button(role: .destructive, action: onDeleteAlbum) {
+                            Label("Delete Album", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.body)
                     }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
                 }
                 .padding(.top, 2)
             }
@@ -470,7 +486,7 @@ struct AlbumDetailContent: View {
         if let url = coverArtURL {
             AsyncImage(url: url) { phase in
                 switch phase {
-                case .success(let image):
+                case let .success(image):
                     image
                         .resizable()
                         .aspectRatio(contentMode: .fill)
@@ -564,7 +580,7 @@ struct AlbumDetailContent: View {
                     isCurrent: isCurrent,
                     isCurrentPlaying: isCurrent && isPlaying,
                     onPlay: { onPlayFromTrack(index) },
-                    onTogglePlayPause: onTogglePlayPause
+                    onTogglePlayPause: onTogglePlayPause,
                 )
                 Divider()
             }
@@ -586,12 +602,12 @@ struct AlbumDetailContent: View {
         isCurrent: Bool,
         isCurrentPlaying: Bool,
         onPlay: @escaping () -> Void,
-        onTogglePlayPause: @escaping () -> Void
+        onTogglePlayPause: @escaping () -> Void,
     ) -> some View {
         HStack(spacing: 12) {
             ZStack {
                 if isHovered {
-                    if isCurrent && isCurrentPlaying {
+                    if isCurrent, isCurrentPlaying {
                         Button(action: onTogglePlayPause) {
                             Image(systemName: "pause.fill")
                                 .font(.callout)
@@ -776,7 +792,7 @@ struct CoverSheetView: View {
             VStack(spacing: 4) {
                 AsyncImage(url: URL(string: cover.thumbnailUrl)) { phase in
                     switch phase {
-                    case .success(let image):
+                    case let .success(image):
                         image
                             .resizable()
                             .aspectRatio(contentMode: .fill)
@@ -880,7 +896,7 @@ struct ManageReleaseSheet: View {
         let isUnmanaged = !release.managedLocally && !release.managedInCloud && release.unmanagedPath != nil
 
         return HStack(spacing: 6) {
-            if release.managedLocally && release.managedInCloud {
+            if release.managedLocally, release.managedInCloud {
                 Image(systemName: "internaldrive")
                 Text("Local + Cloud")
             } else if release.managedLocally {
@@ -938,7 +954,7 @@ struct ManageReleaseSheet: View {
                 year: 2024,
                 isCompilation: false,
                 coverReleaseId: nil,
-                artistNames: "Artist Name"
+                artistNames: "Artist Name",
             ),
             artists: [BridgeArtist(id: "ar-1", name: "Artist Name")],
             releases: [
@@ -955,13 +971,13 @@ struct ManageReleaseSheet: View {
                     managedInCloud: false,
                     unmanagedPath: nil,
                     tracks: [
-                        BridgeTrack(id: "t-1", title: "First Track", discNumber: 1, trackNumber: 1, durationMs: 234000, artistNames: "Artist Name"),
-                        BridgeTrack(id: "t-2", title: "Second Track", discNumber: 1, trackNumber: 2, durationMs: 180000, artistNames: "Artist Name"),
-                        BridgeTrack(id: "t-3", title: "Third Track", discNumber: 1, trackNumber: 3, durationMs: 312000, artistNames: "Artist Name"),
+                        BridgeTrack(id: "t-1", title: "First Track", discNumber: 1, trackNumber: 1, durationMs: 234_000, artistNames: "Artist Name"),
+                        BridgeTrack(id: "t-2", title: "Second Track", discNumber: 1, trackNumber: 2, durationMs: 180_000, artistNames: "Artist Name"),
+                        BridgeTrack(id: "t-3", title: "Third Track", discNumber: 1, trackNumber: 3, durationMs: 312_000, artistNames: "Artist Name"),
                     ],
-                    files: []
-                )
-            ]
+                    files: [],
+                ),
+            ],
         ),
         coverArtURL: nil,
         lightboxItems: [LightboxItem(id: "cover", label: "Cover", url: nil)],
@@ -977,9 +993,11 @@ struct ManageReleaseSheet: View {
         onShare: {},
         onAddNext: { _ in },
         onAddToQueue: { _ in },
+        onAddNextAlbum: {},
+        onAddAlbumToQueue: {},
         onChangeCover: {},
         onManage: {},
-        onDeleteAlbum: {}
+        onDeleteAlbum: {},
     )
     .frame(width: 450, height: 600)
     .environment(OverlayCoordinator())
@@ -999,7 +1017,7 @@ struct ManageReleaseSheet: View {
         onSelectRemote: { _ in },
         onSelectReleaseImage: { _ in },
         onRefresh: {},
-        onDone: {}
+        onDone: {},
     )
     .frame(width: 500, height: 450)
     .background(Theme.surface)
@@ -1013,7 +1031,7 @@ struct ManageReleaseSheet: View {
         onSelectRemote: { _ in },
         onSelectReleaseImage: { _ in },
         onRefresh: {},
-        onDone: {}
+        onDone: {},
     )
     .frame(width: 500, height: 450)
     .background(Theme.surface)

@@ -41,7 +41,7 @@ struct ImageLightbox: View {
                     if let url = currentItem.url {
                         AsyncImage(url: url) { phase in
                             switch phase {
-                            case .success(let image):
+                            case let .success(image):
                                 image
                                     .resizable()
                                     .aspectRatio(contentMode: .fit)
@@ -56,7 +56,7 @@ struct ImageLightbox: View {
                                                 withAnimation(.easeOut(duration: 0.25)) {
                                                     magnification = 1.0
                                                 }
-                                            }
+                                            },
                                     )
                                     .padding(40)
                                     .shadow(color: .black.opacity(0.5), radius: 20)
@@ -196,7 +196,7 @@ struct ImageLightbox: View {
                 if let url = item.url {
                     AsyncImage(url: url) { phase in
                         switch phase {
-                        case .success(let image):
+                        case let .success(image):
                             image
                                 .resizable()
                                 .aspectRatio(contentMode: .fill)
@@ -219,8 +219,8 @@ struct ImageLightbox: View {
                 RoundedRectangle(cornerRadius: 6)
                     .stroke(
                         isActive ? .white : .gray.opacity(0.4),
-                        lineWidth: isActive ? 2 : 1
-                    )
+                        lineWidth: isActive ? 2 : 1,
+                    ),
             )
         }
         .buttonStyle(.plain)

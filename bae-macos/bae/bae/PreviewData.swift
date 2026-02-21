@@ -5,7 +5,6 @@ import Foundation
 // Cover art loaded from bae-mocks/public/covers/ via file:// URLs.
 
 enum PreviewData {
-
     private static func coverURL(_ artist: String, _ title: String) -> URL? {
         let slug = { (s: String) in
             s.lowercased()
@@ -78,20 +77,20 @@ enum PreviewData {
                 discNumber: 1,
                 trackNumber: Int32(index + 1),
                 durationMs: durationMs,
-                artistNames: artist
+                artistNames: artist,
             )
         }
     }
 
     private static func makeDetail(
         id: String, title: String, artist: String, year: Int32,
-        tracks: [String], format: String
+        tracks: [String], format: String,
     ) -> BridgeAlbumDetail {
         BridgeAlbumDetail(
             album: BridgeAlbum(
                 id: id, title: title, year: year,
                 isCompilation: false, coverReleaseId: nil,
-                artistNames: artist
+                artistNames: artist,
             ),
             artists: [BridgeArtist(id: "ar-\(id)", name: artist)],
             releases: [
@@ -102,9 +101,9 @@ enum PreviewData {
                     managedLocally: true, managedInCloud: false,
                     unmanagedPath: nil,
                     tracks: makeTracks(tracks, artist: artist),
-                    files: []
-                )
-            ]
+                    files: [],
+                ),
+            ],
         )
     }
 

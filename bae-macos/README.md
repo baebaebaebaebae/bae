@@ -49,6 +49,14 @@ All commands run from the repo root.
 
 The Rust side is always built with `--release` by `build-macos.sh`. The Debug/Release toggle in Xcode only affects Swift compilation.
 
+## Formatting
+
+Swift code is formatted with [SwiftFormat](https://github.com/nicklockwood/SwiftFormat). Install it:
+
+    brew install swiftformat
+
+The pre-commit hook runs `swiftformat` automatically on staged files. Config is in `.swiftformat`.
+
 ## Data
 
 The app discovers libraries from `~/.bae/libraries/`. Run bae-desktop first to create or import a library if you don't have one.

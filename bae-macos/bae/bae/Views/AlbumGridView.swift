@@ -20,7 +20,7 @@ struct AlbumGridView: View {
     let onAddNext: (String) -> Void
 
     private let columns = [
-        GridItem(.adaptive(minimum: albumCardSize), spacing: 24, alignment: .topLeading)
+        GridItem(.adaptive(minimum: albumCardSize), spacing: 24, alignment: .topLeading),
     ]
 
     var body: some View {
@@ -41,7 +41,7 @@ struct AlbumGridView: View {
                             isSelected: selectedAlbumId == album.id,
                             onPlay: { onPlayAlbum(album.id) },
                             onAddToQueue: { onAddToQueue(album.id) },
-                            onAddNext: { onAddNext(album.id) }
+                            onAddNext: { onAddNext(album.id) },
                         )
                         .draggable(album.id)
                         .onTapGesture {
@@ -84,8 +84,8 @@ struct AlbumGridView: View {
                 }
             } label: {
                 Text(sortField.rawValue)
-                        .font(.callout)
-                .foregroundStyle(.secondary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
@@ -125,8 +125,8 @@ struct AlbumCardView: View {
                     RoundedRectangle(cornerRadius: 8)
                         .strokeBorder(
                             Color.accentColor,
-                            lineWidth: isSelected ? 3 : 0
-                        )
+                            lineWidth: isSelected ? 3 : 0,
+                        ),
                 )
                 .overlay(alignment: .topTrailing) {
                     if isHovered || showMenu {
@@ -166,7 +166,7 @@ struct AlbumCardView: View {
         if let url = coverArtURL {
             AsyncImage(url: url) { phase in
                 switch phase {
-                case .success(let image):
+                case let .success(image):
                     image
                         .resizable()
                         .aspectRatio(contentMode: .fill)
@@ -225,8 +225,8 @@ private struct CardMenuButton: View {
         menu.addItem(nextItem)
 
         menu.popUp(positioning: nil,
-                    at: NSEvent.mouseLocation,
-                    in: nil)
+                   at: NSEvent.mouseLocation,
+                   in: nil)
         showMenu = false
     }
 }
@@ -237,29 +237,33 @@ private class MenuItem: NSMenuItem {
     init(title: String, handler: @escaping () -> Void) {
         self.handler = handler
         super.init(title: title, action: #selector(fire), keyEquivalent: "")
-        self.target = self
+        target = self
     }
 
-    required init(coder: NSCoder) { fatalError() }
+    @available(*, unavailable)
+    required init(coder _: NSCoder) {
+        fatalError()
+    }
 
-    @objc private func fire() { handler() }
+    @objc private func fire() {
+        handler()
+    }
 }
 
 // MARK: - Previews
 
 private func sortedAlbums(
-    _ field: LibrarySortField, _ direction: SortDirection
+    _ field: LibrarySortField, _ direction: SortDirection,
 ) -> [AlbumCardViewModel] {
-    let sorted: [AlbumCardViewModel]
-    switch field {
+    let sorted: [AlbumCardViewModel] = switch field {
     case .title:
-        sorted = PreviewData.albums.sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
+        PreviewData.albums.sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
     case .artist:
-        sorted = PreviewData.albums.sorted { $0.artistNames.localizedCompare($1.artistNames) == .orderedAscending }
+        PreviewData.albums.sorted { $0.artistNames.localizedCompare($1.artistNames) == .orderedAscending }
     case .year:
-        sorted = PreviewData.albums.sorted { ($0.year ?? 0) < ($1.year ?? 0) }
+        PreviewData.albums.sorted { ($0.year ?? 0) < ($1.year ?? 0) }
     case .dateAdded:
-        sorted = PreviewData.albums
+        PreviewData.albums
     }
     return direction == .ascending ? sorted : sorted.reversed()
 }
@@ -279,7 +283,7 @@ private struct GridPreview: View {
             sortDirection: $sortDirection,
             onPlayAlbum: { _ in },
             onAddToQueue: { _ in },
-            onAddNext: { _ in }
+            onAddNext: { _ in },
         )
         .frame(width: width, height: height)
     }
@@ -309,7 +313,7 @@ private struct GridPreview: View {
             isSelected: false,
             onPlay: {},
             onAddToQueue: {},
-            onAddNext: {}
+            onAddNext: {},
         )
         AlbumCardView(
             title: selected.title,
@@ -319,7 +323,7 @@ private struct GridPreview: View {
             isSelected: true,
             onPlay: {},
             onAddToQueue: {},
-            onAddNext: {}
+            onAddNext: {},
         )
     }
     .padding()
@@ -340,11 +344,12 @@ private struct LibraryPreview: View {
                 sortDirection: $sortDirection,
                 onPlayAlbum: { _ in },
                 onAddToQueue: { _ in },
-                onAddNext: { _ in }
+                onAddNext: { _ in },
             )
 
             if let albumId = selectedAlbumId,
-               let detail = PreviewData.albumDetails[albumId] {
+               let detail = PreviewData.albumDetails[albumId]
+            {
                 Divider()
                 AlbumDetailContent(
                     detail: detail,
@@ -362,9 +367,11 @@ private struct LibraryPreview: View {
                     onShare: {},
                     onAddNext: { _ in },
                     onAddToQueue: { _ in },
+                    onAddNextAlbum: {},
+                    onAddAlbumToQueue: {},
                     onChangeCover: {},
                     onManage: {},
-                    onDeleteAlbum: {}
+                    onDeleteAlbum: {},
                 )
                 .frame(width: 400)
             }

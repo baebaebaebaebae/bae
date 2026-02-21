@@ -47,7 +47,7 @@ private struct LibrarySettingsTab: View {
                 libraryId: config.libraryId,
                 libraryPath: config.libraryPath,
                 saved: saved,
-                onRename: { saveName() }
+                onRename: { saveName() },
             )
         } else {
             Form {
@@ -149,7 +149,7 @@ private struct DiscogsSettingsTab: View {
                 if let t = appService.getDiscogsToken() {
                     token = t
                 }
-            }
+            },
         )
         .task {
             hasToken = appService.appHandle.hasDiscogsToken()
@@ -279,7 +279,7 @@ private struct SubsonicSettingsTab: View {
                 port: config.subsonicPort,
                 bindAddress: config.subsonicBindAddress,
                 username: config.subsonicUsername,
-                onToggle: { toggleServer($0) }
+                onToggle: { toggleServer($0) },
             )
         } else {
             Form {
@@ -362,7 +362,7 @@ struct SubsonicSettingsContent: View {
 
                 Toggle("Enable Subsonic Server", isOn: Binding(
                     get: { isRunning },
-                    set: { onToggle($0) }
+                    set: { onToggle($0) },
                 ))
                 .disabled(isToggling)
 
@@ -421,7 +421,7 @@ struct AboutSettingsTab: View {
         libraryId: "550e8400-e29b-41d4-a716-446655440000",
         libraryPath: "/Users/user/.bae/libraries/default",
         saved: false,
-        onRename: {}
+        onRename: {},
     )
     .frame(width: 500, height: 300)
 }
@@ -434,7 +434,7 @@ struct AboutSettingsTab: View {
         statusMessage: nil,
         onSave: {},
         onRemove: {},
-        onRevealToken: {}
+        onRevealToken: {},
     )
     .frame(width: 500, height: 300)
 }
@@ -447,7 +447,7 @@ struct AboutSettingsTab: View {
         statusMessage: nil,
         onSave: {},
         onRemove: {},
-        onRevealToken: {}
+        onRevealToken: {},
     )
     .frame(width: 500, height: 300)
 }
@@ -460,7 +460,7 @@ struct AboutSettingsTab: View {
         port: 4533,
         bindAddress: "127.0.0.1",
         username: "admin",
-        onToggle: { _ in }
+        onToggle: { _ in },
     )
     .frame(width: 500, height: 300)
 }
@@ -473,7 +473,7 @@ struct AboutSettingsTab: View {
         port: 4533,
         bindAddress: "127.0.0.1",
         username: nil,
-        onToggle: { _ in }
+        onToggle: { _ in },
     )
     .frame(width: 500, height: 300)
 }

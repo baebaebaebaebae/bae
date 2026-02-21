@@ -11,7 +11,7 @@ struct UnlockView: View {
     @State private var error: String?
 
     private var isValidHex: Bool {
-        keyHex.count == 64 && keyHex.allSatisfy { $0.isHexDigit }
+        keyHex.count == 64 && keyHex.allSatisfy(\.isHexDigit)
     }
 
     var body: some View {

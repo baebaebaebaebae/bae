@@ -6,11 +6,11 @@ enum MainSection {
     case importing
 }
 
-// Adjusts the position of the window's traffic light buttons (close/minimize/zoom).
-// With .hiddenTitleBar, the buttons sit at the system default position which doesn't align
-// with our custom title bar content. This modifier accesses the NSWindow and shifts them.
-// Reapplies on window resize since macOS resets button positions during resize.
-// Technique from: https://medium.com/@clyapp/fix-the-problem-that-nswindow-traffic-light-buttons-always-revert-to-its-origin-position-after-6a13675df18a
+/// Adjusts the position of the window's traffic light buttons (close/minimize/zoom).
+/// With .hiddenTitleBar, the buttons sit at the system default position which doesn't align
+/// with our custom title bar content. This modifier accesses the NSWindow and shifts them.
+/// Reapplies on window resize since macOS resets button positions during resize.
+/// Technique from: https://medium.com/@clyapp/fix-the-problem-that-nswindow-traffic-light-buttons-always-revert-to-its-origin-position-after-6a13675df18a
 struct TrafficLightOffset: ViewModifier {
     let xOffset: CGFloat
     let yOffset: CGFloat
@@ -34,7 +34,7 @@ struct TrafficLightOffset: ViewModifier {
             return view
         }
 
-        func updateNSView(_ nsView: NSView, context: Context) {}
+        func updateNSView(_: NSView, context _: Context) {}
 
         func makeCoordinator() -> Coordinator {
             Coordinator()
@@ -57,7 +57,7 @@ struct TrafficLightOffset: ViewModifier {
                 observation = NotificationCenter.default.addObserver(
                     forName: NSWindow.didResizeNotification,
                     object: window,
-                    queue: .main
+                    queue: .main,
                 ) { notification in
                     guard let window = notification.object as? NSWindow else { return }
                     for buttonType: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
@@ -77,16 +77,15 @@ struct TrafficLightOffset: ViewModifier {
     }
 }
 
-// Makes an area behave like a native title bar: draggable to move the window,
-// double-click to zoom (maximize/restore). Needed because .hiddenTitleBar removes
-// the system title bar and our custom HStack doesn't inherit that behavior.
+/// Makes an area behave like a native title bar: draggable to move the window,
+/// double-click to zoom (maximize/restore). Needed because .hiddenTitleBar removes
+/// the system title bar and our custom HStack doesn't inherit that behavior.
 struct WindowDragArea: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = DragView()
-        return view
+    func makeNSView(context _: Context) -> NSView {
+        DragView()
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    func updateNSView(_: NSView, context _: Context) {}
 
     private class DragView: NSView {
         override func mouseDown(with event: NSEvent) {
@@ -186,7 +185,7 @@ struct MainAppView: View {
                                 artistNames: item.artistNames,
                                 albumTitle: item.albumTitle,
                                 durationMs: item.durationMs,
-                                coverArtURL: appService.imageURL(for: item.coverImageId)
+                                coverArtURL: appService.imageURL(for: item.coverImageId),
                             )
                         },
                         onPlayPause: { appService.togglePlayPause() },
@@ -212,12 +211,12 @@ struct MainAppView: View {
                                 selectedAlbumId = albumId
                             }
                         },
-                        onNavigateToArtist: {}
+                        onNavigateToArtist: {},
                     )
                 }
             }
 
-            if overlayCoordinator.lightboxIndex != nil && !overlayCoordinator.lightboxItems.isEmpty {
+            if overlayCoordinator.lightboxIndex != nil, !overlayCoordinator.lightboxItems.isEmpty {
                 ImageLightbox(items: overlayCoordinator.lightboxItems, currentIndex: $overlayCoordinator.lightboxIndex)
             }
         }
@@ -230,7 +229,8 @@ struct MainAppView: View {
                 guard event.keyCode == 49 else { return event } // 49 = space
                 // Don't steal space from text fields
                 if let responder = event.window?.firstResponder,
-                   responder is NSTextView || responder is NSTextField {
+                   responder is NSTextView || responder is NSTextField
+                {
                     return event
                 }
                 appService.togglePlayPause()
@@ -265,34 +265,34 @@ struct MainAppView: View {
             HStack(spacing: 12) {
                 Spacer()
                 SearchField(text: $searchText, prompt: "Artists, albums, tracks", onEscape: { searchFocused = false })
-                .focused($searchFocused)
-                .frame(width: 250)
-                .popover(isPresented: .constant(showSearchResults), arrowEdge: .bottom) {
-                    SearchView(
-                        results: appService.searchResults,
-                        searchQuery: appService.searchQuery,
-                        resolveImageURL: { appService.imageURL(for: $0) },
-                        onSelectArtist: { _ in
-                            searchFocused = false
-                            searchText = ""
-                        },
-                        onSelectAlbum: { albumId in
-                            searchFocused = false
-                            searchText = ""
-                            appService.search(query: "")
-                            selectedAlbumId = albumId
-                        },
-                        onPlayTrack: { _ in }
-                    )
-                    .frame(width: 400, height: 350)
-                }
+                    .focused($searchFocused)
+                    .frame(width: 250)
+                    .popover(isPresented: .constant(showSearchResults), arrowEdge: .bottom) {
+                        SearchView(
+                            results: appService.searchResults,
+                            searchQuery: appService.searchQuery,
+                            resolveImageURL: { appService.imageURL(for: $0) },
+                            onSelectArtist: { _ in
+                                searchFocused = false
+                                searchText = ""
+                            },
+                            onSelectAlbum: { albumId in
+                                searchFocused = false
+                                searchText = ""
+                                appService.search(query: "")
+                                selectedAlbumId = albumId
+                            },
+                            onPlayTrack: { _ in },
+                        )
+                        .frame(width: 400, height: 350)
+                    }
 
-            Button(action: { openSettings() }) {
-                Image(systemName: "gearshape")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Settings")
+                Button(action: { openSettings() }) {
+                    Image(systemName: "gearshape")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Settings")
             }
         }
         .padding(.top, 8)
@@ -380,12 +380,14 @@ struct MainAppView: View {
 
         provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
             guard let data = item as? Data,
-                  let url = URL(dataRepresentation: data, relativeTo: nil) else {
+                  let url = URL(dataRepresentation: data, relativeTo: nil)
+            else {
                 return
             }
             var isDir: ObjCBool = false
             guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir),
-                  isDir.boolValue else {
+                  isDir.boolValue
+            else {
                 return
             }
             DispatchQueue.main.async {

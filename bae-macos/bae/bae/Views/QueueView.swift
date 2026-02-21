@@ -40,7 +40,7 @@ struct QueueView: View {
                 ContentUnavailableView(
                     "Queue is empty",
                     systemImage: "list.bullet",
-                    description: Text("Drag tracks here or play an album")
+                    description: Text("Drag tracks here or play an album"),
                 )
                 .frame(maxHeight: .infinity)
                 .dropDestination(for: String.self) { droppedIds, _ in
@@ -69,7 +69,7 @@ struct QueueView: View {
                                 draggedTrackId: $draggedTrackId,
                                 dropInsertIndex: $dropInsertIndex,
                                 onReorder: onReorder,
-                                onInsertTracks: onInsertTracks
+                                onInsertTracks: onInsertTracks,
                             ))
                         }
                         // Insertion line at the very end
@@ -86,7 +86,7 @@ struct QueueView: View {
                                 draggedTrackId: $draggedTrackId,
                                 dropInsertIndex: $dropInsertIndex,
                                 onReorder: onReorder,
-                                onInsertTracks: onInsertTracks
+                                onInsertTracks: onInsertTracks,
                             ))
                     }
                 }
@@ -156,7 +156,7 @@ struct QueueView: View {
         if let url = nowPlayingArtURL {
             AsyncImage(url: url) { phase in
                 switch phase {
-                case .success(let image):
+                case let .success(image):
                     image.resizable().aspectRatio(contentMode: .fill)
                 default:
                     artPlaceholder
@@ -238,7 +238,7 @@ struct QueueView: View {
         if let url {
             AsyncImage(url: url) { phase in
                 switch phase {
-                case .success(let image):
+                case let .success(image):
                     image.resizable().aspectRatio(contentMode: .fill)
                 default:
                     artPlaceholder
@@ -284,9 +284,10 @@ private struct QueueDropDelegate: DropDelegate {
         return items.contains { $0.id == draggedId }
     }
 
-    func dropEntered(info: DropInfo) {
+    func dropEntered(info _: DropInfo) {
         if let draggedId = draggedTrackId,
-           let fromIndex = items.firstIndex(where: { $0.id == draggedId }) {
+           let fromIndex = items.firstIndex(where: { $0.id == draggedId })
+        {
             // Internal reorder: show insertion line relative to source
             if targetIndex > fromIndex {
                 dropInsertIndex = targetIndex + 1
@@ -301,13 +302,14 @@ private struct QueueDropDelegate: DropDelegate {
         }
     }
 
-    func dropUpdated(info: DropInfo) -> DropProposal? {
+    func dropUpdated(info _: DropInfo) -> DropProposal? {
         DropProposal(operation: isInternalDrag ? .move : .copy)
     }
 
     func performDrop(info: DropInfo) -> Bool {
         if let draggedId = draggedTrackId,
-           let fromIndex = items.firstIndex(where: { $0.id == draggedId }) {
+           let fromIndex = items.firstIndex(where: { $0.id == draggedId })
+        {
             // Internal reorder
             let toIndex = targetIndex > fromIndex ? targetIndex + 1 : targetIndex
             if toIndex != fromIndex {
@@ -352,7 +354,7 @@ private struct QueueDropDelegate: DropDelegate {
         return true
     }
 
-    func dropExited(info: DropInfo) {
+    func dropExited(info _: DropInfo) {
         dropInsertIndex = nil
     }
 
@@ -377,7 +379,7 @@ private struct QueueDropDelegate: DropDelegate {
         onSkipTo: { _ in },
         onRemove: { _ in },
         onReorder: { _, _ in },
-        onInsertTracks: { _, _ in }
+        onInsertTracks: { _, _ in },
     )
     .frame(width: 350, height: 500)
 }
@@ -394,7 +396,7 @@ private struct QueueDropDelegate: DropDelegate {
         onSkipTo: { _ in },
         onRemove: { _ in },
         onReorder: { _, _ in },
-        onInsertTracks: { _, _ in }
+        onInsertTracks: { _, _ in },
     )
     .frame(width: 350, height: 400)
 }

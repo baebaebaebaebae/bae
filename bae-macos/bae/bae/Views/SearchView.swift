@@ -10,7 +10,7 @@ struct SearchView: View {
 
     var body: some View {
         if let results {
-            if results.artists.isEmpty && results.albums.isEmpty && results.tracks.isEmpty {
+            if results.artists.isEmpty, results.albums.isEmpty, results.tracks.isEmpty {
                 ContentUnavailableView.search(text: searchQuery)
             } else {
                 searchResultsList(results)
@@ -135,7 +135,7 @@ struct SearchView: View {
         if let url = resolveImageURL(album.coverReleaseId) {
             AsyncImage(url: url) { phase in
                 switch phase {
-                case .success(let image):
+                case let .success(image):
                     image
                         .resizable()
                         .aspectRatio(contentMode: .fill)
@@ -184,13 +184,13 @@ struct SearchView: View {
             tracks: [
                 BridgeTrackSearchResult(id: "t-03", title: "Tide Pool", durationMs: 198_000, albumId: "a-02", albumTitle: "Pacific Standard", artistName: "Glass Harbor"),
                 BridgeTrackSearchResult(id: "t-05", title: "Axiom", durationMs: 187_000, albumId: "a-03", albumTitle: "Proof by Induction", artistName: "Velvet Mathematics"),
-            ]
+            ],
         ),
         searchQuery: "glass",
         resolveImageURL: { _ in nil },
         onSelectArtist: { _ in },
         onSelectAlbum: { _ in },
-        onPlayTrack: { _ in }
+        onPlayTrack: { _ in },
     )
     .frame(width: 600, height: 500)
 }
@@ -202,7 +202,7 @@ struct SearchView: View {
         resolveImageURL: { _ in nil },
         onSelectArtist: { _ in },
         onSelectAlbum: { _ in },
-        onPlayTrack: { _ in }
+        onPlayTrack: { _ in },
     )
     .frame(width: 600, height: 400)
 }

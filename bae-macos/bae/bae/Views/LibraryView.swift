@@ -8,10 +8,10 @@ enum LibrarySortField: String, CaseIterable {
 
     var bridgeField: BridgeSortField {
         switch self {
-        case .title: return .title
-        case .artist: return .artist
-        case .year: return .year
-        case .dateAdded: return .dateAdded
+        case .title: .title
+        case .artist: .artist
+        case .year: .year
+        case .dateAdded: .dateAdded
         }
     }
 }
@@ -22,8 +22,8 @@ enum SortDirection {
 
     var bridgeDirection: BridgeSortDirection {
         switch self {
-        case .ascending: return .ascending
-        case .descending: return .descending
+        case .ascending: .ascending
+        case .descending: .descending
         }
     }
 }
@@ -47,13 +47,13 @@ struct LibraryView: View {
                 ContentUnavailableView(
                     "Failed to load library",
                     systemImage: "exclamationmark.triangle",
-                    description: Text(error)
+                    description: Text(error),
                 )
             } else if albums.isEmpty {
                 ContentUnavailableView(
                     "No albums",
                     systemImage: "square.stack",
-                    description: Text("Import some music to get started")
+                    description: Text("Import some music to get started"),
                 )
             } else {
                 HStack(spacing: 0) {
@@ -64,7 +64,7 @@ struct LibraryView: View {
                                 title: album.title,
                                 artistNames: album.artistNames,
                                 year: album.year,
-                                coverArtURL: appService.imageURL(for: album.coverReleaseId)
+                                coverArtURL: appService.imageURL(for: album.coverReleaseId),
                             )
                         },
                         selectedAlbumId: $selectedAlbumId,
@@ -72,7 +72,7 @@ struct LibraryView: View {
                         sortDirection: $sortDirection,
                         onPlayAlbum: { appService.playAlbum(albumId: $0) },
                         onAddToQueue: { albumId in addAlbumToQueue(albumId: albumId) },
-                        onAddNext: { albumId in addAlbumNext(albumId: albumId) }
+                        onAddNext: { albumId in addAlbumNext(albumId: albumId) },
                     )
                     .frame(maxWidth: 1200)
                     .frame(maxWidth: .infinity)
@@ -82,7 +82,7 @@ struct LibraryView: View {
                         AlbumDetailView(
                             albumId: albumId,
                             appService: appService,
-                            onClose: { selectedAlbumId = nil }
+                            onClose: { selectedAlbumId = nil },
                         )
                         .frame(width: 450)
                     }
