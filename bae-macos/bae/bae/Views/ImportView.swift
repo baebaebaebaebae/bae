@@ -1,4 +1,41 @@
+import AppKit
 import SwiftUI
+
+// MARK: - Shared formatters
+
+private func formatBytes(_ bytes: UInt64) -> String {
+    let kb = Double(bytes) / 1024
+    if kb < 1 {
+        return "\(bytes) B"
+    }
+    let mb = kb / 1024
+    if mb < 1 {
+        return String(format: "%.0f KB", kb)
+    }
+    if mb >= 1024 {
+        return String(format: "%.1f GB", mb / 1024)
+    }
+    return String(format: "%.0f MB", mb)
+}
+
+private func formatDuration(_ ms: UInt64) -> String {
+    let totalSeconds = ms / 1000
+    let minutes = totalSeconds / 60
+    let seconds = totalSeconds % 60
+    return String(format: "%d:%02d", minutes, seconds)
+}
+
+private func generateThumbnail(for path: String, maxSize: Int) -> NSImage? {
+    let url = URL(fileURLWithPath: path) as CFURL
+    guard let source = CGImageSourceCreateWithURL(url, nil) else { return nil }
+    let options: [CFString: Any] = [
+        kCGImageSourceThumbnailMaxPixelSize: maxSize,
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+    ]
+    guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+    return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+}
 
 // MARK: - State types
 
@@ -118,9 +155,6 @@ struct ImportView: View {
 
     @State private var galleryIndex: Int?
     @State private var showCoverPicker = false
-    @State private var audioExpanded = false
-    @State private var imagesExpanded = true
-    @State private var documentsExpanded = true
     @State private var documentContent: (name: String, text: String)?
     @State private var thumbnailCache: [String: NSImage] = [:]
 
@@ -279,78 +313,46 @@ struct ImportView: View {
     // MARK: - Candidate list UI
 
     private var candidateList: some View {
-        VStack(spacing: 0) {
-            candidateListHeader
-            Divider()
-            List(
-                sortedCandidates,
-                id: \.folderPath,
-                selection: candidateSelectionBinding,
-            ) { candidate in
-                CandidateRow(
-                    candidate: candidate,
-                    status: appService.importStatuses[candidate.folderPath],
-                    onRemove: {
-                        if selectedCandidate?.folderPath == candidate.folderPath {
-                            selectedCandidate = nil
-                        }
-                        candidateStates.removeValue(forKey: candidate.folderPath)
-                        appService.removeCandidate(folderPath: candidate.folderPath)
-                    },
-                )
-                .padding(.vertical, 4)
-            }
-            .scrollContentBackground(.hidden)
-            .background(Theme.surface)
-        }
-    }
-
-    private var candidateListHeader: some View {
-        HStack {
-            Button(action: { openFolderAndAppend() }) {
-                Image(systemName: "plus")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            Spacer()
-            Menu {
-                Button("Clear All") {
-                    appService.clearAllCandidates()
+        ImportCandidateListContent(
+            candidates: sortedCandidates,
+            selectedFolderPath: candidateSelectionBinding,
+            statuses: appService.importStatuses,
+            onAdd: { openFolderAndAppend() },
+            onClearAll: {
+                appService.clearAllCandidates()
+                selectedCandidate = nil
+                candidateStates = [:]
+            },
+            onClearCompleted: {
+                let wasSelected = selectedCandidate
+                appService.clearCompletedCandidates()
+                if let wasSelected,
+                   !appService.scanResults.contains(where: { $0.folderPath == wasSelected.folderPath })
+                {
                     selectedCandidate = nil
-                    candidateStates = [:]
                 }
-                Button("Clear Completed") {
-                    let wasSelected = selectedCandidate
-                    appService.clearCompletedCandidates()
-                    if let wasSelected,
-                       !appService.scanResults.contains(where: { $0.folderPath == wasSelected.folderPath })
-                    {
-                        selectedCandidate = nil
-                    }
-                    // Clean up orphaned candidate states
-                    let validPaths = Set(appService.scanResults.map(\.folderPath))
-                    candidateStates = candidateStates.filter { validPaths.contains($0.key) }
+                let validPaths = Set(appService.scanResults.map(\.folderPath))
+                candidateStates = candidateStates.filter { validPaths.contains($0.key) }
+            },
+            onClearIncomplete: {
+                let wasSelected = selectedCandidate
+                appService.clearIncompleteCandidates()
+                if let wasSelected,
+                   !appService.scanResults.contains(where: { $0.folderPath == wasSelected.folderPath })
+                {
+                    selectedCandidate = nil
                 }
-                Button("Clear Incomplete") {
-                    let wasSelected = selectedCandidate
-                    appService.clearIncompleteCandidates()
-                    if let wasSelected,
-                       !appService.scanResults.contains(where: { $0.folderPath == wasSelected.folderPath })
-                    {
-                        selectedCandidate = nil
-                    }
-                    let validPaths = Set(appService.scanResults.map(\.folderPath))
-                    candidateStates = candidateStates.filter { validPaths.contains($0.key) }
+                let validPaths = Set(appService.scanResults.map(\.folderPath))
+                candidateStates = candidateStates.filter { validPaths.contains($0.key) }
+            },
+            onRemove: { folderPath in
+                if selectedCandidate?.folderPath == folderPath {
+                    selectedCandidate = nil
                 }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(Theme.surface)
+                candidateStates.removeValue(forKey: folderPath)
+                appService.removeCandidate(folderPath: folderPath)
+            },
+        )
     }
 
     private func openFolderAndAppend() {
@@ -378,8 +380,12 @@ struct ImportView: View {
             HSplitView {
                 // File pane (left)
                 if let files = candidateFiles {
-                    filePane(files)
-                        .frame(minWidth: 200, idealWidth: 280, maxWidth: 400)
+                    ImportFilePane(
+                        files: files,
+                        onOpenGallery: { index in galleryIndex = index },
+                        onOpenDocument: { name, text in documentContent = (name: name, text: text) },
+                    )
+                    .frame(minWidth: 200, idealWidth: 280, maxWidth: 400)
                 }
                 // Right pane: confirmation replaces search when confirming
                 if mode == .loadingDetail {
@@ -1093,9 +1099,85 @@ struct ImportView: View {
         )
     }
 
-    // MARK: - File pane
+    // MARK: - Helpers
 
-    private func filePane(_ files: BridgeCandidateFiles) -> some View {
+    private func isImporting(_ folderPath: String) -> Bool {
+        guard let status = appService.importStatuses[folderPath] else { return false }
+        switch status {
+        case .importing, .complete:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
+// MARK: - ImportCandidateListContent
+
+struct ImportCandidateListContent: View {
+    let candidates: [BridgeImportCandidate]
+    @Binding var selectedFolderPath: String?
+    let statuses: [String: BridgeImportStatus]
+    let onAdd: () -> Void
+    let onClearAll: () -> Void
+    let onClearCompleted: () -> Void
+    let onClearIncomplete: () -> Void
+    let onRemove: (String) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button(action: onAdd) {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                Spacer()
+                Menu {
+                    Button("Clear All", action: onClearAll)
+                    Button("Clear Completed", action: onClearCompleted)
+                    Button("Clear Incomplete", action: onClearIncomplete)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Theme.surface)
+            Divider()
+            List(
+                candidates,
+                id: \.folderPath,
+                selection: $selectedFolderPath,
+            ) { candidate in
+                CandidateRow(
+                    candidate: candidate,
+                    status: statuses[candidate.folderPath],
+                    onRemove: { onRemove(candidate.folderPath) },
+                )
+                .padding(.vertical, 4)
+            }
+            .scrollContentBackground(.hidden)
+            .background(Theme.surface)
+        }
+    }
+}
+
+// MARK: - ImportFilePane
+
+struct ImportFilePane: View {
+    let files: BridgeCandidateFiles
+    let onOpenGallery: (Int) -> Void
+    let onOpenDocument: (String, String) -> Void
+
+    @State private var audioExpanded = false
+    @State private var imagesExpanded = true
+    @State private var documentsExpanded = true
+    @State private var thumbnailCache: [String: NSImage] = [:]
+
+    var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 switch files.audio {
@@ -1145,7 +1227,7 @@ struct ImportView: View {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 4)], spacing: 4) {
                             ForEach(Array(files.artwork.enumerated()), id: \.offset) { index, file in
                                 imageThumb(file)
-                                    .onTapGesture { galleryIndex = index }
+                                    .onTapGesture { onOpenGallery(index) }
                             }
                         }
                     } label: {
@@ -1173,9 +1255,9 @@ struct ImportView: View {
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 if let text = try? String(contentsOfFile: file.path, encoding: .utf8) {
-                                    documentContent = (name: file.name, text: text)
+                                    onOpenDocument(file.name, text)
                                 } else if let text = try? String(contentsOfFile: file.path, encoding: .shiftJIS) {
-                                    documentContent = (name: file.name, text: text)
+                                    onOpenDocument(file.name, text)
                                 }
                             }
                             .onHover { hovering in
@@ -1226,52 +1308,6 @@ struct ImportView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
-    }
-
-    private func generateThumbnail(for path: String, maxSize: Int) -> NSImage? {
-        let url = URL(fileURLWithPath: path) as CFURL
-        guard let source = CGImageSourceCreateWithURL(url, nil) else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageSourceThumbnailMaxPixelSize: maxSize,
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-        ]
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-    }
-
-    // MARK: - Helpers
-
-    private func isImporting(_ folderPath: String) -> Bool {
-        guard let status = appService.importStatuses[folderPath] else { return false }
-        switch status {
-        case .importing, .complete:
-            return true
-        default:
-            return false
-        }
-    }
-
-    private func formatBytes(_ bytes: UInt64) -> String {
-        let kb = Double(bytes) / 1024
-        if kb < 1 {
-            return "\(bytes) B"
-        }
-        let mb = kb / 1024
-        if mb < 1 {
-            return String(format: "%.0f KB", kb)
-        }
-        if mb >= 1024 {
-            return String(format: "%.1f GB", mb / 1024)
-        }
-        return String(format: "%.0f MB", mb)
-    }
-
-    private func formatDuration(_ ms: UInt64) -> String {
-        let totalSeconds = ms / 1000
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        return String(format: "%d:%02d", minutes, seconds)
     }
 }
 
@@ -1853,4 +1889,53 @@ struct DocumentViewerView: View {
     )
     .frame(width: 600, height: 500)
     .background(Theme.surface)
+}
+
+#Preview("Candidate List") {
+    ImportCandidateListContent(
+        candidates: PreviewData.importCandidates,
+        selectedFolderPath: .constant(PreviewData.importCandidates[0].folderPath),
+        statuses: PreviewData.importStatuses,
+        onAdd: {},
+        onClearAll: {},
+        onClearCompleted: {},
+        onClearIncomplete: {},
+        onRemove: { _ in },
+    )
+    .frame(width: 280, height: 500)
+}
+
+#Preview("File Pane - CUE+FLAC") {
+    ImportFilePane(
+        files: PreviewData.candidateFiles,
+        onOpenGallery: { _ in },
+        onOpenDocument: { _, _ in },
+    )
+    .frame(width: 300, height: 500)
+}
+
+#Preview("File Pane - Track Files") {
+    ImportFilePane(
+        files: BridgeCandidateFiles(
+            audio: .trackFiles(files: (1 ... 9).map { i in
+                BridgeFileInfo(
+                    name: "Track \(i).flac",
+                    path: "/tmp/fake/Track \(i).flac",
+                    size: UInt64(35_000_000 + i * 2_000_000),
+                )
+            }),
+            artwork: [
+                BridgeFileInfo(name: "Front.png", path: "/tmp/fake/Front.png", size: 2_500_000),
+            ],
+            documents: [
+                BridgeFileInfo(name: "info.log", path: "/tmp/fake/info.log", size: 6000),
+                BridgeFileInfo(name: "notes.txt", path: "/tmp/fake/notes.txt", size: 1200),
+            ],
+            badAudioCount: 0,
+            badImageCount: 0,
+        ),
+        onOpenGallery: { _ in },
+        onOpenDocument: { _, _ in },
+    )
+    .frame(width: 300, height: 500)
 }

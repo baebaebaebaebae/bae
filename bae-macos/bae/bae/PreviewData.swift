@@ -152,4 +152,144 @@ enum PreviewData {
         ]
         return Dictionary(uniqueKeysWithValues: details.map { ($0.album.id, $0) })
     }()
+
+    // MARK: - Import
+
+    static let importCandidates: [BridgeImportCandidate] = [
+        BridgeImportCandidate(
+            folderPath: "/Music/Downloads/Album Title One",
+            artistName: "Artist Name",
+            albumTitle: "Album Title One",
+            trackCount: 9,
+            format: "CUE+FLAC",
+            totalSizeBytes: 350_000_000,
+            badAudioCount: 0,
+            badImageCount: 0,
+            mbDiscid: "abc123",
+        ),
+        BridgeImportCandidate(
+            folderPath: "/Music/Downloads/Album Title Two [Label CAT-002]",
+            artistName: "Another Artist",
+            albumTitle: "Album Title Two",
+            trackCount: 12,
+            format: "FLAC",
+            totalSizeBytes: 520_000_000,
+            badAudioCount: 0,
+            badImageCount: 0,
+            mbDiscid: nil,
+        ),
+        BridgeImportCandidate(
+            folderPath: "/Music/Downloads/Compilation Vol. 3",
+            artistName: "Various Artists",
+            albumTitle: "Compilation Vol. 3",
+            trackCount: 15,
+            format: "FLAC",
+            totalSizeBytes: 680_000_000,
+            badAudioCount: 2,
+            badImageCount: 1,
+            mbDiscid: nil,
+        ),
+        BridgeImportCandidate(
+            folderPath: "/Music/Downloads/EP Release",
+            artistName: "Solo Artist",
+            albumTitle: "EP Release",
+            trackCount: 5,
+            format: "CUE+FLAC",
+            totalSizeBytes: 180_000_000,
+            badAudioCount: 0,
+            badImageCount: 0,
+            mbDiscid: nil,
+        ),
+        BridgeImportCandidate(
+            folderPath: "/Music/Downloads/Live Recording 2023",
+            artistName: "Band Name",
+            albumTitle: "Live Recording 2023",
+            trackCount: 18,
+            format: "FLAC",
+            totalSizeBytes: 1_200_000_000,
+            badAudioCount: 0,
+            badImageCount: 0,
+            mbDiscid: "def456",
+        ),
+    ]
+
+    static let importStatuses: [String: BridgeImportStatus] = [
+        "/Music/Downloads/Compilation Vol. 3": .importing(progressPercent: 45),
+        "/Music/Downloads/EP Release": .complete,
+    ]
+
+    static let releaseDetail = BridgeReleaseDetail(
+        releaseId: "rel-001",
+        source: "musicbrainz",
+        title: "Album Title One",
+        artist: "Artist Name",
+        year: 2000,
+        format: "CD",
+        label: "Label Name",
+        catalogNumber: "CAT-001",
+        trackCount: 9,
+        tracks: (1 ... 9).map { i in
+            BridgeReleaseTrack(
+                title: "Track \(i)",
+                artist: nil,
+                durationMs: UInt64(180_000 + i * 30000),
+                position: "\(i)",
+            )
+        },
+        coverArt: [
+            BridgeCoverArt(url: "https://example.com/cover.jpg", source: "musicbrainz"),
+        ],
+    )
+
+    static let importSearchResults: [BridgeMetadataResult] = [
+        BridgeMetadataResult(
+            source: "musicbrainz",
+            releaseId: "mb-001",
+            title: "Album Title One",
+            artist: "Artist Name",
+            year: 2000,
+            format: "CD",
+            label: "Label Name",
+            trackCount: 9,
+            coverUrl: nil,
+        ),
+        BridgeMetadataResult(
+            source: "musicbrainz",
+            releaseId: "mb-002",
+            title: "Album Title One (Remaster)",
+            artist: "Artist Name",
+            year: 2010,
+            format: "CD",
+            label: "Another Label",
+            trackCount: 11,
+            coverUrl: nil,
+        ),
+        BridgeMetadataResult(
+            source: "discogs",
+            releaseId: "dc-001",
+            title: "Album Title One",
+            artist: "Artist Name",
+            year: 2000,
+            format: "Vinyl",
+            label: "Label Name",
+            trackCount: 9,
+            coverUrl: nil,
+        ),
+    ]
+
+    static let candidateFiles = BridgeCandidateFiles(
+        audio: .cueFlacPairs(pairs: [
+            BridgeCueFlacPair(cueName: "Album Title.cue", flacName: "Album Title.flac", totalSize: 340_000_000, trackCount: 9),
+        ]),
+        artwork: [
+            BridgeFileInfo(name: "Front.png", path: "/tmp/fake/Front.png", size: 2_500_000),
+            BridgeFileInfo(name: "Back.png", path: "/tmp/fake/Back.png", size: 1_800_000),
+            BridgeFileInfo(name: "Matrix.png", path: "/tmp/fake/Matrix.png", size: 900_000),
+        ],
+        documents: [
+            BridgeFileInfo(name: "info.log", path: "/tmp/fake/info.log", size: 6000),
+        ],
+        badAudioCount: 0,
+        badImageCount: 0,
+    )
 }
